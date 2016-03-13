@@ -5,7 +5,7 @@ import sys
 import numpy as np
 import math
 
-elsymbols = ['n']+[line.split()[1] for line in open('atomic_symbols.dat')]
+elsymbols = ['n']+[line.split(',')[1] for line in open('elements.csv')]
 
 roman_numerals = ('','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII',
                  'XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX')
