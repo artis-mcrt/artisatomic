@@ -219,7 +219,7 @@ def main():
                   else:
                       coll_str = -1
 
-                  if ionization_stage in [1,2,3]:
+                  if True: #ionization_stage in [1,2,3]:
                     ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(abs(float(transition.lambdaangstrom)),float(transition.A),atomic_number,ionization_stage,hc_in_ev_cm*float(energy_levels[i][levelid_from].energyabovegsinpercm),float(energy_levels[i][levelid_from].g),forbidden,transition.namefrom,transition.nameto,float(energy_levels[i][levelid_to].g),hc_in_ev_cm*float(energy_levels[i][levelid_to].energyabovegsinpercm),levelid_to in level_ids_with_permitted_down_transitions))
 
                   ftransitiondata.write('{0:12d}{1:7d}{2:12d}{3:25.16E} {4:.1f}\n'.format(transitionid,levelid_from,levelid_to,float(transition.A),coll_str))
