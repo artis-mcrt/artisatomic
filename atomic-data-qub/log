@@ -1,0 +1,63 @@
+24/Mar/16 (Niall)
+
+I thought it would be handy to write in this text document
+instead of constantly sending emails back and forth and
+that we have everything in one place.
+
+For now I will forward on the adf04 file and corresponding
+A-values for Co2+. Eventually I will send on the photo
+cross-sections in some documented format. I’ll probably
+do this first for the RAW cross-sections so you can 
+manipulate them however you like. Then I’ll run off the 
+Gaussian convolution for say ~ 200 points.
+
+Files included: adf04_v1
+                adf04rad_v1
+
+**adf04_v1**
+I have changed one or two things to the adf04 file, but nothing
+really significant…
+
+1) The first line is the title that has Z and the ionization energy
+   of the 3d
+
+2) lines 1 - 262 are the number of levels included
+       1   3s23p63d7(4F)   (4)3( 4.5)               0.0000
+       |        |           | |  |                     |
+     Index    Config.   (2S+1)L( J  )           Energy in cm-1
+
+3) -1 terminates header
+
+4) (number_of_temps) (i=1,number_of_temps) - in Kelvin
+
+5)  up(j) lo(i)   A-value    UPS(T=1) UPS(T=2) UPS(T=3)… UPS(T=notemp) NOT NEEDED
+      2     1     1.00-30    2.94+00  2.94+00  2.93+00 … 2.83+00       0.00+00
+
+   Effective collision strengths (Symmetric) for all
+   temperatures between an upper and lower state. 
+
+   *****IGNORE A-VALUES FOR NOW****
+   
+   The last value involves the infinite energy point for a high temperature 
+   and the A-value outlined in one of the Burgess papers. We only have these
+   in for dipole transitions but can be calculated using AUTOSTRUCTURE or 
+   something. We shouldn’t need these
+
+6) That’s about it! some termination and additional comments at the end…
+
+**adf04rad_v1**
+
+This file has all the corrected A-values and match up with the
+level indices in the adf04 file. You can just as easily cut 
+and paste them in, but I was playing about with this so
+I just included it as a separate file. It also means you can
+include other A-values if you have another set.
+
+Hope this helps. 
+
+Photo stuff will follow shortly, will give a basic example and
+then run it off for more transitions.
+
+- END - 
+
+
