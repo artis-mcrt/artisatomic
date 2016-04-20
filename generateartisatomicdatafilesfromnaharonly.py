@@ -32,7 +32,7 @@ def smoothphixslist(listin, temperature): #list of points (energy, phixs cross s
     for i in range(len(xgrid)-1):
         enlow = xgrid[i]*listin[0][0]
         enhigh = xgrid[i+1]*listin[0][0]
-        
+
         listenergyryd = np.linspace(enlow,enhigh,num=NPHIXSNUINCREMENT*5000,endpoint=False)
         dnu = (listenergyryd[1] - listenergyryd[0]) * RYD / H
 
@@ -50,13 +50,13 @@ def smoothphixslist(listin, temperature): #list of points (energy, phixs cross s
             else:
                 sigma_bf = sigma_bfMb
             nu = energyryd * RYD / H
-            
+
             integrandnosigma = (nu ** 2) * math.exp(-HOVERKB*(nu-nu0)/temperature)
             integralcontribution = (integrandnosigma + previntegrand) / 2.0
             integralnosigma += integralcontribution
             integralwithsigma += integralcontribution * sigma_bf
             previntegrand = integrandnosigma
-            
+
         if integralnosigma > 0:
             listout.append( (integralwithsigma/integralnosigma) )
         else:
@@ -138,18 +138,18 @@ if __name__ == "__main__":
             (26, 4),
             (26, 5)
         ]
-    
+
     naharcorestaterow = collections.namedtuple('naharcorestate','id configuration term energyrydberg upperlevelid')
     naharcorestates = [['IGNORE'] for x in listions] #list of named tuples (naharcorestaterow)
     naharconfigs = [{} for x in listions] #keys are (2s+1, l, parity, indexinsymmetry), values are strings of electron configuration
-    
+
     energylevelrow = collections.namedtuple('energylevel','indexinsymmetry TC corestateid elecn elecl energyrydberg twosplusone l parity transitioncount')
     listenergylevels = [['IGNORE'] for x in listions] #list of named tuples (first element is IGNORE to discard 0th index)
-    
+
     transitionrow = collections.namedtuple('transition','namefrom nameto f A lambdaangstrom i j id')
     listtransitions = [['IGNORE'] for x in listions] #list of named tuples (transitionrow)
     transitioncountofenergylevelname = [{} for x in listions]
-    
+
     ionizationpotentialrydberg = [0.0 for x in listions]
     groundstateenergyev = [0.0 for x in listions]
     photoionizations = [{} for x in listions] #keys are (2s+1, l, parity, indexinsymmetry), values are lists of (energy in Rydberg, cross section in Mb) tuples
@@ -158,11 +158,11 @@ if __name__ == "__main__":
         (atomicnumber, ionizationstage) = listions[i]
 
         print('==============> {0} {1}:'.format(elsymbols[atomicnumber],romannumerals[ionizationstage]))
-        
+
         #read Nahar energy level file
         pathnaharen = 'atomic-data-nahar/{0}{1:d}.en.ls.txt'.format(elsymbols[atomicnumber].lower(),ionizationstage)
         print('Reading ' + pathnaharen)
-        
+
         with open(pathnaharen, 'r') as fenlist:
             while True:
                 line = fenlist.readline()
@@ -190,7 +190,7 @@ if __name__ == "__main__":
                         print('Nahar levels mismatch: id {0:d} found at entry number {1:d}'.format(
                             len(naharcorestates[i])-1,int(naharcorestates[i][-1].id)))
                         sys.exit()
-            
+
             while True:
                 line = fenlist.readline()
                 if not line:
@@ -198,7 +198,7 @@ if __name__ == "__main__":
                     sys.exit()
                 if line.startswith('ii) Table of bound (negative) state energies (with spectroscopic notation)'):
                     break
-        
+
             foundtable = False
             while True:
                 line = fenlist.readline()
@@ -214,19 +214,19 @@ if __name__ == "__main__":
                     energy = float(line[29:29+8])
                     twosplusone = int(state[18])
                     l = lchars.index(state[19])
-                    
+
                     if state[20] == 'o':
                         parity = 1
                         indexinsymmetry = reversedalphabets.index(state[17])+1
                     else:
                         parity = 0
                         indexinsymmetry = alphabets.index(state[17])+1
-                    
+
                     #print(state,energy,twosplusone,l,parity,indexinsymmetry)
                     naharconfigs[i][(twosplusone,l,parity,indexinsymmetry)] = state
                 else:
                     if foundtable: break
-                    
+
             while True:
                 line = fenlist.readline()
                 if not line:
@@ -246,11 +246,11 @@ if __name__ == "__main__":
             row = fenlist.readline().split() #line of atomic number and electron number, unless...
             while len(row)==0: #some extra blank lines might exist
                 row = fenlist.readline().split()
-            
+
             if atomicnumber != int(row[0]) or ionizationstage != int(row[0]) - int(row[1]):
                     print('Wrong atomic number or ionization stage in Nahar energy file',atomicnumber,int(row[0]),ionizationstage,int(row[0]) - int(row[1]))
                     sys.exit()
-            
+
             while True:
                 line = fenlist.readline()
                 if not line:
@@ -263,9 +263,9 @@ if __name__ == "__main__":
                 l = int(row[1])
                 parity = int(row[2])
                 numberofstatesinsymmetry = int(row[3])
-                
+
                 line = fenlist.readline() #core state number and energy for the whole LSP group. Not sure what to do with this.
-                
+
                 for s in range(numberofstatesinsymmetry):
                     row = fenlist.readline().split()
                     listenergylevels[i].append(energylevelrow._make(row+[twosplusone,l,parity,0]))
@@ -274,9 +274,9 @@ if __name__ == "__main__":
 
             listenergylevels[i] = ['IGNORE'] + sorted(listenergylevels[i][1:],key=lambda x:float(x.energyrydberg))
 #                    print(listenergylevels[i][-1])
-            
+
         #end reading Nahar energy file
-        
+
         #read Nahar linelist
         """
         pathnaharf = 'atomic-data-nahar/{0}{1:d}.f.ls.txt'.format(elsymbols[atomicnumber].lower(),ionizationstage)
@@ -284,7 +284,7 @@ if __name__ == "__main__":
         with open(pathnaharf,'r') as fnaharf:
             for line in fnaharf:
                 row = line.split()
-                
+
                 # check for right number of columns and are all numbers except first column
                 if len(row) == len(energylevelrow._fields) and all(map(isfloat, row[1:])):
                     listenergylevels[i].append(energylevelrow._make(row))
@@ -303,7 +303,7 @@ if __name__ == "__main__":
                             #print(truncatedlevelname,naharstatefromconfig(truncatedlevelname),)
                         else:
                             truncatedlevelnamesofnaharstate[i][(twosplusone,l,parity)] = [truncatedlevelname,]
-                        
+
                         if float(listenergylevels[i][-1].energyabovegsinpercm) < 1.0: #if this is the ground state
                             ionizationenergyev[i] = hcinevangstrom / float(listenergylevels[i][-1].lambdaangstrom)
 #                                ionizationenergyev[i] = float(listenergylevels[i][-1].thresholdenergyev)
@@ -316,7 +316,7 @@ if __name__ == "__main__":
         #read Nahar photoionization cross sections
         pathphot = 'nahar_radiativeatomicdata/{0}{1:d}.px.txt'.format(elsymbols[atomicnumber].lower(),ionizationstage)
         print('Reading ' + pathphot)
-    
+
         with open(pathphot, 'r') as fenlist:
             while True:
                 line = fenlist.readline()
@@ -325,7 +325,7 @@ if __name__ == "__main__":
                     sys.exit()
                 if line.startswith('----------------------------------------------'):
                     break
-            
+
             line = fenlist.readline()
             row = line.split()
             if atomicnumber != int(row[0]) or ionizationstage != int(row[0]) - int(row[1]):
@@ -353,7 +353,7 @@ if __name__ == "__main__":
                 for p in range(numberofpoints):
                     row = fenlist.readline().split()
                     photoionizations[i][lowerlevelid].append( (float(row[0]),float(row[1])) )
-                    
+
                     if (len(photoionizations[i][lowerlevelid]) > 1 and
                         photoionizations[i][lowerlevelid][-1][0] <= photoionizations[i][lowerlevelid][-2][0]):
                         #some (energy) x values are only repeated because they're not specified with high enough precision
@@ -370,7 +370,7 @@ if __name__ == "__main__":
         fphixs.write('{0:14.7e}\n'.format(NPHIXSNUINCREMENT))
         for i in range(len(listions)):
             (atomicnumber, ionizationstage) = listions[i]
-            
+
             print('==============> {0} {1}:'.format(elsymbols[atomicnumber],romannumerals[ionizationstage]))
 
             # write output files for artis
@@ -381,13 +381,13 @@ if __name__ == "__main__":
                 energylevel = listenergylevels[i][energylevelid]
                 fatommodels.write('{0:7d}{1:25.16f}{2:25.16f}{3:7d}\n'.format(energylevelid,(ionizationpotentialrydberg[i]+float(energylevel.energyrydberg))*13.605698066,energylevel.twosplusone*(2*energylevel.l+1),energylevel.transitioncount))
             fatommodels.write('\n')
-            
+
             print("writing to 'transitiondata.txt'")
             flinelist.write('{0:7d}{1:7d}{2:12d}\n'.format(atomicnumber,ionizationstage,len(listtransitions[i])-1))
             for transition in listtransitions[i][1:]:
                 flinelist.write('{0:12d}{1:7d}{2:12d}{3:25.16E} -1\n'.format(int(transition.id),idofenergylevelname[i][transition.namefrom],idofenergylevelname[i][transition.nameto.lstrip('-')],float(transition.A)))
             flinelist.write('\n')
-            
+
             print("writing to 'phixsdata2.txt'")
             if i < len(listions)-1:
                 for corestateindex in range(1,len(naharcorestates[i])):
@@ -422,7 +422,7 @@ if __name__ == "__main__":
                                 candidatematchesother.append( (upperlevelindex, energydeviation) )
                         else:
                             candidatematchesother.append( (upperlevelindex, energydeviation) )
-                
+
 #                        else:
 #                            print('no config for ',(twosplusone,l,parity,indexinsymmetry))
                     sortedmatches = sorted(candidatematchesgoodtermgoodconfig,key=lambda x:x[1]) + sorted(candidatematchesgoodtermwildcardconfig,key=lambda x:x[1]) + sorted(candidatematchesgoodterm,key=lambda x:x[1]) + sorted(candidatematchesother,key=lambda x:x[1])
@@ -430,7 +430,7 @@ if __name__ == "__main__":
                         if candidate[0] not in [cs.upperlevelid for cs in naharcorestates[i][1:]]:
                             naharcorestates[i][corestateindex] = naharcorestates[i][corestateindex]._replace(upperlevelid=candidate[0])
                             break
-                
+
                 #debugging info only, not needed
                 #output a list of energy levels and their corresponding core states
                 """
@@ -450,7 +450,7 @@ if __name__ == "__main__":
                         if corestateindex != -1:
                             thiscorestate = naharcorestates[i][corestateindex]
                             corestateenergyabovegs = float(thiscorestate.energyrydberg)
-                            
+
 #                            print('{0}   {1:.5f} {2:12.6E}   core state {3}, with E={4:12.6E}'.format(naharconfigs[i+1][(twosplusone,l,parity,indexinsymmetry)],float(upperenergylevel.energyrydberg),upperlevelenergyabovegs,thiscorestate.id,thiscorestate.energyrydberg))
                             print('{0}  {1}'.format(naharconfigs[i+1][(twosplusone,l,parity,indexinsymmetry)],thiscorestate.id))
                         else:
@@ -466,7 +466,7 @@ if __name__ == "__main__":
                         parity = energylevel.parity
                         indexinsymmetry = int(energylevel.indexinsymmetry)
                         print('{0}@{1}'.format(levelindex-1,naharconfigs[i][(twosplusone,l,parity,indexinsymmetry)]))
-                
+
                 for lowerlevelidnum in range(1,len(listenergylevels[i])):
                     lowerlevel = listenergylevels[i][lowerlevelidnum]
                     if 0 < int(lowerlevel.corestateid) < len(naharcorestates[i])-1:
@@ -477,20 +477,20 @@ if __name__ == "__main__":
                     #(twosplusone, l, parity) = naharstatefromconfig(lowerlevelcorestate.term)
                     lowerlevelid = (lowerlevel.twosplusone,lowerlevel.l,lowerlevel.parity,int(lowerlevel.indexinsymmetry))
     #                lowerlevelidstring = '{0}{1}{2}{3}'.format(alphabets[int(lowerlevel.indexinsymmetry)-1],lowerlevel.twosplusone,lchars[lowerlevel.l],('e','o')[lowerlevel.parity],)
-    
+
                     upperlevelid = lowerlevelcorestate.upperlevelid
                     if upperlevelid == -1:
                         upperlevelid = 1
-                    
+
                     thresholdenergyrydberg = -float(lowerlevel.energyrydberg) #energy up to ionisation
                     thresholdenergyrydberg += float(lowerlevelcorestate.energyrydberg) #plus upper level energy
-                    
+
                     if lowerlevelid in photoionizations[i].keys():
                         smoothedphixs = smoothphixslist(photoionizations[i][lowerlevelid], 1000) #temperature here is important
                     else:
                         smoothedphixs = [0.0] * NPHIXSPOINTS
-                    
+
                     fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(atomicnumber,ionizationstage+1,upperlevelid,ionizationstage,lowerlevelidnum))
-                    
+
                     for crosssection in smoothedphixs:
                         fphixs.write('{0:16.8E}\n'.format(crosssection))

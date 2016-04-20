@@ -291,12 +291,19 @@ def main():
                                         upper_level_ids_of_core_state_id[
                                             core_state_id].append(upperlevelid)
                                         logprint("Matched core state {0} '{1}_{2}' to upper ion level {3} '{4}'".format(
-                                            core_state_id, nahar_core_state.configuration, nahar_core_state.term, upperlevelid, upperlevelconfig))
+                                            core_state_id,
+                                            nahar_core_state.configuration,
+                                            nahar_core_state.term,
+                                            upperlevelid,
+                                            upperlevelconfig))
 
                                 if len(upper_level_ids_of_core_state_id[core_state_id]) == 0:
                                     upper_level_ids_of_core_state_id[core_state_id] = [1]
                                     logprint("No upper level matched core state {0} '{1}_{2}' (reduced string: '{3}')".format(
-                                        core_state_id, nahar_core_state.configuration, nahar_core_state.term, nahar_core_state_reduced_configuration))
+                                        core_state_id,
+                                        nahar_core_state.configuration,
+                                        nahar_core_state.term,
+                                        nahar_core_state_reduced_configuration))
 
                             upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
                         else:
@@ -448,16 +455,20 @@ def read_nahar_energy_level_file(path_nahar_energy_file):
                 nahar_core_state_id = int(row[2])
                 if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states[i]):
                     flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d})\n".format(
-                        twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry, nahar_core_state_id, len(nahar_core_states[i])))
+                        twosplusone, lchars[l], ['e', 'o'][parity],
+                        indexinsymmetry, nahar_core_state_id,
+                        len(nahar_core_states[i])))
+
                     if nahar_core_state_id == 0:
                         flog.write("(setting the core state to 1 instead)\n")
                         nahar_core_state_id = 1
 
                 nahar_energy_levels[i].append(nahar_energy_level_row._make(
                     row + [twosplusone, l, parity, -1.0, 0]))
-                energyabovegsinpercm = (nahar_ionization_potential_rydberg[i] +
-                                        float(nahar_energy_levels[i][-1].energyreltoionpotrydberg)) * \
-                                        ryd_to_ev / hc_in_ev_cm
+                energyabovegsinpercm = \
+                    (nahar_ionization_potential_rydberg[i] +
+                     float(nahar_energy_levels[i][-1].energyreltoionpotrydberg)) * \
+                    ryd_to_ev / hc_in_ev_cm
 
                 nahar_energy_levels[i][-1] = nahar_energy_levels[i][-1]._replace(
                     indexinsymmetry=indexinsymmetry,
@@ -497,16 +508,17 @@ def read_hillier_levels_and_transitions_file(hillier_ion_folder, path_hillier_os
 
                 (twosplusone, l, parity) = get_term_as_tuple(levelname)
                 hillier_energy_level = hillier_energy_level._replace(
-                    hillierlevelid = hillierlevelid,
-                    energyabovegsinpercm = energyabovegsinpercm,
-                    twosplusone = twosplusone,
-                    l = l,
-                    parity = parity
+                    hillierlevelid=hillierlevelid,
+                    energyabovegsinpercm=energyabovegsinpercm,
+                    twosplusone=twosplusone,
+                    l=l,
+                    parity=parity
                 )
 
                 hillier_energy_levels[i].append(hillier_energy_level)
 
-                if twosplusone == -1:  # -1 would mean that the term could not be interpreted
+                if twosplusone == -1:
+                    # -1 indicates that the term could not be interpreted
                     logprint("Can't find term in Hillier level name '" + levelname + "'")
                 else:
                     if (twosplusone, l, parity) in hillier_level_ids_matching_term[i].keys():
@@ -549,8 +561,11 @@ def read_hillier_levels_and_transitions_file(hillier_ion_folder, path_hillier_os
 
                     if int(transition.hilliertransitionid) != len(transitions[i]) - 1:
                         print(hillier_ion_folder + path_hillier_osc_file +
-                              ', WARNING: Transition id {0:d} found at entry number {1:d}'.format(
-                              int(transition.hilliertransitionid), len(transitions[i]) - 1))
+                              ', WARNING: Transition id {0:d} found at entry number {1:d}'.format
+                              (
+                                  int(transition.hilliertransitionid),
+                                  len(transitions[i]) - 1)
+                              )
 #                    sys.exit()
                 else:
                     logprint('FATAL: multiply-defined Hillier transition: {0} {1}'
@@ -667,8 +682,9 @@ def combine_sources():
                 flog.write(" (and no matching entry in Nahar energy table, so can't be added)\n")
         else:
             nahar_energyabovegsinev = hc_in_ev_cm * \
-                nahar_energy_levels[i][nahar_level_index_of_state[i][state_tuple]].energyabovegsinpercm
-            #avghillierthreshold = weightedavgthresholdinev(
+                nahar_energy_levels[i][nahar_level_index_of_state[
+                    i][state_tuple]].energyabovegsinpercm
+            # avghillierthreshold = weightedavgthresholdinev(
             #    hillier_energy_levels[i], hillier_level_ids_matching_this_nahar_state)
             strhilliermatchesthreshold = '[' + ', '.join(['{0} ({1:.3f} eV)'.format(hillier_energy_levels[i][k].hilliername, hc_in_ev_angstrom /
                                                                                     float(hillier_energy_levels[i][k].lambdaangstrom)) for k in hillier_level_ids_matching_this_nahar_state]) + ']'
@@ -806,7 +822,6 @@ reversedalphabets = 'zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA '
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 
 
-
 # reads a Hillier level name and returns the term tuple (twosplusone, l, parity)
 def get_term_as_tuple(config):
     config = config.split('[')[0]
@@ -833,7 +848,6 @@ def get_term_as_tuple(config):
         parity = -1
 #        sys.exit()
     return (twosplusone, l, parity)
-
 
 
 # e.g. convert "3d64s  (6D ) 8p  j5Fo" to "3d64s8p_5Fo",
@@ -865,8 +879,10 @@ def reduce_configuration(instr):
         outstr += 'e'
     return outstr
 
+
 if __name__ == "__main__":
     main()
+
 
 """
 # check whether this produces valid output before using
