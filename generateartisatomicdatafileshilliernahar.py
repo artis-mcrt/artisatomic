@@ -47,14 +47,14 @@ OPTIMALTEMPERATURE = 3000  # was 3000
 # need to also include collision strengths from e.g., o2col.dat
 listelements = \
     [
-        (8, (
-            (1, '20sep11/oi_osc_mchf',               'NONE',
-             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6'),
-            (2, '23mar05/o2osc_fin.dat',             'NONE',
-             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4'),
-            (3, '15mar08/oiiiosc',                   'NONE',
-             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4')
-        )),
+#        (8, (
+#            (1, '20sep11/oi_osc_mchf',               'NONE',
+#             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6'),
+#            (2, '23mar05/o2osc_fin.dat',             'NONE',
+#             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4'),
+#            (3, '15mar08/oiiiosc',                   'NONE',
+#             'hilliername g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4')
+#        )),
         (26,
          (
              (1, '29apr04/fei_osc',                   '29apr04/phot_smooth_3000',
@@ -205,14 +205,27 @@ def main():
                             i][energylevel.hilliername]
                     else:
                         transitioncount = 0
+
+                    level_comment = ""
                     try:
-                        level_comment = 'Hiller: ' + energylevel.hilliername
+                        level_comment = "Hiller: '{:}', ".format(energylevel.hilliername)
                     except AttributeError:
-                        level_comment = 'Nahar: {:d}{:}{:} index {:}'.format(
+                        pass
+
+                    try:
+                        level_comment += 'Nahar: {:d}{:}{:} index {:}'.format(
                             energylevel.twosplusone,
                             lchars[energylevel.l],
                             ['e', 'o'][energylevel.parity],
                             energylevel.indexinsymmetry)
+                    except AttributeError:
+                        pass
+
+                    try:
+                        level_comment += " '{:}'".format(energylevel.naharconfiguration)
+                    except AttributeError:
+                        level_comment += ' (no config)'
+
                     fatommodels.write('{:7d}{:25.16f}{:25.16f}{:7d}     {:}\n'.format(levelid, hc_in_ev_cm * float(
                         energylevel.energyabovegsinpercm), float(energylevel.g), transitioncount, level_comment))
                 fatommodels.write('\n')
@@ -651,12 +664,19 @@ def combine_sources():
                     levelname = hillier_energy_levels[i][levelid].hilliername
                     if reduce_configuration(levelname) == reduce_configuration(nahar_configuration_this_state) and \
                             hillier_energy_levels[i][levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
+                        
                         core_state_id = nahar_energy_levels[i][
                             nahar_level_index_of_state[i][state_tuple]].corestateid
+                        
+                        confignote = nahar_configurations[i][state_tuple]
+                        
+                        if nahar_configuration_this_state != confignote:
+                            confignote += " manually replaced by {:}".format(nahar_configuration_this_state)
+                            
                         hillier_energy_levels[i][levelid] = hillier_energy_levels[i][levelid]._replace(
                             twosplusone=twosplusone, l=l, parity=parity,
                             indexinsymmetry=indexinsymmetry, corestateid=core_state_id,
-                            naharconfiguration=nahar_configuration_this_state)
+                            naharconfiguration=confignote)
                         hillier_level_ids_matching_this_nahar_state.append(levelid)
             else:
                 logprint("No electron configuration for {0:d}{1}{2} index {3:d}".format(

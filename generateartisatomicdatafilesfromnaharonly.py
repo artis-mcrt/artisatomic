@@ -314,7 +314,7 @@ if __name__ == "__main__":
         #end reading Nahar linelist
 
         #read Nahar photoionization cross sections
-        pathphot = 'nahar_radiativeatomicdata/{0}{1:d}.px.txt'.format(elsymbols[atomicnumber].lower(),ionizationstage)
+        pathphot = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(elsymbols[atomicnumber].lower(),ionizationstage)
         print('Reading ' + pathphot)
 
         with open(pathphot, 'r') as fenlist:
