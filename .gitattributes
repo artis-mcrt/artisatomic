@@ -4,4 +4,3 @@
 *.f.fs.txt filter=lfs diff=lfs merge=lfs -text
 *.f.rrc.ls.txt filter=lfs diff=lfs merge=lfs -text
 *.f.rrc.txt filter=lfs diff=lfs merge=lfs -text
-artis_files_example_old/* filter=lfs diff=lfs merge=lfs -text
