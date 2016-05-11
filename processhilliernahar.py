@@ -4,6 +4,7 @@ import os
 import sys
 import math
 import argparse
+
 from astropy import constants as const
 from astropy import units as u
 import numpy as np
@@ -69,9 +70,6 @@ listelements = \
     ]
 
 ryd_to_ev = u.rydberg.to('eV')
-h_over_kb_in_kelvin_seconds = (const.h / const.k_B).to('K s').value
-ryd_to_erg = u.rydberg.to('erg')
-h_in_erg_seconds = const.h.to('erg s').value  # Planck constant
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
@@ -97,10 +95,9 @@ def main():
     parser.add_argument('-nphixspoints', type=int, default=100,
         help='Number of cross section points to save in output')
     parser.add_argument('-nphixsnuincrement', type=float, default=0.1,
-        help='Fraction of edge frequency incremented for each cross section '
-             'point')
+        help='Fraction of nu_edge incremented for each cross section point')
     parser.add_argument('-integralstepfactor', type=int, default=5000,
-        help='Number of steps in integral (times something)')
+        help='Number of steps in integral per factor of nu_edge')
     parser.add_argument('-optimaltemperature', type=int, default=3000,
         help='Temperature to use when downsampling cross sections')
 
@@ -671,36 +668,40 @@ def isfloat(value):
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
 def reduce_phixs_table(listin, args):  # listin is a list of pairs (energy, phixs cross section)
-    listout = []
+    ryd_to_hz = (u.rydberg / const.h).to('Hz').value
+    h_over_kb_in_K_sec = (const.h / const.k_B).to('K s').value
+
+    listout = np.empty(args.nphixspoints + 1)
+    # x is nu/nu_edge
     xgrid = np.arange(1.0, 1.0 + args.nphixsnuincrement * (args.nphixspoints + 1), args.nphixsnuincrement)
 #    xgrid = list(filter(lambda x:x < (listin[-1][0]/listin[0][0]),xgrid))
 
-    for i in range(len(xgrid) - 1):
+    for i, x in enumerate(xgrid[:-1]):
         enlow = xgrid[i] * listin[0][0]
         enhigh = xgrid[i + 1] * listin[0][0]
 
-        listenergyryd = np.linspace(enlow, enhigh, num=args.nphixsnuincrement *
-                                    args.integralstepfactor, endpoint=False)  # change back to *5000
-        # dnu = (listenergyryd[1] - listenergyryd[0]) * ryd_to_erg / h_in_erg_seconds
+        arr_energyryd = np.linspace(enlow, enhigh, num=args.nphixsnuincrement *
+                                   args.integralstepfactor, endpoint=False)
+        # dnu = (arr_energyryd[1] - arr_energyryd[0]) * ryd_to_erg / h_in_erg_seconds
 
-        listsigma_bf_megabarns = np.interp(listenergyryd, listin[:, :1].flatten(), listin[
-                                           :, 1:].flatten(), right=-1)
         # this method is incredibly slow!
-        # listsigma_bf_megabarns = np.interp(listenergyryd,*zip(*listin),right=-1)
+        arr_sigma_megabarns = np.interp(arr_energyryd, listin[:, 0].flatten(),
+                                        listin[:, 1].flatten(), right=-1)
 
         integralnosigma = 0.0
         integralwithsigma = 0.0
-        nu0 = listenergyryd[0] * ryd_to_erg / h_in_erg_seconds
+        nu0 = arr_energyryd[0] * ryd_to_hz
         previntegrand = nu0 ** 2
-        for j in range(1, len(listenergyryd)):
-            energyryd = listenergyryd[j]
-            sigma_bf_megabarns = listsigma_bf_megabarns[j]
+        for j in range(1, len(arr_energyryd)):
+            energyryd = arr_energyryd[j]
+            sigma_bf_megabarns = arr_sigma_megabarns[j]
             if sigma_bf_megabarns < 0:  # negative value means we're in the extrapolation regime
                 # assume a power law decline from the highest-energy cross section point
                 sigma_bf_megabarns = (listin[-1][0] / energyryd) ** 3 * listin[-1][1]
-            nu = energyryd * ryd_to_erg / h_in_erg_seconds
 
-            integrandnosigma = (nu ** 2) * math.exp(-h_over_kb_in_kelvin_seconds *
+            nu = energyryd * ryd_to_hz
+
+            integrandnosigma = (nu ** 2) * math.exp(- h_over_kb_in_K_sec *
                                                     (nu - nu0) / args.optimaltemperature)
             integralcontribution = (integrandnosigma + previntegrand) / 2.0
             integralnosigma += integralcontribution
@@ -708,9 +709,9 @@ def reduce_phixs_table(listin, args):  # listin is a list of pairs (energy, phix
             previntegrand = integrandnosigma
 
         if integralnosigma > 0:
-            listout.append((integralwithsigma / integralnosigma))
+            listout[i] = (integralwithsigma / integralnosigma)
         else:
-            listout.append((0.0))
+            listout[i] = 0.0
             print('probable underflow')
 
     return listout[:args.nphixspoints]  # output is a 1D list of cross sections
@@ -745,10 +746,10 @@ lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 # reads a Hillier level name and returns the term tuple (twosplusone, l, parity)
 def get_term_as_tuple(config):
     config = config.split('[')[0]
-    for charpos in reversed(range(len(config))):
-        if config[charpos] in lchars:
+    for charpos, char in reversed(list(enumerate(config))):
+        if char in lchars:
             lposition = charpos
-            l = lchars.index(config[charpos])
+            l = lchars.index(char)
             break
 
     twosplusone = int(config[lposition - 1])  # could this be two digits long?
