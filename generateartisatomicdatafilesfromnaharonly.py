@@ -3,10 +3,13 @@ import collections
 import os
 import sys
 import numpy as np
+import pandas as pd
 import math
 import re
 
-elsymbols = ['n']+[line.split(',')[1] for line in open('elements.csv')]
+pydir = os.path.dirname(os.path.abspath(__file__))
+elsymbols = ['n'] + list(pd.read_csv(
+    os.path.join(pydir, 'elements.csv'))['symbol'].values)
 
 romannumerals = ('','I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII',
                  'XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX')
