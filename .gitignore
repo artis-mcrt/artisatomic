@@ -1,5 +1,4 @@
 /atomic-data-hillier/atomic/
-artis_files/phixsdata_v2.txt
-artis_files/transitiondata.txt
-atomic_data_logs
+artis_files/
+transition_guide/transitions_*.txt
 Icon?
