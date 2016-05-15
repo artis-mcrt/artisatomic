@@ -667,11 +667,13 @@ def reduce_phixs_table(tablein, args):
 
     #proportional to recombination rate
     def integrand(nu):
-        return (nu ** 2) * math.exp(- h_over_kb_in_K_sec *
+        return (nu + nu) * math.exp(- h_over_kb_in_K_sec *
                                     (nu - nu0) / args.optimaltemperature)
 
     def integrand_vec(nu_list):
-        return [integrand(nu) for nu in nu_list]
+        return [(nu + nu) * math.exp(- h_over_kb_in_K_sec *
+                                     (nu - nu0) / args.optimaltemperature)
+                for nu in nu_list]
 
     arr_sigma_out = np.empty(args.nphixspoints)
     # x is nu/nu_edge
