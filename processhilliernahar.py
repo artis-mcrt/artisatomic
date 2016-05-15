@@ -139,6 +139,8 @@ def process_files(args):
     #    d = './hillieratomic/' + hillierelname
 
     for elementindex, (atomic_number, listions) in enumerate(listelements):
+        if not listions:
+            continue
 
         nahar_core_states = [['IGNORE'] for x in listions]  # list of named tuples (naharcorestaterow)
 
@@ -234,154 +236,155 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     nahar_configurations = {}
     nahar_energy_levels = ['IGNORE']
     nahar_level_index_of_state = {}
-    with open(path_nahar_energy_file, 'r') as fenlist:
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before data section')
-                sys.exit()
-            if line.startswith(' i) Table of target/core states in the wavefunction expansion'):
-                break
-
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before end of core states table')
-                sys.exit()
-            if line.startswith(' no of target/core states in WF'):
-                numberofcorestates = int(line.split('=')[1])
-                break
-        fenlist.readline()  # blank line
-        fenlist.readline()  # ' target states and energies:'
-        fenlist.readline()  # blank line
-
-        nahar_core_states = [()] * (numberofcorestates + 1)
-        for c in range(1, numberofcorestates + 1):
-            row = fenlist.readline().split()
-            nahar_core_states[c] = naharcorestaterow(
-                int(row[0]), row[1], row[2], float(row[3]))
-            if int(nahar_core_states[c].nahar_core_state_id) != c:
-                print('Nahar levels mismatch: id {0:d} found at entry number {1:d}'.format(
-                    c, int(nahar_core_states[c].nahar_core_state_id)))
-                sys.exit()
-
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before data section ii)')
-                sys.exit()
-            if line.startswith('ii) Table of bound (negative) state energies (with spectroscopic notation)'):
-                break
-
-        found_table = False
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before end of state table')
-                sys.exit()
-
-            if line.startswith(' Ion ground state'):
-                nahar_ionization_potential_rydberg = -float(line.split('=')[2])
-                flog.write('Ionization potential = {0} Ryd\n'.format(
-                    nahar_ionization_potential_rydberg))
-
-            if line.startswith(' ') and len(line) > 36 and isfloat(line[29:29 + 8]):
-                found_table = True
-                state = line[1:22]
-#               energy = float(line[29:29+8])
-                twosplusone = int(state[18])
-                l = lchars.index(state[19])
-
-                if state[20] == 'o':
-                    parity = 1
-                    indexinsymmetry = reversedalphabets.index(state[17]) + 1
-                else:
-                    parity = 0
-                    indexinsymmetry = alphabets.index(state[17]) + 1
-
-                # print(state,energy,twosplusone,l,parity,indexinsymmetry)
-                nahar_configurations[(twosplusone, l, parity, indexinsymmetry)] = state
-            else:
-                if found_table:
+    nahar_core_states = []
+    if os.path.isfile(path_nahar_energy_file):
+        with open(path_nahar_energy_file, 'r') as fenlist:
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before data section')
+                    sys.exit()
+                if line.startswith(' i) Table of target/core states in the wavefunction expansion'):
                     break
 
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before table iii header')
-                sys.exit()
-            if line.startswith('iii) Table of complete set (both negative and positive) of energies'):
-                break
-        line = fenlist.readline()  # line of ----------------------
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before table iii starts')
-                sys.exit()
-            if line.startswith('------------------------------------------------------'):
-                break
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before end of core states table')
+                    sys.exit()
+                if line.startswith(' no of target/core states in WF'):
+                    numberofcorestates = int(line.split('=')[1])
+                    break
+            fenlist.readline()  # blank line
+            fenlist.readline()  # ' target states and energies:'
+            fenlist.readline()  # blank line
 
-        row = fenlist.readline().split()  # line of atomic number and electron number, unless
-        while len(row) == 0:  # some extra blank lines might exist
-            row = fenlist.readline().split()
-
-        if atomic_number != int(row[0]) or ion_stage != int(row[0]) - int(row[1]):
-            print('Wrong atomic number or ionization stage in Nahar energy file',
-                  atomic_number, int(row[0]), ion_stage, int(row[0]) - int(row[1]))
-            sys.exit()
-
-        while True:
-            line = fenlist.readline()
-            if not line:
-                print('End of file before table iii finished')
-                sys.exit()
-            row = line.split()
-            if row == ['0','0','0','0']:
-                break
-            twosplusone = int(row[0])
-            l = int(row[1])
-            parity = int(row[2])
-            number_of_states_in_symmetry = int(row[3])
-
-            line = fenlist.readline()  # core state number and energy
-
-            for s in range(number_of_states_in_symmetry):
+            nahar_core_states = [()] * (numberofcorestates + 1)
+            for c in range(1, numberofcorestates + 1):
                 row = fenlist.readline().split()
-                indexinsymmetry = int(row[0])
-                nahar_core_state_id = int(row[2])
-                if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
-                    flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d})\n".format(
-                        twosplusone, lchars[l], ['e', 'o'][parity],
-                        indexinsymmetry, nahar_core_state_id,
-                        len(nahar_core_states)))
+                nahar_core_states[c] = naharcorestaterow(
+                    int(row[0]), row[1], row[2], float(row[3]))
+                if int(nahar_core_states[c].nahar_core_state_id) != c:
+                    print('Nahar levels mismatch: id {0:d} found at entry number {1:d}'.format(
+                        c, int(nahar_core_states[c].nahar_core_state_id)))
+                    sys.exit()
 
-                    if nahar_core_state_id == 0:
-                        flog.write("(setting the core state to 1 instead)\n")
-                        nahar_core_state_id = 1
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before data section ii)')
+                    sys.exit()
+                if line.startswith('ii) Table of bound (negative) state energies (with spectroscopic notation)'):
+                    break
 
-                nahar_energy_levels.append(nahar_energy_level_row(
-                    *row,twosplusone, l, parity, -1.0, 0))
+            found_table = False
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before end of state table')
+                    sys.exit()
 
-                energyabovegsinpercm = \
-                    (nahar_ionization_potential_rydberg +
-                     float(nahar_energy_levels[-1].energyreltoionpotrydberg)) * \
-                    ryd_to_ev / hc_in_ev_cm
+                if line.startswith(' Ion ground state'):
+                    nahar_ionization_potential_rydberg = -float(line.split('=')[2])
+                    flog.write('Ionization potential = {0} Ryd\n'.format(
+                        nahar_ionization_potential_rydberg))
 
-                nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
-                    indexinsymmetry=indexinsymmetry,
-                    corestateid=nahar_core_state_id,
-                    energyreltoionpotrydberg=float(
-                        nahar_energy_levels[-1].energyreltoionpotrydberg),
-                    energyabovegsinpercm=energyabovegsinpercm,
-                    g=twosplusone * (2 * l + 1)
-                )
-                nahar_level_index_of_state[(twosplusone, l, parity, indexinsymmetry)] = len(
-                    nahar_energy_levels) - 1
+                if line.startswith(' ') and len(line) > 36 and isfloat(line[29:29 + 8]):
+                    found_table = True
+                    state = line[1:22]
+    #               energy = float(line[29:29+8])
+                    twosplusone = int(state[18])
+                    l = lchars.index(state[19])
 
-#                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
-#                    nahar_energy_levels.pop()
+                    if state[20] == 'o':
+                        parity = 1
+                        indexinsymmetry = reversedalphabets.index(state[17]) + 1
+                    else:
+                        parity = 0
+                        indexinsymmetry = alphabets.index(state[17]) + 1
 
-    # end reading Nahar energy file
+                    # print(state,energy,twosplusone,l,parity,indexinsymmetry)
+                    nahar_configurations[(twosplusone, l, parity, indexinsymmetry)] = state
+                else:
+                    if found_table:
+                        break
+
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before table iii header')
+                    sys.exit()
+                if line.startswith('iii) Table of complete set (both negative and positive) of energies'):
+                    break
+            line = fenlist.readline()  # line of ----------------------
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before table iii starts')
+                    sys.exit()
+                if line.startswith('------------------------------------------------------'):
+                    break
+
+            row = fenlist.readline().split()  # line of atomic number and electron number, unless
+            while len(row) == 0:  # some extra blank lines might exist
+                row = fenlist.readline().split()
+
+            if atomic_number != int(row[0]) or ion_stage != int(row[0]) - int(row[1]):
+                print('Wrong atomic number or ionization stage in Nahar energy file',
+                      atomic_number, int(row[0]), ion_stage, int(row[0]) - int(row[1]))
+                sys.exit()
+
+            while True:
+                line = fenlist.readline()
+                if not line:
+                    print('End of file before table iii finished')
+                    sys.exit()
+                row = line.split()
+                if row == ['0','0','0','0']:
+                    break
+                twosplusone = int(row[0])
+                l = int(row[1])
+                parity = int(row[2])
+                number_of_states_in_symmetry = int(row[3])
+
+                line = fenlist.readline()  # core state number and energy
+
+                for s in range(number_of_states_in_symmetry):
+                    row = fenlist.readline().split()
+                    indexinsymmetry = int(row[0])
+                    nahar_core_state_id = int(row[2])
+                    if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
+                        flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d})\n".format(
+                            twosplusone, lchars[l], ['e', 'o'][parity],
+                            indexinsymmetry, nahar_core_state_id,
+                            len(nahar_core_states)))
+
+                        if nahar_core_state_id == 0:
+                            flog.write("(setting the core state to 1 instead)\n")
+                            nahar_core_state_id = 1
+
+                    nahar_energy_levels.append(nahar_energy_level_row(
+                        *row,twosplusone, l, parity, -1.0, 0))
+
+                    energyabovegsinpercm = \
+                        (nahar_ionization_potential_rydberg +
+                         float(nahar_energy_levels[-1].energyreltoionpotrydberg)) * \
+                        ryd_to_ev / hc_in_ev_cm
+
+                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
+                        indexinsymmetry=indexinsymmetry,
+                        corestateid=nahar_core_state_id,
+                        energyreltoionpotrydberg=float(
+                            nahar_energy_levels[-1].energyreltoionpotrydberg),
+                        energyabovegsinpercm=energyabovegsinpercm,
+                        g=twosplusone * (2 * l + 1)
+                    )
+                    nahar_level_index_of_state[(twosplusone, l, parity, indexinsymmetry)] = len(
+                        nahar_energy_levels) - 1
+
+    #                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
+    #                    nahar_energy_levels.pop()
+
     return nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations
 
 
@@ -394,88 +397,90 @@ def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
     hillier_energy_levels = ['IGNORE']
     hillier_level_ids_matching_term = defaultdict(list)
     transition_count_of_hillier_level_name = defaultdict(int)
-
+    hillier_ionization_energy_ev = 0.0
     transitions = ['IGNORE']
-    with open(path_hillier_osc_file, 'r') as fhillierosc:
-        for line in fhillierosc:
-            row = line.split()
 
-            # check for right number of columns and that are all numbers except first column
-            if len(row) == len(hillier_row_format_energy_level.split()) and all(map(isfloat, row[1:])):
-                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '')
+    if os.path.isfile(path_hillier_osc_file):
+        with open(path_hillier_osc_file, 'r') as fhillierosc:
+            for line in fhillierosc:
+                row = line.split()
 
-                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip('-'))
-                levelname = hillier_energy_level.hilliername
+                # check for right number of columns and that are all numbers except first column
+                if len(row) == len(hillier_row_format_energy_level.split()) and all(map(isfloat, row[1:])):
+                    hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '')
 
-                (twosplusone, l, parity) = get_term_as_tuple(levelname)
-                hillier_energy_level = hillier_energy_level._replace(
-                    hillierlevelid=hillierlevelid,
-                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm),
-                    g=float(hillier_energy_level.g),
-                    twosplusone=twosplusone,
-                    l=l,
-                    parity=parity
-                )
+                    hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip('-'))
+                    levelname = hillier_energy_level.hilliername
 
-                hillier_energy_levels.append(hillier_energy_level)
+                    (twosplusone, l, parity) = get_term_as_tuple(levelname)
+                    hillier_energy_level = hillier_energy_level._replace(
+                        hillierlevelid=hillierlevelid,
+                        energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm),
+                        g=float(hillier_energy_level.g),
+                        twosplusone=twosplusone,
+                        l=l,
+                        parity=parity
+                    )
 
-                if twosplusone == -1:
-                    # -1 indicates that the term could not be interpreted
-                    log_and_print("Can't find term in Hillier level name '" + levelname + "'")
-                else:
-                    if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                        hillier_level_ids_matching_term[
-                            (twosplusone, l, parity)].append(hillierlevelid)
+                    hillier_energy_levels.append(hillier_energy_level)
 
-                # if this is the ground state
-                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / \
-                        float(hillier_energy_levels[-1].lambdaangstrom)
+                    if twosplusone == -1:
+                        # -1 indicates that the term could not be interpreted
+                        log_and_print("Can't find term in Hillier level name '" + levelname + "'")
+                    else:
+                        if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
+                            hillier_level_ids_matching_term[
+                                (twosplusone, l, parity)].append(hillierlevelid)
 
-                if hillierlevelid != len(hillier_energy_levels) - 1:
-                    print('Hillier levels mismatch: id {0:d} found at entry number {1:d}'.format(
-                        len(hillier_energy_levels) - 1, hillierlevelid))
-                    sys.exit()
+                    # if this is the ground state
+                    if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
+                        hillier_ionization_energy_ev = hc_in_ev_angstrom / \
+                            float(hillier_energy_levels[-1].lambdaangstrom)
 
-            if line.startswith('                        Oscillator strengths'):
-                break
+                    if hillierlevelid != len(hillier_energy_levels) - 1:
+                        print('Hillier levels mismatch: id {0:d} found at entry number {1:d}'.format(
+                            len(hillier_energy_levels) - 1, hillierlevelid))
+                        sys.exit()
 
-        # defined_transition_ids = []
-        for line in fhillierosc:
-            if line.startswith('                        Oscillator strengths'):
-                break
-            linesplitdash = line.split('-')
-            row = (linesplitdash[0] + ' ' + '-'.join(linesplitdash[1:-1]) +
-                   ' ' + linesplitdash[-1]).split()
+                if line.startswith('                        Oscillator strengths'):
+                    break
 
-            if len(row) == 8 and all(map(isfloat, row[2:4])):
-                transition = hillier_transition_row(row[0], row[1],
-                                                    float(row[2]), # f
-                                                    float(row[3]), # A
-                                                    float(row[4]), # lambda
-                                                    int(row[5]), # i
-                                                    int(row[6]), # j
-                                                    int(row[7]))
+            # defined_transition_ids = []
+            for line in fhillierosc:
+                if line.startswith('                        Oscillator strengths'):
+                    break
+                linesplitdash = line.split('-')
+                row = (linesplitdash[0] + ' ' + '-'.join(linesplitdash[1:-1]) +
+                       ' ' + linesplitdash[-1]).split()
 
-                if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
-                    #                    defined_transition_ids.append(int(transition.hilliertransitionid))
-                    transitions.append(transition)
-                    transition_count_of_hillier_level_name[transition.namefrom] += 1
-                    transition_count_of_hillier_level_name[transition.nameto] += 1
+                if len(row) == 8 and all(map(isfloat, row[2:4])):
+                    transition = hillier_transition_row(row[0], row[1],
+                                                        float(row[2]), # f
+                                                        float(row[3]), # A
+                                                        float(row[4]), # lambda
+                                                        int(row[5]), # i
+                                                        int(row[6]), # j
+                                                        int(row[7]))
 
-                    if int(transition.hilliertransitionid) != len(transitions) - 1:
-                        print(hillier_ion_folder + path_hillier_osc_file +
-                              ', WARNING: Transition id {0:d} found at entry number {1:d}'.format
-                              (
-                                  int(transition.hilliertransitionid),
-                                  len(transitions) - 1)
-                              )
-#                    sys.exit()
-                else:
-                    log_and_print('FATAL: multiply-defined Hillier transition: {0} {1}'
-                             .format(transition.namefrom, transition.nameto))
-                    sys.exit()
-    log_and_print('Read {:d} transitions'.format(len(transitions) - 1))
+                    if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
+                        #                    defined_transition_ids.append(int(transition.hilliertransitionid))
+                        transitions.append(transition)
+                        transition_count_of_hillier_level_name[transition.namefrom] += 1
+                        transition_count_of_hillier_level_name[transition.nameto] += 1
+
+                        if int(transition.hilliertransitionid) != len(transitions) - 1:
+                            print(hillier_ion_folder + path_hillier_osc_file +
+                                  ', WARNING: Transition id {0:d} found at entry number {1:d}'.format
+                                  (
+                                      int(transition.hilliertransitionid),
+                                      len(transitions) - 1)
+                                  )
+    #                    sys.exit()
+                    else:
+                        log_and_print('FATAL: multiply-defined Hillier transition: {0} {1}'
+                                 .format(transition.namefrom, transition.nameto))
+                        sys.exit()
+        log_and_print('Read {:d} transitions'.format(len(transitions) - 1))
 
     return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_hillier_level_name, hillier_level_ids_matching_term
 
@@ -572,8 +577,8 @@ def combine_sources(i, hillier_energy_levels, hillier_level_ids_matching_term, h
             flog.write("No Hillier levels with term {0:d}{1}{2}\n".format(
                 twosplusone, lchars[l], ['e', 'o'][parity]))
 
-        naharthresholdrydberg = nahar_phixs_tables[state_tuple][0][0]
         if not hillier_level_ids_matching_this_nahar_state:
+            naharthresholdrydberg = nahar_phixs_tables[state_tuple][0][0]
             flog.write("No matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} [{4}] ".format(twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
                                                                                                                     (nahar_configurations[state_tuple] if state_tuple in nahar_configurations else 'CONFIG NOT FOUND')) +
                        '(E_threshold={0:.2f} eV)'.format(naharthresholdrydberg * ryd_to_ev) + "\n")
@@ -593,7 +598,8 @@ def combine_sources(i, hillier_energy_levels, hillier_level_ids_matching_term, h
             # avghillierthreshold = weightedavgthresholdinev(
             #    hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
             strhilliermatchesthreshold = '[' + ', '.join(['{0} ({1:.3f} eV)'.format(hillier_energy_levels[k].hilliername, hc_in_ev_angstrom /
-                                                                                    float(hillier_energy_levels[k].lambdaangstrom)) for k in hillier_level_ids_matching_this_nahar_state]) + ']'
+                                                                                    float(hillier_energy_levels[k].lambdaangstrom))
+                                                          for k in hillier_level_ids_matching_this_nahar_state]) + ']'
             avghillierenergyabovegsinev = weightedavgenergyinev(
                 hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
 
@@ -608,7 +614,7 @@ def combine_sources(i, hillier_energy_levels, hillier_level_ids_matching_term, h
     energy_levels = hillier_energy_levels + added_nahar_levels
 
     log_and_print('Included {0} levels from Hillier dataset and added {1} levels from Nahar phixs tables for a total of {2} levels'.format(
-        len(hillier_energy_levels) - 1, len(added_nahar_levels), len(energy_levels[i]) - 1))
+        len(hillier_energy_levels) - 1, len(added_nahar_levels), len(energy_levels) - 1))
 
     # sort the concatenated energy level list by energy
     print('Sorting level list...')
@@ -912,8 +918,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
             level_ids_with_permitted_down_transitions.add(
                 levelid_to)  # hopefully 'to_level' is the upper level
 
-    for transitionid in range(1, len(transitions)):
-        transition = transitions[transitionid]
+    for transitionid, transition in enumerate(transitions[1:], 1):
         levelid_from = level_id_of_level_name[transition.namefrom]
         levelid_to = level_id_of_level_name[transition.nameto]
         forbidden = (energy_levels[levelid_from].parity ==
