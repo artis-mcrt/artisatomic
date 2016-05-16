@@ -2,3 +2,5 @@
 artis_files/
 transition_guide/transitions_*.*
 Icon?
+*.swp
+*.tmp
