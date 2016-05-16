@@ -577,7 +577,6 @@ def combine_sources(i, hillier_energy_levels, hillier_level_ids_matching_term,
     # hillier_level_ids_matching_term[i] = {} #TESTING only
     added_nahar_levels = []
     photoionization_crosssections = []
-    level_id_of_level_name = {}
     # match up Nahar states given in phixs data with Hillier levels, adding
     # missing levels as necessary
     for (twosplusone, l, parity, indexinsymmetry) in nahar_phixs_tables.keys():
