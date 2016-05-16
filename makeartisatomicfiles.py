@@ -12,9 +12,9 @@ import pandas as pd
 from scipy import integrate
 #from scipy import interpolate
 
-pydir = os.path.dirname(os.path.abspath(__file__))
+PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(
-    os.path.join(pydir, 'elements.csv'))['symbol'].values)
+    os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
 
 roman_numerals = ('', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
                   'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII',
@@ -74,7 +74,7 @@ listelements = [
 #         ])
         (27,
          [
-             iontuple(2, '', '', ''),
+             iontuple(3, '', '', ''),
          ])
     ]
 
@@ -540,7 +540,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage):
 
     qub_energylevels = ['IGNORE']
     qub_transitions = ['IGNORE']
-    if (atomic_number == 27) and (ion_stage == 2):
+    if (atomic_number == 27) and (ion_stage == 3):
         with open('atomic-data-qub/adf04_v1', 'r') as fleveltrans:
             line = fleveltrans.readline()
             while True:
