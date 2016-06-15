@@ -10,11 +10,10 @@ from astropy import units as u
 import numpy as np
 import pandas as pd
 from scipy import integrate
-#from scipy import interpolate
+# from scipy import interpolate
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
-elsymbols = ['n'] + list(pd.read_csv(
-    os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
+elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
 
 roman_numerals = ('', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
                   'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII',
@@ -70,8 +69,8 @@ hillier_row_format_energy_level = {
 }
 
 listelements = [
-    (26, [1, 2]),
-    #(27, [3])
+    (26, [1, 2, 3, 4, 5]),
+    # (27, [3])
     ]
 
 ryd_to_ev = u.rydberg.to('eV')
@@ -122,10 +121,8 @@ def main():
 
 def clear_files(args):
     # clear out the file contents, so these can be appended to later
-    with open(os.path.join(args.output_folder, 'adata.txt'),
-              'w') as fatommodels, \
-            open(os.path.join(args.output_folder, 'transitiondata.txt'),
-                 'w') as ftransitiondata, \
+    with open(os.path.join(args.output_folder, 'adata.txt'), 'w'), \
+            open(os.path.join(args.output_folder, 'transitiondata.txt'), 'w'), \
             open(os.path.join(args.output_folder, 'phixsdata_v2.txt'),
                  'w') as fphixs:
         fphixs.write('{0:d}\n'.format(args.nphixspoints))
@@ -168,9 +165,7 @@ def process_files(args):
                 pass
             else:
                 with open(os.path.join(args.output_folder, args.output_folder_logs,
-                                       '{0}{1:d}.txt'.format(
-                                           elsymbols[atomic_number].lower(),
-                                           ion_stage)),
+                                       '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)),
                           'w') as flog:
 
                     hillier_ion_folder = 'atomic-data-hillier/atomic/' + \
@@ -186,9 +181,7 @@ def process_files(args):
                     log_and_print('Reading ' + path_nahar_energy_file)
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i]) = \
-                            read_nahar_energy_level_file(path_nahar_energy_file,
-                                                         atomic_number,
-                                                         i, ion_stage)
+                        read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_stage)
 
                     if (atomic_number, ion_stage) in path_hillier_osc_file:
                         osc_file = path_hillier_osc_file[(atomic_number, ion_stage)]
@@ -225,8 +218,6 @@ def process_files(args):
                     # print('Reading ' + hillier_ion_folder + path_hillier_phixs_file[(atomic_number, ion_stage)])
                     # read_hillier_phixs_tables(hillier_ion_folder,path_hillier_phixs_file[(atomic_number, ion_stage)])
 
-
-
         write_output_files(elementindex, energy_levels, transitions,
                            ionization_energy_ev,
                            transition_count_of_level_name,
@@ -236,7 +227,7 @@ def process_files(args):
 
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_stage):
     nahar_energy_level_row = namedtuple(
-        'energylevel', 'indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity energyabovegsinpercm g')
+        'energylevel', 'indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity energyabovegsinpercm g naharconfiguration')
     naharcorestaterow = namedtuple(
         'naharcorestate', 'nahar_core_state_id configuration term energyrydberg')
     nahar_configurations = {}
@@ -370,7 +361,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
                             nahar_core_state_id = 1
 
                     nahar_energy_levels.append(nahar_energy_level_row(
-                        *row, twosplusone, l, parity, -1.0, 0))
+                        *row, twosplusone, l, parity, -1.0, 0, ''))
 
                     energyabovegsinpercm = \
                         (nahar_ionization_potential_rydberg +
@@ -476,20 +467,17 @@ def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
                         transition_count_of_level_name[transition.nameto] += 1
 
                         if int(transition.hilliertransitionid) != len(transitions) - 1:
-                            print(hillier_ion_folder + path_hillier_osc_file +
-                                  ', WARNING: Transition id {0:d} found at entry number {1:d}'.format
-                                  (
-                                      int(transition.hilliertransitionid),
-                                      len(transitions) - 1)
-                                  )
-    #                    sys.exit()
+                            print(path_hillier_osc_file + ', WARNING: Transition id {0:d} found at entry number {1:d}'.format(
+                                int(transition.hilliertransitionid), len(transitions) - 1))
+                            sys.exit()
                     else:
                         log_and_print('FATAL: multiply-defined Hillier transition: {0} {1}'
-                                 .format(transition.namefrom, transition.nameto))
+                                      .format(transition.namefrom, transition.nameto))
                         sys.exit()
         log_and_print('Read {:d} transitions'.format(len(transitions) - 1))
 
     return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
+
 
 def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage):
     nahar_phixs_tables = {}
@@ -601,8 +589,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                     if reduce_configuration(levelname) == reduce_configuration(nahar_configuration_this_state) and \
                             hillier_energy_levels[levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
 
-                        core_state_id = nahar_energy_levels[
-                            nahar_level_index_of_state[state_tuple]].corestateid
+                        core_state_id = nahar_energy_levels[nahar_level_index_of_state[state_tuple]].corestateid
 
                         confignote = nahar_configurations[state_tuple]
 
@@ -616,45 +603,51 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                             naharconfiguration=confignote)
                         hillier_level_ids_matching_this_nahar_state.append(levelid)
             else:
-                log_and_print("No electron configuration for {0:d}{1}{2} index {3:d}".format(
+                log_and_print("\nNo electron configuration for {0:d}{1}{2} index {3:d}".format(
                     twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
         else:
-            flog.write("No Hillier levels with term {0:d}{1}{2}\n".format(
+            flog.write("\nNo Hillier levels with term {0:d}{1}{2}\n".format(
                 twosplusone, lchars[l], ['e', 'o'][parity]))
 
         if not hillier_level_ids_matching_this_nahar_state:
             naharthresholdrydberg = nahar_phixs_tables[state_tuple][0][0]
-            flog.write("No matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} [{4}] ".format(twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
-                                                                                                                    (nahar_configurations[state_tuple] if state_tuple in nahar_configurations else 'CONFIG NOT FOUND')) +
-                       '(E_threshold={0:.2f} eV)'.format(naharthresholdrydberg * ryd_to_ev) + "\n")
+            flog.write("\nNo matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} '{4}' ".format(
+                twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
+                nahar_configuration_this_state))
+
             # now find the Nahar level and add it to the new list
             if state_tuple in nahar_level_index_of_state:
-                nahar_energy_level = nahar_energy_levels[
-                    nahar_level_index_of_state[state_tuple]]
-                if nahar_energy_level.energyabovegsinpercm * hc_in_ev_cm < 0.002:
+                nahar_energy_level = nahar_energy_levels[nahar_level_index_of_state[state_tuple]]
+                energy_eV = nahar_energy_level.energyabovegsinpercm * hc_in_ev_cm
+                flog.write('(E = {0:.3f} eV, g = {1:.1f})'.format(energy_eV, nahar_energy_level.g) + "\n")
+
+                if energy_eV < 0.002:
                     flog.write(" but prevented duplicating the ground state\n")
                 else:
-                    added_nahar_levels.append(nahar_energy_level)
+                    added_nahar_levels.append(nahar_energy_level._replace(naharconfiguration=nahar_configuration_this_state))
             else:
                 flog.write(" (and no matching entry in Nahar energy table, so can't be added)\n")
-        else:
+        else:  # there are Hillier levels matched to this state
+            nahar_energy_level = nahar_energy_levels[nahar_level_index_of_state[state_tuple]]
             nahar_energyabovegsinev = hc_in_ev_cm * \
-                nahar_energy_levels[nahar_level_index_of_state[state_tuple]].energyabovegsinpercm
+                nahar_energy_level.energyabovegsinpercm
             # avghillierthreshold = weightedavgthresholdinev(
             #    hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
-            strhilliermatchesthreshold = '[' + ', '.join(['{0} ({1:.3f} eV)'.format(hillier_energy_levels[k].levelname, hc_in_ev_angstrom /
-                                                                                    float(hillier_energy_levels[k].lambdaangstrom))
-                                                          for k in hillier_level_ids_matching_this_nahar_state]) + ']'
-            avghillierenergyabovegsinev = weightedavgenergyinev(
-                hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
+            # strhilliermatchesthreshold = '[' + ', '.join(
+            #     ['{0} ({1:.3f} eV)'.format(hillier_energy_levels[k].levelname,
+            #                                hc_in_ev_angstrom / float(hillier_energy_levels[k].lambdaangstrom))
+            #      for k in hillier_level_ids_matching_this_nahar_state]) + ']'
 
-            strhilliermatchesenergy = '[' + ', '.join(['{0} ({1:.3f} eV)'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
-                hillier_energy_levels[k].energyabovegsinpercm)) for k in hillier_level_ids_matching_this_nahar_state]) + ']'
+            strhilliermatchesenergies = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
+                hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g) for k in hillier_level_ids_matching_this_nahar_state])
 
-            flog.write("Matched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' ".format(twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
-                                                                                       nahar_configuration_this_state) +
-                       '({0:.3f} eV) to '.format(nahar_energyabovegsinev) +
-                       '<E>={0:.3f} eV: '.format(avghillierenergyabovegsinev) + strhilliermatchesenergy + '\n')
+            flog.write("\nMatched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to ".format(
+                twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry, nahar_configuration_this_state, nahar_energyabovegsinev, nahar_energy_level.g))
+            if len(hillier_level_ids_matching_this_nahar_state) > 1:
+                avghillierenergyabovegsinev = weightedavgenergyinev(hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
+                sumhillierstatweights = sum([hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state])
+                flog.write('\n<E> = {0:.3f} eV, g_sum = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
+            flog.write('{0}\n'.format(strhilliermatchesenergies))
 
     energy_levels = hillier_energy_levels + added_nahar_levels
 
@@ -710,14 +703,14 @@ def reduce_phixs_tables(dicttables, args):
     ryd_to_hz = (u.rydberg / const.h).to('Hz').value
     h_over_kb_in_K_sec = (const.h / const.k_B).to('K s').value
 
-    #proportional to recombination rate
-    #nu0 = 1e13
-    #fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
+    # proportional to recombination rate
+    # nu0 = 1e13
+    # fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
     def integrand(nu):
         return (nu + nu) * math.exp(- h_over_kb_in_K_sec *
-                                    (nu -nu0) / args.optimaltemperature)
+                                    (nu - nu0) / args.optimaltemperature)
 
-    #def integrand_vec(nu_list):
+    # def integrand_vec(nu_list):
     #    return [(nu + nu) * math.exp(- h_over_kb_in_K_sec *
     #                                 (nu - nu0) / args.optimaltemperature)
     #            for nu in nu_list]
@@ -737,22 +730,22 @@ def reduce_phixs_tables(dicttables, args):
         arr_sigma_out = np.empty(args.nphixspoints)
         # x is nu/nu_edge
 
-        #sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1],
+        # sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1],
         #                                    kind='linear', assume_sorted=True)
 
-        for i, x in enumerate(xgrid[:-1]):
+        for i, _ in enumerate(xgrid[:-1]):
             enlow = xgrid[i] * tablein[0][0]
             enhigh = xgrid[i + 1] * tablein[0][0]
 
             nsteps = (args.nphixspoints - i + 1) * args.integralstepfactor
 
-            #integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
-            #integralwithsigma, err = integrate.fixed_quad(
+            # integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
+            # integralwithsigma, err = integrate.fixed_quad(
             #    lambda x: sigma_interp(x) * integrand_vec(x), enlow, enhigh, n=250)
 
-            #this is incredibly fast, but maybe not accurate
-            #integralnosigma, err = integrate.quad(integrand, enlow, enhigh, epsrel=1e-2)
-            #integralwithsigma, err = integrate.quad(
+            # this is incredibly fast, but maybe not accurate
+            # integralnosigma, err = integrate.quad(integrand, enlow, enhigh, epsrel=1e-2)
+            # integralwithsigma, err = integrate.quad(
             #    lambda x: sigma_interp(x) * integrand(x), enlow, enhigh, epsrel=1e-2)
 
             arr_energyryd = np.linspace(enlow, enhigh,
@@ -777,24 +770,24 @@ def reduce_phixs_tables(dicttables, args):
     return dictout
 
 
-def weightedavgenergyinev(energy_levelsthision, ids):
+def weightedavgenergyinev(energylevels_thision, ids):
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
-        statisticalweight = float(energy_levelsthision[levelid].g)
+        statisticalweight = float(energylevels_thision[levelid].g)
         genergysum += statisticalweight * hc_in_ev_cm * \
-            float(energy_levelsthision[levelid].energyabovegsinpercm)
+            float(energylevels_thision[levelid].energyabovegsinpercm)
         gsum += statisticalweight
     return genergysum / gsum
 
 
-def weightedavgthresholdinev(energy_levelsthision, ids):
+def weightedavgthresholdinev(energylevels_thision, ids):
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
-        statisticalweight = float(energy_levelsthision[levelid].g)
+        statisticalweight = float(energylevels_thision[levelid].g)
         genergysum += statisticalweight * hc_in_ev_angstrom / \
-            float(energy_levelsthision[levelid].lambdaangstrom)
+            float(energylevels_thision[levelid].lambdaangstrom)
         gsum += statisticalweight
     return genergysum / gsum
 
@@ -889,8 +882,7 @@ def write_output_files(elementindex, energy_levels, transitions,
             flog = open(
                 os.path.join(args.output_folder,
                              args.output_folder_logs,
-                             '{0}{1:d}.txt'.format(
-                     elsymbols[atomic_number].lower(), ion_stage)),
+                             '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)),
                 'a')
 
             print('==============> ' + ionstr + ':')
@@ -920,9 +912,9 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
         level_comment = ""
         try:
-            level_comment = "Hiller: '{:}', ".format(energylevel.levelname)
+            level_comment = "Hiller: '{:}', ".format(energylevel.levelname).ljust(35)
         except AttributeError:
-            pass
+            level_comment = " " * 35
 
         try:
             level_comment += 'Nahar: {:d}{:}{:} index {:}'.format(
@@ -1019,7 +1011,7 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
         # find the upper level ids from the Nahar core state
         upperionlevelids = get_photoion_upperlevelids(
             energy_level, energy_levels_upperion,
-            nahar_core_states, nahar_configurations,
+            nahar_core_states, nahar_configurations[i + 1],
             upper_level_ids_of_core_state_id)
 
         # upperionlevelids = [1] #force ionization to ground state
@@ -1045,7 +1037,7 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
 
 
 def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
-                               nahar_core_states, nahar_configurations,
+                               nahar_core_states, nahar_configurations_upperion,
                                upper_level_ids_of_core_state_id):
 
     core_state_id = int(energy_level.corestateid)
@@ -1063,7 +1055,7 @@ def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
                 else:
                     state_tuple = (int(upperlevel.twosplusone), int(upperlevel.l), int(
                         upperlevel.parity), int(upperlevel.indexinsymmetry))
-                    upperlevelconfig = nahar_configurations[i + 1].get(state_tuple, '-1')
+                    upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
 
                 if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
                     upper_level_ids_of_core_state_id[core_state_id].append(upperlevelid)
