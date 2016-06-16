@@ -351,17 +351,14 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
                     indexinsymmetry = int(row[0])
                     nahar_core_state_id = int(row[2])
                     if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
-                        flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d})\n".format(
+                        flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d}). Setting core state to 1 instead.\n".format(
                             twosplusone, lchars[l], ['e', 'o'][parity],
                             indexinsymmetry, nahar_core_state_id,
                             len(nahar_core_states)))
+                        nahar_core_state_id = 1
 
-                        if nahar_core_state_id == 0:
-                            flog.write("(setting the core state to 1 instead)\n")
-                            nahar_core_state_id = 1
-
-                    nahar_energy_levels.append(nahar_energy_level_row(
-                        *row, twosplusone, l, parity, -1.0, 0, ''))
+                    nahar_energy_levels.append(
+                        nahar_energy_level_row(*row, twosplusone, l, parity, -1.0, 0, ''))
 
                     energyabovegsinpercm = \
                         (nahar_ionization_potential_rydberg +
@@ -371,25 +368,22 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
                     nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
                         indexinsymmetry=indexinsymmetry,
                         corestateid=nahar_core_state_id,
-                        energyreltoionpotrydberg=float(
-                            nahar_energy_levels[-1].energyreltoionpotrydberg),
+                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),
                         energyabovegsinpercm=energyabovegsinpercm,
                         g=twosplusone * (2 * l + 1)
                     )
-                    nahar_level_index_of_state[(twosplusone, l, parity, indexinsymmetry)] = len(
-                        nahar_energy_levels) - 1
+                    nahar_level_index_of_state[(twosplusone, l, parity, indexinsymmetry)] = len(nahar_energy_levels) - 1
 
     #                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
     #                    nahar_energy_levels.pop()
 
-    return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state,
-            nahar_configurations)
+    return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations)
 
 
 def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
                                              hillier_row_format_energy_level, i):
     hillier_energy_level_row = namedtuple(
-        'energylevel', hillier_row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration')
+        'energylevel', hillier_row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
     hillier_transition_row = namedtuple(
         'transition', 'namefrom nameto f A lambdaangstrom i j hilliertransitionid')
     hillier_energy_levels = ['IGNORE']
@@ -405,7 +399,7 @@ def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
 
                 # check for right number of columns and that are all numbers except first column
                 if len(row) == len(hillier_row_format_energy_level.split()) and all(map(isfloat, row[1:])):
-                    hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '')
+                    hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '', -1)
 
                     hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip('-'))
                     levelname = hillier_energy_level.levelname
@@ -584,24 +578,32 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
         if hillier_level_ids_matching_term[(twosplusone, l, parity)]:
                 # match the electron configurations
             if nahar_configuration_this_state != '_CONFIG NOT FOUND_':
+                best_match_score = 0.
                 for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                    levelname = hillier_energy_levels[levelid].levelname
-                    if reduce_configuration(levelname) == reduce_configuration(nahar_configuration_this_state) and \
-                            hillier_energy_levels[levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
+                    match_score = score_config_match(hillier_energy_levels[levelid].levelname, nahar_configuration_this_state)
+                    best_match_score = max(best_match_score, match_score)
+                if best_match_score > 0.:
+                    for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
+                        levelname = hillier_energy_levels[levelid].levelname
+                        match_score = score_config_match(hillier_energy_levels[levelid].levelname, nahar_configuration_this_state)
+                        # if reduce_configuration(levelname) == reduce_configuration(nahar_configuration_this_state) and \
+                        if match_score == best_match_score and \
+                                hillier_energy_levels[levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
 
-                        core_state_id = nahar_energy_levels[nahar_level_index_of_state[state_tuple]].corestateid
+                            core_state_id = nahar_energy_levels[nahar_level_index_of_state[state_tuple]].corestateid
 
-                        confignote = nahar_configurations[state_tuple]
+                            confignote = nahar_configurations[state_tuple]
 
-                        if nahar_configuration_this_state != confignote:
-                            confignote += " manually replaced by {:}".format(nahar_configuration_this_state)
+                            if nahar_configuration_this_state != confignote:
+                                confignote += " manually replaced by {:}".format(nahar_configuration_this_state)
 
-                        hillier_energy_levels[levelid] = hillier_energy_levels[levelid]._replace(
-                            twosplusone=twosplusone, l=l, parity=parity,
-                            indexinsymmetry=indexinsymmetry,
-                            corestateid=core_state_id,
-                            naharconfiguration=confignote)
-                        hillier_level_ids_matching_this_nahar_state.append(levelid)
+                            hillier_energy_levels[levelid] = hillier_energy_levels[levelid]._replace(
+                                twosplusone=twosplusone, l=l, parity=parity,
+                                indexinsymmetry=indexinsymmetry,
+                                corestateid=core_state_id,
+                                naharconfiguration=confignote,
+                                matchscore=match_score)
+                            hillier_level_ids_matching_this_nahar_state.append(levelid)
             else:
                 log_and_print("\nNo electron configuration for {0:d}{1}{2} index {3:d}".format(
                     twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
@@ -638,16 +640,17 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
             #                                hc_in_ev_angstrom / float(hillier_energy_levels[k].lambdaangstrom))
             #      for k in hillier_level_ids_matching_this_nahar_state]) + ']'
 
-            strhilliermatchesenergies = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
-                hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g) for k in hillier_level_ids_matching_this_nahar_state])
+            strhilliermatches = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
+                hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g, hillier_energy_levels[k].matchscore) for k in hillier_level_ids_matching_this_nahar_state])
 
-            flog.write("\nMatched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to ".format(
+            flog.write("\nMatched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to \n".format(
                 twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry, nahar_configuration_this_state, nahar_energyabovegsinev, nahar_energy_level.g))
+
             if len(hillier_level_ids_matching_this_nahar_state) > 1:
                 avghillierenergyabovegsinev = weightedavgenergyinev(hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
                 sumhillierstatweights = sum([hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state])
-                flog.write('\n<E> = {0:.3f} eV, g_sum = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
-            flog.write('{0}\n'.format(strhilliermatchesenergies))
+                flog.write('<E> = {0:.3f} eV, g_sum = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
+            flog.write(strhilliermatches + '\n')
 
     energy_levels = hillier_energy_levels + added_nahar_levels
 
@@ -832,21 +835,11 @@ def get_term_as_tuple(config):
 def reduce_configuration(instr):
     if instr == "-1":
         return "-1"
-    instr = instr.split('[')[0]
+    instr = instr.split('[')[0]  # remove trailing bracketed J value
     if instr[-1] in lchars:
-        instr = instr + 'e'
-    outstr = ""
-    in_brackets = False
-    for char in instr[:-4]:
-        if char == ' ' or char == '_':
-            continue
-        if char == '(':
-            in_brackets = True
-        if not in_brackets:
-            outstr += char
-        if char == ')':
-            in_brackets = False
+        instr = instr + 'e'  # last character being S,P,D, etc means even
 
+    outstr = remove_bracketed_part(instr)
     outstr += '_'
     outstr += instr[-3:-1]
     if instr[-1] == 'o':
@@ -854,6 +847,151 @@ def reduce_configuration(instr):
     else:
         outstr += 'e'
     return outstr
+
+
+def remove_bracketed_part(instr):
+    outstr = ""
+    in_brackets = False
+    for char in instr[:-4]:
+        if char == ' ' or char == '_':
+            continue
+        elif char == '(':
+            in_brackets = True
+        elif char == ')':
+            in_brackets = False
+        elif not in_brackets:
+            outstr += char
+    return outstr
+
+
+def interpret_configuration(instr_orig):
+    max_n = 20  # maximum possible principle quantum number n
+    instr = instr_orig
+    instr = instr.split('[')[0]  # remove trailing bracketed J value
+
+    if instr[-1] in lchars:
+        term_parity = 0  # even
+    else:
+        term_parity = [0, 1][(instr[-1] == 'o')]
+        instr = instr[:-1]
+
+    term_twosplusone = -1
+    term_l = -1
+    indexinsymmetry = -1
+
+    while instr:
+        if instr[-1] in lchars:
+            term_l = lchars.index(instr[-1])
+            instr = instr[:-1]
+            break
+        else:
+            term_parity = term_parity + 2  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hiller levels. Shouldn't match these
+        instr = instr[:-1]
+
+    if str.isdigit(instr[-1]):
+        term_twosplusone = int(instr[-1])
+        instr = instr[:-1]
+
+    if instr[-1] == '_':
+        instr = instr[:-1]
+    elif instr[-1] in alphabets:
+        if term_parity == 1:
+            indexinsymmetry = reversedalphabets.index(instr[-1]) + 1
+        else:
+            indexinsymmetry = alphabets.index(instr[-1]) + 1
+        instr = instr[:-1]
+
+    electron_config = []
+    if not instr.startswith('Eqv st'):
+        while instr:
+            if instr[-1].upper() in lchars:
+                try:
+                    if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n:
+                        startpos = -3
+                    else:
+                        startpos = -2
+                except ValueError:
+                    startpos = -3  # this tripped on '4sp(3P)_7Po[2]'. just pretend 4sp is an orbital and occupation number
+
+                electron_config.insert(0, instr[startpos:])
+                instr = instr[:startpos]
+            elif instr[-1] == ')':
+                left_bracket_pos = instr.rfind('(')
+                str_parent_term = instr[left_bracket_pos:].replace(" ", "")
+                electron_config.insert(0, str_parent_term)
+                instr = instr[:left_bracket_pos]
+            elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
+                if instr[-2].upper() in lchars:
+                    if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n:
+                        startpos = -4
+                    else:
+                        startpos = -3
+                    electron_config.insert(0, instr[-3:])
+                    instr = instr[:-3]
+                else:
+                    # print('Unknown character ' + instr[-1])
+                    instr = instr[:-1]
+            elif instr[-1] in ['_', ' ']:
+                instr = instr[:-1]
+            else:
+                # print('Unknown character ' + instr[-1])
+                instr = instr[:-1]
+
+    # return '{0} {1}{2}{3} index {4}'.format(electron_config, term_twosplusone, lchars[term_l], ['e', 'o'][term_parity], indexinsymmetry)
+    return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
+
+
+def score_config_match(config_a, config_b):
+    electron_config_a, term_twosplusone_a, term_l_a, term_parity_a, indexinsymmetry_a = interpret_configuration(config_a)
+    electron_config_b, term_twosplusone_b, term_l_b, term_parity_b, indexinsymmetry_b = interpret_configuration(config_b)
+
+    if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_a or term_parity_a != term_parity_b:
+        return 0
+    elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1:
+        if indexinsymmetry_a == indexinsymmetry_b:
+            return 100  # exact match between Hillier and Nahar
+        else:
+            return 0  # both correspond to Nahar states but do not match
+    elif electron_config_a == electron_config_b:
+        return 100
+    else:
+        parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is unknown, 1 is definite match
+        matched_pieces = 0
+        index_a = 0
+        index_b = 0
+
+        non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith('(')])
+        non_term_pieces_b = sum([1 for b in electron_config_a if not b.startswith('(')])
+        # go through the configuration piece by piece
+        while index_a < len(electron_config_a) and index_b < len(electron_config_b):
+            piece_a = electron_config_a[index_a]  # an orbital electron count or a parent term
+            piece_b = electron_config_b[index_b]  # an orbital electron count or a parent term
+
+            if piece_a.startswith('(') and piece_b.startswith('('):
+                if piece_a == piece_b:
+                    matched_pieces += 1
+                    parent_term_match = 1.
+                else:
+                    parent_term_match = 0.
+                index_a += 1
+                index_b += 1
+            elif piece_a.startswith('('):
+                index_a += 1
+            elif piece_b.startswith('('):
+                index_b += 1
+            else:  # orbital occupation piece
+                if piece_a == piece_b:
+                    matched_pieces += 1
+                else:
+                    return 0
+                index_a += 1
+                index_b += 1
+
+        score = 100 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match
+        return score
+    print("WHAT?")
+    sys.exit()
+    return -1
 
 
 def write_output_files(elementindex, energy_levels, transitions,
@@ -917,18 +1055,18 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
             level_comment = " " * 35
 
         try:
-            level_comment += 'Nahar: {:d}{:}{:} index {:}'.format(
-                energylevel.twosplusone,
-                lchars[energylevel.l],
-                ['e', 'o'][energylevel.parity],
-                energylevel.indexinsymmetry)
+            if energylevel.indexinsymmetry >= 0:
+                level_comment += 'Nahar: {:d}{:}{:} index {:}'.format(
+                    energylevel.twosplusone,
+                    lchars[energylevel.l],
+                    ['e', 'o'][energylevel.parity],
+                    energylevel.indexinsymmetry)
+                try:
+                    level_comment += " '{:}'".format(energylevel.naharconfiguration)
+                except AttributeError:
+                    level_comment += ' (no config)'
         except AttributeError:
             pass
-
-        try:
-            level_comment += " '{:}'".format(energylevel.naharconfiguration)
-        except AttributeError:
-            level_comment += ' (no config)'
 
         fatommodels.write('{:7d}{:25.16f}{:25.16f}{:7d}     {:}\n'.format(
             levelid, hc_in_ev_cm * float(energylevel.energyabovegsinpercm),
@@ -1082,6 +1220,9 @@ def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
 
 
 if __name__ == "__main__":
+    # print(interpret_configuration('3d64s_4H'))
+    # print(interpret_configuration('3d6(3H)4sa4He[11/2]'))
+    # print(score_config_match('3d64s_4H','3d6(3H)4sa4He[11/2]'))
     main()
 
 
