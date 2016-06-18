@@ -69,7 +69,7 @@ hillier_row_format_energy_level = {
 }
 
 listelements = [
-    (26, [1, 2, 3, 4, 5]),
+    (26, [1, 2, 3, 4]),
     # (27, [3])
     ]
 
@@ -829,6 +829,27 @@ def get_term_as_tuple(config):
     return (twosplusone, l, parity)
 
 
+# e.g. turn '(4F)' into (4, 3, -1)
+# or '(4F1) into (4, 3, 1)
+def get_parent_term_as_tuple(strin):
+    strin = strin.strip('()')
+    lposition = -1
+    for charpos, char in reversed(list(enumerate(strin))):
+        if char in lchars:
+            lposition = charpos
+            l = lchars.index(char)
+            break
+    if lposition < 0:
+        return (-1, -1, -1)
+
+    twosplusone = int(strin[:lposition])  # could this be two digits long?
+    if lposition < len(strin)-1:
+        jvalue = strin[lposition+1:]
+    else:
+        jvalue = -1
+    return (twosplusone, l, jvalue)
+
+
 # e.g. convert "3d64s  (6D ) 8p  j5Fo" to "3d64s8p_5Fo",
 # similar to Hillier style "3d6(5D)4s8p_5Fo" but without the parent term
 # (and mysterious letter before the term if present)
@@ -894,7 +915,7 @@ def interpret_configuration(instr_orig):
 
     if instr[-1] == '_':
         instr = instr[:-1]
-    elif instr[-1] in alphabets:
+    elif instr[-1] in alphabets and (len(instr) < 2 or not str.isdigit(instr[-2])):  # to catch e.g., '3d6(5D)6d4Ge[9/2]' 6d, not index d
         if term_parity == 1:
             indexinsymmetry = reversedalphabets.index(instr[-1]) + 1
         else:
@@ -945,7 +966,7 @@ def score_config_match(config_a, config_b):
     electron_config_a, term_twosplusone_a, term_l_a, term_parity_a, indexinsymmetry_a = interpret_configuration(config_a)
     electron_config_b, term_twosplusone_b, term_l_b, term_parity_b, indexinsymmetry_b = interpret_configuration(config_b)
 
-    if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_a or term_parity_a != term_parity_b:
+    if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_b or term_parity_a != term_parity_b:
         return 0
     elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1:
         if indexinsymmetry_a == indexinsymmetry_b:
@@ -957,8 +978,8 @@ def score_config_match(config_a, config_b):
     else:
         parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is unknown, 1 is definite match
         matched_pieces = 0
-        index_a = 0
-        index_b = 0
+        index_a, index_b = 0, 0
+        index_parent_term_a, index_parent_term_b = -1, -1
 
         non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith('(')])
         non_term_pieces_b = sum([1 for b in electron_config_a if not b.startswith('(')])
@@ -968,16 +989,22 @@ def score_config_match(config_a, config_b):
             piece_b = electron_config_b[index_b]  # an orbital electron count or a parent term
 
             if piece_a.startswith('(') and piece_b.startswith('('):
+                # strip J values from the parent term
                 if piece_a == piece_b:
                     matched_pieces += 1
                     parent_term_match = 1.
+                elif piece_a[:-2] == piece_b[:-2] and piece_a[-1] == piece_b[-1]:  # eg. '(3F1)' matches '(3F)'
+                    parent_term_match = 0.75
                 else:
                     parent_term_match = 0.
+                    return 0.
                 index_a += 1
                 index_b += 1
             elif piece_a.startswith('('):
+                index_parent_term_a = index_a
                 index_a += 1
             elif piece_b.startswith('('):
+                index_parent_term_b = index_b
                 index_b += 1
             else:  # orbital occupation piece
                 if piece_a == piece_b:
@@ -986,6 +1013,22 @@ def score_config_match(config_a, config_b):
                     return 0
                 index_a += 1
                 index_b += 1
+
+        if index_parent_term_a != index_parent_term_b:
+            parent_term_a = electron_config_a[index_parent_term_a]
+            parent_term_b = electron_config_b[index_parent_term_b]
+            # print(parent_term_a, get_parent_term_as_tuple(parent_term_a))
+            # print(parent_term_b, get_parent_term_as_tuple(parent_term_b))
+            (twosplusone_a, lvalue_a, jvalue_a) = get_parent_term_as_tuple(parent_term_a)
+            (twosplusone_b, lvalue_b, jvalue_b) = get_parent_term_as_tuple(parent_term_b)
+            if index_parent_term_a > index_parent_term_b and (twosplusone_a < twosplusone_b or lvalue_a < lvalue_b):
+                parent_term_match = 0.
+            elif index_parent_term_b > index_parent_term_a and (twosplusone_b < twosplusone_a or lvalue_b < lvalue_a):
+                parent_term_match = 0.
+            else:
+                # parent terms are in different places but probably
+                # consistent (without yet checking the exact orbitals making the difference)
+                parent_term_match = 0.6
 
         score = 100 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match
         return score
