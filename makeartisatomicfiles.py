@@ -15,24 +15,19 @@ from scipy import integrate
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
 
-roman_numerals = ('', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
-                  'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII',
-                  'XIX', 'XX')
+roman_numerals = (
+    '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
+    'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX')
 
 elsymboltohilliercode = {
-    'H': 'HYD', 'He': 'HE',
-    'C': 'CARB', 'N': 'NIT',
-    'O': 'OXY', 'F': 'FLU',
-    'Ne': 'NEON', 'Na': 'SOD',
-    'Mg': 'MG', 'Al': 'ALUM',
-    'Si': 'SIL', 'P': 'PHOS',
-    'S': 'SUL', 'Cl': 'CHL',
-    'Ar': 'ARG', 'K': 'POT',
-    'Ca': 'CAL', 'Sc': 'SCAN',
-    'Ti': 'TIT', 'V': 'VAN',
-    'Cr': 'CHRO', 'Mn': 'MAN',
-    'Fe': 'FE', 'Co': 'COB',
-    'Ni': 'NICK'}
+    'H': 'HYD', 'He': 'HE', 'C': 'CARB', 'N': 'NIT',
+    'O': 'OXY', 'F': 'FLU', 'Ne': 'NEON', 'Na': 'SOD',
+    'Mg': 'MG', 'Al': 'ALUM', 'Si': 'SIL', 'P': 'PHOS',
+    'S': 'SUL', 'Cl': 'CHL', 'Ar': 'ARG', 'K': 'POT',
+    'Ca': 'CAL', 'Sc': 'SCAN', 'Ti': 'TIT', 'V': 'VAN',
+    'Cr': 'CHRO', 'Mn': 'MAN', 'Fe': 'FE', 'Co': 'COB',
+    'Ni': 'NICK'
+}
 
 nahar_configuration_replacements = {
     'Eqv st (0S ) 0s  a3P':  '2s2_2p4_3Pe',  # O I groundstate
@@ -40,6 +35,8 @@ nahar_configuration_replacements = {
     '2s22p  (2Po) 0s  a3P':  '2s2_2p2_3Pe',  # O III groundstate
     'Eqv st (0S ) 0s  a5D':  '3d6_4s2_5De',  # Fe I groundstate
     '3d5    (6S ) 0s  a5D':  '3d6_5De',  # Fe III groundstate
+    'Eqv st (0S ) 0s  a4P':  '3d5_4Pe',  # Fe III level
+    'Eqv st (0S ) 0s  a4F': '3d5_4Fe',  # Fe III level
     'Eqv st (0S ) 0s  a6S':  '3d5_6Se',  # Fe IV groundstate
     'Eqv st (0S ) 0s  a4G':  '3d5_4Ge'  # Fe IV state
 }
@@ -63,15 +60,15 @@ hillier_row_format_energy_level = {
     (8, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
     (26, 1): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
     (26, 2): 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid',
-    (26, 3):  'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
+    (26, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
     (26, 4): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
     (26, 5): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
 }
 
 listelements = [
-    (26, [1, 2, 3, 4]),
+    (26, [1, 2, 3, 4, 5]),
     # (27, [3])
-    ]
+]
 
 ryd_to_ev = u.rydberg.to('eV')
 
@@ -123,8 +120,7 @@ def clear_files(args):
     # clear out the file contents, so these can be appended to later
     with open(os.path.join(args.output_folder, 'adata.txt'), 'w'), \
             open(os.path.join(args.output_folder, 'transitiondata.txt'), 'w'), \
-            open(os.path.join(args.output_folder, 'phixsdata_v2.txt'),
-                 'w') as fphixs:
+            open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'w') as fphixs:
         fphixs.write('{0:d}\n'.format(args.nphixspoints))
         fphixs.write('{0:14.7e}\n'.format(args.nphixsnuincrement))
 
@@ -283,8 +279,8 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
 
                 if line.startswith(' Ion ground state'):
                     nahar_ionization_potential_rydberg = -float(line.split('=')[2])
-                    flog.write('Ionization potential = {0} Ryd\n'.format(
-                        nahar_ionization_potential_rydberg))
+                    flog.write('Ionization potential = {0:.4f} eV\n'.format(
+                        nahar_ionization_potential_rydberg * ryd_to_ev))
 
                 if line.startswith(' ') and len(line) > 36 and isfloat(line[29:29 + 8]):
                     found_table = True
@@ -357,8 +353,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
                             len(nahar_core_states)))
                         nahar_core_state_id = 1
 
-                    nahar_energy_levels.append(
-                        nahar_energy_level_row(*row, twosplusone, l, parity, -1.0, 0, ''))
+                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l, parity, -1.0, 0, ''))
 
                     energyabovegsinpercm = \
                         (nahar_ionization_potential_rydberg +
@@ -565,7 +560,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
         hillier_level_ids_matching_this_nahar_state = []
 
         nahar_configuration_this_state = '_CONFIG NOT FOUND_'
-
+        flog.write("\n")
         if state_tuple in nahar_configurations:
             nahar_configuration_this_state = nahar_configurations[state_tuple]
 
@@ -605,15 +600,15 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                                 matchscore=match_score)
                             hillier_level_ids_matching_this_nahar_state.append(levelid)
             else:
-                log_and_print("\nNo electron configuration for {0:d}{1}{2} index {3:d}".format(
+                log_and_print("No electron configuration for {0:d}{1}{2} index {3:d}".format(
                     twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
         else:
-            flog.write("\nNo Hillier levels with term {0:d}{1}{2}\n".format(
+            flog.write("No Hillier levels with term {0:d}{1}{2}\n".format(
                 twosplusone, lchars[l], ['e', 'o'][parity]))
 
         if not hillier_level_ids_matching_this_nahar_state:
             naharthresholdrydberg = nahar_phixs_tables[state_tuple][0][0]
-            flog.write("\nNo matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} '{4}' ".format(
+            flog.write("No matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} '{4}' ".format(
                 twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
                 nahar_configuration_this_state))
 
@@ -640,16 +635,17 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
             #                                hc_in_ev_angstrom / float(hillier_energy_levels[k].lambdaangstrom))
             #      for k in hillier_level_ids_matching_this_nahar_state]) + ']'
 
-            strhilliermatches = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
-                hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g, hillier_energy_levels[k].matchscore) for k in hillier_level_ids_matching_this_nahar_state])
-
-            flog.write("\nMatched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to \n".format(
+            flog.write("Matched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to \n".format(
                 twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry, nahar_configuration_this_state, nahar_energyabovegsinev, nahar_energy_level.g))
 
             if len(hillier_level_ids_matching_this_nahar_state) > 1:
                 avghillierenergyabovegsinev = weightedavgenergyinev(hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
                 sumhillierstatweights = sum([hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state])
-                flog.write('<E> = {0:.3f} eV, g_sum = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
+                flog.write('<E> = {0:.3f} eV, sum(g) = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
+
+            strhilliermatches = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
+                hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g, hillier_energy_levels[k].matchscore) for k in hillier_level_ids_matching_this_nahar_state])
+
             flog.write(strhilliermatches + '\n')
 
     energy_levels = hillier_energy_levels + added_nahar_levels
@@ -763,10 +759,12 @@ def reduce_phixs_tables(dicttables, args):
                                     in zip(integrand_vals, arr_sigma_megabarns)]
 
             integralnosigma = integrate.simps(integrand_vals, arr_energyryd)
-            integralwithsigma = integrate.simps(sigma_integrand_vals,
-                                                arr_energyryd)
+            integralwithsigma = integrate.simps(sigma_integrand_vals, arr_energyryd)
 
-            arr_sigma_out[i] = (integralwithsigma / integralnosigma)
+            if integralnosigma > 0:
+                arr_sigma_out[i] = (integralwithsigma / integralnosigma)
+            else:
+                arr_sigma_out[i] = 0
 
         dictout[state_tuple] = arr_sigma_out  # output a 1D list of cross sections
 
@@ -831,7 +829,7 @@ def get_term_as_tuple(config):
 
 # e.g. turn '(4F)' into (4, 3, -1)
 # or '(4F1) into (4, 3, 1)
-def get_parent_term_as_tuple(strin):
+def interpret_parent_term(strin):
     strin = strin.strip('()')
     lposition = -1
     for charpos, char in reversed(list(enumerate(strin))):
@@ -842,7 +840,7 @@ def get_parent_term_as_tuple(strin):
     if lposition < 0:
         return (-1, -1, -1)
 
-    twosplusone = int(strin[:lposition])  # could this be two digits long?
+    twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
     if lposition < len(strin)-1:
         jvalue = strin[lposition+1:]
     else:
@@ -975,11 +973,11 @@ def score_config_match(config_a, config_b):
             return 0  # both correspond to Nahar states but do not match
     elif electron_config_a == electron_config_b:
         return 100
-    else:
-        parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is unknown, 1 is definite match
+    elif len(electron_config_a) > 0 and len(electron_config_b) > 0:
+        parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is consistent, 1 is definite match
+        parent_term_index_a, parent_term_index_b = -1, -1
         matched_pieces = 0
         index_a, index_b = 0, 0
-        index_parent_term_a, index_parent_term_b = -1, -1
 
         non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith('(')])
         non_term_pieces_b = sum([1 for b in electron_config_a if not b.startswith('(')])
@@ -988,50 +986,68 @@ def score_config_match(config_a, config_b):
             piece_a = electron_config_a[index_a]  # an orbital electron count or a parent term
             piece_b = electron_config_b[index_b]  # an orbital electron count or a parent term
 
-            if piece_a.startswith('(') and piece_b.startswith('('):
-                # strip J values from the parent term
-                if piece_a == piece_b:
-                    matched_pieces += 1
-                    parent_term_match = 1.
-                elif piece_a[:-2] == piece_b[:-2] and piece_a[-1] == piece_b[-1]:  # eg. '(3F1)' matches '(3F)'
-                    parent_term_match = 0.75
-                else:
-                    parent_term_match = 0.
-                    return 0.
-                index_a += 1
-                index_b += 1
-            elif piece_a.startswith('('):
-                index_parent_term_a = index_a
-                index_a += 1
-            elif piece_b.startswith('('):
-                index_parent_term_b = index_b
-                index_b += 1
+            if piece_a.startswith('(') or piece_b.startswith('('):
+                if piece_a.startswith('('):
+                    if parent_term_index_a == -1:
+                        parent_term_index_a = index_a
+                    index_a += 1
+                if piece_b.startswith('('):
+                    if parent_term_index_b == -1:
+                        parent_term_index_b = index_b
+                    index_b += 1
             else:  # orbital occupation piece
                 if piece_a == piece_b:
                     matched_pieces += 1
+                elif '0s' in [piece_a, piece_b]:  # wildcard piece
+                    pass
                 else:
                     return 0
                 index_a += 1
                 index_b += 1
 
-        if index_parent_term_a != index_parent_term_b:
-            parent_term_a = electron_config_a[index_parent_term_a]
-            parent_term_b = electron_config_b[index_parent_term_b]
-            # print(parent_term_a, get_parent_term_as_tuple(parent_term_a))
-            # print(parent_term_b, get_parent_term_as_tuple(parent_term_b))
-            (twosplusone_a, lvalue_a, jvalue_a) = get_parent_term_as_tuple(parent_term_a)
-            (twosplusone_b, lvalue_b, jvalue_b) = get_parent_term_as_tuple(parent_term_b)
-            if index_parent_term_a > index_parent_term_b and (twosplusone_a < twosplusone_b or lvalue_a < lvalue_b):
-                parent_term_match = 0.
-            elif index_parent_term_b > index_parent_term_a and (twosplusone_b < twosplusone_a or lvalue_b < lvalue_a):
-                parent_term_match = 0.
-            else:
-                # parent terms are in different places but probably
-                # consistent (without yet checking the exact orbitals making the difference)
-                parent_term_match = 0.6
+        if parent_term_index_a != -1 and parent_term_index_b != -1:
+            parent_term_a = interpret_parent_term(electron_config_a[parent_term_index_a])
+            parent_term_b = interpret_parent_term(electron_config_b[parent_term_index_b])
+            if parent_term_index_a == parent_term_index_b:
+                if parent_term_a == parent_term_b:
+                    parent_term_match = 1.
+                elif parent_term_a[:2] == parent_term_b[:2] and -1 in [parent_term_a[2], parent_term_b[2]]:  # e.g., '(3F1)' matches '(3F)'
+                    # strip J values from the parent term
+                    parent_term_match = 0.75
+                else:
+                    parent_term_match = 0.
+                    return 0
+            else:  # parent terms occur at different locations. are they consistent?
+                if parent_term_index_b > parent_term_index_a:
+                    orbitaldiff = electron_config_b[parent_term_index_a:parent_term_index_b]
+                else:
+                    orbitaldiff = electron_config_a[parent_term_index_b:parent_term_index_a]
 
-        score = 100 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match
+                maxldiff = 0
+                maxspindiff = 0  # two times s
+                for orbital in orbitaldiff:
+                    for pos, char in enumerate(orbital):
+                        if char in lchars.lower():
+                            maxldiff += lchars.lower().index(char)
+                            occupation = orbital[pos+1:]
+                            if len(occupation) > 0:
+                                maxspindiff += int(occupation)
+                            else:
+                                maxspindiff += 1
+                            break
+
+                spindiff = abs(parent_term_a[0] - parent_term_b[0])
+                ldiff = abs(parent_term_a[1] - parent_term_b[1])
+                if spindiff > maxspindiff or ldiff > maxldiff:  # parent terms are inconsistent -> no match
+                    # print(orbitaldiff, spindiff, maxspindiff, ldiff, maxldiff, config_a, config_b)
+                    parent_term_match = 0.
+                    return 0
+
+        score = int(99 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
         return score
+    else:
+        return 5  # term matches but no electron config available or it's an Eqv state...0s type
+
     print("WHAT?")
     sys.exit()
     return -1
