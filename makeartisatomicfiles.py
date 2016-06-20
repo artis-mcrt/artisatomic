@@ -1256,7 +1256,7 @@ def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
 
                 if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
                     upper_level_ids_of_core_state_id[core_state_id].append(upperlevelid)
-                    log_and_print("Matched core state {0} '{1}_{2}' to upper ion level {3} '{4}'".format(
+                    flog.write("Matched core state {0} '{1}_{2}' to upper ion level {3} '{4}'\n".format(
                         core_state_id,
                         nahar_core_state.configuration,
                         nahar_core_state.term,
