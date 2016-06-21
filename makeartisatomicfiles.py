@@ -29,16 +29,84 @@ elsymboltohilliercode = {
     'Ni': 'NICK'
 }
 
+
+# make sure there is no leading or trailing whitespace in the keys
 nahar_configuration_replacements = {
     'Eqv st (0S ) 0s  a3P':  '2s2_2p4_3Pe',  # O I groundstate
     '2s22p2 (3P ) 0s  z4So': '2s2_2p3_4So',  # O II groundstate
     '2s22p  (2Po) 0s  a3P':  '2s2_2p2_3Pe',  # O III groundstate
+
     'Eqv st (0S ) 0s  a5D':  '3d6_4s2_5De',  # Fe I groundstate
-    '3d5    (6S ) 0s  a5D':  '3d6_5De',  # Fe III groundstate
-    'Eqv st (0S ) 0s  a4P':  '3d5_4Pe',  # Fe III level
-    'Eqv st (0S ) 0s  a4F': '3d5_4Fe',  # Fe III level
-    'Eqv st (0S ) 0s  a6S':  '3d5_6Se',  # Fe IV groundstate
-    'Eqv st (0S ) 0s  a4G':  '3d5_4Ge'  # Fe IV state
+
+    # Fe II
+    '3d6    (3P ) 0s  b4G': '3d54s2b4Ge',
+    '3d6    (3P ) 0s  a6S': '3d54s2a6Se',
+    '3d6    (5D ) 0s  b2F': '3d7b2Fe',
+    '3d6    (3P ) 0s  c2H': '3d54s22He',
+    '3d6    (3P ) 0s  d4F': '3d54s24Fe',
+    '3d54s  (5G ) 0s  f2F': '3d54s22Fe',
+    '3d6    (5D ) 5p  v6Po': '3d5(4P)4s4p(3P)6Po',
+    '3d6    (3P ) 0s  e2G': '3d54s22Ge',
+    '3d5    (6S ) 0s  d1S': '3d4(1S)4s2_1Se',
+
+    # Fe III
+    '3d5    (6S ) 0s  a5D': '3d6_5De',  # Fe III groundstate
+    'Eqv st (0S ) 0s  a4P': '3d5_4Pe',
+    'Eqv st (0S ) 0s  a4F': '3d5_4Fe',
+    '3d5    (6S ) 0s  a3G': '3d6_3Ge',
+    '3d5    (2G ) 4s  c3G': '3d5(2G2)4s_3Ge',
+    '3d5    (2G ) 4s  d3G': '3d5(2G1)4s_3Ge',
+    '3d5    (6S ) 0s  a3P': '3d6_3P2e',
+    '3d5    (6S ) 0s  b3P': '3d6_3P1e',
+    '3d5    (6S ) 0s  a3F': '3d6_3Fe',
+    '3d5    (6S ) 0s  a3D': '3d6_3De',
+    '3d5    (4D ) 4s  b3D': '3d5(4D)4s_3De',
+    '3d5    (2D ) 4s  c3D': '3d5(2D3)4s_3De',
+    '3d5    (2D ) 4s  d3D': '3d5(2D2)4s_3De',
+    '3d5    (6S ) 0s  a3H': '3d6_3He',
+    '3d5    (6S ) 0s  a3F': '3d6_3F2e',
+    '3d5    (6S ) 0s  b3F': '3d6_3F1e',
+    '3d5    (2F ) 4s  c3F': '3d5(2F2)4s_3Fe',
+    '3d5    (2F ) 4s  e3F': '3d5(2F1)4s_3Fe',
+    '3d5    (6S ) 0s  a1D': '3d6_1D2e',
+    '3d5    (2D ) 4s  b1D': '3d5(2D3)4s_1De',
+    '3d5    (6S ) 0s  c1D': '3d6_1De',
+    '3d5    (2D ) 4s  d1D': '3d5(2D2)4s_1De',
+    '3d5    (6S ) 0s  a1G': '3d6_1G2e',
+    '3d5    (6S ) 0s  b1G': '3d6_1G1e',
+    '3d5    (6S ) 0s  a1I': '3d6_1Ie',
+    '3d5    (6S ) 0s  a1S': '3d6_1S2e',
+    '3d5    (6S ) 0s  b1S': '3d6_1Se',
+    '3d5    (6S ) 0s  a1F': '3d6_1Fe',
+    '3d5    (2F ) 4s  b1F': '3d5(2F2)4s_1Fe',
+    '3d5    (2F ) 4s  c1F': '3d5(2F1)4s_1Fe',
+    '3d5    (2D ) 4p  x3Fo': '3d5(a2D)4p_3Fo',
+    '3d5    (2D ) 4p  z1Do': '3d5(a2F)4p_1Do',
+    '3d5    (2F ) 4p  y1Do': '3d5(b2F)4p_1Do',
+    '3d5    (2D ) 4p  w1Do': '3d5(b2D)4p_1Do',
+    '3d5    (2D ) 4p  x3Po': '3d5(a2D)4p_3Po',
+    '3d5    (2S ) 4p  w3Po': '3d5(2S)4p_3Po',
+    '3d5    (2D ) 4p  v3Po': '3d5(b2D)4p_3Po',
+    '3d5    (2D ) 4p  z1Po': '3d5(a2D)4p_1Po',
+    '3d5    (2F ) 4p  z1Go': '3d5(a2F)4p_1Go',
+    '3d5    (2G ) 4p  y1Go': '3d5(a2G)4p_1Go',
+    '3d5    (2F ) 4p  w1Go': '3d5(b2F)4p_1Go',
+
+    # Fe IV
+    'Eqv st (0S ) 0s  a6S': '3d5_6Se',  # Fe IV groundstate
+    'Eqv st (0S ) 0s  a4G': '3d5_4Ge',
+    '3d4    (3P ) 4s  b4P': '3d4(3P2)4s_4Pe',
+    '3d4    (3P ) 4s  c4P': '3d4(3P1)4s_4Pe',
+    '3d4    (3P ) 4p  y4Do': '3d4(3P2)4p_4Do',
+    '3d4    (3F ) 4p  x4Do': '3d4(3F2)4p_4Do',
+    '3d4    (3D ) 4p  w4Do': '3d4(3D)4p_4Do',
+    '3d4    (3F ) 4p  v4Do': '3d4(3F1)4p_4Do',
+    '3d4    (3P ) 4p  u4Do': '3d4(3P1)4p_4Do',
+    '3d4    (3F ) 4s  b4F': '3d4(3F2)4s_4Fe',
+    '3d4    (3F ) 4s  c4F': '3d4(3F1)4s_4Fe',
+    '3d4    (3P ) 4p  y4Po': '3d4(3P2)4p_4Po',
+    '3d4    (3P ) 4p  w4Po': '3d4(3P1)4p_4Po',
+    '3d4    (3P ) 4p  z4So': '3d4(3P1)4p_4So',
 }
 
 # need to also include collision strengths from e.g., o2col.dat
@@ -567,7 +635,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
             if nahar_configuration_this_state.strip() in nahar_configuration_replacements:
                 nahar_configuration_this_state = nahar_configuration_replacements[
                     nahar_configurations[state_tuple].strip()]
-                log_and_print("Replacing Nahar configuration of '{0}' with '{1}'".format(
+                flog.write("Replacing Nahar configuration of '{0}' with '{1}'\n".format(
                     nahar_configurations[state_tuple], nahar_configuration_this_state))
 
         if hillier_level_ids_matching_term[(twosplusone, l, parity)]:
@@ -575,13 +643,14 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
             if nahar_configuration_this_state != '_CONFIG NOT FOUND_':
                 best_match_score = 0.
                 for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                    match_score = score_config_match(hillier_energy_levels[levelid].levelname, nahar_configuration_this_state)
+                    levelname = hillier_energy_levels[levelid].levelname
+                    match_score = score_config_match(levelname, nahar_configuration_this_state)
                     best_match_score = max(best_match_score, match_score)
-                if best_match_score > 0.:
+
+                if best_match_score > 0:
                     for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                        levelname = hillier_energy_levels[levelid].levelname
                         match_score = score_config_match(hillier_energy_levels[levelid].levelname, nahar_configuration_this_state)
-                        # if reduce_configuration(levelname) == reduce_configuration(nahar_configuration_this_state) and \
+
                         if match_score == best_match_score and \
                                 hillier_energy_levels[levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
 
@@ -621,7 +690,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                 if energy_eV < 0.002:
                     flog.write(" but prevented duplicating the ground state\n")
                 else:
-                    added_nahar_levels.append(nahar_energy_level._replace(naharconfiguration=nahar_configuration_this_state))
+                    added_nahar_levels.append(nahar_energy_level._replace(naharconfiguration=nahar_configurations[state_tuple]))
             else:
                 flog.write(" (and no matching entry in Nahar energy table, so can't be added)\n")
         else:  # there are Hillier levels matched to this state
@@ -641,7 +710,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
             if len(hillier_level_ids_matching_this_nahar_state) > 1:
                 avghillierenergyabovegsinev = weightedavgenergyinev(hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
                 sumhillierstatweights = sum([hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state])
-                flog.write('<E> = {0:.3f} eV, sum(g) = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
+                flog.write('<E> = {0:.3f} eV, g_sum = {1:.1f}: \n'.format(avghillierenergyabovegsinev, sumhillierstatweights))
 
             strhilliermatches = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
                 hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g, hillier_energy_levels[k].matchscore) for k in hillier_level_ids_matching_this_nahar_state])
@@ -842,7 +911,7 @@ def interpret_parent_term(strin):
 
     twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
     if lposition < len(strin)-1:
-        jvalue = strin[lposition+1:]
+        jvalue = int(strin[lposition+1:])
     else:
         jvalue = -1
     return (twosplusone, l, jvalue)
@@ -855,8 +924,11 @@ def reduce_configuration(instr):
     if instr == "-1":
         return "-1"
     instr = instr.split('[')[0]  # remove trailing bracketed J value
-    if instr[-1] in lchars:
+
+    if instr[-1] not in ['o', 'e']:
         instr = instr + 'e'  # last character being S,P,D, etc means even
+    if str.isdigit(instr[-2]):  # J value is in the term, so remove it
+        instr = instr[:-2] + instr[-1]
 
     outstr = remove_bracketed_part(instr)
     outstr += '_'
@@ -903,7 +975,7 @@ def interpret_configuration(instr_orig):
             term_l = lchars.index(instr[-1])
             instr = instr[:-1]
             break
-        else:
+        elif not str.isdigit(instr[-1]):
             term_parity = term_parity + 2  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hiller levels. Shouldn't match these
         instr = instr[:-1]
 
@@ -913,7 +985,9 @@ def interpret_configuration(instr_orig):
 
     if instr[-1] == '_':
         instr = instr[:-1]
-    elif instr[-1] in alphabets and (len(instr) < 2 or not str.isdigit(instr[-2])):  # to catch e.g., '3d6(5D)6d4Ge[9/2]' 6d, not index d
+    elif instr[-1] in alphabets and ((len(instr) < 2 or not str.isdigit(instr[-2])) or (len(instr) < 3 or instr[-3] in lchars.lower())):
+        # to catch e.g., '3d6(5D)6d4Ge[9/2]' occupation piece 6d, not index d
+        # and 3d7b2Fe is at index b, (keep it from conflicting into the orbital occupation)
         if term_parity == 1:
             indexinsymmetry = reversedalphabets.index(instr[-1]) + 1
         else:
@@ -961,6 +1035,9 @@ def interpret_configuration(instr_orig):
 
 
 def score_config_match(config_a, config_b):
+    if config_a.split('[')[0] == config_b.split('[')[0]:
+        return 100
+
     electron_config_a, term_twosplusone_a, term_l_a, term_parity_a, indexinsymmetry_a = interpret_configuration(config_a)
     electron_config_b, term_twosplusone_b, term_l_b, term_parity_b, indexinsymmetry_b = interpret_configuration(config_b)
 
@@ -972,7 +1049,7 @@ def score_config_match(config_a, config_b):
         else:
             return 0  # both correspond to Nahar states but do not match
     elif electron_config_a == electron_config_b:
-        return 100
+        return 99
     elif len(electron_config_a) > 0 and len(electron_config_b) > 0:
         parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is consistent, 1 is definite match
         parent_term_index_a, parent_term_index_b = -1, -1
@@ -1043,7 +1120,7 @@ def score_config_match(config_a, config_b):
                     parent_term_match = 0.
                     return 0
 
-        score = int(99 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
+        score = int(98 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
         return score
     else:
         return 5  # term matches but no electron config available or it's an Eqv state...0s type
@@ -1109,7 +1186,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
         level_comment = ""
         try:
-            level_comment = "Hiller: '{:}', ".format(energylevel.levelname).ljust(35)
+            level_comment = "Hiller: '{:}'".format(energylevel.levelname).ljust(35)
         except AttributeError:
             level_comment = " " * 35
 
@@ -1121,7 +1198,10 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
                     ['e', 'o'][energylevel.parity],
                     energylevel.indexinsymmetry)
                 try:
-                    level_comment += " '{:}'".format(energylevel.naharconfiguration)
+                    config = energylevel.naharconfiguration
+                    if energylevel.naharconfiguration.strip() in nahar_configuration_replacements:
+                        config += ' manually replaced by {0}'.format(nahar_configuration_replacements[energylevel.naharconfiguration.strip()])
+                    level_comment += " '{0}'".format(config)
                 except AttributeError:
                     level_comment += ' (no config)'
         except AttributeError:
