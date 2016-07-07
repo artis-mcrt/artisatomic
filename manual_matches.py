@@ -1,9 +1,21 @@
+#!/usr/bin/env python3
+
 # make sure there is no leading or trailing whitespace in the keys
 nahar_configuration_replacements = {
+    # O I groundstate
     'Eqv st (0S ) 0s  a3P':  '2s2_2p4_3Pe',  # O I groundstate
+
+    # O II
     '2s22p2 (3P ) 0s  z4So': '2s2_2p3_4So',  # O II groundstate
+    '2s22p2 (1D ) 0s  a4P': '2s_2p4_4Pe',
+    '2s22p2 (1D ) 0s  a2S': '2s_2p4_2Se',
+    '2s22p2 (1D ) 3d  e2P': '2s_2p4_2Pe',
+
+    # O III
     '2s22p  (2Po) 0s  a3P':  '2s2_2p2_3Pe',  # O III groundstate
 
+
+    # Fe I
     'Eqv st (0S ) 0s  a5D':  '3d6_4s2_5De',  # Fe I groundstate
 
     # Fe II
@@ -75,4 +87,22 @@ nahar_configuration_replacements = {
     '3d4    (3P ) 4p  y4Po': '3d4(3P2)4p_4Po',
     '3d4    (3P ) 4p  w4Po': '3d4(3P1)4p_4Po',
     '3d4    (3P ) 4p  z4So': '3d4(3P1)4p_4So',
+    '3d4    (3P ) 4p  y4So': '3d4(3P)5p_4So',
+    '3d4    (3F ) 4p  y4Fo': '3d4(3F2)4p_4Fo',
+    '3d4    (3H ) 4p  z4Go': '3d4(3H)4p_4Go',
+    '3d4    (3F ) 4p  y4Go': '3d4(3F2)4p_4Go',
+    '3d4    (3G ) 4p  x4Go': '3d4(3G)4p_4Go',
+    '3d4    (3F ) 4p  w4Go': '3d4(3F1)4p_4Go',
+    '3d4    (3F ) 4p  v4Fo': '3d4(3F1)4p_4Fo',
+}
+
+# this is necessary if the original Hiller term doesn't match
+hiller_name_replacements = {
+    '2s2_2p3(4So)5z_5Z': '2s22p3 (4So) 5g  z5Go',
+    '2s2_2p3(4So)5z_3Z': '2s22p3 (4So) 5g  z3Go',
+    # '2s2_2p3(4So)6z_3Z': '2s22p3 (4So) 6g  y3Go',
+    # '2s2_2p3(4So)6z_3Z': '2s22p3 (4So) 6h  a3H',
+    # '2s2_2p3(4So)6z_5Z': '2s22p3 (4So) 6g  y5Go',
+    # '2s2_2p3(4So)6z_5Z': '2s22p3 (4So) 6h  a5H',
+    # '2s2_2p3(4So)8z_3Z': '',
 }

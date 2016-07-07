@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy import integrate
 from manual_matches import *
-# from scipy import interpolate
+from scipy import interpolate
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
@@ -56,6 +56,7 @@ hillier_row_format_energy_level = {
 }
 
 listelements = [
+    (8, [1, 2, 3]),
     (26, [1, 2, 3, 4, 5]),
     # (27, [3])
 ]
@@ -90,7 +91,7 @@ def main():
         '-nphixspoints', type=int, default=100,
         help='Number of cross section points to save in output')
     parser.add_argument(
-        '-nphixsnuincrement', type=float, default=0.1,
+        '-phixsnuincrement', type=float, default=0.1,
         help='Fraction of nu_edge incremented for each cross section point')
     parser.add_argument(
         '-integralstepfactor', type=int, default=4,
@@ -112,7 +113,7 @@ def clear_files(args):
             open(os.path.join(args.output_folder, 'transitiondata.txt'), 'w'), \
             open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'w') as fphixs:
         fphixs.write('{0:d}\n'.format(args.nphixspoints))
-        fphixs.write('{0:14.7e}\n'.format(args.nphixsnuincrement))
+        fphixs.write('{0:14.7e}\n'.format(args.phixsnuincrement))
 
 
 def process_files(args):
@@ -388,8 +389,11 @@ def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
 
                     hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip('-'))
                     levelname = hillier_energy_level.levelname
+                    if levelname not in hiller_name_replacements:
+                        (twosplusone, l, parity) = get_term_as_tuple(levelname)
+                    else:
+                        (twosplusone, l, parity) = get_term_as_tuple(hiller_name_replacements[levelname])
 
-                    (twosplusone, l, parity) = get_term_as_tuple(levelname)
                     hillier_energy_level = hillier_energy_level._replace(
                         hillierlevelid=hillierlevelid,
                         energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm),
@@ -406,8 +410,7 @@ def read_hillier_levels_and_transitions_file(path_hillier_osc_file,
                         log_and_print("Can't find term in Hillier level name '" + levelname + "'")
                     else:
                         if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                            hillier_level_ids_matching_term[
-                                (twosplusone, l, parity)].append(hillierlevelid)
+                            hillier_level_ids_matching_term[(twosplusone, l, parity)].append(hillierlevelid)
 
                     # if this is the ground state
                     if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
@@ -566,12 +569,18 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                 best_match_score = 0.
                 for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
                     levelname = hillier_energy_levels[levelid].levelname
+                    if levelname in hiller_name_replacements:
+                        levelname = hiller_name_replacements[levelname]
+
                     match_score = score_config_match(levelname, nahar_configuration_this_state)
                     best_match_score = max(best_match_score, match_score)
 
                 if best_match_score > 0:
                     for levelid in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                        match_score = score_config_match(hillier_energy_levels[levelid].levelname, nahar_configuration_this_state)
+                        hlevelname = hillier_energy_levels[levelid].levelname
+                        if hlevelname in hiller_name_replacements:
+                            hlevelname = hiller_name_replacements[hlevelname]
+                        match_score = score_config_match(hlevelname, nahar_configuration_this_state)
 
                         if match_score == best_match_score and \
                                 hillier_energy_levels[levelid].indexinsymmetry < 1:  # make sure this Hillier level hasn't already been matched to a Nahar state
@@ -694,22 +703,20 @@ def reduce_phixs_tables(dicttables, args):
     h_over_kb_in_K_sec = (const.h / const.k_B).to('K s').value
 
     # proportional to recombination rate
-    # nu0 = 1e13
+    nu0 = 1e13
     # fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
+
     def integrand(nu):
-        return (nu + nu) * math.exp(- h_over_kb_in_K_sec *
-                                    (nu - nu0) / args.optimaltemperature)
+        return (nu ** 2) * math.exp(- h_over_kb_in_K_sec * nu / args.optimaltemperature)
 
     # def integrand_vec(nu_list):
-    #    return [(nu + nu) * math.exp(- h_over_kb_in_K_sec *
-    #                                 (nu - nu0) / args.optimaltemperature)
+    #    return [(nu ** 2) * math.exp(- h_over_kb_in_K_sec * (nu - nu0) / args.optimaltemperature)
     #            for nu in nu_list]
 
     integrand_vec = np.vectorize(integrand)
 
     xgrid = np.linspace(1.0,
-                        1.0 + args.nphixsnuincrement * (
-                            args.nphixspoints + 1),
+                        1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
                         num=args.nphixspoints + 1, endpoint=False)
 
     for state_tuple, tablein in dicttables.items():
@@ -720,14 +727,26 @@ def reduce_phixs_tables(dicttables, args):
         arr_sigma_out = np.empty(args.nphixspoints)
         # x is nu/nu_edge
 
-        # sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1],
-        #                                    kind='linear', assume_sorted=True)
+        sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind='linear', assume_sorted=True)
 
         for i, _ in enumerate(xgrid[:-1]):
             enlow = xgrid[i] * tablein[0][0]
             enhigh = xgrid[i + 1] * tablein[0][0]
 
-            nsteps = (args.nphixspoints - i + 1) * args.integralstepfactor
+            # start of interval interpolated point, Nahar points, and end of interval interpolated point
+            samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
+
+            if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow)/enlow) > 1e-20:
+                if i == 0:
+                    print('adding first point {0:.4e} {1:.4e} {2:.4e}'.format(enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow)/enlow)))
+                samples_in_interval = np.vstack([[enlow, sigma_interp(enlow)], samples_in_interval])
+
+            if len(samples_in_interval) == 0 or ((enhigh - samples_in_interval[-1, 0])/samples_in_interval[-1, 0]) > 1e-20:
+                if sigma_interp(enhigh) < 0:
+                    print('negative extrap')
+                samples_in_interval = np.vstack([samples_in_interval, [enhigh, sigma_interp(enhigh)]])
+
+            nsamples = len(samples_in_interval)
 
             # integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
             # integralwithsigma, err = integrate.fixed_quad(
@@ -738,24 +757,34 @@ def reduce_phixs_tables(dicttables, args):
             # integralwithsigma, err = integrate.quad(
             #    lambda x: sigma_interp(x) * integrand(x), enlow, enhigh, epsrel=1e-2)
 
-            arr_energyryd = np.linspace(enlow, enhigh,
-                                        num=nsteps, endpoint=False)
-
-            arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0],
-                                            tablein[:, 1])
+            if nsamples >= 500:
+                arr_energyryd = samples_in_interval[:, 0]
+                arr_sigma_megabarns = samples_in_interval[:, 1]
+            else:
+                nsteps = 500
+                arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
+                arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
 
             integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
             sigma_integrand_vals = [sigma * integrand_val
                                     for integrand_val, sigma
                                     in zip(integrand_vals, arr_sigma_megabarns)]
 
-            integralnosigma = integrate.simps(integrand_vals, arr_energyryd)
-            integralwithsigma = integrate.simps(sigma_integrand_vals, arr_energyryd)
+            integralnosigma = integrate.trapz(integrand_vals, arr_energyryd)
+            integralwithsigma = integrate.trapz(sigma_integrand_vals, arr_energyryd)
 
-            if integralnosigma > 0:
+            if integralwithsigma > 0 and integralnosigma > 0:
                 arr_sigma_out[i] = (integralwithsigma / integralnosigma)
+            elif integralwithsigma == 0:
+                arr_sigma_out[i] = 0.
             else:
-                arr_sigma_out[i] = 0
+                print('Math error: ', i, nsamples, arr_sigma_megabarns[i], integralwithsigma, integralnosigma)
+                print(samples_in_interval)
+                print(arr_sigma_out[i-1])
+                print(arr_sigma_out[i])
+                print(arr_sigma_out[i+1])
+                arr_sigma_out[i] = 0.
+                # sys.exit()
 
         dictout[state_tuple] = arr_sigma_out  # output a 1D list of cross sections
 
@@ -832,7 +861,8 @@ def interpret_parent_term(strin):
         return (-1, -1, -1)
 
     twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
-    if lposition < len(strin)-1:
+
+    if lposition < len(strin)-1 and strin[lposition+1:] != 'e':
         jvalue = int(strin[lposition+1:])
     else:
         jvalue = -1
@@ -1108,7 +1138,11 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
         level_comment = ""
         try:
-            level_comment = "Hiller: '{:}'".format(energylevel.levelname).ljust(35)
+            hlevelname = energylevel.levelname
+            if hlevelname in hiller_name_replacements:
+                # hlevelname += ' replaced by {0}'.format(hiller_name_replacements[hlevelname])
+                hlevelname = hiller_name_replacements[hlevelname]
+            level_comment = "Hiller: '{:}'".format(hlevelname).ljust(35)
         except AttributeError:
             level_comment = " " * 35
 
@@ -1122,7 +1156,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
                 try:
                     config = energylevel.naharconfiguration
                     if energylevel.naharconfiguration.strip() in nahar_configuration_replacements:
-                        config += ' manually replaced by {0}'.format(nahar_configuration_replacements[energylevel.naharconfiguration.strip()])
+                        config += ' replaced by {0}'.format(nahar_configuration_replacements[energylevel.naharconfiguration.strip()])
                     level_comment += " '{0}'".format(config)
                 except AttributeError:
                     level_comment += ' (no config)'
@@ -1203,6 +1237,8 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
     log_and_print("writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(
         args.optimaltemperature))
+    flog.write('integralstepfactor={0}\n'.format(
+        args.integralstepfactor))
     upper_level_ids_of_core_state_id = defaultdict(list)
 
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
@@ -1247,7 +1283,11 @@ def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
             nahar_core_state = nahar_core_states[core_state_id]
             nahar_core_state_reduced_configuration = reduce_configuration(
                 nahar_core_state.configuration + '_' + nahar_core_state.term)
+            core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
+            flog.write("\nMatching core state {0} '{1}_{2}' E={3:0.3f} eV to:\n".format(
+                core_state_id, nahar_core_state.configuration, nahar_core_state.term, core_state_energy_ev))
 
+            candidate_upper_levels = {}
             for upperlevelid, upperlevel in enumerate(energy_levels_upperion[1:], 1):
                 if hasattr(upperlevel, 'levelname'):
                     upperlevelconfig = upperlevel.levelname
@@ -1255,22 +1295,33 @@ def get_photoion_upperlevelids(energy_level, energy_levels_upperion,
                     state_tuple = (int(upperlevel.twosplusone), int(upperlevel.l), int(
                         upperlevel.parity), int(upperlevel.indexinsymmetry))
                     upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
+                energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
 
-                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
-                    upper_level_ids_of_core_state_id[core_state_id].append(upperlevelid)
-                    flog.write("Matched core state {0} '{1}_{2}' to upper ion level {3} '{4}'\n".format(
-                        core_state_id,
-                        nahar_core_state.configuration,
-                        nahar_core_state.term,
-                        upperlevelid,
-                        upperlevelconfig))
+                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
+                    ediff = energyev - core_state_energy_ev
+                    upperlevelconfignoj = upperlevelconfig.split('[')[0]
+                    if upperlevelconfignoj not in candidate_upper_levels:
+                        candidate_upper_levels[upperlevelconfignoj] = [[], []]
+                    candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
+                    candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
+                    flog.write("Upper ion level {0} '{1}' E = {2:.4f} E_diff={3:.4f}\n".format(upperlevelid, upperlevelconfig, energyev, ediff))
 
+            best_ediff = float('inf')
+            best_match_upperlevelids = []
+            for _, (ediffs, upperlevelids) in candidate_upper_levels.items():
+                avg_ediff = abs(sum(ediffs)/len(ediffs))
+                if avg_ediff < best_ediff:
+                    best_ediff = avg_ediff
+                    best_match_upperlevelids = upperlevelids
+
+            flog.write('Best matching levels: {0}\n'.format(best_match_upperlevelids))
+
+            upper_level_ids_of_core_state_id[core_state_id] = best_match_upperlevelids
+
+            # after matching process, still no upper levels matched!
             if not upper_level_ids_of_core_state_id[core_state_id]:
                 upper_level_ids_of_core_state_id[core_state_id] = [1]
-                log_and_print("No upper level matched core state {0} '{1}_{2}' (reduced string: '{3}')".format(
-                    core_state_id,
-                    nahar_core_state.configuration,
-                    nahar_core_state.term,
+                log_and_print("No upper levels matched. Defaulting to level 1 (reduced string: '{3}')".format(
                     nahar_core_state_reduced_configuration))
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]

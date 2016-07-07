@@ -1,5 +1,5 @@
-/atomic-data-hillier/atomic/
-artis_files/
+/atomic-data-hillier/atomic
+artis_files
 transition_guide/transitions_*.*
 __pycache__
 .cache
