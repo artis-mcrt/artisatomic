@@ -163,8 +163,7 @@ def process_files(args):
                         print('Reading ' + hillier_ion_folder + osc_file)
 
                         (ionization_energy_ev[i], energy_levels[i],
-                         transitions[i],
-                         transition_count_of_level_name[i],
+                         transitions[i], transition_count_of_level_name[i],
                          hillier_level_ids_matching_term) = \
                             read_hillier_levels_and_transitions_file(
                                 hillier_ion_folder + osc_file,
@@ -229,8 +228,7 @@ def process_files(args):
                            ionization_energy_ev,
                            transition_count_of_level_name,
                            nahar_core_states, nahar_configurations,
-                           photoionization_targetfractions,
-                           photoionization_crosssections, args)
+                           photoionization_targetfractions, photoionization_crosssections, args)
 
 
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_stage):
@@ -1177,7 +1175,9 @@ def write_output_files(elementindex, energy_levels, transitions,
             write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], args)
 
             if i < len(listions) - 1:  # ignore the top ion
-                write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations, photoionization_crosssections[i], photoionization_targetfractions[i], args)
+                if len(photoionization_targetfractions[i]) <= 1:
+                    photoionization_targetfractions[i] = get_nahar_targetfractions(i, energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations)
+                write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args)
 
 
 def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args):
@@ -1293,48 +1293,26 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
 
 
 def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
-                     energy_levels_upperion, nahar_core_states,
-                     nahar_configurations, photoionization_crosssections,
-                     photoionization_targetfractions, args):
+                     photoionization_crosssections, photoionization_targetfractions, args):
     log_and_print("writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(
         args.optimaltemperature))
-    upper_level_ids_of_core_state_id = defaultdict(list)
 
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
 
-        if len(photoionization_targetfractions) > 1:
+        if len(photoionization_targetfractions[lowerlevelid]) == 0:
+            print("NO TARGETS!")
+            sys.exit()
+        elif len(photoionization_targetfractions[lowerlevelid]) == 1 and photoionization_targetfractions[lowerlevelid][0][1] > 0.99:
+            fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
+                atomic_number, ion_stage + 1, photoionization_targetfractions[lowerlevelid][0][0], ion_stage, lowerlevelid))
+        else:
             targetlist = photoionization_targetfractions[lowerlevelid]
             fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
                 atomic_number, ion_stage + 1, -1, ion_stage, lowerlevelid))
             fphixs.write('{0:8d}\n'.format(len(targetlist)))
             for upperionlevelid, targetprobability in targetlist:
                 fphixs.write('{0:8d}{1:12f}\n'.format(upperionlevelid, targetprobability))
-        else:
-            upperionlevelids = []
-            # find the upper level ids from the Nahar core state
-            upperionlevelids = get_naharphotoion_upperlevelids(
-                energy_level, energy_levels_upperion,
-                nahar_core_states, nahar_configurations[i + 1],
-                upper_level_ids_of_core_state_id)
-
-            # upperionlevelids = [1] #force ionization to ground state
-
-            if upperionlevelids == [1]:
-                fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
-                    atomic_number, ion_stage + 1, 1, ion_stage, lowerlevelid))
-            else:
-                fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
-                    atomic_number, ion_stage + 1, -1, ion_stage, lowerlevelid))
-                fphixs.write('{0:8d}\n'.format(len(upperionlevelids)))
-
-                summed_statistical_weights = sum(
-                    [float(energy_levels_upperion[id].g) for id in upperionlevelids])
-                for upperionlevelid in sorted(upperionlevelids):
-                    phixsprobability = (energy_levels_upperion[upperionlevelid].g /
-                                        summed_statistical_weights)
-                    fphixs.write('{0:8d}{1:12f}\n'.format(
-                        upperionlevelid, phixsprobability))
 
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write('{0:16.8E}\n'.format(crosssection))
@@ -1397,6 +1375,21 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
         upperionlevelids = [1]
 
     return upperionlevelids
+
+
+def get_nahar_targetfractions(i, energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations):
+    targetlist = [[] for _ in energy_levels]
+    upper_level_ids_of_core_state_id = defaultdict(list)
+    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+        # find the upper level ids from the Nahar core state
+        upperionlevelids = get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states, nahar_configurations[i + 1], upper_level_ids_of_core_state_id)
+
+        summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
+        for upperionlevelid in sorted(upperionlevelids):
+            phixsprobability = (energy_levels_upperion[upperionlevelid].g / summed_statistical_weights)
+            targetlist[lowerlevelid].append( (upperionlevelid, phixsprobability) )
+
+    return targetlist
 
 
 if __name__ == "__main__":
