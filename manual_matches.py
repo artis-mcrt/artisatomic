@@ -97,7 +97,7 @@ nahar_configuration_replacements = {
 }
 
 # this is necessary if the original Hiller term doesn't match
-hiller_name_replacements = {
+hillier_name_replacements = {
     '2s2_2p3(4So)5z_5Z': '2s22p3 (4So) 5g  z5Go',
     '2s2_2p3(4So)5z_3Z': '2s22p3 (4So) 5g  z3Go',
     # '2s2_2p3(4So)6z_3Z': '2s22p3 (4So) 6g  y3Go',
