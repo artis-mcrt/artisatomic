@@ -4,7 +4,6 @@ import os
 import sys
 import math
 import argparse
-import operator
 
 from astropy import constants as const
 from astropy import units as u
@@ -102,6 +101,9 @@ def main():
 
     args = parser.parse_args()
 
+    log_folder = os.path.join(args.output_folder, args.output_folder_logs)
+    if not os.path.exists(log_folder):
+        os.makedirs(log_folder)
     clear_files(args)
     process_files(args)
 
