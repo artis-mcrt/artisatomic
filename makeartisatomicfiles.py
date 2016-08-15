@@ -16,6 +16,8 @@ from manual_matches import nahar_configuration_replacements, hillier_name_replac
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
 
+upsilondata = pd.read_csv('upsilon-data.txt', names=["Z", "ion_stage", "lower", "upper", "upsilon"], index_col=False, header=None, sep=" ")
+
 roman_numerals = (
     '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
     'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'
@@ -419,7 +421,10 @@ def read_hillier_levels_and_transitions(path_hillier_osc_file,
 
                     if twosplusone == -1:
                         # -1 indicates that the term could not be interpreted
-                        log_and_print("Can't find term in Hillier level name '" + levelname + "'")
+                        if parity == -1:
+                            log_and_print("Can't find LS term in Hillier level name '" + levelname + "'")
+                        else:
+                            log_and_print("Can't find LS term in Hillier level name '{0:}' (but the parity is {1:})".format(levelname, parity))
                     else:
                         if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
                             hillier_level_ids_matching_term[(twosplusone, l, parity)].append(hillierlevelid)
@@ -898,6 +903,15 @@ lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 # tuple (twosplusone, l, parity)
 def get_term_as_tuple(config):
     config = config.split('[')[0]
+
+    if '{' in config and '}' in config:  # JJ coupling, no L and S
+        if config[-1] == 'e':
+            return (-1, -1, 0)
+        elif config[-1] == 'o':
+            return (-1, -1, 1)
+        else:
+            log_and_print("Can't read parity from JJ coupling state '" + config + "'")
+            return (-1, -1, -1)
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
@@ -1287,38 +1301,44 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
     for transitionid, transition in enumerate(transitions[1:], 1):
         levelid_from = level_id_of_level_name[transition.namefrom]
         levelid_to = level_id_of_level_name[transition.nameto]
+
         forbidden = (energy_levels[levelid_from].parity == energy_levels[levelid_to].parity)
         if forbidden:
-            num_forbidden_transitions += 1
             coll_str = -2
-            flog.write('Forbidden transition: lambda_angstrom= {:7.1f}, {:25s} to {:25s}\n'.format(
-                float(transition.lambdaangstrom), transition.namefrom,
-                transition.nameto))
         else:
             coll_str = -1
 
-        if True:  # ion_stage in [1,2,3]:
-            ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
-                abs(float(transition.lambdaangstrom)), float(transition.A),
-                atomic_number, ion_stage,
-                hc_in_ev_cm * float(
-                    energy_levels[levelid_from].energyabovegsinpercm),
-                float(energy_levels[levelid_from].g), forbidden,
-                transition.namefrom, transition.nameto,
-                float(energy_levels[levelid_to].g),
-                hc_in_ev_cm * float(
-                    energy_levels[levelid_to].energyabovegsinpercm),
-                levelid_to in level_ids_with_permitted_down_transitions))
+        upsilonmatchingtrans = upsilondata.query('Z==@atomic_number and ion_stage=@ion_stage and lower==@levelid_from and upper==@levelid_to', inplace=False)
+        if len(upsilonmatchingtrans) > 0:
+            coll_str = upsilonmatchingtrans.iloc[0].upsilon
+            # log_and_print("Using upsilon {0} for lowerlevel {1} to upperlevel {2}".format(coll_str, levelid_from, levelid_to))
+
+        if forbidden:
+            num_forbidden_transitions += 1
+            flog.write('Forbidden transition: lambda_angstrom= {:7.1f}, {:25s} to {:25s}\n'.format(
+                float(transition.lambdaangstrom), transition.namefrom,
+                transition.nameto))
+
+        ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
+            abs(float(transition.lambdaangstrom)), float(transition.A),
+            atomic_number, ion_stage,
+            hc_in_ev_cm * float(
+                energy_levels[levelid_from].energyabovegsinpercm),
+            float(energy_levels[levelid_from].g), forbidden,
+            transition.namefrom, transition.nameto,
+            float(energy_levels[levelid_to].g),
+            hc_in_ev_cm * float(
+                energy_levels[levelid_to].energyabovegsinpercm),
+            levelid_to in level_ids_with_permitted_down_transitions))
 
         ftransitiondata.write(
-            '{0:12d}{1:7d}{2:12d}{3:25.16E} {4:.1f}\n'.format(
+            '{0:9d}{1:6d}{2:6d}{3:25.16E} {4:9.2e}\n'.format(
                 transitionid, levelid_from, levelid_to,
                 float(transition.A), coll_str))
 
     ftransitiondata.write('\n')
-    log_and_print(
-        'Included {0:d} transitions, of which {1:d} are forbidden'.format(
-            len(transitions) - 1, num_forbidden_transitions))
+    log_and_print('Included {0:d} transitions, of which {1:d} are forbidden'.format(
+        len(transitions) - 1, num_forbidden_transitions))
 
 
 def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
