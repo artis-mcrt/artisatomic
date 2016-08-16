@@ -1308,7 +1308,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
         else:
             coll_str = -1
 
-        upsilonmatchingtrans = upsilondata.query('Z==@atomic_number and ion_stage=@ion_stage and lower==@levelid_from and upper==@levelid_to', inplace=False)
+        upsilonmatchingtrans = upsilondata.query('Z==@atomic_number and ion_stage==@ion_stage and lower==@levelid_from and upper==@levelid_to', inplace=False)
         if len(upsilonmatchingtrans) > 0:
             coll_str = upsilonmatchingtrans.iloc[0].upsilon
             # log_and_print("Using upsilon {0} for lowerlevel {1} to upperlevel {2}".format(coll_str, levelid_from, levelid_to))
