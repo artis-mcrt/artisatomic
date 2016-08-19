@@ -12,11 +12,10 @@ import pandas as pd
 from scipy import integrate
 from scipy import interpolate
 from manual_matches import nahar_configuration_replacements, hillier_name_replacements
+# from readnaharfiles import get_naharphotoion_upperlevelids, get_nahar_targetfractions
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
-
-upsilondata = pd.read_csv('upsilon-data.txt', names=["Z", "ion_stage", "lower", "upper", "upsilon"], index_col=False, header=None, sep=" ")
 
 roman_numerals = (
     '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
@@ -100,6 +99,9 @@ def main():
     parser.add_argument(
         '-optimaltemperature', type=int, default=3000,
         help='Temperature to use when downsampling cross sections')
+    parser.add_argument(
+        '--nophixs', action='store_true',
+        help='Don''t generate cross sections and write to phixsdata_v2.txt file')
 
     args = parser.parse_args()
 
@@ -113,10 +115,11 @@ def main():
 def clear_files(args):
     # clear out the file contents, so these can be appended to later
     with open(os.path.join(args.output_folder, 'adata.txt'), 'w'), \
-            open(os.path.join(args.output_folder, 'transitiondata.txt'), 'w'), \
-            open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'w') as fphixs:
-        fphixs.write('{0:d}\n'.format(args.nphixspoints))
-        fphixs.write('{0:14.7e}\n'.format(args.phixsnuincrement))
+            open(os.path.join(args.output_folder, 'transitiondata.txt'), 'w'):
+        if not args.nophixs:
+            with open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'w') as fphixs:
+                fphixs.write('{0:d}\n'.format(args.nphixspoints))
+                fphixs.write('{0:14.7e}\n'.format(args.phixsnuincrement))
 
 
 def process_files(args):
@@ -143,6 +146,7 @@ def process_files(args):
         # list of named tuples (hillier_transition_row)
         transitions = [[] for x in listions]
         transition_count_of_level_name = [{} for x in listions]
+        upsilondicts = [{} for x in listions]
 
         energy_levels = [[] for x in listions]
         # keys are level ids, values are lists of (energy in Rydberg,
@@ -156,13 +160,30 @@ def process_files(args):
             hillier_ion_folder = ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] +
                                   '/' + roman_numerals[ion_stage] + '/')
 
+            if atomic_number == 26:
+                upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
+                if ion_stage in upsilondatafilenames:
+                    upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
+                                                names=["Z", "ion_stage", "lower", "upper", "upsilon"],
+                                                index_col=False, header=None, sep=" ")
+                    if len(upsilondatadf) > 0:
+                        for _, row in upsilondatadf.iterrows():
+                            lower = int(row['lower'])
+                            upper = int(row['upper'])
+                            if (lower, upper) not in upsilondicts[i]:
+                                upsilondicts[i][(lower, upper)] = row['upsilon']
+                            else:
+                                log_and_print("Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                                    lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
+
             if atomic_number == 27:
                 with open(logfilepath, 'w') as flog:
                     log_and_print('==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
 
                     if ion_stage in [3, 4]:
                         (ionization_energy_ev[i], energy_levels[i],
-                         transitions[i], transition_count_of_level_name[i]) = read_qub_levels_and_transitions(atomic_number, ion_stage)
+                         transitions[i], transition_count_of_level_name[i],
+                         upsilondicts[i]) = read_qub_levels_and_transitions(atomic_number, ion_stage)
                     else:
                         osc_file = path_hillier_osc_file[(atomic_number, ion_stage)]
                         print('Reading ' + hillier_ion_folder + osc_file)
@@ -173,7 +194,7 @@ def process_files(args):
                              hillier_ion_folder + osc_file,
                              hillier_row_format_energy_level[(atomic_number, ion_stage)], i)
 
-                    if i < len(listions) - 1:  # don't get cross sections for top ion
+                    if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args)
 
             else:
@@ -182,8 +203,6 @@ def process_files(args):
 
                     path_nahar_energy_file = 'atomic-data-nahar/{0}{1:d}.en.ls.txt'.format(
                         elsymbols[atomic_number].lower(), ion_stage)
-
-                    log_and_print('Reading ' + path_nahar_energy_file)
 
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i]) = read_nahar_energy_level_file(
@@ -206,20 +225,19 @@ def process_files(args):
                             elsymbols[atomic_number].lower(), ion_stage)
 
                         log_and_print('Reading ' + path_nahar_px_file)
-                        nahar_phixs_tables[i] = read_nahar_phixs_tables(
-                            path_nahar_px_file, atomic_number, i, ion_stage)
+                        nahar_phixs_tables[i] = read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage, args)
 
                     (energy_levels[i], transitions[i], photoionization_crosssections[i]) = combine_hillier_nahar(
                         i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
-                        nahar_phixs_tables[i], args)
+                        nahar_phixs_tables[i], upsilondicts[i], args)
 
                     # Alternatively use Hillier phixs tables, but BEWARE this
                     # probably doesn't work anymore since the code has changed a lot
                     # print('Reading ' + hillier_ion_folder + path_hillier_phixs_file[(atomic_number, ion_stage)])
                     # read_hillier_phixs_tables(hillier_ion_folder,path_hillier_phixs_file[(atomic_number, ion_stage)])
 
-        write_output_files(elementindex, energy_levels, transitions,
+        write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev,
                            transition_count_of_level_name,
                            nahar_core_states, nahar_configurations,
@@ -235,7 +253,11 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     nahar_energy_levels = ['IGNORE']
     nahar_level_index_of_state = {}
     nahar_core_states = []
-    if os.path.isfile(path_nahar_energy_file):
+
+    if not os.path.isfile(path_nahar_energy_file):
+        log_and_print(path_nahar_energy_file + ' does not exist')
+    else:
+        log_and_print('Reading ' + path_nahar_energy_file)
         with open(path_nahar_energy_file, 'r') as fenlist:
             while True:
                 line = fenlist.readline()
@@ -380,17 +402,16 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations)
 
 
-def read_hillier_levels_and_transitions(path_hillier_osc_file,
-                                        hillier_row_format_energy_level, i):
+def read_hillier_levels_and_transitions(path_hillier_osc_file, hillier_row_format_energy_level, i):
     hillier_energy_level_row = namedtuple(
         'energylevel', hillier_row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
     hillier_transition_row = namedtuple(
-        'transition', 'namefrom nameto f A lambdaangstrom i j hilliertransitionid')
+        'transition', 'namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str')
     hillier_energy_levels = ['IGNORE']
     hillier_level_ids_matching_term = defaultdict(list)
     transition_count_of_level_name = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
-    transitions = ['IGNORE']
+    transitions = []
 
     if os.path.isfile(path_hillier_osc_file):
         with open(path_hillier_osc_file, 'r') as fhillierosc:
@@ -423,8 +444,8 @@ def read_hillier_levels_and_transitions(path_hillier_osc_file,
                         # -1 indicates that the term could not be interpreted
                         if parity == -1:
                             log_and_print("Can't find LS term in Hillier level name '" + levelname + "'")
-                        else:
-                            log_and_print("Can't find LS term in Hillier level name '{0:}' (but the parity is {1:})".format(levelname, parity))
+                        # else:
+                            # log_and_print("Can't find LS term in Hillier level name '{0:}' (parity is {1:})".format(levelname, parity))
                     else:
                         if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
                             hillier_level_ids_matching_term[(twosplusone, l, parity)].append(hillierlevelid)
@@ -457,7 +478,10 @@ def read_hillier_levels_and_transitions(path_hillier_osc_file,
                                                         float(row[4]),  # lambda
                                                         int(row[5]),  # i
                                                         int(row[6]),  # j
-                                                        int(row[7]))
+                                                        int(row[7]),  # hilliertransitionid
+                                                        -1,  # lowerlevel
+                                                        -1,  # upperlevel
+                                                        -99)  # coll_str
 
                     if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
                         #                    defined_transition_ids.append(int(transition.hilliertransitionid))
@@ -465,20 +489,20 @@ def read_hillier_levels_and_transitions(path_hillier_osc_file,
                         transition_count_of_level_name[transition.namefrom] += 1
                         transition_count_of_level_name[transition.nameto] += 1
 
-                        if int(transition.hilliertransitionid) != len(transitions) - 1:
+                        if int(transition.hilliertransitionid) != len(transitions):
                             print(path_hillier_osc_file + ', WARNING: Transition id {0:d} found at entry number {1:d}'.format(
-                                int(transition.hilliertransitionid), len(transitions) - 1))
+                                int(transition.hilliertransitionid), len(transitions)))
                             sys.exit()
                     else:
                         log_and_print('FATAL: multiply-defined Hillier transition: {0} {1}'
                                       .format(transition.namefrom, transition.nameto))
                         sys.exit()
-        log_and_print('Read {:d} transitions'.format(len(transitions) - 1))
+        log_and_print('Read {:d} transitions'.format(len(transitions)))
 
     return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
 
 
-def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage):
+def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage, args):
     nahar_phixs_tables = {}
     with open(path_nahar_px_file, 'r') as fenlist:
         while True:
@@ -509,25 +533,109 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage):
             twosplusone, l, parity, indexinsymmetry = int(row[0]), int(row[1]), int(row[2]), int(row[3])
 
             number_of_points = int(fenlist.readline().split()[1])
-            nahar_binding_energy_rydberg = float(fenlist.readline().split()[0])
+            _ = float(fenlist.readline().split()[0])  # nahar_binding_energy_rydberg
 
-            nahar_phixs_tables[(twosplusone, l, parity, indexinsymmetry)] = \
-                np.array([list(map(float, fenlist.readline().split())) for p in range(number_of_points)])
+            if not args.nophixs:
+                phixsarray = np.array([list(map(float, fenlist.readline().split())) for p in range(number_of_points)])
+            else:
+                for p in range(number_of_points):
+                    fenlist.readline()
+                phixsarray = np.zeros((2, 2))
+
+            nahar_phixs_tables[(twosplusone, l, parity, indexinsymmetry)] = phixsarray
+
             #    np.genfromtxt(fenlist, max_rows=number_of_points)
 
     return nahar_phixs_tables
+
+
+def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states,
+                                    nahar_configurations_upperion, upper_level_ids_of_core_state_id):
+
+    core_state_id = int(energy_level.corestateid)
+    if core_state_id > 0 and core_state_id < len(nahar_core_states):
+
+        if not upper_level_ids_of_core_state_id[core_state_id]:
+            # go find matching levels if they haven't been found yet
+            nahar_core_state = nahar_core_states[core_state_id]
+            nahar_core_state_reduced_configuration = reduce_configuration(
+                nahar_core_state.configuration + '_' + nahar_core_state.term)
+            core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
+            flog.write("\nMatching core state {0} '{1}_{2}' E={3:0.3f} eV to:\n".format(
+                core_state_id, nahar_core_state.configuration, nahar_core_state.term, core_state_energy_ev))
+
+            candidate_upper_levels = {}
+            for upperlevelid, upperlevel in enumerate(energy_levels_upperion[1:], 1):
+                if hasattr(upperlevel, 'levelname'):
+                    upperlevelconfig = upperlevel.levelname
+                else:
+                    state_tuple = (int(upperlevel.twosplusone), int(upperlevel.l),
+                                   int(upperlevel.parity), int(upperlevel.indexinsymmetry))
+                    upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
+                energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
+
+                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
+                    ediff = energyev - core_state_energy_ev
+                    upperlevelconfignoj = upperlevelconfig.split('[')[0]
+                    if upperlevelconfignoj not in candidate_upper_levels:
+                        candidate_upper_levels[upperlevelconfignoj] = [[], []]
+                    candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
+                    candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
+                    flog.write("Upper ion level {0} '{1}' E = {2:.4f} E_diff={3:.4f}\n".format(upperlevelid, upperlevelconfig, energyev, ediff))
+
+            best_ediff = float('inf')
+            best_match_upperlevelids = []
+            for _, (ediffs, upperlevelids) in candidate_upper_levels.items():
+                avg_ediff = abs(sum(ediffs)/len(ediffs))
+                if avg_ediff < best_ediff:
+                    best_ediff = avg_ediff
+                    best_match_upperlevelids = upperlevelids
+
+            flog.write('Best matching levels: {0}\n'.format(best_match_upperlevelids))
+
+            upper_level_ids_of_core_state_id[core_state_id] = best_match_upperlevelids
+
+            # after matching process, still no upper levels matched!
+            if not upper_level_ids_of_core_state_id[core_state_id]:
+                upper_level_ids_of_core_state_id[core_state_id] = [1]
+                log_and_print("No upper levels matched. Defaulting to level 1 (reduced string: '{3}')".format(
+                    nahar_core_state_reduced_configuration))
+
+        upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
+    else:
+        upperionlevelids = [1]
+
+    return upperionlevelids
+
+
+def get_nahar_targetfractions(i, energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations):
+    targetlist = [[] for _ in energy_levels]
+    upper_level_ids_of_core_state_id = defaultdict(list)
+    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+        # find the upper level ids from the Nahar core state
+        upperionlevelids = get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states, nahar_configurations[i + 1], upper_level_ids_of_core_state_id)
+
+        summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
+        for upperionlevelid in sorted(upperionlevelids):
+            phixsprobability = (energy_levels_upperion[upperionlevelid].g / summed_statistical_weights)
+            targetlist[lowerlevelid].append((upperionlevelid, phixsprobability))
+
+    return targetlist
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage):
     qub_energy_level_row = namedtuple(
         'energylevel', 'levelname qub_id twosplusone l j energyabovegsinpercm g parity')
     qub_transition_row = namedtuple(
-        'transition', 'upperlevel lowerlevel A nameto namefrom lambdaangstrom')
+        'transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
     transition_count_of_level_name = defaultdict(int)
     qub_energylevels = ['IGNORE']
     qub_transitions = []
+    upsilondict = {}
     ionization_energy_ev = 0.
+
     if (atomic_number == 27) and (ion_stage == 3):
+        log_and_print('Reading atomic-data-qub/adf04_v1')
         with open('atomic-data-qub/adf04_v1', 'r') as fleveltrans:
             line = fleveltrans.readline()
             row = line.split()
@@ -552,6 +660,23 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage):
                     g=g, parity=parity, levelname=levelname)
                 qub_energylevels.append(energylevel)
 
+            upsilonheader = fleveltrans.readline().split()
+            list_tempheaders = ['upsT={0:}'.format(x) for x in upsilonheader[2:]]
+            list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
+            qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
+                                                comment="C", names=list_headers, dtype={'lower': np.int, 'upper': np.int}.update({z: np.float64 for z in list_headers[2:]}),
+                                                error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
+            qubupsilondf_alltemps.query('upper!=-1', inplace=True)
+            for _, row in qubupsilondf_alltemps.iterrows():
+                lower = int(row['lower'])
+                upper = int(row['upper'])
+                upsilon = float(row['upsT=5.01+03'].replace('-', 'E').replace('+', 'E'))
+                if (lower, upper) not in upsilondict:
+                    upsilondict[(lower, upper)] = upsilon
+                else:
+                    log_and_print("Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                        lower, upper, upsilondict[(lower, upper)], upsilon))
+
         with open('atomic-data-qub/adf04rad_v1', 'r') as ftrans:
             for line in ftrans:
                 row = line.split()
@@ -561,20 +686,24 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage):
                 if A > 2e-30:
                     namefrom = qub_energylevels[id_upper].levelname
                     nameto = qub_energylevels[id_lower].levelname
+                    forbidden = check_forbidden(qub_energylevels[id_upper], qub_energylevels[id_lower])
                     transition_count_of_level_name[namefrom] += 1
                     transition_count_of_level_name[nameto] += 1
                     lamdaangstrom = 1.e8 / (qub_energylevels[id_upper].energyabovegsinpercm - qub_energylevels[id_lower].energyabovegsinpercm)
-                    transition = qub_transition_row(id_upper, id_lower, A, namefrom, nameto, lamdaangstrom)
+                    if (id_lower, id_upper) in upsilondict:
+                        coll_str = upsilondict[(id_lower, id_upper)]
+                    elif forbidden:
+                        coll_str = -2.
+                    else:
+                        coll_str = -1.
+                    transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
                     qub_transitions.append(transition)
 
     if (atomic_number == 27) and (ion_stage == 4):
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row('groundstate', 1, 0, 0, 0, 0., 10, 0))
 
-    qub_transitions.sort(key=lambda x: (x.lowerlevel, x.upperlevel))
-    qub_transitions.insert(0, 'IGNORE')
-
-    return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name
+    return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
 
 
 def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args):
@@ -582,7 +711,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args):
     # photoionization_crosssections = [[] for _ in energy_levels]
     photoionization_targetfractions = [[(1, 1.)] for _ in energy_levels]
 
-    if (atomic_number == 27 and ion_stage == 2):
+    if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
             photdata = pd.read_csv('atomic-data-qub/{0:d}.gz'.format(lowerlevelid), delim_whitespace=True, header=None)
             phixstables = {}
@@ -600,7 +729,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args):
             photoionization_targetfractions[lowerlevelid] = [(upperlevelid, targetfractions[upperlevelid]) for upperlevelid in range(1, ntargets + 1)]
             photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[1] / targetfractions[1]
 
-    if (atomic_number == 27 and ion_stage == 3):
+    if atomic_number == 27 and ion_stage == 3:
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
             if lowerlevelid <= 4:
@@ -609,13 +738,14 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args):
     return photoionization_crosssections, photoionization_targetfractions
 
 
-def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_term,
-                          hillier_transitions,
-                          nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables, args):
+def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
+                          nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables, upsilondict,
+                          args):
     # hillier_energy_levels[i] = ['IGNORE'] #TESTING only
     # hillier_level_ids_matching_term[i] = {} #TESTING only
     added_nahar_levels = []
     photoionization_crosssections = []
+
     # match up Nahar states given in phixs data with Hillier levels, adding
     # missing levels as necessary
     for (twosplusone, l, parity, indexinsymmetry) in nahar_phixs_tables:
@@ -660,7 +790,7 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                             confignote = nahar_configurations[state_tuple]
 
                             if nahar_configuration_this_state != confignote:
-                                confignote += " manually replaced by {:}".format(nahar_configuration_this_state)
+                                confignote += " replaced by {:}".format(nahar_configuration_this_state)
 
                             hillier_energy_levels[levelid] = hillier_energy_levels[levelid]._replace(
                                 twosplusone=twosplusone, l=l, parity=parity,
@@ -727,26 +857,26 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
     print('Sorting level list...')
     energy_levels.sort(key=lambda x: float(getattr(x, 'energyabovegsinpercm', '-inf')))
 
-    # generate a mapping of level names to the final output level id numbers
-
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this probably gets overwritten anyway
 
-    print('Processing phixs tables...')
-    # process the phixs tables and attach them to any matching levels in the output list
-    reduced_phixs_list = reduce_phixs_tables(nahar_phixs_tables, args)
-    for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_list.items():
-        foundamatch = False
-        for levelid, energylevel in enumerate(energy_levels[1:], 1):
-            if (int(energylevel.twosplusone) == twosplusone and
-                    int(energylevel.l) == l and
-                    int(energylevel.parity) == parity and
-                    int(energylevel.indexinsymmetry) == indexinsymmetry):
-                photoionization_crosssections[levelid] = phixstable
-                foundamatch = True  # there could be more than one match, but this flags there being at least one
+    if not args.nophixs:
+        print('Processing phixs tables...')
+        # process the phixs tables and attach them to any matching levels in the output list
+        reduced_phixs_list = reduce_phixs_tables(nahar_phixs_tables, args)
+        for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_list.items():
+            foundamatch = False
+            for levelid, energylevel in enumerate(energy_levels[1:], 1):
+                if (int(energylevel.twosplusone) == twosplusone and
+                        int(energylevel.l) == l and
+                        int(energylevel.parity) == parity and
+                        int(energylevel.indexinsymmetry) == indexinsymmetry):
+                    photoionization_crosssections[levelid] = phixstable
+                    foundamatch = True  # there could be more than one match, but this flags there being at least one
 
-        if not foundamatch:
-            log_and_print("No Hillier or Nahar state to match with photoionization crosssection of {0:d}{1}{2} index {3:d}".format(
-                twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
+            if not foundamatch:
+                log_and_print("No Hillier or Nahar state to match with photoionization crosssection of {0:d}{1}{2} index {3:d}".format(
+                    twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
+
     return energy_levels, hillier_transitions, photoionization_crosssections
 
 
@@ -870,6 +1000,10 @@ def reduce_phixs_tables(dicttables, args):
         dictout[key] = arr_sigma_out  # output a 1D list of cross sections
 
     return dictout
+
+
+def check_forbidden(levela, levelb):
+    return levela.parity == levelb.parity
 
 
 def weightedavgenergyinev(energylevels_thision, ids):
@@ -1186,7 +1320,7 @@ def score_config_match(config_a, config_b):
     return -1
 
 
-def write_output_files(elementindex, energy_levels, transitions,
+def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                        ionization_energies,
                        transition_count_of_level_name,
                        nahar_core_states, nahar_configurations,
@@ -1194,6 +1328,7 @@ def write_output_files(elementindex, energy_levels, transitions,
                        photoionization_crosssections, args):
     global flog
     atomic_number, listions = listelements[elementindex]
+    upsilon_transition_row = namedtuple('transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
     print('\nStarting output stage:')
 
@@ -1202,27 +1337,72 @@ def write_output_files(elementindex, energy_levels, transitions,
             open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'a') as fphixs, \
             open(os.path.join(args.output_folder_transition_guide, 'transitions_{}.txt'.format(elsymbols[atomic_number])), 'w') as ftransitionguide:
 
-        ftransitionguide.write('{0:>16s} {1:>12s} {2:>3s} {3:>9s} {4:>17s} {5:>17s} {6:>10s} {7:25s} {8:25s} {9:>17s} {10:>17s} {11:>19s}\n'.format(
+        ftransitionguide.write('{0:>16s} {1:>12s} {2:>3s} {3:>9s} {4:>17s} {5:>17s} {6:>10s} {7:25s}  {8:25s} {9:>17s} {10:>17s} {11:>19s}\n'.format(
             'lambda_angstroms', 'A', 'Z', 'ion_stage', 'lower_energy_Ev', 'lower_statweight', 'forbidden', 'lower_level', 'upper_level', 'upper_statweight', 'upper_energy_Ev', 'upper_has_permitted'))
 
         for i, ion_stage in enumerate(listions):
-
+            upsilondict = upsilondicts[i]
             ionstr = '{0} {1}'.format(elsymbols[atomic_number],
                                       roman_numerals[ion_stage])
 
-            flog = open(
-                os.path.join(args.output_folder,
-                             args.output_folder_logs,
-                             '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)),
-                'a')
+            flog = open(os.path.join(args.output_folder, args.output_folder_logs,
+                                     '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)), 'a')
 
             print('==============> ' + ionstr + ':')
 
+            level_id_of_level_name = {}
+            for levelid in range(1, len(energy_levels[i])):
+                if hasattr(energy_levels[i][levelid], 'levelname'):
+                    level_id_of_level_name[energy_levels[i][levelid].levelname] = levelid
+
+            unused_upsilon_transitions = set(upsilondicts[i].keys())
+            for transitionid, transition in enumerate(transitions[i]):
+                updaterequired = False
+                if hasattr(transition, 'upperlevel') and transition.upperlevel >= 0:
+                    id_lower = transition.lowerlevel
+                    id_upper = transition.upperlevel
+                else:
+                    id_upper = level_id_of_level_name[transition.nameto]
+                    id_lower = level_id_of_level_name[transition.namefrom]
+                    updaterequired = True
+                unused_upsilon_transitions.discard((id_lower, id_upper))
+
+                coll_str = transition.coll_str
+                if coll_str < 5:
+                    forbidden = check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
+                    if (id_lower, id_upper) in upsilondict:
+                        coll_str = upsilondict[(id_lower, id_upper)]
+                    elif forbidden:
+                        coll_str = -2.
+                    else:
+                        coll_str = -1.
+                    updaterequired = True
+                if updaterequired:
+                    transitions[i][transitionid] = transition._replace(
+                        lowerlevel=id_lower, upperlevel=id_upper,
+                        coll_str=coll_str)
+
+            print("Adding in {0:d} extra transitions with upsilon values".format(len(unused_upsilon_transitions)))
+            for (id_lower, id_upper) in unused_upsilon_transitions:
+                namefrom = energy_levels[i][id_upper].levelname
+                nameto = energy_levels[i][id_lower].levelname
+                A = 0.
+                lamdaangstrom = 1.e8 / (energy_levels[i][id_upper].energyabovegsinpercm - energy_levels[i][id_lower].energyabovegsinpercm)
+                # upsilon = upsilondict[(id_lower, id_upper)]
+                transition_count_of_level_name[i][namefrom] += 1
+                transition_count_of_level_name[i][nameto] += 1
+                coll_str = upsilondict[(id_lower, id_upper)]
+
+                transition = upsilon_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                transitions[i].append(transition)
+
+            transitions[i].sort(key=lambda x: (getattr(x, 'lowerlevel', -99), getattr(x, 'upperlevel', -99)))
+
             write_adata(fatommodels, atomic_number, ion_stage, energy_levels[i], ionization_energies[i], transition_count_of_level_name[i], args)
 
-            write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], args)
+            write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args)
 
-            if i < len(listions) - 1:  # ignore the top ion
+            if i < len(listions) - 1 and not args.nophixs:  # ignore the top ion
                 if len(photoionization_targetfractions[i]) < 1:
                     photoionization_targetfractions[i] = get_nahar_targetfractions(i, energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations)
                 write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args)
@@ -1276,42 +1456,33 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
     fatommodels.write('\n')
 
 
-def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels, transitions, args):
-    level_id_of_level_name = {}
-    for levelid in range(1, len(energy_levels)):
-        if hasattr(energy_levels[levelid], 'levelname'):
-            level_id_of_level_name[energy_levels[levelid].levelname] = levelid
-
+def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels,
+                          transitions, upsilondict, args):
     log_and_print("writing to 'transitiondata.txt'")
+
     num_forbidden_transitions = 0
+    num_collision_strengths_applied = 0
     ftransitiondata.write('{0:7d}{1:7d}{2:12d}\n'.format(
-        atomic_number, ion_stage, len(transitions) - 1))
+        atomic_number, ion_stage, len(transitions)))
 
     level_ids_with_permitted_down_transitions = set()
-    for transitionid in range(1, len(transitions)):
-        transition = transitions[transitionid]
-        levelid_from = level_id_of_level_name[transition.namefrom]
-        levelid_to = level_id_of_level_name[transition.nameto]
-        forbidden = (energy_levels[levelid_from].parity == energy_levels[levelid_to].parity)
+    for transitionid, transition in enumerate(transitions):
+        levelid_lower = transition.lowerlevel
+        levelid_upper = transition.upperlevel
+        forbidden = (energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity)
 
         if not forbidden:
-            level_ids_with_permitted_down_transitions.add(
-                levelid_to)  # hopefully 'to_level' is the upper level
+            level_ids_with_permitted_down_transitions.add(levelid_upper)
 
-    for transitionid, transition in enumerate(transitions[1:], 1):
-        levelid_from = level_id_of_level_name[transition.namefrom]
-        levelid_to = level_id_of_level_name[transition.nameto]
+    for transitionid, transition in enumerate(transitions):
+        levelid_lower = transition.lowerlevel
+        levelid_upper = transition.upperlevel
+        coll_str = transition.coll_str
 
-        forbidden = (energy_levels[levelid_from].parity == energy_levels[levelid_to].parity)
-        if forbidden:
-            coll_str = -2
-        else:
-            coll_str = -1
+        if coll_str > 0:
+            num_collision_strengths_applied += 1
 
-        upsilonmatchingtrans = upsilondata.query('Z==@atomic_number and ion_stage==@ion_stage and lower==@levelid_from and upper==@levelid_to', inplace=False)
-        if len(upsilonmatchingtrans) > 0:
-            coll_str = upsilonmatchingtrans.iloc[0].upsilon
-            # log_and_print("Using upsilon {0} for lowerlevel {1} to upperlevel {2}".format(coll_str, levelid_from, levelid_to))
+        forbidden = (energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity)
 
         if forbidden:
             num_forbidden_transitions += 1
@@ -1323,22 +1494,22 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
             abs(float(transition.lambdaangstrom)), float(transition.A),
             atomic_number, ion_stage,
             hc_in_ev_cm * float(
-                energy_levels[levelid_from].energyabovegsinpercm),
-            float(energy_levels[levelid_from].g), forbidden,
+                energy_levels[levelid_lower].energyabovegsinpercm),
+            float(energy_levels[levelid_lower].g), forbidden,
             transition.namefrom, transition.nameto,
-            float(energy_levels[levelid_to].g),
+            float(energy_levels[levelid_upper].g),
             hc_in_ev_cm * float(
-                energy_levels[levelid_to].energyabovegsinpercm),
-            levelid_to in level_ids_with_permitted_down_transitions))
+                energy_levels[levelid_upper].energyabovegsinpercm),
+            levelid_upper in level_ids_with_permitted_down_transitions))
 
         ftransitiondata.write(
-            '{0:9d}{1:6d}{2:6d}{3:25.16E} {4:9.2e}\n'.format(
-                transitionid, levelid_from, levelid_to,
+            '{0:9d}{1:6d}{2:6d}{3:18.10E} {4:9.2e}\n'.format(
+                transitionid + 1, levelid_lower, levelid_upper,
                 float(transition.A), coll_str))
 
     ftransitiondata.write('\n')
-    log_and_print('Included {0:d} transitions, of which {1:d} are forbidden'.format(
-        len(transitions) - 1, num_forbidden_transitions))
+    log_and_print('Wrote out {0:d} transitions, of which {1:d} are forbidden and {2:d} had collision strengths'.format(
+        len(transitions), num_forbidden_transitions, num_collision_strengths_applied))
 
 
 def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
@@ -1346,7 +1517,7 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
     log_and_print("writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(args.optimaltemperature))
 
-    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+    for lowerlevelid in range(1, len(energy_levels)):
 
         if len(photoionization_targetfractions[lowerlevelid]) <= 1 and photoionization_targetfractions[lowerlevelid][0][1] > 0.99:
             if len(photoionization_targetfractions[lowerlevelid]) > 0:
@@ -1366,80 +1537,6 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
 
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write('{0:16.8E}\n'.format(crosssection))
-
-
-def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states,
-                                    nahar_configurations_upperion, upper_level_ids_of_core_state_id):
-
-    core_state_id = int(energy_level.corestateid)
-    if core_state_id > 0 and core_state_id < len(nahar_core_states):
-
-        if not upper_level_ids_of_core_state_id[core_state_id]:
-            # go find matching levels if they haven't been found yet
-            nahar_core_state = nahar_core_states[core_state_id]
-            nahar_core_state_reduced_configuration = reduce_configuration(
-                nahar_core_state.configuration + '_' + nahar_core_state.term)
-            core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
-            flog.write("\nMatching core state {0} '{1}_{2}' E={3:0.3f} eV to:\n".format(
-                core_state_id, nahar_core_state.configuration, nahar_core_state.term, core_state_energy_ev))
-
-            candidate_upper_levels = {}
-            for upperlevelid, upperlevel in enumerate(energy_levels_upperion[1:], 1):
-                if hasattr(upperlevel, 'levelname'):
-                    upperlevelconfig = upperlevel.levelname
-                else:
-                    state_tuple = (int(upperlevel.twosplusone), int(upperlevel.l),
-                                   int(upperlevel.parity), int(upperlevel.indexinsymmetry))
-                    upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
-                energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
-
-                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
-                    ediff = energyev - core_state_energy_ev
-                    upperlevelconfignoj = upperlevelconfig.split('[')[0]
-                    if upperlevelconfignoj not in candidate_upper_levels:
-                        candidate_upper_levels[upperlevelconfignoj] = [[], []]
-                    candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
-                    candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
-                    flog.write("Upper ion level {0} '{1}' E = {2:.4f} E_diff={3:.4f}\n".format(upperlevelid, upperlevelconfig, energyev, ediff))
-
-            best_ediff = float('inf')
-            best_match_upperlevelids = []
-            for _, (ediffs, upperlevelids) in candidate_upper_levels.items():
-                avg_ediff = abs(sum(ediffs)/len(ediffs))
-                if avg_ediff < best_ediff:
-                    best_ediff = avg_ediff
-                    best_match_upperlevelids = upperlevelids
-
-            flog.write('Best matching levels: {0}\n'.format(best_match_upperlevelids))
-
-            upper_level_ids_of_core_state_id[core_state_id] = best_match_upperlevelids
-
-            # after matching process, still no upper levels matched!
-            if not upper_level_ids_of_core_state_id[core_state_id]:
-                upper_level_ids_of_core_state_id[core_state_id] = [1]
-                log_and_print("No upper levels matched. Defaulting to level 1 (reduced string: '{3}')".format(
-                    nahar_core_state_reduced_configuration))
-
-        upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
-    else:
-        upperionlevelids = [1]
-
-    return upperionlevelids
-
-
-def get_nahar_targetfractions(i, energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations):
-    targetlist = [[] for _ in energy_levels]
-    upper_level_ids_of_core_state_id = defaultdict(list)
-    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
-        # find the upper level ids from the Nahar core state
-        upperionlevelids = get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states, nahar_configurations[i + 1], upper_level_ids_of_core_state_id)
-
-        summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
-        for upperionlevelid in sorted(upperionlevelids):
-            phixsprobability = (energy_levels_upperion[upperionlevelid].g / summed_statistical_weights)
-            targetlist[lowerlevelid].append((upperionlevelid, phixsprobability))
-
-    return targetlist
 
 
 if __name__ == "__main__":
