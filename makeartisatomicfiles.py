@@ -170,11 +170,14 @@ def process_files(args):
                         for _, row in upsilondatadf.iterrows():
                             lower = int(row['lower'])
                             upper = int(row['upper'])
-                            if (lower, upper) not in upsilondicts[i]:
-                                upsilondicts[i][(lower, upper)] = row['upsilon']
+                            if upper <= lower:
+                                print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
                             else:
-                                log_and_print("Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
-                                    lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
+                                if (lower, upper) not in upsilondicts[i]:
+                                    upsilondicts[i][(lower, upper)] = row['upsilon']
+                                else:
+                                    log_and_print("Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                                        lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
             if atomic_number == 27:
                 with open(logfilepath, 'w') as flog:
