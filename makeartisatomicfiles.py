@@ -1506,9 +1506,9 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
             levelid_upper in level_ids_with_permitted_down_transitions))
 
         ftransitiondata.write(
-            '{0:9d}{1:6d}{2:6d}{3:18.10E} {4:9.2e}\n'.format(
+            '{0:9d}{1:6d}{2:6d}{3:18.10E} {4:9.2e} {5:d}\n'.format(
                 transitionid + 1, levelid_lower, levelid_upper,
-                float(transition.A), coll_str))
+                float(transition.A), coll_str, forbidden))
 
     ftransitiondata.write('\n')
     log_and_print('Wrote out {0:d} transitions, of which {1:d} are forbidden and {2:d} had collision strengths'.format(
