@@ -160,7 +160,7 @@ def process_files(args):
 
             with open(logfilepath, 'w') as flog:
                 log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
-                
+
                 if atomic_number == 26:
                     upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
                     if ion_stage in upsilondatafilenames:
@@ -979,7 +979,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                     lowerlevel=id_lower, upperlevel=id_upper,
                     coll_str=coll_str)
 
-        print("Adding in {0:d} extra transitions with upsilon values".format(len(unused_upsilon_transitions)))
+        log_and_print(flog, "Adding in {0:d} extra transitions with upsilon values".format(len(unused_upsilon_transitions)))
         for (id_lower, id_upper) in unused_upsilon_transitions:
             namefrom = energy_levels[i][id_upper].levelname
             nameto = energy_levels[i][id_lower].levelname
