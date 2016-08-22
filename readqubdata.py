@@ -110,7 +110,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             for targetlevel in range(1, ntargets + 1):
                 phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.][[0, targetlevel]].values
 
-            reduced_phixs_dict = reduce_phixs_tables(phixstables, args)
+            reduced_phixs_dict = artisatomic.reduce_phixs_tables(phixstables, args)
             target_scalefactors = np.zeros(ntargets + 1)
             for upperlevelid in reduced_phixs_dict:
                 # take the ratio of cross sections at the threshold energyies
