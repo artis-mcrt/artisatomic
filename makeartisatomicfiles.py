@@ -123,8 +123,6 @@ def clear_files(args):
 
 
 def process_files(args):
-    global flog
-
     # for hillierelname in ('IRON',):
     #    d = './hillieratomic/' + hillierelname
 
@@ -195,7 +193,7 @@ def process_files(args):
                          transitions[i], transition_count_of_level_name[i],
                          hillier_level_ids_matching_term) = read_hillier_levels_and_transitions(
                              hillier_ion_folder + osc_file,
-                             hillier_row_format_energy_level[(atomic_number, ion_stage)], i)
+                             hillier_row_format_energy_level[(atomic_number, ion_stage)], i, flog)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
@@ -221,7 +219,7 @@ def process_files(args):
                          hillier_level_ids_matching_term) = \
                             read_hillier_levels_and_transitions(
                                 hillier_ion_folder + osc_file,
-                                hillier_row_format_energy_level[(atomic_number, ion_stage)], i)
+                                hillier_row_format_energy_level[(atomic_number, ion_stage)], i, flog)
 
                     if i < len(listions) - 1:  # don't get cross sections for top ion
                         path_nahar_px_file = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(
@@ -233,7 +231,7 @@ def process_files(args):
                     (energy_levels[i], transitions[i], photoionization_crosssections[i]) = combine_hillier_nahar(
                         i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
-                        nahar_phixs_tables[i], upsilondicts[i], args)
+                        nahar_phixs_tables[i], upsilondicts[i], args, flog)
 
                     # Alternatively use Hillier phixs tables, but BEWARE this
                     # probably doesn't work anymore since the code has changed a lot
@@ -246,7 +244,7 @@ def process_files(args):
                            photoionization_targetfractions, photoionization_crosssections, args)
 
 
-def read_hillier_levels_and_transitions(path_hillier_osc_file, hillier_row_format_energy_level, i):
+def read_hillier_levels_and_transitions(path_hillier_osc_file, hillier_row_format_energy_level, i, flog):
     hillier_energy_level_row = namedtuple(
         'energylevel', hillier_row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
     hillier_transition_row = namedtuple(
@@ -348,7 +346,7 @@ def read_hillier_levels_and_transitions(path_hillier_osc_file, hillier_row_forma
 
 def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                           nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables, upsilondict,
-                          args):
+                          args, flog):
     # hillier_energy_levels[i] = ['IGNORE'] #TESTING only
     # hillier_level_ids_matching_term[i] = {} #TESTING only
     added_nahar_levels = []
@@ -934,7 +932,6 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                        nahar_core_states, nahar_configurations,
                        photoionization_targetfractions,
                        photoionization_crosssections, args):
-    global flog
     atomic_number, listions = listelements[elementindex]
     upsilon_transition_row = namedtuple('transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
@@ -1002,22 +999,22 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
         transitions[i].sort(key=lambda x: (getattr(x, 'lowerlevel', -99), getattr(x, 'upperlevel', -99)))
 
         with open(os.path.join(args.output_folder, 'adata.txt'), 'a') as fatommodels:
-            write_adata(fatommodels, atomic_number, ion_stage, energy_levels[i], ionization_energies[i], transition_count_of_level_name[i], args)
+            write_adata(fatommodels, atomic_number, ion_stage, energy_levels[i], ionization_energies[i], transition_count_of_level_name[i], args, flog)
 
         with open(os.path.join(args.output_folder, 'transitiondata.txt'), 'a') as ftransitiondata, \
                 open(os.path.join(args.output_folder_transition_guide, 'transitions_{}.txt'.format(elsymbols[atomic_number])), 'a') as ftransitionguide:
-            write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args)
+            write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args, flog)
 
         if i < len(listions) - 1 and not args.nophixs:  # ignore the top ion
             if len(photoionization_targetfractions[i]) < 1:
                 photoionization_targetfractions[i] = readnahardata.get_nahar_targetfractions(i, energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations, flog)
             with open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'a') as fphixs:
-                write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args)
+                write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args, flog)
 
         flog.close()
 
 
-def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args):
+def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args, flog):
     log_and_print(flog, "writing to 'adata.txt'")
     fatommodels.write('{0:12d}{1:12d}{2:12d}{3:15.7f}\n'.format(
         atomic_number, ion_stage,
@@ -1066,7 +1063,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
 
 def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels,
-                          transitions, upsilondict, args):
+                          transitions, upsilondict, args, flog):
     log_and_print(flog, "writing to 'transitiondata.txt'")
 
     num_forbidden_transitions = 0
@@ -1122,7 +1119,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
 
 
 def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
-                     photoionization_crosssections, photoionization_targetfractions, args):
+                     photoionization_crosssections, photoionization_targetfractions, args, flog):
     log_and_print(flog, "writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(args.optimaltemperature))
 

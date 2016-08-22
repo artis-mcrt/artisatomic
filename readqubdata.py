@@ -13,6 +13,7 @@ hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 
+
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     qub_energy_level_row = namedtuple(
         'energylevel', 'levelname qub_id twosplusone l j energyabovegsinpercm g parity')

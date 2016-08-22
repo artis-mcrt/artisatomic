@@ -232,7 +232,7 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
         if not upper_level_ids_of_core_state_id[core_state_id]:
             # go find matching levels if they haven't been found yet
             nahar_core_state = nahar_core_states[core_state_id]
-            nahar_core_state_reduced_configuration = reduce_configuration(
+            nahar_core_state_reduced_configuration = artisatomic.reduce_configuration(
                 nahar_core_state.configuration + '_' + nahar_core_state.term)
             core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
             flog.write("\nMatching core state {0} '{1}_{2}' E={3:0.3f} eV to:\n".format(
@@ -248,7 +248,7 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
                     upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
                 energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
 
-                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
+                if artisatomic.reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
                     ediff = energyev - core_state_energy_ev
                     upperlevelconfignoj = upperlevelconfig.split('[')[0]
                     if upperlevelconfignoj not in candidate_upper_levels:
