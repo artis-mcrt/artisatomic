@@ -46,7 +46,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     energylevel.twosplusone, lchars[energylevel.l],
                     ['e', 'o'][energylevel.parity], int(2 * energylevel.j), energylevel.qub_id)
 
-                g = energylevel.twosplusone * (2 * energylevel.l + 1)
+                g = (2 * energylevel.j + 1)
                 energylevel = energylevel._replace(
                     g=g, parity=parity, levelname=levelname)
                 qub_energylevels.append(energylevel)
