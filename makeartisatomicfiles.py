@@ -158,29 +158,29 @@ def process_files(args):
             hillier_ion_folder = ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] +
                                   '/' + roman_numerals[ion_stage] + '/')
 
-            if atomic_number == 26:
-                upsilondatafilenames = {}  # {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
-                if ion_stage in upsilondatafilenames:
-                    upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
-                                                names=["Z", "ion_stage", "lower", "upper", "upsilon"],
-                                                index_col=False, header=None, sep=" ")
-                    if len(upsilondatadf) > 0:
-                        for _, row in upsilondatadf.iterrows():
-                            lower = int(row['lower'])
-                            upper = int(row['upper'])
-                            if upper <= lower:
-                                print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
-                            else:
-                                if (lower, upper) not in upsilondicts[i]:
-                                    upsilondicts[i][(lower, upper)] = row['upsilon']
+            with open(logfilepath, 'w') as flog:
+                log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
+                
+                if atomic_number == 26:
+                    upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
+                    if ion_stage in upsilondatafilenames:
+                        upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
+                                                    names=["Z", "ion_stage", "lower", "upper", "upsilon"],
+                                                    index_col=False, header=None, sep=" ")
+                        if len(upsilondatadf) > 0:
+                            for _, row in upsilondatadf.iterrows():
+                                lower = int(row['lower'])
+                                upper = int(row['upper'])
+                                if upper <= lower:
+                                    print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
                                 else:
-                                    log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
-                                        lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
+                                    if (lower, upper) not in upsilondicts[i]:
+                                        upsilondicts[i][(lower, upper)] = row['upsilon']
+                                    else:
+                                        log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                                            lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
-            if atomic_number == 27:
-                with open(logfilepath, 'w') as flog:
-                    log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
-
+                if atomic_number == 27:
                     if ion_stage in [3, 4]:
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
@@ -198,10 +198,7 @@ def process_files(args):
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
 
-            else:
-                with open(logfilepath, 'w') as flog:
-                    log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
-
+                else:
                     path_nahar_energy_file = 'atomic-data-nahar/{0}{1:d}.en.ls.txt'.format(
                         elsymbols[atomic_number].lower(), ion_stage)
 
@@ -1034,9 +1031,9 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
             if hlevelname in hillier_name_replacements:
                 # hlevelname += ' replaced by {0}'.format(hillier_name_replacements[hlevelname])
                 hlevelname = hillier_name_replacements[hlevelname]
-            level_comment = hlevelname.ljust(30)
+            level_comment = hlevelname.ljust(27)
         except AttributeError:
-            level_comment = " " * 30
+            level_comment = " " * 27
 
         try:
             if energylevel.indexinsymmetry >= 0:
@@ -1053,9 +1050,9 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
                 except AttributeError:
                     level_comment += ' (no config)'
         except AttributeError:
-            pass
+            level_comment = level_comment.rstrip()
 
-        fatommodels.write('{:7d}{:25.16f}{:25.16f}{:7d}     {:}\n'.format(
+        fatommodels.write('{0:5d} {1:19.16f} {2:7.3f} {3:4d} {4:}\n'.format(
             levelid, hc_in_ev_cm * float(energylevel.energyabovegsinpercm),
             float(energylevel.g), transitioncount, level_comment))
 
@@ -1068,11 +1065,10 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
 
     num_forbidden_transitions = 0
     num_collision_strengths_applied = 0
-    ftransitiondata.write('{0:7d}{1:7d}{2:12d}\n'.format(
-        atomic_number, ion_stage, len(transitions)))
+    ftransitiondata.write('{0:7d}{1:7d}{2:12d}\n'.format(atomic_number, ion_stage, len(transitions)))
 
     level_ids_with_permitted_down_transitions = set()
-    for transitionid, transition in enumerate(transitions):
+    for transition in transitions:
         levelid_lower = transition.lowerlevel
         levelid_upper = transition.upperlevel
         forbidden = (energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity)
@@ -1080,7 +1076,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
         if not forbidden:
             level_ids_with_permitted_down_transitions.add(levelid_upper)
 
-    for transitionid, transition in enumerate(transitions):
+    for transition in transitions:
         levelid_lower = transition.lowerlevel
         levelid_upper = transition.upperlevel
         coll_str = transition.coll_str
@@ -1108,12 +1104,11 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
                 energy_levels[levelid_upper].energyabovegsinpercm),
             levelid_upper in level_ids_with_permitted_down_transitions))
 
-        ftransitiondata.write(
-            '{0:9d}{1:6d}{2:6d}{3:18.10E} {4:9.2e} {5:d}\n'.format(
-                transitionid + 1, levelid_lower, levelid_upper,
-                float(transition.A), coll_str, forbidden))
+        ftransitiondata.write('{0:4d} {1:4d} {2:16.10E} {3:9.2e} {4:d}\n'.format(
+            levelid_lower, levelid_upper, float(transition.A), coll_str, forbidden))
 
     ftransitiondata.write('\n')
+
     log_and_print(flog, 'Wrote out {0:d} transitions, of which {1:d} are forbidden and {2:d} had collision strengths'.format(
         len(transitions), num_forbidden_transitions, num_collision_strengths_applied))
 
