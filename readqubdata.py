@@ -114,11 +114,28 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             target_scalefactors = np.zeros(ntargets + 1)
             for upperlevelid in reduced_phixs_dict:
                 # take the ratio of cross sections at the threshold energyies
-                target_scalefactors[upperlevelid] = reduced_phixs_dict[upperlevelid][0] / reduced_phixs_dict[1][0]
-            targetfractions = target_scalefactors / sum(target_scalefactors)
+                # target_scalefactor = reduced_phixs_dict[upperlevelid][0] / reduced_phixs_dict[1][0]
+                target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
 
-            photoionization_targetfractions[lowerlevelid] = [(upperlevelid, targetfractions[upperlevelid]) for upperlevelid in range(1, ntargets + 1)]
-            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[1] / targetfractions[1]
+            scalefactorsum = sum(target_scalefactors)
+            photoionization_targetfractions[lowerlevelid] = []
+            targetfractiontogroundstate = 0.
+            lost_fraction = 0.
+            max_fraction = 0.
+            upperlevelid_withmaxfraction = 1
+            for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
+                target_fraction = target_scalefactor / scalefactorsum
+                if upperlevelid == 1:
+                    targetfractiontogroundstate = target_fraction
+                if target_fraction > max_fraction:
+                    upperlevelid_withmaxfraction = upperlevelid
+                    max_fraction = target_fraction
+                if target_fraction > 0.005:
+                    photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
+                else:
+                    lost_fraction += target_fraction
+
+            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / targetfractiontogroundstate / (1 - lost_fraction)
 
     if atomic_number == 27 and ion_stage == 3:
         for lowerlevelid in range(1, len(energy_levels)):
