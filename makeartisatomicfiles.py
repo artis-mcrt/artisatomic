@@ -506,7 +506,7 @@ def reduce_phixs_tables(dicttables, args):
     h_over_kb_in_K_sec = (const.h / const.k_B).to('K s').value
 
     # proportional to recombination rate
-    nu0 = 1e13
+    # nu0 = 1e13
     # fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
 
     def integrand(nu):
@@ -542,7 +542,7 @@ def reduce_phixs_tables(dicttables, args):
             if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow)/enlow) > 1e-20:
                 if i == 0:
                     print('adding first point {0:.4e} {1:.4e} {2:.4e}'.format(enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow)/enlow)))
-                if (enlow <= tablein[-1][0]):
+                if enlow <= tablein[-1][0]:
                     new_crosssection = sigma_interp(enlow)
                     if new_crosssection < 0:
                         print('negative extrap')
@@ -551,7 +551,7 @@ def reduce_phixs_tables(dicttables, args):
                 samples_in_interval = np.vstack([[enlow, new_crosssection], samples_in_interval])
 
             if len(samples_in_interval) == 0 or ((enhigh - samples_in_interval[-1, 0])/samples_in_interval[-1, 0]) > 1e-20:
-                if (enhigh <= tablein[-1][0]):
+                if enhigh <= tablein[-1][0]:
                     new_crosssection = sigma_interp(enhigh)
                     if new_crosssection < 0:
                         print('negative extrap')
