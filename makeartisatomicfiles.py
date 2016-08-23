@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 from collections import namedtuple, defaultdict
+import itertools
 import os
 import sys
 import math
+import multiprocessing as mp
 import argparse
 
 from astropy import constants as const
@@ -161,24 +163,23 @@ def process_files(args):
             with open(logfilepath, 'w') as flog:
                 log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
 
-                if atomic_number == 26:
-                    upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
-                    if ion_stage in upsilondatafilenames:
-                        upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
-                                                    names=["Z", "ion_stage", "lower", "upper", "upsilon"],
-                                                    index_col=False, header=None, sep=" ")
-                        if len(upsilondatadf) > 0:
-                            for _, row in upsilondatadf.iterrows():
-                                lower = int(row['lower'])
-                                upper = int(row['upper'])
-                                if upper <= lower:
-                                    print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
+                upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
+                if atomic_number == 26 and ion_stage in upsilondatafilenames:
+                    upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
+                                                names=["Z", "ion_stage", "lower", "upper", "upsilon"],
+                                                index_col=False, header=None, sep=" ")
+                    if len(upsilondatadf) > 0:
+                        for _, row in upsilondatadf.iterrows():
+                            lower = int(row['lower'])
+                            upper = int(row['upper'])
+                            if upper <= lower:
+                                print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
+                            else:
+                                if (lower, upper) not in upsilondicts[i]:
+                                    upsilondicts[i][(lower, upper)] = row['upsilon']
                                 else:
-                                    if (lower, upper) not in upsilondicts[i]:
-                                        upsilondicts[i][(lower, upper)] = row['upsilon']
-                                    else:
-                                        log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
-                                            lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
+                                    log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                                        lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
                 if atomic_number == 27:
                     if ion_stage in [3, 4]:
@@ -460,25 +461,27 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
     print('Sorting level list...')
     energy_levels.sort(key=lambda x: float(getattr(x, 'energyabovegsinpercm', '-inf')))
 
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this probably gets overwritten anyway
+    if len(nahar_phixs_tables.keys()) > 0:
+        photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this probably gets overwritten anyway
 
-    if not args.nophixs:
-        print('Processing phixs tables...')
-        # process the phixs tables and attach them to any matching levels in the output list
-        reduced_phixs_list = reduce_phixs_tables(nahar_phixs_tables, args)
-        for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_list.items():
-            foundamatch = False
-            for levelid, energylevel in enumerate(energy_levels[1:], 1):
-                if (int(energylevel.twosplusone) == twosplusone and
-                        int(energylevel.l) == l and
-                        int(energylevel.parity) == parity and
-                        int(energylevel.indexinsymmetry) == indexinsymmetry):
-                    photoionization_crosssections[levelid] = phixstable
-                    foundamatch = True  # there could be more than one match, but this flags there being at least one
+        if not args.nophixs:
+            # process the phixs tables and attach them to any matching levels in the output list
 
-            if not foundamatch:
-                log_and_print(flog, "No Hillier or Nahar state to match with photoionization crosssection of {0:d}{1}{2} index {3:d}".format(
-                    twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
+            reduced_phixs_list = reduce_phixs_tables(nahar_phixs_tables, args)
+
+            for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_list.items():
+                foundamatch = False
+                for levelid, energylevel in enumerate(energy_levels[1:], 1):
+                    if (int(energylevel.twosplusone) == twosplusone and
+                            int(energylevel.l) == l and
+                            int(energylevel.parity) == parity and
+                            int(energylevel.indexinsymmetry) == indexinsymmetry):
+                        photoionization_crosssections[levelid] = phixstable
+                        foundamatch = True  # there could be more than one match, but this flags there being at least one
+
+                if not foundamatch:
+                    log_and_print(flog, "No Hillier or Nahar state to match with photoionization crosssection of {0:d}{1}{2} index {3:d}".format(
+                        twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry))
 
     return energy_levels, hillier_transitions, photoionization_crosssections
 
@@ -496,10 +499,39 @@ def isfloat(value):
         return False
 
 
+# split a list into evenly sized chunks
+def chunks(listin, chunk_size):
+    return [listin[i:i + chunk_size] for i in range(0, len(listin), chunk_size)]
+
+
+def reduce_phixs_tables(dicttables, args):
+    out_q = mp.Queue()
+    procs = []
+
+    print("Processing {0:d} phixs tables".format(len(dicttables.keys())))
+    nprocs = os.cpu_count()
+    keylist = dicttables.keys()
+    for procnum in range(nprocs):
+        dicttablesslice = itertools.islice(dicttables.items(), procnum, len(keylist), nprocs)
+        procs.append(mp.Process(target=reduce_phixs_tables_worker, args=(dicttablesslice, args, out_q)))
+        procs[-1].start()
+
+    dictout = {}
+    for procnum in range(len(procs)):
+        subdict = out_q.get()
+        dictout.update(subdict)
+        print("Process {:} returned {:d} items".format(procnum, len(subdict.keys())))
+
+    for proc in procs:
+        proc.join()
+
+    return dictout
+
+
 # this method downsamples the photoionization cross section table to a
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
-def reduce_phixs_tables(dicttables, args):
+def reduce_phixs_tables_worker(dicttables, args, out_q):
     dictout = {}
 
     ryd_to_hz = (u.rydberg / const.h).to('Hz').value
@@ -522,10 +554,12 @@ def reduce_phixs_tables(dicttables, args):
                         1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
                         num=args.nphixspoints + 1, endpoint=False)
 
-    for key, tablein in dicttables.items():
+    # for key in keylist:
+        # tablein = dicttables[key]
+    for key, tablein in dicttables:
         # tablein is an array of pairs (energy, phixs cross section)
 
-        nu0 = tablein[0][0] * ryd_to_hz
+        # nu0 = tablein[0][0] * ryd_to_hz
 
         arr_sigma_out = np.empty(args.nphixspoints)
         # x is nu/nu_edge
@@ -602,7 +636,8 @@ def reduce_phixs_tables(dicttables, args):
 
         dictout[key] = arr_sigma_out  # output a 1D list of cross sections
 
-    return dictout
+    # return dictout
+    out_q.put(dictout)
 
 
 def check_forbidden(levela, levelb):
