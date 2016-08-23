@@ -44,7 +44,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
                 levelname = energylevel.levelname + '_{0:d}{1:}{2:}[{3:d}/2]_id={4:}'.format(
                     energylevel.twosplusone, lchars[energylevel.l],
-                    ['e', 'o'][energylevel.parity], int(2 * energylevel.j), energylevel.qub_id)
+                    ['e', 'o'][parity], int(2 * energylevel.j), energylevel.qub_id)
 
                 g = (2 * energylevel.j + 1)
                 energylevel = energylevel._replace(
@@ -61,7 +61,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             for _, row in qubupsilondf_alltemps.iterrows():
                 lower = int(row['lower'])
                 upper = int(row['upper'])
-                upsilon = float(row['upsT=5.01+03'].replace('-', 'E').replace('+', 'E'))
+                upsilon = float(row['upsT=5.01+03'].replace('-', 'E-').replace('+', 'E+'))
                 if (lower, upper) not in upsilondict:
                     upsilondict[(lower, upper)] = upsilon
                 else:
