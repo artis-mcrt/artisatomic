@@ -114,28 +114,22 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             target_scalefactors = np.zeros(ntargets + 1)
             for upperlevelid in reduced_phixs_dict:
                 # take the ratio of cross sections at the threshold energyies
-                # target_scalefactor = reduced_phixs_dict[upperlevelid][0] / reduced_phixs_dict[1][0]
-                target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
+                target_scalefactors[upperlevelid] = reduced_phixs_dict[upperlevelid][0]
+                # target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
 
             scalefactorsum = sum(target_scalefactors)
             photoionization_targetfractions[lowerlevelid] = []
-            targetfractiontogroundstate = 0.
-            lost_fraction = 0.
             max_fraction = 0.
             upperlevelid_withmaxfraction = 1
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
                 target_fraction = target_scalefactor / scalefactorsum
-                if upperlevelid == 1:
-                    targetfractiontogroundstate = target_fraction
                 if target_fraction > max_fraction:
                     upperlevelid_withmaxfraction = upperlevelid
                     max_fraction = target_fraction
-                if target_fraction > 0.005:
+                if target_fraction > 0.001:
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
-                else:
-                    lost_fraction += target_fraction
 
-            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / targetfractiontogroundstate / (1 - lost_fraction)
+            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
 
     if atomic_number == 27 and ion_stage == 3:
         for lowerlevelid in range(1, len(energy_levels)):
@@ -144,4 +138,3 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                 photoionization_crosssections[lowerlevelid] = np.array([9.3380692, 7.015829602, 5.403975231, 4.250372872, 3.403086443, 2.766835319, 2.279802051, 1.900685772, 1.601177846, 1.361433037, 1.16725865, 1.008321909, 0.8769787, 0.76749151, 0.675496904, 0.597636429, 0.531296609, 0.474423066, 0.425385805, 0.382880364, 0.345854415, 0.313452694, 0.284975256, 0.259845541, 0.237585722, 0.217797532, 0.200147231, 0.184353724, 0.17017913, 0.157421217, 0.145907331, 0.135489462, 0.126040239, 0.117449648, 0.109622338, 0.102475382, 0.095936439, 0.089942202, 0.084437113, 0.079372279, 0.074704554, 0.070395769, 0.066412076, 0.062723384, 0.059302883, 0.056126637, 0.053173226, 0.050423446, 0.047860046, 0.045467498, 0.043231802, 0.041140312, 0.039181587, 0.037345256, 0.035621907, 0.034002983, 0.032480693, 0.031047932, 0.029698215, 0.028425611, 0.027224692, 0.026090478, 0.025018404, 0.02400427, 0.023044216, 0.022134683, 0.021272391, 0.020454314, 0.019677652, 0.018939819, 0.018238416, 0.017571225, 0.016936183, 0.016331377, 0.01575503, 0.015205486, 0.014681206, 0.014180754, 0.013702792, 0.013246071, 0.012809423, 0.012391758, 0.011992055, 0.011609359, 0.011242775, 0.010891464, 0.010554639, 0.010231561, 0.009921535, 0.009623909, 0.009338069, 0.009063438, 0.008799471, 0.008545656, 0.00830151, 0.008066575, 0.007840423, 0.007622646, 0.00741286, 0.007210703])
 
     return photoionization_crosssections, photoionization_targetfractions
-
