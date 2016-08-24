@@ -172,14 +172,16 @@ def process_files(args):
                         for _, row in upsilondatadf.iterrows():
                             lower = int(row['lower'])
                             upper = int(row['upper'])
-                            if upper <= lower:
-                                print("Problem in {0}, lower {1} upper {2}. Skipping".format(upsilondatafilenames[ion_stage], lower, upper))
+                            if upper < lower:
+                                print("Problem in {0}, lower {1} upper {2}. Swapping lower and upper".format(upsilondatafilenames[ion_stage], lower, upper))
+                                old_lower = lower
+                                lower = upper
+                                upper = old_lower
+                            if (lower, upper) not in upsilondicts[i]:
+                                upsilondicts[i][(lower, upper)] = row['upsilon']
                             else:
-                                if (lower, upper) not in upsilondicts[i]:
-                                    upsilondicts[i][(lower, upper)] = row['upsilon']
-                                else:
-                                    log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
-                                        lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
+                                log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
+                                    lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
                 if atomic_number == 27:
                     if ion_stage in [3, 4]:
