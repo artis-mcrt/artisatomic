@@ -176,7 +176,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations)
 
 
-def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage, args):
+def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     nahar_phixs_tables = {}
     with open(path_nahar_px_file, 'r') as fenlist:
         while True:
@@ -225,7 +225,9 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage, arg
 
 def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states,
                                     nahar_configurations_upperion, upper_level_ids_of_core_state_id, flog):
-
+    """
+        Returns a list of upper level id numbers for a given energy level's photoionisation processes
+    """
     core_state_id = int(energy_level.corestateid)
     if core_state_id > 0 and core_state_id < len(nahar_core_states):
 
@@ -272,7 +274,7 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
             # after matching process, still no upper levels matched!
             if not upper_level_ids_of_core_state_id[core_state_id]:
                 upper_level_ids_of_core_state_id[core_state_id] = [1]
-                log_and_print(flog, "No upper levels matched. Defaulting to level 1 (reduced string: '{3}')".format(
+                artisatomic.log_and_print(flog, "No upper levels matched. Defaulting to level 1 (reduced string: '{3}')".format(
                     nahar_core_state_reduced_configuration))
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]

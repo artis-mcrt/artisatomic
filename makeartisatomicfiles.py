@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from collections import namedtuple, defaultdict
+from collections import namedtuple
 import itertools
 import os
 import sys
@@ -16,6 +16,7 @@ from scipy import interpolate
 from manual_matches import nahar_configuration_replacements, hillier_name_replacements
 import readnahardata
 import readqubdata
+import readhillierdata
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
@@ -25,46 +26,11 @@ roman_numerals = (
     'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'
 )
 
-elsymboltohilliercode = {
-    'H': 'HYD', 'He': 'HE', 'C': 'CARB', 'N': 'NIT',
-    'O': 'OXY', 'F': 'FLU', 'Ne': 'NEON', 'Na': 'SOD',
-    'Mg': 'MG', 'Al': 'ALUM', 'Si': 'SIL', 'P': 'PHOS',
-    'S': 'SUL', 'Cl': 'CHL', 'Ar': 'ARG', 'K': 'POT',
-    'Ca': 'CAL', 'Sc': 'SCAN', 'Ti': 'TIT', 'V': 'VAN',
-    'Cr': 'CHRO', 'Mn': 'MAN', 'Fe': 'FE', 'Co': 'COB',
-    'Ni': 'NICK'
-}
-
-
-# need to also include collision strengths from e.g., o2col.dat
-
-path_hillier_osc_file = {
-    (8, 1): '20sep11/oi_osc_mchf',
-    (8, 2): '23mar05/o2osc_fin.dat',
-    (8, 3): '15mar08/oiiiosc',
-    (26, 1): '29apr04/fei_osc',
-    (26, 2): '16nov98/fe2osc_nahar_kurucz.dat',
-    (26, 3): '30oct12/FeIII_OSC',
-    (26, 4): '18oct00/feiv_osc_rev2.dat',
-    (26, 5): '18oct00/fev_osc.dat',
-    (27, 2): '15nov11/fin_osc_bound',
-}
-
-hillier_row_format_energy_level = {
-    (8, 1): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
-    (8, 2): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (8, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 1): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 2): 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid',
-    (26, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
-    (26, 4): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 5): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (27, 2): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-}
-
-listelements = [  # (8, [1, 2, 3]),
-  (26, [1, 2, 3, 4, 5]),
-  (27, [2, 3, 4])
+listelements = [
+    (8, [1, 2, 3]),
+    (26, [1, 2, 3, 4, 5]),
+    (27, [2, 3, 4]),
+    # (28, [1, 2]),
 ]
 
 ryd_to_ev = u.rydberg.to('eV')
@@ -72,11 +38,6 @@ ryd_to_ev = u.rydberg.to('eV')
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
-
-# hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
-# hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
-
-atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltohilliercode.items()}
 
 
 def main():
@@ -157,15 +118,16 @@ def process_files(args):
         for i, ion_stage in enumerate(listions):
             logfilepath = os.path.join(args.output_folder, args.output_folder_logs,
                                        '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage))
-            hillier_ion_folder = ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] +
-                                  '/' + roman_numerals[ion_stage] + '/')
-
             with open(logfilepath, 'w') as flog:
-                log_and_print(flog, '==============> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
+                log_and_print(flog, '\n==============> {0} {1}:'.format(elsymbols[atomic_number],
+                                                                        roman_numerals[ion_stage]))
 
-                upsilondatafilenames = {2: 'fe_ii_upsilon-data.txt', 3: 'fe_iii_upsilon-data.txt'}
-                if atomic_number == 26 and ion_stage in upsilondatafilenames:
-                    upsilondatadf = pd.read_csv(os.path.join('atomic-data-tiptopbase', upsilondatafilenames[ion_stage]),
+                upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
+                if (atomic_number, ion_stage) in upsilondatafilenames:
+                    upsilonfilename = os.path.join('atomic-data-tiptopbase',
+                                                   upsilondatafilenames[(atomic_number, ion_stage)])
+                    log_and_print(flog, 'Reading effective collision strengths from ' + upsilonfilename)
+                    upsilondatadf = pd.read_csv(upsilonfilename,
                                                 names=["Z", "ion_stage", "lower", "upper", "upsilon"],
                                                 index_col=False, header=None, sep=" ")
                     if len(upsilondatadf) > 0:
@@ -173,7 +135,8 @@ def process_files(args):
                             lower = int(row['lower'])
                             upper = int(row['upper'])
                             if upper < lower:
-                                print("Problem in {0}, lower {1} upper {2}. Swapping lower and upper".format(upsilondatafilenames[ion_stage], lower, upper))
+                                print("Problem in {0}, lower {1} upper {2}. Swapping lower and upper".format(
+                                    upsilondatafilenames[(atomic_number, ion_stage)], lower, upper))
                                 old_lower = lower
                                 lower = upper
                                 upper = old_lower
@@ -189,14 +152,13 @@ def process_files(args):
                          transitions[i], transition_count_of_level_name[i],
                          upsilondicts[i]) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
                     else:
-                        osc_file = path_hillier_osc_file[(atomic_number, ion_stage)]
-                        print('Reading ' + hillier_ion_folder + osc_file)
-
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
-                         hillier_level_ids_matching_term) = read_hillier_levels_and_transitions(
-                             hillier_ion_folder + osc_file,
-                             hillier_row_format_energy_level[(atomic_number, ion_stage)], i, flog)
+                         hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
+                             atomic_number, ion_stage, flog)
+
+                        if ion_stage == 2:
+                            upsilondicts[i] = read_storey_2016_upsilondata(flog)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
@@ -209,34 +171,30 @@ def process_files(args):
                      nahar_level_index_of_state, nahar_configurations[i]) = readnahardata.read_nahar_energy_level_file(
                          path_nahar_energy_file, atomic_number, i, ion_stage, flog)
 
-                    if (atomic_number, ion_stage) in path_hillier_osc_file:
-                        osc_file = path_hillier_osc_file[(atomic_number, ion_stage)]
-                        log_and_print(flog, 'Reading ' + hillier_ion_folder + osc_file)
+                    if (atomic_number, ion_stage) in readhillierdata.path_hillier_osc_file:
 
                         (ionization_energy_ev[i], hillier_energy_levels,
                          hillier_transitions,
                          transition_count_of_level_name[i],
                          hillier_level_ids_matching_term) = \
-                            read_hillier_levels_and_transitions(
-                                hillier_ion_folder + osc_file,
-                                hillier_row_format_energy_level[(atomic_number, ion_stage)], i, flog)
+                            readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                     if i < len(listions) - 1:  # don't get cross sections for top ion
                         path_nahar_px_file = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(
                             elsymbols[atomic_number].lower(), ion_stage)
 
                         log_and_print(flog, 'Reading ' + path_nahar_px_file)
-                        nahar_phixs_tables[i] = readnahardata.read_nahar_phixs_tables(path_nahar_px_file, atomic_number, i, ion_stage, args)
+                        nahar_phixs_tables[i] = readnahardata.read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args)
 
                     (energy_levels[i], transitions[i], photoionization_crosssections[i]) = combine_hillier_nahar(
                         i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
-                        nahar_phixs_tables[i], upsilondicts[i], args, flog)
+                        nahar_phixs_tables[i], args, flog)
 
                     # Alternatively use Hillier phixs tables, but BEWARE this
                     # probably doesn't work anymore since the code has changed a lot
                     # print('Reading ' + hillier_ion_folder + path_hillier_phixs_file[(atomic_number, ion_stage)])
-                    # read_hillier_phixs_tables(hillier_ion_folder,path_hillier_phixs_file[(atomic_number, ion_stage)])
+                    # read_hillier_phixs_tables(hillier_ion_folder, path_hillier_phixs_file[(atomic_number, ion_stage)], atomic_number, ion_stage)
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
@@ -244,108 +202,38 @@ def process_files(args):
                            photoionization_targetfractions, photoionization_crosssections, args)
 
 
-def read_hillier_levels_and_transitions(path_hillier_osc_file, hillier_row_format_energy_level, i, flog):
-    hillier_energy_level_row = namedtuple(
-        'energylevel', hillier_row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
-    hillier_transition_row = namedtuple(
-        'transition', 'namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str')
-    hillier_energy_levels = ['IGNORE']
-    hillier_level_ids_matching_term = defaultdict(list)
-    transition_count_of_level_name = defaultdict(int)
-    hillier_ionization_energy_ev = 0.0
-    transitions = []
+def read_storey_2016_upsilondata(flog):
+    upsilondict = {}
 
-    if os.path.isfile(path_hillier_osc_file):
-        with open(path_hillier_osc_file, 'r') as fhillierosc:
-            for line in fhillierosc:
+    filename = 'atomic-data-storey/storetetal2016-co-ii.txt'
+    log_and_print(flog, 'Reading effective collision strengths from ' + filename)
+
+    with open(filename, 'r') as fstoreydata:
+        found_tablestart = False
+        while True:
+            line = fstoreydata.readline()
+            if not line:
+                break
+
+            if found_tablestart:
                 row = line.split()
 
-                # check for right number of columns and that are all numbers except first column
-                if len(row) == len(hillier_row_format_energy_level.split()) and all(map(isfloat, row[1:])):
-                    hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '', -1)
-
-                    hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip('-'))
-                    levelname = hillier_energy_level.levelname
-                    if levelname not in hillier_name_replacements:
-                        (twosplusone, l, parity) = get_term_as_tuple(levelname)
-                    else:
-                        (twosplusone, l, parity) = get_term_as_tuple(hillier_name_replacements[levelname])
-
-                    hillier_energy_level = hillier_energy_level._replace(
-                        hillierlevelid=hillierlevelid,
-                        energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm),
-                        g=float(hillier_energy_level.g),
-                        twosplusone=twosplusone,
-                        l=l,
-                        parity=parity
-                    )
-
-                    hillier_energy_levels.append(hillier_energy_level)
-
-                    if twosplusone == -1:
-                        # -1 indicates that the term could not be interpreted
-                        if parity == -1:
-                            log_and_print(flog, "Can't find LS term in Hillier level name '" + levelname + "'")
-                        # else:
-                            # log_and_print(flog, "Can't find LS term in Hillier level name '{0:}' (parity is {1:})".format(levelname, parity))
-                    else:
-                        if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                            hillier_level_ids_matching_term[(twosplusone, l, parity)].append(hillierlevelid)
-
-                    # if this is the ground state
-                    if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
-                        hillier_ionization_energy_ev = hc_in_ev_angstrom / \
-                            float(hillier_energy_levels[-1].lambdaangstrom)
-
-                    if hillierlevelid != len(hillier_energy_levels) - 1:
-                        print('Hillier levels mismatch: id {0:d} found at entry number {1:d}'.format(
-                            len(hillier_energy_levels) - 1, hillierlevelid))
-                        sys.exit()
-
-                if line.startswith('                        Oscillator strengths'):
+                if len(row) > 5:
+                    lower = int(row[0])
+                    upper = int(row[1])
+                    upsilon = float(row[11])
+                    upsilondict[(lower, upper)] = upsilon
+                else:
                     break
 
-            # defined_transition_ids = []
-            for line in fhillierosc:
-                if line.startswith('                        Oscillator strengths'):
-                    break
-                linesplitdash = line.split('-')
-                row = (linesplitdash[0] + ' ' + '-'.join(linesplitdash[1:-1]) +
-                       ' ' + linesplitdash[-1]).split()
+            if line.startswith('--	--	------	------	------	------	------	------	------	------	------	------	------	------	------'):
+                found_tablestart = True
 
-                if len(row) == 8 and all(map(isfloat, row[2:4])):
-                    transition = hillier_transition_row(row[0], row[1],
-                                                        float(row[2]),  # f
-                                                        float(row[3]),  # A
-                                                        float(row[4]),  # lambda
-                                                        int(row[5]),  # i
-                                                        int(row[6]),  # j
-                                                        int(row[7]),  # hilliertransitionid
-                                                        -1,  # lowerlevel
-                                                        -1,  # upperlevel
-                                                        -99)  # coll_str
-
-                    if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
-                        #                    defined_transition_ids.append(int(transition.hilliertransitionid))
-                        transitions.append(transition)
-                        transition_count_of_level_name[transition.namefrom] += 1
-                        transition_count_of_level_name[transition.nameto] += 1
-
-                        if int(transition.hilliertransitionid) != len(transitions):
-                            print(path_hillier_osc_file + ', WARNING: Transition id {0:d} found at entry number {1:d}'.format(
-                                int(transition.hilliertransitionid), len(transitions)))
-                            sys.exit()
-                    else:
-                        log_and_print(flog, 'FATAL: multiply-defined Hillier transition: {0} {1}'
-                                      .format(transition.namefrom, transition.nameto))
-                        sys.exit()
-        log_and_print(flog, 'Read {:d} transitions'.format(len(transitions)))
-
-    return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
+    return upsilondict
 
 
 def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
-                          nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables, upsilondict,
+                          nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables,
                           args, flog):
     # hillier_energy_levels[i] = ['IGNORE'] #TESTING only
     # hillier_level_ids_matching_term[i] = {} #TESTING only
@@ -522,7 +410,7 @@ def reduce_phixs_tables(dicttables, args):
     for procnum in range(len(procs)):
         subdict = out_q.get()
         dictout.update(subdict)
-        print("Process {:} returned {:d} items".format(procnum, len(subdict.keys())))
+        # print("a process returned {:d} items".format(len(subdict.keys())))
 
     for proc in procs:
         proc.join()
@@ -557,7 +445,7 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
                         num=args.nphixspoints + 1, endpoint=False)
 
     # for key in keylist:
-        # tablein = dicttables[key]
+    #   tablein = dicttables[key]
     for key, tablein in dicttables:
         # tablein is an array of pairs (energy, phixs cross section)
 
@@ -989,7 +877,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
             if hasattr(energy_levels[i][levelid], 'levelname'):
                 level_id_of_level_name[energy_levels[i][levelid].levelname] = levelid
 
-        unused_upsilon_transitions = set(upsilondicts[i].keys())
+        unused_upsilon_transitions = set(upsilondicts[i].keys())  # start with the full set and remove used ones
         for transitionid, transition in enumerate(transitions[i]):
             updaterequired = False
             if hasattr(transition, 'upperlevel') and transition.upperlevel >= 0:
@@ -1184,101 +1072,3 @@ if __name__ == "__main__":
     main()
 
 
-"""
-    # this is out of date, so make sure this produces valid output before using
-    def read_hillier_phixs_tables(hillier_ion_folder, path_nahar_px_file):
-    with open(hillier_ion_folder + path_nahar_px_file,'r') as fhillierphot:
-        upperlevelid = -1
-        truncatedlowerlevelname = ''
-        numpointsexpected = 0
-        crosssectiontype = '-1'
-        seatonfittingcoefficients = []
-
-        for line in fhillierphot:
-            row = line.split()
-    #            print(row)
-
-            if len(row) >= 2 and ' '.join(row[1:]) == '!Final state in ion':
-                #upperlevelid = level_ids_of_energy_level_name_no_brackets[row[0]][0]
-                upperlevelid = -1
-
-            if len(row) >= 2 and ' '.join(row[1:]) == '!Configuration name':
-                truncatedlowerlevelname = row[0]
-                for lowerlevelid in level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname]:
-                    photoionization_crosssections[i][lowerlevelid] = []
-                seatonfittingcoefficients = []
-                numpointsexpected = 0
-
-            if len(row) >= 2 and ' '.join(row[1:]) == '!Number of cross-section points':
-                numpointsexpected = int(row[0])
-
-            if len(row) >= 2 and ' '.join(row[1:]) == '!Cross-section unit' and row[0] != 'Megabarns':
-                    print('Wrong cross-section unit: ' + row[0])
-                    sys.exit()
-
-            if crosssectiontype in ['20','21'] and len(row) == 2 and all(map(isfloat, row)) and lowerlevelid != -1:
-                for lowerlevelid in level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname]:
-                    #WOULD NEED TO FIX THIS LINE SO THAT ENERGY IS IN ABSOLUTE UNITS OF RYDBERG FOR THIS TO WORK
-                    photoionization_crosssections[i][lowerlevelid].append( (float(row[0].replace('D','E')),float(row[1].replace('D','E'))) )
-                    if (len(photoionization_crosssections[i][lowerlevelid]) > 1 and
-                       photoionization_crosssections[i][lowerlevelid][-1][0] <= photoionization_crosssections[i][lowerlevelid][-2][0]):
-                        print('ERROR: photoionization table first column not monotonically increasing')
-                        sys.exit()
-            #elif True: #if want to ignore below types
-                #pass
-            elif crosssectiontype == '1' and len(row) == 1 and isfloat(row[0]) and numpointsexpected > 0:
-                seatonfittingcoefficients.append(float(row[0].replace('D', 'E')))
-                if len(seatonfittingcoefficients) == 3:
-                    (sigmat,beta,s) = seatonfittingcoefficients
-                    for lowerlevelid in level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname]:
-                        for c in np.arange(0,1.0,0.01):
-                            energydivthreshold = 1 + 20 * (c ** 2)
-                            thresholddivenergy = energydivthreshold ** -1
-                            crosssection = sigmat * (beta + (1 - beta)*(thresholddivenergy)) * (thresholddivenergy ** s)
-                            photoionization_crosssections[i][lowerlevelid].append( (energydivthreshold*thresholddivenergy/ryd_to_ev, crosssection) )
-    #                    print('Using Seaton formula values for lower level {0:d}'.format(lowerlevelid))
-                    numpointsexpected = len(photoionization_crosssections[i][lowerlevelid])
-            elif crosssectiontype == '7' and len(row) == 1 and isfloat(row[0]) and numpointsexpected > 0:
-                seatonfittingcoefficients.append(float(row[0].replace('D', 'E')))
-                if len(seatonfittingcoefficients) == 4:
-                    (sigmat,beta,s,nuo) = seatonfittingcoefficients
-                    for lowerlevelid in level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname]:
-                        for c in np.arange(0,1.0,0.01):
-                            energydivthreshold = 1 + 20 * (c ** 2)
-                            thresholdenergyev = hc_in_ev_angstrom / float(hillier_energy_levels[i][lowerlevelid].lambdaangstrom)
-                            energyoffsetdivthreshold = energydivthreshold + (nuo*1e15*h_in_ev_seconds)/thresholdenergyev
-                            thresholddivenergyoffset = energyoffsetdivthreshold ** -1
-                            if thresholddivenergyoffset < 1.0:
-                                crosssection = sigmat * (beta + (1 - beta)*(thresholddivenergyoffset)) * (thresholddivenergyoffset ** s)
-                            else:
-                                crosssection = 0
-
-                            photoionization_crosssections[i][lowerlevelid].append( (energydivthreshold*thresholddivenergy/ryd_to_ev, crosssection) )
-    #                    print('Using modified Seaton formula values for lower level {0:d}'.format(lowerlevelid))
-                    numpointsexpected = len(photoionization_crosssections[i][lowerlevelid])
-
-            if len(row) >= 2 and ' '.join(row[1:]) == '!Type of cross-section':
-                crosssectiontype = row[0]
-                if crosssectiontype not in ['1','7','20','21']:
-                    if crosssectiontype != '-1':
-                        print('Warning: Unknown cross-section type: "{0}"'.format(crosssectiontype))
-    #                                sys.exit()
-                    truncatedlowerlevelname = ''
-                    crosssectiontype = '-1'
-                    numpointsexpected = 0
-
-            if len(row) == 0:
-                if (truncatedlowerlevelname != '' and
-                    numpointsexpected != len(photoionization_crosssections[i][level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname][0]])):
-                    print('photoionization_crosssections mismatch: expecting {0:d} rows but found {1:d}'.format(
-                        numpointsexpected,len(photoionization_crosssections[i][level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname][0]])))
-                    print('A={0}, ion_stage={1}, lowerlevel={2}, crosssectiontype={3}'.format(
-                        atomic_number,ion_stage,truncatedlowerlevelname,crosssectiontype))
-                    print('matching level ids: ',level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname])
-                    print(photoionization_crosssections[i][level_ids_of_energy_level_name_no_brackets[i][truncatedlowerlevelname][0]])
-                    sys.exit()
-                seatonfittingcoefficients = []
-                truncatedlowerlevelname = ''
-                numpointsexpected = 0
-    return
-"""

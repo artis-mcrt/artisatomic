@@ -55,7 +55,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             list_tempheaders = ['upsT={0:}'.format(x) for x in upsilonheader[2:]]
             list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
             qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
-                                                comment="C", names=list_headers, dtype={'lower': np.int, 'upper': np.int}.update({z: np.float64 for z in list_headers[2:]}),
+                                                comment="C", names=list_headers,
+                                                dtype={'lower': np.int, 'upper': np.int}.update({z: np.float64 for z in list_headers[2:]}),
                                                 error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
             qubupsilondf_alltemps.query('upper!=-1', inplace=True)
             for _, row in qubupsilondf_alltemps.iterrows():
