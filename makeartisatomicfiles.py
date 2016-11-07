@@ -30,7 +30,7 @@ listelements = [
     (8, [1, 2, 3]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
-    # (28, [1, 2]),
+    # (28, [2, 3]),
 ]
 
 ryd_to_ev = u.rydberg.to('eV')
@@ -147,14 +147,13 @@ def process_files(args):
                                     lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
                 if atomic_number == 27:
-                    if ion_stage in [3, 4]:
+                    if ion_stage in [3, 4]:  # QUB levels and transitions, or dummy top ion
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
                          upsilondicts[i]) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
-                    else:
-                        (ionization_energy_ev[i], energy_levels[i],
-                         transitions[i], transition_count_of_level_name[i],
-                         hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
+                    else:  # hillier levels and transitions
+                        (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                         transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
                              atomic_number, ion_stage, flog)
 
                         if ion_stage == 2:
@@ -163,7 +162,7 @@ def process_files(args):
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                else:
+                elif atomic_number in [8, 26]:  # Nahar/Hillier hybrid
                     path_nahar_energy_file = 'atomic-data-nahar/{0}{1:d}.en.ls.txt'.format(
                         elsymbols[atomic_number].lower(), ion_stage)
 
@@ -173,13 +172,11 @@ def process_files(args):
 
                     if (atomic_number, ion_stage) in readhillierdata.path_hillier_osc_file:
 
-                        (ionization_energy_ev[i], hillier_energy_levels,
-                         hillier_transitions,
-                         transition_count_of_level_name[i],
-                         hillier_level_ids_matching_term) = \
+                        (ionization_energy_ev[i], hillier_energy_levels, hillier_transitions,
+                         transition_count_of_level_name[i], hillier_level_ids_matching_term) = \
                             readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
-                    if i < len(listions) - 1:  # don't get cross sections for top ion
+                    if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         path_nahar_px_file = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(
                             elsymbols[atomic_number].lower(), ion_stage)
 
@@ -190,11 +187,13 @@ def process_files(args):
                         i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
                         nahar_phixs_tables[i], args, flog)
+                else:  # just Hillier data
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
+                         atomic_number, ion_stage, flog)
 
-                    # Alternatively use Hillier phixs tables, but BEWARE this
-                    # probably doesn't work anymore since the code has changed a lot
-                    # print('Reading ' + hillier_ion_folder + path_hillier_phixs_file[(atomic_number, ion_stage)])
-                    # read_hillier_phixs_tables(hillier_ion_folder, path_hillier_phixs_file[(atomic_number, ion_stage)], atomic_number, ion_stage)
+                    if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
+                        photoionization_crosssections[i], photoionization_targetfractions[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
@@ -357,9 +356,9 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
         if not args.nophixs:
             # process the phixs tables and attach them to any matching levels in the output list
 
-            reduced_phixs_list = reduce_phixs_tables(nahar_phixs_tables, args)
+            reduced_phixs_dict = reduce_phixs_tables(nahar_phixs_tables, args)
 
-            for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_list.items():
+            for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_dict.items():
                 foundamatch = False
                 for levelid, energylevel in enumerate(energy_levels[1:], 1):
                     if (int(energylevel.twosplusone) == twosplusone and
@@ -395,6 +394,12 @@ def chunks(listin, chunk_size):
 
 
 def reduce_phixs_tables(dicttables, args):
+    """
+        Recieves a dictionary, with each item being a 2D array of energy and cross section points
+        Returns a dictionary with the items having been downsampled into a 1D array
+
+        Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
+    """
     out_q = mp.Queue()
     procs = []
 
@@ -440,14 +445,18 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
 
     integrand_vec = np.vectorize(integrand)
 
-    xgrid = np.linspace(1.0,
-                        1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
+    xgrid = np.linspace(1.0, 1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
                         num=args.nphixspoints + 1, endpoint=False)
 
     # for key in keylist:
     #   tablein = dicttables[key]
     for key, tablein in dicttables:
         # tablein is an array of pairs (energy, phixs cross section)
+
+        # table says zero threshold, so avoid divide by zero
+        if tablein[0][0] == 0.:
+            dictout[key] = np.zeros(args.nphixspoints)
+            continue
 
         # nu0 = tablein[0][0] * ryd_to_hz
 
@@ -465,13 +474,15 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
 
             if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow)/enlow) > 1e-20:
                 if i == 0:
-                    print('adding first point {0:.4e} {1:.4e} {2:.4e}'.format(enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow)/enlow)))
+                    print('adding first point {0:.4e} {1:.4e} {2:.4e}'.format(
+                        enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow)/enlow)))
                 if enlow <= tablein[-1][0]:
                     new_crosssection = sigma_interp(enlow)
                     if new_crosssection < 0:
                         print('negative extrap')
                 else:
-                    new_crosssection = tablein[-1][1] * (tablein[-1][0] / enlow) ** 3  # assume power law decay after last point
+                    # assume power law decay after last point
+                    new_crosssection = tablein[-1][1] * (tablein[-1][0] / enlow) ** 3
                 samples_in_interval = np.vstack([[enlow, new_crosssection], samples_in_interval])
 
             if len(samples_in_interval) == 0 or ((enhigh - samples_in_interval[-1, 0])/samples_in_interval[-1, 0]) > 1e-20:
@@ -645,6 +656,10 @@ def reduce_configuration(instr):
 
 
 def remove_bracketed_part(instr):
+    """
+        Operates on a string by removing anything between parentheses (including the parentheses)
+        e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'
+    """
     outstr = ""
     in_brackets = False
     for char in instr[:-4]:

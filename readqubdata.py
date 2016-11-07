@@ -38,8 +38,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 config = line[5:21].strip()
                 energylevel = qub_energy_level_row(
                     config, int(line[:5]), int(line[25:26]),
-                    int(line[27:28]), float(line[29:33]), float(line[34:55]),
-                    0.0, 0)
+                    int(line[27:28]), float(line[29:33]), float(line[34:55]), 0.0, 0)
                 parity = artisatomic.get_parity_from_config(config)
 
                 levelname = energylevel.levelname + '_{0:d}{1:}{2:}[{3:d}/2]_id={4:}'.format(
@@ -47,8 +46,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     ['e', 'o'][parity], int(2 * energylevel.j), energylevel.qub_id)
 
                 g = (2 * energylevel.j + 1)
-                energylevel = energylevel._replace(
-                    g=g, parity=parity, levelname=levelname)
+                energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
                 qub_energylevels.append(energylevel)
 
             upsilonheader = fleveltrans.readline().split()
@@ -131,8 +129,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
 
             photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
-
-    if atomic_number == 27 and ion_stage == 3:
+    elif atomic_number == 27 and ion_stage == 3:
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
             if lowerlevelid <= 4:
