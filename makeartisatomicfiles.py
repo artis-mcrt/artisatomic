@@ -119,8 +119,7 @@ def process_files(args):
             logfilepath = os.path.join(args.output_folder, args.output_folder_logs,
                                        '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage))
             with open(logfilepath, 'w') as flog:
-                log_and_print(flog, '\n==============> {0} {1}:'.format(elsymbols[atomic_number],
-                                                                        roman_numerals[ion_stage]))
+                log_and_print(flog, '\n===========> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
 
                 upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
                 if (atomic_number, ion_stage) in upsilondatafilenames:
@@ -147,7 +146,7 @@ def process_files(args):
                                     lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
                 if atomic_number == 27:
-                    if ion_stage in [3, 4]:  # QUB levels and transitions, or dummy top ion
+                    if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
                          upsilondicts[i]) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
@@ -176,7 +175,7 @@ def process_files(args):
                          transition_count_of_level_name[i], hillier_level_ids_matching_term) = \
                             readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
-                    if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
+                    if i < len(listions) - 1:  # don't get cross sections for top ion
                         path_nahar_px_file = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(
                             elsymbols[atomic_number].lower(), ion_stage)
 
@@ -353,9 +352,9 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
     if len(nahar_phixs_tables.keys()) > 0:
         photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this probably gets overwritten anyway
 
-        if not args.nophixs:
-            # process the phixs tables and attach them to any matching levels in the output list
+        # process the phixs tables and attach them to any matching levels in the output list
 
+        if not args.nophixs:
             reduced_phixs_dict = reduce_phixs_tables(nahar_phixs_tables, args)
 
             for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_dict.items():
@@ -885,7 +884,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
         flog = open(os.path.join(args.output_folder, args.output_folder_logs,
                                  '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)), 'a')
 
-        print('==============> ' + ionstr + ':')
+        print('===========> ' + ionstr + ':')
 
         level_id_of_level_name = {}
         for levelid in range(1, len(energy_levels[i])):

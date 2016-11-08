@@ -21,8 +21,6 @@ lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_stage, flog):
     nahar_energy_level_row = namedtuple(
         'energylevel', 'indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity energyabovegsinpercm g naharconfiguration')
-    naharcorestaterow = namedtuple(
-        'naharcorestate', 'nahar_core_state_id configuration term energyrydberg')
     nahar_configurations = {}
     nahar_energy_levels = ['IGNORE']
     nahar_level_index_of_state = {}
@@ -33,75 +31,9 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     else:
         artisatomic.log_and_print(flog, 'Reading ' + path_nahar_energy_file)
         with open(path_nahar_energy_file, 'r') as fenlist:
-            while True:
-                line = fenlist.readline()
-                if not line:
-                    print('End of file before data section')
-                    sys.exit()
-                if line.startswith(' i) Table of target/core states in the wavefunction expansion'):
-                    break
+            nahar_core_states = read_nahar_core_states(fenlist)
 
-            while True:
-                line = fenlist.readline()
-                if not line:
-                    print('End of file before end of core states table')
-                    sys.exit()
-                if line.startswith(' no of target/core states in WF'):
-                    numberofcorestates = int(line.split('=')[1])
-                    break
-            fenlist.readline()  # blank line
-            fenlist.readline()  # ' target states and energies:'
-            fenlist.readline()  # blank line
-
-            nahar_core_states = [()] * (numberofcorestates + 1)
-            for c in range(1, numberofcorestates + 1):
-                row = fenlist.readline().split()
-                nahar_core_states[c] = naharcorestaterow(
-                    int(row[0]), row[1], row[2], float(row[3]))
-                if int(nahar_core_states[c].nahar_core_state_id) != c:
-                    print('Nahar levels mismatch: id {0:d} found at entry number {1:d}'.format(
-                        c, int(nahar_core_states[c].nahar_core_state_id)))
-                    sys.exit()
-
-            while True:
-                line = fenlist.readline()
-                if not line:
-                    print('End of file before data section ii)')
-                    sys.exit()
-                if line.startswith('ii) Table of bound (negative) state energies (with spectroscopic notation)'):
-                    break
-
-            found_table = False
-            while True:
-                line = fenlist.readline()
-                if not line:
-                    print('End of file before end of state table')
-                    sys.exit()
-
-                if line.startswith(' Ion ground state'):
-                    nahar_ionization_potential_rydberg = -float(line.split('=')[2])
-                    flog.write('Ionization potential = {0:.4f} eV\n'.format(
-                        nahar_ionization_potential_rydberg * ryd_to_ev))
-
-                if line.startswith(' ') and len(line) > 36 and artisatomic.isfloat(line[29:29 + 8]):
-                    found_table = True
-                    state = line[1:22]
-    #               energy = float(line[29:29+8])
-                    twosplusone = int(state[18])
-                    l = lchars.index(state[19])
-
-                    if state[20] == 'o':
-                        parity = 1
-                        indexinsymmetry = reversedalphabets.index(state[17]) + 1
-                    else:
-                        parity = 0
-                        indexinsymmetry = alphabets.index(state[17]) + 1
-
-                    # print(state,energy,twosplusone,l,parity,indexinsymmetry)
-                    nahar_configurations[(twosplusone, l, parity, indexinsymmetry)] = state
-                else:
-                    if found_table:
-                        break
+            nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
 
             while True:
                 line = fenlist.readline()
@@ -114,7 +46,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
             while True:
                 line = fenlist.readline()
                 if not line:
-                    print('End of file before table iii starts')
+                    print('End of file before table iii ends')
                     sys.exit()
                 if line.startswith('------------------------------------------------------'):
                     break
@@ -131,7 +63,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
             while True:
                 line = fenlist.readline()
                 if not line:
-                    print('End of file before table iii finished')
+                    print('End of file before table finished')
                     sys.exit()
                 row = line.split()
                 if row == ['0', '0', '0', '0']:
@@ -174,6 +106,40 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_s
     #                    nahar_energy_levels.pop()
 
     return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations)
+
+
+def read_nahar_core_states(fenlist):
+    naharcorestaterow = namedtuple('naharcorestate', 'nahar_core_state_id configuration term energyrydberg')
+    while True:
+        line = fenlist.readline()
+        if not line:
+            print('End of file before data section')
+            sys.exit()
+        if line.startswith(' i) Table of target/core states in the wavefunction expansion'):
+            break
+
+    while True:
+        line = fenlist.readline()
+        if not line:
+            print('End of file before end of core states table')
+            sys.exit()
+        if line.startswith(' no of target/core states in WF'):
+            numberofcorestates = int(line.split('=')[1])
+            break
+    fenlist.readline()  # blank line
+    fenlist.readline()  # ' target states and energies:'
+    fenlist.readline()  # blank line
+
+    nahar_core_states = [()] * (numberofcorestates + 1)
+    for c in range(1, numberofcorestates + 1):
+        row = fenlist.readline().split()
+        nahar_core_states[c] = naharcorestaterow(
+            int(row[0]), row[1], row[2], float(row[3]))
+        if int(nahar_core_states[c].nahar_core_state_id) != c:
+            print('Nahar levels mismatch: id {0:d} found at entry number {1:d}'.format(
+                c, int(nahar_core_states[c].nahar_core_state_id)))
+            sys.exit()
+    return nahar_core_states
 
 
 def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
@@ -221,6 +187,51 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
             #    np.genfromtxt(fenlist, max_rows=number_of_points)
 
     return nahar_phixs_tables
+
+
+def read_nahar_configurations(fenlist, flog):
+    nahar_configurations = {}
+    while True:
+        line = fenlist.readline()
+        if not line:
+            print('End of file before data section ii)')
+            sys.exit()
+        if line.startswith('ii) Table of bound (negative) state energies (with spectroscopic notation)'):
+            break
+
+    found_table = False
+    while True:
+        line = fenlist.readline()
+        if not line:
+            print('End of file before end of state table')
+            sys.exit()
+
+        if line.startswith(' Ion ground state'):
+            nahar_ionization_potential_rydberg = -float(line.split('=')[2])
+            flog.write('Ionization potential = {0:.4f} eV\n'.format(
+                nahar_ionization_potential_rydberg * ryd_to_ev))
+
+        if line.startswith(' ') and len(line) > 36 and artisatomic.isfloat(line[29:29 + 8]):
+            found_table = True
+            state = line[1:22]
+#               energy = float(line[29:29+8])
+            twosplusone = int(state[18])
+            l = lchars.index(state[19])
+
+            if state[20] == 'o':
+                parity = 1
+                indexinsymmetry = reversedalphabets.index(state[17]) + 1
+            else:
+                parity = 0
+                indexinsymmetry = alphabets.index(state[17]) + 1
+
+            # print(state,energy,twosplusone,l,parity,indexinsymmetry)
+            nahar_configurations[(twosplusone, l, parity, indexinsymmetry)] = state
+        else:
+            if found_table:
+                break
+
+    return nahar_configurations, nahar_ionization_potential_rydberg
 
 
 def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states,
