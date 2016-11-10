@@ -12,36 +12,85 @@ from manual_matches import hillier_name_replacements
 
 # need to also include collision strengths from e.g., o2col.dat
 
+hillier_rowformata = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4'
+hillier_rowformatb = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6'
+hillier_rowformatc = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
+
 # keys are (atomic number, ion stage)
+ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename', 'energylevelrowformat', 'photfilename'])
+# TODO: replace things below with this structure
+ions_data = {
+    (8, 1): ion_files('20sep11', 'oi_osc_mchf', hillier_rowformatb, ''),
+    (8, 2): ion_files('23mar05', 'o2osc_fin.dat', hillier_rowformata, ''),
+    (8, 3): ion_files('15mar08', 'oiiiosc', hillier_rowformata, ''),
+
+    (20, 1): ion_files('5aug97', 'cai_osc.dat', hillier_rowformatc, 'cai_phot_a.dat'),
+    (20, 2): ion_files('30oct12', 'ca2_osc.dat', hillier_rowformatc, 'ca2_phot_a.dat'),
+    (20, 3): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, 'phot_smooth.dat'),
+    (20, 4): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, 'phot_smooth.dat'),
+
+    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformata, ''),
+    (26, 2): ion_files('16nov98', 'fe2osc_nahar_kurucz.dat', hillier_rowformatc, ''),
+    (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformatb, ''),
+    (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformata, ''),
+    (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformata, ''),
+
+    (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformata, ''),
+
+    (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformata, '30oct12/phot_data'),
+    (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformatb, ''),
+}
+
 path_hillier_osc_file = {
     (8, 1): '20sep11/oi_osc_mchf',
     (8, 2): '23mar05/o2osc_fin.dat',
     (8, 3): '15mar08/oiiiosc',
+
+    (20, 1): '5aug97/cai_osc.dat',
+    (20, 2): '30oct12/ca2_osc.dat',
+    (20, 3): '10apr99/osc_op_sp.dat',
+    (20, 4): '10apr99/osc_op_sp.dat',
+
     (26, 1): '29apr04/fei_osc',
     (26, 2): '16nov98/fe2osc_nahar_kurucz.dat',
     (26, 3): '30oct12/FeIII_OSC',
     (26, 4): '18oct00/feiv_osc_rev2.dat',
     (26, 5): '18oct00/fev_osc.dat',
+
     (27, 2): '15nov11/fin_osc_bound',
+
     (28, 2): '30oct12/nkii_osc.dat',
     (28, 3): '27aug12/nkiii_osc.dat',
 }
 
 hillier_row_format_energy_level = {
-    (8, 1): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
-    (8, 2): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (8, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 1): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 2): 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid',
-    (26, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
-    (26, 4): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (26, 5): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (27, 2): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (28, 2): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
-    (28, 3): 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
+    (8, 1): hillier_rowformatb,
+    (8, 2): hillier_rowformata,
+    (8, 3): hillier_rowformata,
+
+    (20, 1): hillier_rowformatc,
+    (20, 2): hillier_rowformatc,
+    (20, 3): hillier_rowformatc,
+    (20, 4): hillier_rowformatc,
+
+    (26, 1): hillier_rowformata,
+    (26, 2): hillier_rowformatc,
+    (26, 3): hillier_rowformatb,
+    (26, 4): hillier_rowformata,
+    (26, 5): hillier_rowformata,
+
+    (27, 2): hillier_rowformata,
+
+    (28, 2): hillier_rowformata,
+    (28, 3): hillier_rowformatb,
 }
 
 path_hillier_phot_file = {
+    (20, 1): '5aug97/cai_phot_a.dat',
+    (20, 2): '30oct12/ca2_phot_a.dat',
+    (20, 3): '10apr99/phot_smooth.dat',
+    (20, 4): '10apr99/phot_smooth.dat',
+
     (28, 2): '30oct12/phot_data',
 }
 

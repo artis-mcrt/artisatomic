@@ -30,7 +30,7 @@ listelements = [
     (8, [1, 2, 3]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
-    # (28, [2, 3]),
+    (28, [2, 3]),
 ]
 
 ryd_to_ev = u.rydberg.to('eV')
@@ -151,12 +151,11 @@ def process_files(args):
                          transitions[i], transition_count_of_level_name[i],
                          upsilondicts[i]) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
                     else:  # hillier levels and transitions
+                        # if ion_stage == 2:
+                            # upsilondicts[i] = read_storey_2016_upsilondata(flog)
                         (ionization_energy_ev[i], energy_levels[i], transitions[i],
                          transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
                              atomic_number, ion_stage, flog)
-
-                        if ion_stage == 2:
-                            upsilondicts[i] = read_storey_2016_upsilondata(flog)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)

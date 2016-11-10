@@ -98,7 +98,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
 def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
-    # photoionization_crosssections = [[] for _ in energy_levels]
     photoionization_targetfractions = [[(1, 1.)] for _ in energy_levels]
 
     if atomic_number == 27 and ion_stage == 2:
