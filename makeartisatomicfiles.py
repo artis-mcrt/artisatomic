@@ -19,7 +19,9 @@ import readqubdata
 import readhillierdata
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
-elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
+atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
+elsymbols = ['n'] + list(atomicdata['symbol'].values)
+atomic_weights = ['n'] + list(atomicdata['mass'].values)
 
 roman_numerals = (
     '', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX',
@@ -71,8 +73,9 @@ def main():
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
     if not os.path.exists(log_folder):
         os.makedirs(log_folder)
+    write_compositionfile(listelements, args)
     clear_files(args)
-    process_files(args)
+    process_files(listelements, args)
 
 
 def clear_files(args):
@@ -85,7 +88,7 @@ def clear_files(args):
                 fphixs.write('{0:14.7e}\n'.format(args.phixsnuincrement))
 
 
-def process_files(args):
+def process_files(listelements, args):
     # for hillierelname in ('IRON',):
     #    d = './hillieratomic/' + hillierelname
 
@@ -168,11 +171,9 @@ def process_files(args):
                      nahar_level_index_of_state, nahar_configurations[i]) = readnahardata.read_nahar_energy_level_file(
                          path_nahar_energy_file, atomic_number, i, ion_stage, flog)
 
-                    if (atomic_number, ion_stage) in readhillierdata.path_hillier_osc_file:
-
-                        (ionization_energy_ev[i], hillier_energy_levels, hillier_transitions,
-                         transition_count_of_level_name[i], hillier_level_ids_matching_term) = \
-                            readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+                    (ionization_energy_ev[i], hillier_energy_levels, hillier_transitions,
+                     transition_count_of_level_name[i], hillier_level_ids_matching_term) = \
+                        readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                     if i < len(listions) - 1:  # don't get cross sections for top ion
                         path_nahar_px_file = 'atomic-data-nahar/{0}{1:d}.px.txt'.format(
@@ -239,8 +240,8 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
 
     # match up Nahar states given in phixs data with Hillier levels, adding
     # missing levels as necessary
-    for (twosplusone, l, parity, indexinsymmetry) in nahar_phixs_tables:
-        state_tuple = (twosplusone, l, parity, indexinsymmetry)
+    for state_tuple in nahar_phixs_tables:
+        twosplusone, l, parity, indexinsymmetry = state_tuple
         hillier_level_ids_matching_this_nahar_state = []
 
         nahar_configuration_this_state = '_CONFIG NOT FOUND_'
@@ -298,7 +299,6 @@ def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_t
                 twosplusone, lchars[l], ['e', 'o'][parity]))
 
         if not hillier_level_ids_matching_this_nahar_state:
-            naharthresholdrydberg = nahar_phixs_tables[state_tuple][0][0]
             flog.write("No matched Hillier levels for Nahar cross section of {0:d}{1}{2} index {3:d} '{4}' ".format(
                 twosplusone, lchars[l], ['e', 'o'][parity], indexinsymmetry,
                 nahar_configuration_this_state))
@@ -581,7 +581,7 @@ def get_term_as_tuple(config):
         elif config[-1] == 'o':
             return (-1, -1, 1)
         else:
-            log_and_print(flog, "Can't read parity from JJ coupling state '" + config + "'")
+            print("WARNING: Can't read parity from JJ coupling state '" + config + "'")
             return (-1, -1, -1)
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
@@ -1078,10 +1078,18 @@ def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
             fphixs.write('{0:16.8E}\n'.format(crosssection))
 
 
+def write_compositionfile(listelements, args):
+    with open(os.path.join(args.output_folder, 'compositiondata.txt'), 'w') as fcomp:
+        fcomp.write('{0:d}\n'.format(len(listelements)))
+        fcomp.write('0\n0\n')
+        for (atomic_number, listions) in listelements:
+            ion_stage_min = min(listions)
+            ion_stage_max = max(listions)
+            nions = ion_stage_max - ion_stage_min + 1
+            fcomp.write('{0:d}  {1:d}  {2:d}  {3:d}  -1 0.0 {4:.4f}\n'.format(atomic_number, nions, ion_stage_min, ion_stage_max, atomic_weights[atomic_number]))
+
 if __name__ == "__main__":
     # print(interpret_configuration('3d64s_4H'))
     # print(interpret_configuration('3d6(3H)4sa4He[11/2]'))
     # print(score_config_match('3d64s_4H','3d6(3H)4sa4He[11/2]'))
     main()
-
-
