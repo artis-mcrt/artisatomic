@@ -35,6 +35,9 @@ listelements = [
     (28, [2, 3]),
 ]
 
+# include everything we have data for
+listelements = readhillierdata.extend_ion_list(listelements)
+
 ryd_to_ev = u.rydberg.to('eV')
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
@@ -163,7 +166,7 @@ def process_files(listelements, args):
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif atomic_number in [8, 26]:  # Nahar/Hillier hybrid
+                elif atomic_number in [8, 26]:  # Hillier/Nahar hybrid
                     path_nahar_energy_file = 'atomic-data-nahar/{0}{1:d}.en.ls.txt'.format(
                         elsymbols[atomic_number].lower(), ion_stage)
 
@@ -186,10 +189,15 @@ def process_files(listelements, args):
                         i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
                         nahar_phixs_tables[i], args, flog)
+                    # reading the collision data must be done after the data sets have been combined so that the level numbers
+                    # are correct
+                    if len(upsilondicts[i]) == 0:
+                        upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
                 else:  # just Hillier data
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
                          atomic_number, ion_stage, flog)
+                    upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
@@ -583,28 +591,33 @@ def get_term_as_tuple(config):
         else:
             print("WARNING: Can't read parity from JJ coupling state '" + config + "'")
             return (-1, -1, -1)
+
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
             l = lchars.index(char)
             break
-
-    twosplusone = int(config[lposition - 1])  # could this be two digits long?
-    if lposition + 1 > len(config) - 1:
-        parity = 0
-    elif config[lposition + 1] == 'o':
-        parity = 1
-    elif config[lposition + 1] == 'e':
-        parity = 0
-    elif config[lposition + 2] == 'o':
-        parity = 1
-    elif config[lposition + 2] == 'e':
-        parity = 0
-    else:
+    try:
+        twosplusone = int(config[lposition - 1])  # could this be two digits long?
+        if lposition + 1 > len(config) - 1:
+            parity = 0
+        elif config[lposition + 1] == 'o':
+            parity = 1
+        elif config[lposition + 1] == 'e':
+            parity = 0
+        elif config[lposition + 2] == 'o':
+            parity = 1
+        elif config[lposition + 2] == 'e':
+            parity = 0
+        else:
+            twosplusone = -1
+            l = -1
+            parity = -1
+    #        sys.exit()
+    except ValueError:
         twosplusone = -1
         l = -1
         parity = -1
-#        sys.exit()
     return (twosplusone, l, parity)
 
 
@@ -917,12 +930,15 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                     lowerlevel=id_lower, upperlevel=id_upper,
                     coll_str=coll_str)
 
-        log_and_print(flog, "Adding in {0:d} extra transitions with upsilon values".format(len(unused_upsilon_transitions)))
+        log_and_print(flog, "Adding in {0:d} extra transitions with only upsilon values".format(len(unused_upsilon_transitions)))
         for (id_lower, id_upper) in unused_upsilon_transitions:
             namefrom = energy_levels[i][id_upper].levelname
             nameto = energy_levels[i][id_lower].levelname
             A = 0.
-            lamdaangstrom = 1.e8 / (energy_levels[i][id_upper].energyabovegsinpercm - energy_levels[i][id_lower].energyabovegsinpercm)
+            try:
+                lamdaangstrom = 1.e8 / (energy_levels[i][id_upper].energyabovegsinpercm - energy_levels[i][id_lower].energyabovegsinpercm)
+            except ZeroDivisionError:
+                lamdaangstrom = -1
             # upsilon = upsilondict[(id_lower, id_upper)]
             transition_count_of_level_name[i][namefrom] += 1
             transition_count_of_level_name[i][nameto] += 1
@@ -957,7 +973,6 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
         ionization_energy))
 
     for levelid, energylevel in enumerate(energy_levels[1:], 1):
-
         if hasattr(energylevel, 'levelname'):
             transitioncount = transition_count_of_level_name.get(energylevel.levelname, 0)
         else:

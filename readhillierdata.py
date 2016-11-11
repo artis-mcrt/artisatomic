@@ -17,37 +17,48 @@ hillier_rowformatb = 'levelname g energyabovegsinpercm freqtentothe15hz threshol
 hillier_rowformatc = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
 
 # keys are (atomic number, ion stage)
-ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename', 'energylevelrowformat', 'photfilenames'])
+ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename', 'energylevelrowformat', 'photfilenames', 'coldatafilename'])
 
 ions_data = {
     # O
-    (8, 1): ion_files('20sep11', 'oi_osc_mchf', hillier_rowformatb, ['']),
-    (8, 2): ion_files('23mar05', 'o2osc_fin.dat', hillier_rowformata, ['']),
-    (8, 3): ion_files('15mar08', 'oiiiosc', hillier_rowformata, ['']),
+    (8, 1): ion_files('20sep11', 'oi_osc_mchf', hillier_rowformatb, [''], ''),
+    (8, 2): ion_files('23mar05', 'o2osc_fin.dat', hillier_rowformata, [''], ''),
+    (8, 3): ion_files('15mar08', 'oiiiosc', hillier_rowformata, [''], ''),
 
     # F
-    (9, 2): ion_files('tst', 'fin_osc', hillier_rowformata, ['phot_data_a', 'phot_data_b', 'phot_data_c']),
-    (9, 3): ion_files('tst', 'fin_osc', hillier_rowformata, ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d']),
+    (9, 2): ion_files('tst', 'fin_osc', hillier_rowformata, ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
+    (9, 3): ion_files('tst', 'fin_osc', hillier_rowformata, ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
+
+    # Na 11
+
+
+    # Si
+    (14, 1): ion_files('23nov11', 'SiI_OSC', hillier_rowformatb, ['SiI_PHOT_DATA'], 'col_data'),
+    (14, 2): ion_files('30oct12', 'si2_osc_nahar', hillier_rowformatb, ['phot_op.dat'], 'si2_col'),
+    (14, 3): ion_files('23aug97', 'osc_op.dat', hillier_rowformatb, ['phot_op.dat'], 'col_guess.dat'),
+    (14, 4): ion_files('30oct12', 'osc_op_split.dat', hillier_rowformatb, ['phot_op.dat'], 'col_data.dat'),
 
     # Ca
-    (20, 1): ion_files('5aug97', 'cai_osc.dat', hillier_rowformatc, ['cai_phot_a.dat']),
-    (20, 2): ion_files('30oct12', 'ca2_osc.dat', hillier_rowformatc, ['ca2_phot_a.dat']),
-    (20, 3): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, ['phot_smooth.dat']),
-    (20, 4): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, ['phot_smooth.dat']),
+    (20, 1): ion_files('5aug97', 'cai_osc.dat', hillier_rowformatc, ['cai_phot_a.dat'], 'caicol.dat'),
+    (20, 2): ion_files('30oct12', 'ca2_osc.dat', hillier_rowformatc, ['ca2_phot_a.dat'], 'ca2col.dat'),
+    (20, 3): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, ['phot_smooth.dat'], 'col_guess.dat'),
+    (20, 4): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, ['phot_smooth.dat'], 'col_guess.dat'),
 
     # Fe
-    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformata, ['']),
-    (26, 2): ion_files('16nov98', 'fe2osc_nahar_kurucz.dat', hillier_rowformatc, ['']),
-    (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformatb, ['']),
-    (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformata, ['']),
-    (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformata, ['']),
+    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformata, [''], 'col_data'),
+    (26, 2): ion_files('16nov98', 'fe2osc_nahar_kurucz.dat', hillier_rowformatc, [''], ''),
+    (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformatb, [''], ''),
+    (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformata, [''], ''),
+    (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformata, [''], ''),
 
     # Co
-    (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformata, ['']),
+    (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformata, [''], ''),
 
     # Ni
-    (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformata, ['30oct12/phot_data']),
-    (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformatb, ['']),
+    (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformata, ['phot_data'], 'col_data_bautista'),
+    (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformatb, ['phot_data.dat'], 'col_data.dat'),
+    (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformata, ['phot_data.dat'], 'col_data.dat'),
+    (28, 5): ion_files('18oct00', 'nkv_osc.dat', hillier_rowformata, ['phot_data.dat'], 'col_guess.dat'),
 }
 
 elsymboltohilliercode = {
@@ -55,7 +66,7 @@ elsymboltohilliercode = {
     'O': 'OXY', 'F': 'FLU', 'Ne': 'NEON', 'Na': 'SOD',
     'Mg': 'MG', 'Al': 'ALUM', 'Si': 'SIL', 'P': 'PHOS',
     'S': 'SUL', 'Cl': 'CHL', 'Ar': 'ARG', 'K': 'POT',
-    'Ca': 'CAL', 'Sc': 'SCAN', 'Ti': 'TIT', 'V': 'VAN',
+    'Ca': 'CA', 'Sc': 'SCAN', 'Ti': 'TIT', 'V': 'VAN',
     'Cr': 'CHRO', 'Mn': 'MAN', 'Fe': 'FE', 'Co': 'COB',
     'Ni': 'NICK'
 }
@@ -185,7 +196,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
     phixstables = defaultdict(list)
     for photfilename in ions_data[(atomic_number, ion_stage)].photfilenames:
-        filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage), photfilename)
+        filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
+                                ions_data[(atomic_number, ion_stage)].folder,
+                                photfilename)
         artisatomic.log_and_print(flog, 'Reading ' + filename)
         with open(filename, 'r') as fhillierphot:
             lowerlevelid = -1
@@ -307,5 +320,105 @@ def get_seaton_phixs_table(sigmat, beta, s, nuo=None, lambda_angstrom=None):
     return phixstable
 
 
+def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
+    electron_temperature = 6000
+    t_scale_factor = 1e4  # Hiller temperatures are given as T_4
+    upsilondict = {}
+    coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
+    if coldatafilename == '':
+        return upsilondict
+
+    discarded_transitions = 0
+
+    level_id_of_level_name = {}
+    for levelid in range(1, len(energy_levels)):
+        if hasattr(energy_levels[levelid], 'levelname'):
+            level_id_of_level_name[energy_levels[levelid].levelname] = levelid
+
+    filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
+                            ions_data[(atomic_number, ion_stage)].folder,
+                            coldatafilename)
+    with open(filename, 'r') as fcoldata:
+        header_row = []
+        temperature_index = -1
+        for line in fcoldata:
+            row = line.split()
+            if len(line.strip()) == 0:
+                continue  # skip blank lines
+
+            if line.lstrip().startswith('Transition\T'):  # found the header row
+                header_row = row
+                if len(header_row) != num_expected_t_values + 1:
+                    artisatomic.log_and_print(flog, 'ERROR: Expected {0:d} temperature values, but header has {1:d} columns'.format(
+                                  num_expected_t_values, len(header_row)))
+                    sys.exit()
+                temperatures = row[-num_expected_t_values:]
+                artisatomic.log_and_print(flog, 'Temperatures available for collision strengths (units of {0:.1e}): {1}'.format(
+                    t_scale_factor, temperatures))
+                match_sorted_temperatures = sorted(temperatures,
+                                                   key=lambda t:abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
+                best_temperature = match_sorted_temperatures[0]
+                temperature_index = temperatures.index(best_temperature)
+                artisatomic.log_and_print(flog, 'Selecting {0:.3f} K'.format(float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor))
+                continue
+
+            if len(row) >= 2:
+                row_two_to_end = ' '.join(row[1:])
+
+                if row_two_to_end == '!Number of transitions':
+                    number_expected_transitions = int(row[0])
+                elif row_two_to_end.startswith('!Number of T values OMEGA tabulated at'):
+                    num_expected_t_values = int(row[0])
+                elif row_two_to_end == '!Scaling factor for OMEGA (non-file values)' and float(row[0]) != 1.0:
+                    artisatomic.log_and_print(flog, 'ERROR: non-zero scaling factor for OMEGA. what does this mean?')
+                    sys.exit()
+
+            if header_row != []:
+                namefromnameto = "".join(row[:-num_expected_t_values])
+                upsilonvalues = row[-num_expected_t_values:]
+                namefrom, nameto = map(str.strip, namefromnameto.split('-'))
+                upsilon = float(upsilonvalues[temperature_index].replace('D', 'E'))
+                try:
+                    id_lower = level_id_of_level_name[namefrom]
+                    id_upper = level_id_of_level_name[nameto]
+                    if id_lower >= id_upper:
+                        print('ERROR: Transition ids are backwards or equal? {0:d} -> {1:d}'.format(id_lower, ud_upper))
+                        sys.exit()
+                    if (id_lower, id_upper) in upsilondict:
+                        print('ERROR: Duplicate transition from {0} -> {1}'.format(namefrom, nameto))
+                        sys.exit()
+                    else:
+                        upsilondict[(id_lower, id_upper)] = upsilon
+                    # print(namefrom, nameto, upsilon)
+                except KeyError:
+                    artisatomic.log_and_print(
+                        flog, 'Discarding transition between unlisted levels {0} -> {1}, upsilon={2:.3f}'.format(
+                            namefrom, nameto, upsilon))
+                    discarded_transitions += 1
+
+
+        if len(upsilondict) + discarded_transitions != number_expected_transitions:
+            print('ERROR: file specified {0:d} transitions, but {1:d} were found'.format(
+                  number_expected_transitions, len(upsilondict) + discarded_transitions))
+            sys.exit()
+
+    return upsilondict
+
+
 def hillier_ion_folder(atomic_number, ion_stage):
     return ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] + '/' + artisatomic.roman_numerals[ion_stage] + '/')
+
+
+def extend_ion_list(listelements):
+    for (atomic_number, ion_stage) in ions_data.keys():
+        found_element = False
+        for (tmp_atomic_number, list_ions) in listelements:
+            if tmp_atomic_number == atomic_number:
+                if ion_stage not in list_ions:
+                    list_ions.append(ion_stage)
+                    list_ions.sort()
+                found_element = True
+        if not found_element:
+            listelements.append((atomic_number, [ion_stage],))
+    listelements.sort(key=lambda x: x[0])
+    return listelements
