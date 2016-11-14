@@ -30,7 +30,7 @@ roman_numerals = (
 
 listelements = [
     # (8, [1, 2, 3]),
-    # (26, [1, 2, 3, 4, 5]),
+    (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
     # (28, [2, 3]),
 ]
@@ -149,7 +149,7 @@ def process_files(listelements, args):
                                 log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
                                     lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
-                if atomic_number == 27 and ion_stage == 4:  # testing, remove " and ion_stage == 4"
+                if atomic_number == 27 and ion_stage == 4:  # TESTING, remove " and ion_stage == 4"
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
@@ -1072,8 +1072,11 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
     log_and_print(flog, "writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(args.optimaltemperature))
 
-    for lowerlevelid in range(1, len(energy_levels)):
+    if photoionization_crosssections[1][0] == 0.:
+        log_and_print(flog, 'ERROR: ground state has zero photoionization cross section')
+        sys.exit()
 
+    for lowerlevelid in range(1, len(energy_levels)):
         if len(photoionization_targetfractions[lowerlevelid]) <= 1 and photoionization_targetfractions[lowerlevelid][0][1] > 0.99:
             if len(photoionization_targetfractions[lowerlevelid]) > 0:
                 upperionlevelid = photoionization_targetfractions[lowerlevelid][0][0]
@@ -1089,7 +1092,6 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
             fphixs.write('{0:8d}\n'.format(len(targetlist)))
             for upperionlevelid, targetprobability in targetlist:
                 fphixs.write('{0:8d}{1:12f}\n'.format(upperionlevelid, targetprobability))
-
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write('{0:16.8E}\n'.format(crosssection))
 

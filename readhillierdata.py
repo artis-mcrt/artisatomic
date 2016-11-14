@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import math
 import os
 import sys
 import numpy as np
@@ -84,6 +85,8 @@ elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbo
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
 
 atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltohilliercode.items()}
+
+vy95_phixsfitrow = namedtuple('vy95phixsfit', ['n', 'l', 'E_th_eV', 'E_0', 'sigma_0', 'y_a', 'P', 'y_w'])
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -215,6 +218,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             numpointsexpected = 0
             crosssectiontype = '-1'
             seatonfittingcoefficients = []
+            vy95_phixsfitparams_allshells = []
 
             for line in fhillierphot:
                 row = line.split()
@@ -231,6 +235,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         print('STOP! level name contains a bracket (is J-split?)')
                         sys.exit()
                     seatonfittingcoefficients = []
+                    vy95_phixsfitparams_allshells = []
                     numpointsexpected = 0
                     lowerlevelid = 1
                     for levelid, energy_level in enumerate(energy_levels[1:], 1):
@@ -283,11 +288,19 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         numpointsexpected = len(phixstables[truncatedlowerlevelname])
                         # log_and_print(flog, 'Using modified Seaton formula values for lower level {0}'.format(truncatedlowerlevelname))
 
+                elif crosssectiontype == '9' and len(row) == 8 and numpointsexpected > 0:
+                    vy95_phixsfitparams_allshells.append(vy95_phixsfitrow(int(row[0]), int(row[1]), *[float(x.replace('D', 'E')) for x in row[2:]]))
+
+                    if len(vy95_phixsfitparams_allshells) * 8 == numpointsexpected:
+                        phixstables[truncatedlowerlevelname] = get_vy95_phixs_table(vy95_phixsfitparams_allshells)
+                        numpointsexpected = len(phixstables[truncatedlowerlevelname])
+                        artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for lower level {0}'.format(truncatedlowerlevelname))
+
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Type of cross-section':
                     crosssectiontype = row[0]
-                    if crosssectiontype not in ['1', '7', '8', '20', '21']:
+                    if crosssectiontype not in ['1', '7', '8', '9', '20', '21']:
                         if crosssectiontype != '-1':
-                            print('Warning: Unknown cross-section type: {0}'.format(crosssectiontype))
+                            print('Warning: Unknown cross-section type {0} for level {1}'.format(crosssectiontype, truncatedlowerlevelname))
                             # sys.exit()
                         truncatedlowerlevelname = ''
                         crosssectiontype = '-1'
@@ -302,6 +315,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             atomic_number, ion_stage, truncatedlowerlevelname, crosssectiontype))
                         sys.exit()
                     seatonfittingcoefficients = []
+                    vy95_phixsfitparams_allshells = []
                     truncatedlowerlevelname = ''
                     numpointsexpected = 0
 
@@ -339,6 +353,25 @@ def get_seaton_phixs_table(sigmat, beta, s, nuo=None, lambda_angstrom=None):
     return phixstable
 
 
+def get_vy95_phixs_table(vy95_phixsfitparams_allshells):
+    energygrid = np.arange(0, 1.0, 0.001)
+    phixstable = np.empty((len(energygrid), 2))
+
+    for index, c in enumerate(energygrid):
+        energydivthreshold = 1 + 20 * (c ** 2)
+
+        crosssection = 0.
+        for params in vy95_phixsfitparams_allshells:
+            y = energydivthreshold * params.E_th_eV / params.E_0  # E / E_0
+            P = params.P
+            Q = 5.5 + params.l - 0.5 * params.P
+            y_a = params.y_a
+            y_w = params.y_w
+            crosssection += params.sigma_0 * ((y - 1) ** 2 + y_w ** 2) * (y ** -Q) * ((1 + math.sqrt(y / y_a)) ** -P)
+
+        phixstable[index] = energydivthreshold, crosssection
+    return phixstable
+
 def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     electron_temperature = 6000
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
@@ -372,7 +405,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                                   num_expected_t_values, len(header_row)))
                     sys.exit()
                 temperatures = row[-num_expected_t_values:]
-                artisatomic.log_and_print(flog, 'Temperatures available for collision strengths (units of {0:.1e} J):\n{1}'.format(
+                artisatomic.log_and_print(flog, 'Temperatures available for effective collision strengths (units of {0:.1e} J):\n{1}'.format(
                     t_scale_factor, temperatures))
                 match_sorted_temperatures = sorted(temperatures,
                                                    key=lambda t:abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
