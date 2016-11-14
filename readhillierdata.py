@@ -45,19 +45,20 @@ ions_data = {
     (20, 4): ion_files('10apr99', 'osc_op_sp.dat', hillier_rowformatc, ['phot_smooth.dat'], 'col_guess.dat'),
 
     # Fe
-    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformata, [''], 'col_data'),
+    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformata, [''], ''),  # col_data
     (26, 2): ion_files('16nov98', 'fe2osc_nahar_kurucz.dat', hillier_rowformatc, [''], ''),
     (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformatb, [''], ''),
     (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformata, [''], ''),
     (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformata, [''], ''),
 
     # Co
-    (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformata, [''], ''),
+    (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformata, ['phot_nosm'], 'Co2_COL_DATA'),
+    (27, 3): ion_files('30oct12', 'coiii_osc.dat', hillier_rowformatb, ['phot_nosm'], 'col_data.dat'),
 
     # Ni
     (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformata, ['phot_data'], 'col_data_bautista'),
     (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformatb, ['phot_data.dat'], 'col_data.dat'),
-    (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformata, ['phot_data.dat'], 'col_data.dat'),
+    (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformata, ['phot_data.dat'], 'col_guess.dat'),
     (28, 5): ion_files('18oct00', 'nkv_osc.dat', hillier_rowformata, ['phot_data.dat'], 'col_guess.dat'),
 }
 
@@ -83,6 +84,10 @@ elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbo
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
 
 atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltohilliercode.items()}
+
+
+def hillier_ion_folder(atomic_number, ion_stage):
+    return ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] + '/' + artisatomic.roman_numerals[ion_stage] + '/')
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -191,11 +196,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this probably gets overwritten anyway
-    photoionization_targetfractions = [[(1, 1.0)] for _ in energy_levels]
+    photoionization_targetconfigs = ['' for _ in energy_levels]
     # return np.zeros((len(energy_levels), args.nphixspoints)), photoionization_targetfractions  # TODO: replace with real data
 
     phixstables = defaultdict(list)
+    photoionization_targetconfig_of_levelname = defaultdict(str)
     for photfilename in ions_data[(atomic_number, ion_stage)].photfilenames:
+        if photfilename == '':
+            continue
         filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
                                 ions_data[(atomic_number, ion_stage)].folder,
                                 photfilename)
@@ -211,19 +219,29 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             for line in fhillierphot:
                 row = line.split()
 
-                # if len(row) >= 2 and ' '.join(row[1:]) == '!Final state in ion': # TODO: this must not be ignored!
-                #     upperlevelname = row[0]  # this is not used because the upper ion's levels are not known at this time
+                if len(row) >= 2 and ' '.join(row[1:]) == '!Final state in ion':
+                    upperlevelname = row[0]  # this is not used because the upper ion's levels are not known at this time
+                    if '[' in upperlevelname:
+                        print('STOP! target level contains a bracket (is J-split?)')
+                        sys.exit()
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Configuration name':
                     truncatedlowerlevelname = row[0]
+                    if '[' in truncatedlowerlevelname:
+                        print('STOP! level name contains a bracket (is J-split?)')
+                        sys.exit()
                     seatonfittingcoefficients = []
                     numpointsexpected = 0
-                    lowerlevelid = 0
+                    lowerlevelid = 1
                     for levelid, energy_level in enumerate(energy_levels[1:], 1):
                         this_levelnamenoj = energy_level.levelname.split('[')[0]
                         if this_levelnamenoj == truncatedlowerlevelname:
                             lowerlevelid = levelid
                             break
+                    photoionization_targetconfig_of_levelname[truncatedlowerlevelname] = upperlevelname
+                    if upperlevelname == '':
+                        print("ERROR: no upper level name")
+                        sys.exit()
                     # print('Reading level {0} '{1}''.format(lowerlevelid, truncatedlowerlevelname))
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Number of cross-section points':
@@ -255,7 +273,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if len(seatonfittingcoefficients) == 3:
                         phixstables[truncatedlowerlevelname] = get_seaton_phixs_table(*seatonfittingcoefficients)
                         numpointsexpected = len(phixstables[truncatedlowerlevelname])
-                        print('Using Seaton formula values for lower level {0}'.format(truncatedlowerlevelname))
+                        # log_and_print(flog, 'Using Seaton formula values for lower level {0}'.format(truncatedlowerlevelname))
 
                 elif crosssectiontype in ['7', '8'] and len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                     seatonfittingcoefficients.append(float(row[0].replace('D', 'E')))
@@ -263,7 +281,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         phixstables[truncatedlowerlevelname] = get_seaton_phixs_table(
                             *seatonfittingcoefficients, float(energy_levels[lowerlevelid].lambdaangstrom))
                         numpointsexpected = len(phixstables[truncatedlowerlevelname])
-                        print('Using modified Seaton formula values for lower level {0}'.format(truncatedlowerlevelname))
+                        # log_and_print(flog, 'Using modified Seaton formula values for lower level {0}'.format(truncatedlowerlevelname))
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Type of cross-section':
                     crosssectiontype = row[0]
@@ -293,8 +311,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 levelnamenoj = energy_level.levelname.split('[')[0]
                 if levelnamenoj == key:
                     photoionization_crosssections[levelid] = phixstable
+                    photoionization_targetconfigs[levelid] = photoionization_targetconfig_of_levelname[levelnamenoj]
 
-    return photoionization_crosssections, photoionization_targetfractions
+    return photoionization_crosssections, photoionization_targetconfigs
 
 
 def get_seaton_phixs_table(sigmat, beta, s, nuo=None, lambda_angstrom=None):
@@ -353,7 +372,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                                   num_expected_t_values, len(header_row)))
                     sys.exit()
                 temperatures = row[-num_expected_t_values:]
-                artisatomic.log_and_print(flog, 'Temperatures available for collision strengths (units of {0:.1e}): {1}'.format(
+                artisatomic.log_and_print(flog, 'Temperatures available for collision strengths (units of {0:.1e} J):\n{1}'.format(
                     t_scale_factor, temperatures))
                 match_sorted_temperatures = sorted(temperatures,
                                                    key=lambda t:abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
@@ -405,8 +424,32 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     return upsilondict
 
 
-def hillier_ion_folder(atomic_number, ion_stage):
-    return ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] + '/' + artisatomic.roman_numerals[ion_stage] + '/')
+def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_photoion_targetconfigs, flog):
+    targetlist = [[] for _ in energy_levels]
+    targetlist_of_targetconfig = {}
+
+    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+        targetconfig = hillier_photoion_targetconfigs[lowerlevelid]
+        if targetconfig not in targetlist_of_targetconfig:
+            # sometimes the target has a slash, e.g. '3d7_4Fe/3d7_a4Fe'
+            # so split on the slash and match all parts
+            targetconfiglist = targetconfig.split('/')
+            upperionlevelids = []
+            for upperlevelid, upper_energy_level in enumerate(energy_levels_upperion[1:], 1):
+                upperlevelnamenoj = upper_energy_level.levelname.split('[')[0]
+                if upperlevelnamenoj in targetconfiglist:
+                    upperionlevelids.append(upperlevelid)
+            if not upperionlevelids:
+                upperionlevelids = [1]
+            targetlist_of_targetconfig[targetconfig] = []
+            summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
+            for upperionlevelid in sorted(upperionlevelids):
+                phixsprobability = (energy_levels_upperion[upperionlevelid].g / summed_statistical_weights)
+                targetlist_of_targetconfig[targetconfig].append((upperionlevelid, phixsprobability))
+
+        targetlist[lowerlevelid] = targetlist_of_targetconfig[targetconfig]
+
+    return targetlist
 
 
 def extend_ion_list(listelements):

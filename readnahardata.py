@@ -18,7 +18,7 @@ reversedalphabets = 'zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA '
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 
 
-def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, i, ion_stage, flog):
+def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
     nahar_energy_level_row = namedtuple(
         'energylevel', 'indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity energyabovegsinpercm g naharconfiguration')
     nahar_configurations = {}
@@ -295,13 +295,14 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
     return upperionlevelids
 
 
-def get_nahar_targetfractions(i, energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations, flog):
+def get_photoiontargetfractions(energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog):
     targetlist = [[] for _ in energy_levels]
     upper_level_ids_of_core_state_id = defaultdict(list)
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
         # find the upper level ids from the Nahar core state
         upperionlevelids = get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_core_states,
-                                                           nahar_configurations[i + 1], upper_level_ids_of_core_state_id, flog)
+                                                           nahar_configurations_upperion,
+                                                           upper_level_ids_of_core_state_id, flog)
 
         summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
         for upperionlevelid in sorted(upperionlevelids):

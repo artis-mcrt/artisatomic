@@ -29,14 +29,14 @@ roman_numerals = (
 )
 
 listelements = [
-    (8, [1, 2, 3]),
-    (26, [1, 2, 3, 4, 5]),
+    # (8, [1, 2, 3]),
+    # (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
-    (28, [2, 3]),
+    # (28, [2, 3]),
 ]
 
 # include everything we have data for
-listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
@@ -92,14 +92,12 @@ def clear_files(args):
 
 
 def process_files(listelements, args):
-    # for hillierelname in ('IRON',):
-    #    d = './hillieratomic/' + hillierelname
-
     for elementindex, (atomic_number, listions) in enumerate(listelements):
         if not listions:
             continue
 
         nahar_core_states = [['IGNORE'] for x in listions]  # list of named tuples (naharcorestaterow)
+        hillier_photoion_targetconfigs = [[] for x in listions]
 
         # keys are (2S+1, L, parity), values are strings of electron configuration
         nahar_configurations = [{} for x in listions]
@@ -151,7 +149,7 @@ def process_files(listelements, args):
                                 log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
                                     lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
-                if atomic_number == 27:
+                if atomic_number == 27 and ion_stage == 4:  # testing, remove " and ion_stage == 4"
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
@@ -172,7 +170,7 @@ def process_files(listelements, args):
 
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i]) = readnahardata.read_nahar_energy_level_file(
-                         path_nahar_energy_file, atomic_number, i, ion_stage, flog)
+                         path_nahar_energy_file, atomic_number, ion_stage, flog)
 
                     (ionization_energy_ev[i], hillier_energy_levels, hillier_transitions,
                      transition_count_of_level_name[i], hillier_level_ids_matching_term) = \
@@ -186,7 +184,7 @@ def process_files(listelements, args):
                         nahar_phixs_tables[i] = readnahardata.read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args)
 
                     (energy_levels[i], transitions[i], photoionization_crosssections[i]) = combine_hillier_nahar(
-                        i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
+                        hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
                         nahar_phixs_tables[i], args, flog)
                     # reading the collision data must be done after the data sets have been combined so that the level numbers
@@ -200,11 +198,11 @@ def process_files(listelements, args):
                     upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
-                        photoionization_crosssections[i], photoionization_targetfractions[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
+                        photoionization_crosssections[i], hillier_photoion_targetconfigs[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
-                           nahar_core_states, nahar_configurations,
+                           nahar_core_states, nahar_configurations, hillier_photoion_targetconfigs,
                            photoionization_targetfractions, photoionization_crosssections, args)
 
 
@@ -238,11 +236,9 @@ def read_storey_2016_upsilondata(flog):
     return upsilondict
 
 
-def combine_hillier_nahar(i, hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
+def combine_hillier_nahar(hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                           nahar_energy_levels, nahar_level_index_of_state, nahar_configurations, nahar_phixs_tables,
                           args, flog):
-    # hillier_energy_levels[i] = ['IGNORE'] #TESTING only
-    # hillier_level_ids_matching_term[i] = {} #TESTING only
     added_nahar_levels = []
     photoionization_crosssections = []
 
@@ -878,6 +874,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                        ionization_energies,
                        transition_count_of_level_name,
                        nahar_core_states, nahar_configurations,
+                       hillier_photoion_targetconfigs,
                        photoionization_targetfractions,
                        photoionization_crosssections, args):
     atomic_number, listions = listelements[elementindex]
@@ -958,9 +955,13 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
 
         if i < len(listions) - 1 and not args.nophixs:  # ignore the top ion
             if len(photoionization_targetfractions[i]) < 1:
-                photoionization_targetfractions[i] = readnahardata.get_nahar_targetfractions(i, energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations, flog)
+                if len(nahar_core_states[i]) > 1:
+                    photoionization_targetfractions[i] = readnahardata.get_photoiontargetfractions(energy_levels[i], energy_levels[i+1], nahar_core_states[i], nahar_configurations[i + 1], flog)
+                else:
+                    photoionization_targetfractions[i] = readhillierdata.get_photoiontargetfractions(energy_levels[i], energy_levels[i+1], hillier_photoion_targetconfigs[i], flog)
+
             with open(os.path.join(args.output_folder, 'phixsdata_v2.txt'), 'a') as fphixs:
-                write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args, flog)
+                write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels[i], photoionization_crosssections[i], photoionization_targetfractions[i], args, flog)
 
         flog.close()
 
@@ -1066,7 +1067,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
         len(transitions), num_forbidden_transitions, num_collision_strengths_applied))
 
 
-def write_phixs_data(fphixs, i, atomic_number, ion_stage, energy_levels,
+def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
                      photoionization_crosssections, photoionization_targetfractions, args, flog):
     log_and_print(flog, "writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(args.optimaltemperature))
