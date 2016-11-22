@@ -67,6 +67,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     artisatomic.log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
                         lower, upper, upsilondict[(lower, upper)], upsilon))
 
+        artisatomic.log_and_print(flog, 'Read {:d} levels'.format(len(qub_energylevels[1:])))
+
         with open('atomic-data-qub/adf04rad_v1', 'r') as ftrans:
             for line in ftrans:
                 row = line.split()
@@ -89,9 +91,11 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
                     qub_transitions.append(transition)
 
-    if (atomic_number == 27) and (ion_stage == 4):
+    elif (atomic_number == 27) and (ion_stage == 4):
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row('groundstate', 1, 0, 0, 0, 0., 10, 0))
+
+    artisatomic.log_and_print(flog, 'Read {:d} transitions'.format(len(qub_transitions)))
 
     return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
 

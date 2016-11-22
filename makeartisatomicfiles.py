@@ -29,14 +29,18 @@ roman_numerals = (
 )
 
 listelements = [
+    (1, [1, 2]),
+    # (6, [2, 3]),
     # (8, [1, 2, 3]),
-    (26, [1, 2, 3, 4, 5]),
-    (27, [2, 3, 4]),
+    # (13, [1, 2]),
+    # (26, [1, 2, 3, 4, 5]),
+    # (27, [2, 3, 4]),
+    # (21, [2, 3])
     # (28, [2, 3]),
 ]
 
 # include everything we have data for
-# listelements = readhillierdata.extend_ion_list(listelements)
+listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
@@ -72,7 +76,7 @@ def main():
         help='Don''t generate cross sections and write to phixsdata_v2.txt file')
 
     args = parser.parse_args()
-
+    readhillierdata.read_hyd_phixsdata()
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
     if not os.path.exists(log_folder):
         os.makedirs(log_folder)
@@ -123,7 +127,8 @@ def process_files(listelements, args):
             logfilepath = os.path.join(args.output_folder, args.output_folder_logs,
                                        '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage))
             with open(logfilepath, 'w') as flog:
-                log_and_print(flog, '\n===========> {0} {1}:'.format(elsymbols[atomic_number], roman_numerals[ion_stage]))
+                log_and_print(flog, '\n===========> {0} {1} input:'.format(
+                    elsymbols[atomic_number], roman_numerals[ion_stage]))
 
                 upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
                 if (atomic_number, ion_stage) in upsilondatafilenames:
@@ -149,7 +154,7 @@ def process_files(listelements, args):
                                 log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
                                     lower, upper, upsilondicts[i][(lower, upper)], row['upsilon']))
 
-                if atomic_number == 27 and ion_stage == 4:  # TESTING, remove " and ion_stage == 4"
+                if atomic_number == 27:
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
@@ -191,11 +196,13 @@ def process_files(listelements, args):
                     # are correct
                     if len(upsilondicts[i]) == 0:
                         upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
-                else:  # just Hillier data
+                else:  # only Hillier data
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
                          atomic_number, ion_stage, flog)
-                    upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
+
+                    if len(upsilondicts[i]) == 0:
+                        upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         photoionization_crosssections[i], hillier_photoion_targetconfigs[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
@@ -512,7 +519,7 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
                 arr_energyryd = samples_in_interval[:, 0]
                 arr_sigma_megabarns = samples_in_interval[:, 1]
             else:
-                nsteps = 500
+                nsteps = 50  # was 500
                 arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
                 arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
 
@@ -563,8 +570,7 @@ def weightedavgthresholdinev(energylevels_thision, ids):
     gsum = 0.0
     for levelid in ids:
         statisticalweight = float(energylevels_thision[levelid].g)
-        genergysum += statisticalweight * hc_in_ev_angstrom / \
-            float(energylevels_thision[levelid].lambdaangstrom)
+        genergysum += statisticalweight * hc_in_ev_angstrom / float(energylevels_thision[levelid].lambdaangstrom)
         gsum += statisticalweight
     return genergysum / gsum
 
@@ -588,11 +594,17 @@ def get_term_as_tuple(config):
             print("WARNING: Can't read parity from JJ coupling state '" + config + "'")
             return (-1, -1, -1)
 
+    lposition = -1
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
             l = lchars.index(char)
             break
+    if lposition < 0:
+        if config[-1] == 'e':
+            return (-1, -1, 0)
+        elif config[-1] == 'o':
+            return (-1, -1, 1)
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
@@ -880,7 +892,6 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
     atomic_number, listions = listelements[elementindex]
     upsilon_transition_row = namedtuple('transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
-    print('\nStarting output stage:')
     with open(os.path.join(args.output_folder_transition_guide, 'transitions_{}.txt'.format(elsymbols[atomic_number])), 'w') as ftransitionguide:
         ftransitionguide.write('{0:>16s} {1:>12s} {2:>3s} {3:>9s} {4:>17s} {5:>17s} {6:>10s} {7:25s}  {8:25s} {9:>17s} {10:>17s} {11:>19s}\n'.format(
             'lambda_angstroms', 'A', 'Z', 'ion_stage', 'lower_energy_Ev', 'lower_statweight', 'forbidden', 'lower_level', 'upper_level', 'upper_statweight', 'upper_energy_Ev', 'upper_has_permitted'))
@@ -893,7 +904,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
         flog = open(os.path.join(args.output_folder, args.output_folder_logs,
                                  '{0}{1:d}.txt'.format(elsymbols[atomic_number].lower(), ion_stage)), 'a')
 
-        print('===========> ' + ionstr + ':')
+        log_and_print(flog, '\n===========> ' + ionstr + ' output:')
 
         level_id_of_level_name = {}
         for levelid in range(1, len(energy_levels[i])):
@@ -967,7 +978,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
 
 
 def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args, flog):
-    log_and_print(flog, "writing to 'adata.txt'")
+    log_and_print(flog, "Writing to 'adata.txt'")
     fatommodels.write('{0:12d}{1:12d}{2:12d}{3:15.7f}\n'.format(
         atomic_number, ion_stage,
         len(energy_levels) - 1,
@@ -1015,7 +1026,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
 def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels,
                           transitions, upsilondict, args, flog):
-    log_and_print(flog, "writing to 'transitiondata.txt'")
+    log_and_print(flog, "Writing to 'transitiondata.txt'")
 
     num_forbidden_transitions = 0
     num_collision_strengths_applied = 0
@@ -1069,12 +1080,12 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
 
 def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
                      photoionization_crosssections, photoionization_targetfractions, args, flog):
-    log_and_print(flog, "writing to 'phixsdata2.txt'")
+    log_and_print(flog, "Writing to 'phixsdata2.txt'")
     flog.write('Downsampling cross sections assuming T={0} Kelvin\n'.format(args.optimaltemperature))
 
     if photoionization_crosssections[1][0] == 0.:
-        log_and_print(flog, 'ERROR: ground state has zero photoionization cross section')
-        sys.exit()
+        log_and_print(flog, 'WARNING: ground state has zero photoionization cross section')
+        # sys.exit()
 
     for lowerlevelid in range(1, len(energy_levels)):
         if len(photoionization_targetfractions[lowerlevelid]) <= 1 and photoionization_targetfractions[lowerlevelid][0][1] > 0.99:

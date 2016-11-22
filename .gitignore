@@ -1,8 +1,9 @@
 /atomic-data-hillier/atomic
-artis_files
-artis_files_old
+artis_files*
+!artis_files_example_old
 transition_guide/transitions_*.*
 __pycache__
+.pyc
 .cache
 Icon?
 *.swp

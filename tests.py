@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from makeartisatomicfiles import get_term_as_tuple, interpret_configuration, score_config_match, reduce_configuration, interpret_parent_term
+# import readhillierdata as rhd
 
 
 def test_reduce_configuration():
