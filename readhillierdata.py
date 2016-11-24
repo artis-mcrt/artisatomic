@@ -182,7 +182,7 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 
 vy95_phixsfitrow = namedtuple('vy95phixsfit', ['n', 'l', 'E_th_eV', 'E_0', 'sigma_0', 'y_a', 'P', 'y_w'])
 
-hyd_energygrid_ryd, hyd_phixs = {}, {}  # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
+hyd_phixs_energygrid_ryd, hyd_phixs = {}, {}  # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
 hyd_gaunt_energygrid_ryd, hyd_gaunt_factor = {}, {}  # keys are n quantum number
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -310,19 +310,19 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 # cross section types
 phixs_type_labels = {
-0: 'Constant (always zero?) [constant]',
-1: 'Seaton formula fit [sigma_o, alpha, beta]',
-2: 'Hydrogenic split l (z states, n > 11) [n, l_start, l_end]',
-3: 'Hydrogenic pure n level (all l, n >= 13) [scale, n]',
-4: 'Used for CIV rates from Leobowitz (JQSRT 1972,12,299) (6 numbers)',
-5: 'Opacity project fits (from Peach, Sraph, and Seaton (1988) (5 numbers)',
-6: 'Hummer fits to the opacity cross-sections for HeI',
-7: 'Modified Seaton formula fit (cross section zero until offset edge)',
-8: 'Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]',
-9: 'Verner & Yakolev 1995 ground state fits (multiple shells)',
-20: 'Opacity Project: smoothed [number of data pairs]',
-21: 'Opacity Project: scaled, smoothed [number of data pairs]',
-22: 'energy is in units of threshold, cross section in Megabarns? [number of data pairs]',
+    0: 'Constant (always zero?) [constant]',
+    1: 'Seaton formula fit [sigma_o, alpha, beta]',
+    2: 'Hydrogenic split l (z states, n > 11) [n, l_start, l_end]',
+    3: 'Hydrogenic pure n level (all l, n >= 13) [scale, n]',
+    4: 'Used for CIV rates from Leobowitz (JQSRT 1972,12,299) (6 numbers)',
+    5: 'Opacity project fits (from Peach, Sraph, and Seaton (1988) (5 numbers)',
+    6: 'Hummer fits to the opacity cross-sections for HeI',
+    7: 'Modified Seaton formula fit (cross section zero until offset edge)',
+    8: 'Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]',
+    9: 'Verner & Yakolev 1995 ground state fits (multiple shells)',
+    20: 'Opacity Project: smoothed [number of data points]',
+    21: 'Opacity Project: scaled, smoothed [number of data poits]',
+    22: 'energy is in units of threshold, cross section in Megabarns? [number of data points]',
 }
 def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this gets partially overwritten anyway
@@ -411,7 +411,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 3:
-                            phixstables[truncatedlowerlevelname] = get_seaton_phixstable(*fitcoefficients)
+                            lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
+                            phixstables[truncatedlowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
                             numpointsexpected = len(phixstables[truncatedlowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(truncatedlowerlevelname))
 
@@ -440,13 +441,17 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
                             numpointsexpected = len(phixstables[truncatedlowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(truncatedlowerlevelname))
+                            print(truncatedlowerlevelname)
+                            print(phixstables[truncatedlowerlevelname][:10])
+                            print(get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1, n_eff)[:10])
 
                 elif crosssectiontype == 7:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 4:
-                            phixstables[truncatedlowerlevelname] = get_seaton_phixstable(
-                                *fitcoefficients, float(energy_levels[lowerlevelid].lambdaangstrom))
+                            lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
+                            phixstables[truncatedlowerlevelname] = get_seaton_phixstable(lambda_angstrom,
+                                                                                         *fitcoefficients)
                             numpointsexpected = len(phixstables[truncatedlowerlevelname])
                             # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(truncatedlowerlevelname))
 
@@ -469,7 +474,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(vy95_phixsfitrow(int(row[0]), int(row[1]), *[float(x.replace('D', 'E')) for x in row[2:]]))
 
                         if len(fitcoefficients) * 8 == numpointsexpected:
-                            phixstables[truncatedlowerlevelname] = get_vy95_phixstable(fitcoefficients)
+                            lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
+                            phixstables[truncatedlowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
                             numpointsexpected = len(phixstables[truncatedlowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(truncatedlowerlevelname))
 
@@ -524,10 +530,6 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     len(phixs_type_levels[crosssectiontype]), crosssectiontype, phixs_type_labels[crosssectiontype]))
 
 
-        print('1___')
-        print(phixstables['1___'][:10])
-        print('2___')
-        print(phixstables['2___'][:10])
         reduced_phixs_dict = artisatomic.reduce_phixs_tables(phixstables, args)
         for key, phixstable in reduced_phixs_dict.items():
             for levelid, energy_level in enumerate(energy_levels[1:], 1):
@@ -539,9 +541,11 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     return photoionization_crosssections, photoionization_targetconfigs
 
 
-def get_seaton_phixstable(sigmat, beta, s, nu_o=None, lambda_angstrom=None):
+def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
+
+    thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
     for index, c in enumerate(energygrid):
         energydivthreshold = 1 + 20 * (c ** 2)
@@ -558,18 +562,17 @@ def get_seaton_phixstable(sigmat, beta, s, nu_o=None, lambda_angstrom=None):
             else:
                 crosssection = 0.
 
-        phixstable[index] = energydivthreshold, crosssection
+        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
     return phixstable
 
 
-# test: n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
+# test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
 # 2.18 eV threshold cross section is near 4.37072813 Mb, great!
 def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, n_eff, nu_o=None):
-    energygrid = hyd_energygrid_ryd[(n, l_start)]
+    energygrid = hyd_phixs_energygrid_ryd[(n, l_start)]
     phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
-
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
     scale_factor = 1 / thresholdenergyryd / (n ** 2) / ((l_end - l_start + 1) * (l_end + l_start + 1))
@@ -585,7 +588,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, n_eff, nu_o
         if U > 0:
             crosssection = 0.
             for l in range(l_start, l_end + 1):
-                if not np.array_equal(hyd_energygrid_ryd[(n, l)], energygrid):
+                if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], energygrid):
                     print("TABLE MISMATCH")
                     sys.exit()
                 crosssection += (2 * l + 1) * hyd_phixs[(n, l)][index]
@@ -599,7 +602,8 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, n_eff, nu_o
 
 
 # test: hydrogen n = 1: 13.606 eV threshold cross section is near 6.3029 Mb
-# test: hydrogen n = 5: 2.72 eV threshold cross section is near ? Mb
+# test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb?? can't find a source for this
+# IMPORTANT: not sure how atomic number plays into this!
 def get_hydrogenic_n_phixstable(lambda_angstrom, n, atomic_number):
     energygrid = hyd_gaunt_energygrid_ryd[n]
     phixstable = np.empty((len(energygrid), 2))
@@ -607,9 +611,7 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n, atomic_number):
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    scale_factor = 7.91 * atomic_number ** 4 / thresholdenergyryd
-    if n == 2:
-        print(thresholdenergyryd)
+    scale_factor = 7.91 / thresholdenergyryd / n
 
     for index, energy_ryd in enumerate(energygrid):
         energydivthreshold = energy_ryd / energygrid[0]
@@ -625,9 +627,10 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n, atomic_number):
     return phixstable
 
 
-def get_vy95_phixstable(fitcoefficients):
+def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
+    thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
     for index, c in enumerate(energygrid):
         energydivthreshold = 1 + 20 * (c ** 2)
@@ -641,7 +644,7 @@ def get_vy95_phixstable(fitcoefficients):
             y_w = params.y_w
             crosssection += params.sigma_0 * ((y - 1) ** 2 + y_w ** 2) * (y ** -Q) * ((1 + math.sqrt(y / y_a)) ** -P)
 
-        phixstable[index] = energydivthreshold, crosssection
+        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
     return phixstable
 
 
@@ -809,7 +812,7 @@ def read_hyd_phixsdata():
                           n, l, num_points, len(xs_values)))
                     sys.exit()
 
-            hyd_energygrid_ryd[(n, l)] = [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
+            hyd_phixs_energygrid_ryd[(n, l)] = [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
             hyd_phixs[(n, l)] = [10 ** (8 + logxs) for logxs in xs_values]  # cross sections in Megabarns
             #hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
