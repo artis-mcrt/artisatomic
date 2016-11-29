@@ -29,8 +29,8 @@ roman_numerals = (
 )
 
 listelements = [
-    (1, [1, 2]),
-    # (6, [2, 3]),
+    # (1, [1, 2]),
+    # (6, [3, 4]),
     # (8, [1, 2, 3]),
     # (13, [1, 2]),
     # (26, [1, 2, 3, 4, 5]),
@@ -461,6 +461,15 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
     #   tablein = dicttables[key]
     for key, tablein in dicttables:
         # tablein is an array of pairs (energy, phixs cross section)
+
+        # filter zero points out of the table
+        firstnonzeroindex = 0
+        for i, point in enumerate(tablein):
+            if point[1] != 0.:
+                firstnonzeroindex = i
+                break
+        if firstnonzeroindex != 0:
+            tablein = tablein[firstnonzeroindex:]
 
         # table says zero threshold, so avoid divide by zero
         if tablein[0][0] == 0.:
@@ -1087,22 +1096,29 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
         log_and_print(flog, 'WARNING: ground state has zero photoionization cross section')
         # sys.exit()
 
-    for lowerlevelid in range(1, len(energy_levels)):
-        if len(photoionization_targetfractions[lowerlevelid]) <= 1 and photoionization_targetfractions[lowerlevelid][0][1] > 0.99:
-            if len(photoionization_targetfractions[lowerlevelid]) > 0:
-                upperionlevelid = photoionization_targetfractions[lowerlevelid][0][0]
+    for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
+        if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
+            if len(targetlist) > 0:
+                upperionlevelid = targetlist[0][0]
             else:
                 upperionlevelid = 1
 
             fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
                 atomic_number, ion_stage + 1, upperionlevelid, ion_stage, lowerlevelid))
         else:
-            targetlist = photoionization_targetfractions[lowerlevelid]
             fphixs.write('{0:12d}{1:12d}{2:8d}{3:12d}{4:8d}\n'.format(
                 atomic_number, ion_stage + 1, -1, ion_stage, lowerlevelid))
             fphixs.write('{0:8d}\n'.format(len(targetlist)))
+            probability_sum = 0.
             for upperionlevelid, targetprobability in targetlist:
                 fphixs.write('{0:8d}{1:12f}\n'.format(upperionlevelid, targetprobability))
+                probability_sum += targetprobability
+            if abs(probability_sum - 1.) > 0.00001:
+                print('STOP! phixs fractions sum to {0:.5f} != 1.0'.format(probability_sum))
+                print(targetlist)
+                print('level id {0} {1}'.format(lowerlevelid, energy_levels[lowerlevelid].levelname))
+                sys.exit()
+
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write('{0:16.8E}\n'.format(crosssection))
 

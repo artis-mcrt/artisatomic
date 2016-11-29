@@ -132,6 +132,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
 
             photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
+
     elif atomic_number == 27 and ion_stage == 3:
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
