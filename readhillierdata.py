@@ -336,6 +336,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     reduced_phixs_dict = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
 
+    j_splitting_on = False  # hopefully this is either on or off for all photoion files asssociated with a given ion
+
     phixs_type_levels = defaultdict(list)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
@@ -347,7 +349,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         artisatomic.log_and_print(flog, 'Reading ' + filename)
         with open(filename, 'r') as fhillierphot:
             lowerlevelid = -1
-            truncatedlowerlevelname = ''
+            lowerlevelname = ''
             # upperlevelname = ''
             numpointsexpected = 0
             crosssectiontype = -1
@@ -367,27 +369,35 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         sys.exit()
                     phixstargets[filenum] = targetlevelname
 
-                if len(row) >= 2 and ' '.join(row[3:]) == '!Split J levels':
+                if len(row) >= 2 and ' '.join(row[-3:]) == '!Split J levels':
                     if row[0].lower() == 'true':
-                        artisatomic.log_and_print(flog,
-                            'WARNING! file gives phixs for J-split levels but this is currently ignored')
+                        j_splitting_on = True
+                        artisatomic.log_and_print(flog, 'File specifies J-splitting enabled')
+                    elif row[0].lower() == 'false':
+                        if j_splitting_on:
+                            print('STOP! J-splitting disabled here, but was previously enabled for this ion')
+                            sys.exit()
+                        j_splitting_on = False
+                    else:
+                        print('STOP! J-splitting not true or false: "{0}"'.format(row[0]))
+                        sys.exit()
 
                 if len(row) >= 2 and ' '.join(row[-2:]) == '!Configuration name' or ' '.join(row[-3:]) == '!Configuration name [*]':
-                    truncatedlowerlevelname = row[0]
-                    if '[' in truncatedlowerlevelname:
-                        truncatedlowerlevelname.split('[')[0]
+                    lowerlevelname = row[0]
+                    if '[' in lowerlevelname:
+                        lowerlevelname.split('[')[0]
                     fitcoefficients = []
                     numpointsexpected = 0
                     lowerlevelid = 1
                     for levelid, energy_level in enumerate(energy_levels[1:], 1):
                         this_levelnamenoj = energy_level.levelname.split('[')[0]
-                        if this_levelnamenoj == truncatedlowerlevelname:
+                        if this_levelnamenoj == lowerlevelname:
                             lowerlevelid = levelid
                             break
                     if targetlevelname == '':
                         print("ERROR: no upper level name")
                         sys.exit()
-                    # print('Reading level {0} '{1}''.format(lowerlevelid, truncatedlowerlevelname))
+                    # print('Reading level {0} '{1}''.format(lowerlevelid, lowerlevelname))
 
                 if len(row) >= 2 and ' '.join(row[-3:]) == '!Screened nuclear charge':
                     # 'Screened nuclear charge' appears mislabelled in the CMFGEN database
@@ -412,16 +422,16 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             print("ERROR: Cross section type 0 has non-zero number after it")
                             sys.exit()
 
-                        # phixstables[filenum][truncatedlowerlevelname] = np.zeros((numpointsexpected, 2))
+                        # phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
 
                 elif crosssectiontype == 1:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 3:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(truncatedlowerlevelname))
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
+                            # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 2:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -432,10 +442,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                                 artisatomic.log_and_print(flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1))
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                                phixstables[filenum][truncatedlowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
-                                numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
-
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic split l formula values for level {0}'.format(truncatedlowerlevelname))
+                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
+                                numpointsexpected = len(phixstables[filenum][lowerlevelname])
+                            # artisatomic.log_and_print(flog, 'Using Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 3:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -444,12 +453,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             scale, n = fitcoefficients
                             n = int(n)
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = scale * get_hydrogenic_n_phixstable(lambda_angstrom, n)
+                            phixstables[filenum][lowerlevelname] = scale * get_hydrogenic_n_phixstable(lambda_angstrom, n)
 
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(truncatedlowerlevelname))
-                            # print(truncatedlowerlevelname)
-                            # print(phixstables[filenum][truncatedlowerlevelname][:10])
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
+                            # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(lowerlevelname))
+                            # print(lowerlevelname)
+                            # print(phixstables[filenum][lowerlevelname][:10])
                             # print(get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)[:10])
 
                 elif crosssectiontype == 5:
@@ -457,34 +466,34 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 5:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = get_opproject_phixstable(lambda_angstrom, *fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
+                            phixstables[filenum][lowerlevelname] = get_opproject_phixstable(lambda_angstrom, *fitcoefficients)
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # artisatomic.log_and_print(flog, 'Using OP project formula values for level {0}'.format(truncatedlowerlevelname))
+                            # artisatomic.log_and_print(flog, 'Using OP project formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 6:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 8:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = get_hummer_phixstable(lambda_angstrom, *fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
+                            phixstables[filenum][lowerlevelname] = get_hummer_phixstable(lambda_angstrom, *fitcoefficients)
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # print(truncatedlowerlevelname, "HUMMER")
+                            # print(lowerlevelname, "HUMMER")
                             # print(fitcoefficients)
-                            # print(phixstables[truncatedlowerlevelname][::5])
-                            # print(phixstables[truncatedlowerlevelname][-10:])
+                            # print(phixstables[lowerlevelname][::5])
+                            # print(phixstables[lowerlevelname][-10:])
 
-                            # artisatomic.log_and_print(flog, 'Using Hummer formula values for level {0}'.format(truncatedlowerlevelname))
+                            # artisatomic.log_and_print(flog, 'Using Hummer formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 7:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 4:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
-                            # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(truncatedlowerlevelname))
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
+                            # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 8:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -495,10 +504,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                                 artisatomic.log_and_print(flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1))
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                                phixstables[filenum][truncatedlowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n,
+                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n,
                                                                                                  l_start, l_end, nu_o=nu_o)
-                                # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(truncatedlowerlevelname))
-                                numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
+                                # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
+                                numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                 elif crosssectiontype == 9:
                     if len(row) == 8 and numpointsexpected > 0:
@@ -506,26 +515,26 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
                         if len(fitcoefficients) * 8 == numpointsexpected:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][truncatedlowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][truncatedlowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(truncatedlowerlevelname))
+                            phixstables[filenum][lowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
+                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
+                            # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype in [20, 21, 22]:  # sampled data points
-                    if len(row) == 2 and row_is_all_floats and truncatedlowerlevelname != '':
-                        if truncatedlowerlevelname not in phixstables[filenum]:
-                            phixstables[filenum][truncatedlowerlevelname] = np.zeros((numpointsexpected, 2))
+                    if len(row) == 2 and row_is_all_floats and lowerlevelname != '':
+                        if lowerlevelname not in phixstables[filenum]:
+                            phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
                         xspoint = float(row[0].replace('D', 'E')), float(row[1].replace('D', 'E'))
-                        phixstables[filenum][truncatedlowerlevelname][pointnumber] = xspoint
+                        phixstables[filenum][lowerlevelname][pointnumber] = xspoint
 
                         if pointnumber > 0:
-                            curenergy = phixstables[filenum][truncatedlowerlevelname][pointnumber][0]
-                            prevenergy = phixstables[filenum][truncatedlowerlevelname][pointnumber - 1][0]
+                            curenergy = phixstables[filenum][lowerlevelname][pointnumber][0]
+                            prevenergy = phixstables[filenum][lowerlevelname][pointnumber - 1][0]
                             if curenergy == prevenergy:
                                 print('WARNING: photoionization table for {0} first column duplicated energy value of {1}'.format(
-                                      truncatedlowerlevelname, prevenergy))
+                                      lowerlevelname, prevenergy))
                             elif curenergy < prevenergy:
                                 print('ERROR: photoionization table for {0} first column decreases with energy {1} followed by {2}'.format(
-                                      truncatedlowerlevelname, prevenergy, curenergy))
+                                      lowerlevelname, prevenergy, curenergy))
                                 sys.exit()
 
                         pointnumber += 1
@@ -534,24 +543,24 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if crosssectiontype not in unknown_phixs_types:
                         unknown_phixs_types.append(crosssectiontype)
                     fitcoefficients = []
-                    truncatedlowerlevelname = ''
+                    lowerlevelname = ''
                     numpointsexpected = 0
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Type of cross-section':
                     crosssectiontype = int(row[0])
-                    if truncatedlowerlevelname not in phixs_type_levels[crosssectiontype]:
-                        phixs_type_levels[crosssectiontype].append(truncatedlowerlevelname)
+                    if lowerlevelname not in phixs_type_levels[crosssectiontype]:
+                        phixs_type_levels[crosssectiontype].append(lowerlevelname)
 
                 if len(row) == 0:
-                    if (truncatedlowerlevelname != '' and truncatedlowerlevelname in phixstables and
-                            targetlevelname in phixstables[truncatedlowerlevelname] and
-                            numpointsexpected != len(phixstables[filenum][truncatedlowerlevelname])):
+                    if (lowerlevelname != '' and lowerlevelname in phixstables and
+                            targetlevelname in phixstables[lowerlevelname] and
+                            numpointsexpected != len(phixstables[filenum][lowerlevelname])):
                         print('photoionization_crosssections mismatch: expecting {0:d} rows but found {1:d}'.format(
-                            numpointsexpected, len(phixstables[filenum][truncatedlowerlevelname])))
+                            numpointsexpected, len(phixstables[filenum][lowerlevelname])))
                         print('A={0}, ion_stage={1}, lowerlevel={2}, crosssectiontype={3}'.format(
-                            atomic_number, ion_stage, truncatedlowerlevelname, crosssectiontype))
+                            atomic_number, ion_stage, lowerlevelname, crosssectiontype))
                         sys.exit()
-                    truncatedlowerlevelname = ''
+                    lowerlevelname = ''
                     crosssectiontype = -1
                     numpointsexpected = 0
 
@@ -562,7 +571,6 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             else:
                 artisatomic.log_and_print(flog, '{0} levels with cross-section type {1}: {2}'.format(
                     len(phixs_type_levels[crosssectiontype]), crosssectiontype, phixs_type_labels[crosssectiontype]))
-
 
 
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args)
@@ -586,24 +594,32 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
         # filter out low fraction targets
         factor_sum_nofilter = sum([x[1] for x in target_configfactors_nofilter])
-        target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.02)]
-        max_factor = max([x[1] for x in target_configfactors])
-        factor_sum = sum([x[1] for x in target_configfactors])
+        if factor_sum_nofilter > 0.:  # else, it's probably all zeros, so leave it and "send" it to the ground state
+            target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
+            if len(target_configfactors) == 0:
+                print("HERE", lowerlevelname, target_configfactors_nofilter)
+                print(reduced_phixstable)
+            max_factor = max([x[1] for x in target_configfactors])
+            factor_sum = sum([x[1] for x in target_configfactors])
 
-        for target_config, target_factor in target_configfactors:
-            target_fraction = target_factor / factor_sum
-            phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
+            for target_config, target_factor in target_configfactors:
+                target_fraction = target_factor / factor_sum
+                phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
-        # e.g. if the target with the highest fraction has 50%, the cross sections need to be multiplied by two
-        reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
+            # e.g. if the target with the highest fraction has 50%, the cross sections need to be multiplied by two
+            reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
 
     # now the non-J-split cross sections are mapped onto J-split levels
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
         for levelid, energy_level in enumerate(energy_levels[1:], 1):
-            levelname_b_noj = energy_level.levelname.split('[')[0]
-            if levelname_b_noj == lowerlevelname_a:
+            if j_splitting_on:
+                levelname_b = energy_level.levelname
+            else:
+                levelname_b = energy_level.levelname.split('[')[0]
+
+            if levelname_b == lowerlevelname_a:  # due to J splitting, we may match multiple levels here
                 photoionization_crosssections[levelid] = phixstable
-                photoionization_targetconfig_fractions[levelid] = phixs_targetconfigfractions_of_levelname[levelname_b_noj]
+                photoionization_targetconfig_fractions[levelid] = phixs_targetconfigfractions_of_levelname[levelname_b]
 
     return photoionization_crosssections, photoionization_targetconfig_fractions
 

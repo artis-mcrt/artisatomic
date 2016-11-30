@@ -32,11 +32,10 @@ listelements = [
     # (1, [1, 2]),
     # (6, [3, 4]),
     # (8, [1, 2, 3]),
-    # (13, [1, 2]),
-    # (26, [1, 2, 3, 4, 5]),
-    # (27, [2, 3, 4]),
-    # (21, [2, 3])
-    # (28, [2, 3]),
+    # (10, [1, 2]),
+    # (14, [3, 4]),
+    (26, [1, 2, 3, 4, 5]),
+    (27, [2, 3, 4]),
 ]
 
 # include everything we have data for
@@ -356,7 +355,7 @@ def combine_hillier_nahar(hillier_energy_levels, hillier_level_ids_matching_term
         len(hillier_energy_levels) - 1, len(added_nahar_levels), len(energy_levels) - 1))
 
     # sort the concatenated energy level list by energy
-    print('Sorting level list...')
+    print('Sorting levels by energy...')
     energy_levels.sort(key=lambda x: float(getattr(x, 'energyabovegsinpercm', '-inf')))
 
     if len(nahar_phixs_tables.keys()) > 0:
@@ -442,7 +441,7 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
     h_over_kb_in_K_sec = (const.h / const.k_B).to('K s').value
 
     # proportional to recombination rate
-    # nu0 = 1e13
+    # nu0 = 1e16
     # fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
 
     def integrand(nu):
@@ -533,12 +532,16 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
                 arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
 
             integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
-            sigma_integrand_vals = [sigma * integrand_val
-                                    for integrand_val, sigma
-                                    in zip(integrand_vals, arr_sigma_megabarns)]
+            if np.any(integrand_vals):
+                sigma_integrand_vals = [sigma * integrand_val
+                                        for sigma, integrand_val
+                                        in zip(arr_sigma_megabarns, integrand_vals)]
 
-            integralnosigma = integrate.trapz(integrand_vals, arr_energyryd)
-            integralwithsigma = integrate.trapz(sigma_integrand_vals, arr_energyryd)
+                integralnosigma = integrate.trapz(integrand_vals, arr_energyryd)
+                integralwithsigma = integrate.trapz(sigma_integrand_vals, arr_energyryd)
+            else:
+                integralnosigma = 1.0
+                integralwithsigma = np.average(arr_sigma_megabarns)
 
             if integralwithsigma > 0 and integralnosigma > 0:
                 arr_sigma_out[i] = (integralwithsigma / integralnosigma)
@@ -1094,7 +1097,7 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
 
     if photoionization_crosssections[1][0] == 0.:
         log_and_print(flog, 'WARNING: ground state has zero photoionization cross section')
-        # sys.exit()
+        sys.exit()
 
     for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
         if len(targetlist) <= 1 and targetlist[0][1] > 0.99:

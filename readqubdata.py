@@ -106,7 +106,9 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
-            photdata = pd.read_csv('atomic-data-qub/{0:d}.gz'.format(lowerlevelid), delim_whitespace=True, header=None)
+            filename = 'atomic-data-qub/{0:d}.gz'.format(lowerlevelid)
+            artisatomic.log_and_print(flog, 'Reading ' + filename)
+            photdata = pd.read_csv(filename, delim_whitespace=True, header=None)
             phixstables = {}
             ntargets = 40
             for targetlevel in range(1, ntargets + 1):
@@ -114,26 +116,32 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
             reduced_phixs_dict = artisatomic.reduce_phixs_tables(phixstables, args)
             target_scalefactors = np.zeros(ntargets + 1)
+            upperlevelid_withmaxfraction = 1
+            max_scalefactor = 0.
             for upperlevelid in reduced_phixs_dict:
                 # take the ratio of cross sections at the threshold energyies
-                target_scalefactors[upperlevelid] = reduced_phixs_dict[upperlevelid][0]
+                scalefactor = reduced_phixs_dict[upperlevelid][0]
+                target_scalefactors[upperlevelid] = scalefactor
                 # target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
+                if scalefactor > max_scalefactor:
+                    upperlevelid_withmaxfraction = upperlevelid
+                    max_scalefactor = scalefactor
 
             scalefactorsum = sum(target_scalefactors)
+            target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
+            scalefactorsum = sum(target_scalefactors)
+
             photoionization_targetfractions[lowerlevelid] = []
-            max_fraction = 0.
-            upperlevelid_withmaxfraction = 1
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
                 target_fraction = target_scalefactor / scalefactorsum
-                if target_fraction > max_fraction:
-                    upperlevelid_withmaxfraction = upperlevelid
-                    max_fraction = target_fraction
                 if target_fraction > 0.001:
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
 
+            max_fraction = (max_scalefactor / scalefactorsum)
             photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
 
     elif atomic_number == 27 and ion_stage == 3:
+        # photoionize to a single level ion
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
             if lowerlevelid <= 4:
