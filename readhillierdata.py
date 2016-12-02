@@ -16,7 +16,6 @@ from manual_matches import hillier_name_replacements
 hillier_rowformat_a = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4'
 hillier_rowformat_b = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6'
 hillier_rowformat_c = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
-hillier_rowformat_d = 'levelname g energyabovegsinpercm lambdaangstrom freqtentothe15hz hillierlevelid'
 
 # keys are (atomic number, ion stage)
 ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename', 'energylevelrowformat', 'photfilenames', 'coldatafilename'])
@@ -78,7 +77,7 @@ ions_data = {
     # Si
     (14, 1): ion_files('23nov11', 'SiI_OSC', hillier_rowformat_b, ['SiI_PHOT_DATA'], 'col_data'),
     (14, 2): ion_files('30oct12', 'si2_osc_nahar', hillier_rowformat_b, ['phot_op.dat'], 'si2_col'),
-    (14, 3): ion_files('5dec96', 'osc_op_split_rev.dat', hillier_rowformat_d, ['phot_op.dat'], 'col_guess.dat'),
+    (14, 3): ion_files('5dec96', 'osc_op_split_rev.dat', hillier_rowformat_c, ['phot_op.dat'], 'col_guess.dat'),
     (14, 4): ion_files('30oct12', 'osc_op_split.dat', hillier_rowformat_b, ['phot_op.dat'], 'col_data.dat'),
 
     # P (IV and V are the only ions in CMFGEN)
