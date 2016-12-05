@@ -77,7 +77,7 @@ ions_data = {
     # Si
     (14, 1): ion_files('23nov11', 'SiI_OSC', hillier_rowformat_b, ['SiI_PHOT_DATA'], 'col_data'),
     (14, 2): ion_files('30oct12', 'si2_osc_nahar', hillier_rowformat_b, ['phot_op.dat'], 'si2_col'),
-    (14, 3): ion_files('5dec96', 'osc_op_split_rev.dat', hillier_rowformat_c, ['phot_op.dat'], 'col_guess.dat'),
+    (14, 3): ion_files('5dec96b', 'osc_op_split_rev.dat', hillier_rowformat_a, ['phot_op.dat'], 'col_data'),
     (14, 4): ion_files('30oct12', 'osc_op_split.dat', hillier_rowformat_b, ['phot_op.dat'], 'col_data.dat'),
 
     # P (IV and V are the only ions in CMFGEN)
@@ -230,7 +230,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
                 hillier_energy_level = hillier_energy_level._replace(
                     hillierlevelid=hillierlevelid,
-                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm),
+                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace('D', 'E')),
                     g=float(hillier_energy_level.g),
                     twosplusone=twosplusone,
                     l=l,
