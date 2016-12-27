@@ -50,7 +50,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 qub_energylevels.append(energylevel)
 
             upsilonheader = fleveltrans.readline().split()
-            list_tempheaders = ['upsT={0:}'.format(x) for x in upsilonheader[2:]]
+            list_tempheaders = [f'upsT={x:}' for x in upsilonheader[2:]]
             list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
             qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
                                                 comment="C", names=list_headers,
@@ -64,10 +64,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 if (lower, upper) not in upsilondict:
                     upsilondict[(lower, upper)] = upsilon
                 else:
-                    artisatomic.log_and_print(flog, "Duplicate upsilon value for transition {0:d} to {1:d} keeping {2:5.2e} instead of using {3:5.2e}".format(
-                        lower, upper, upsilondict[(lower, upper)], upsilon))
+                    artisatomic.log_and_print(flog, f'Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}')
 
-        artisatomic.log_and_print(flog, 'Read {:d} levels'.format(len(qub_energylevels[1:])))
+        artisatomic.log_and_print(flog, f'Read {len(qub_energylevels[1:]):d} levels')
 
         with open('atomic-data-qub/adf04rad_v1', 'r') as ftrans:
             for line in ftrans:
@@ -95,7 +94,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row('groundstate', 1, 0, 0, 0, 0., 10, 0))
 
-    artisatomic.log_and_print(flog, 'Read {:d} transitions'.format(len(qub_transitions)))
+    artisatomic.log_and_print(flog, f'Read {len(qub_transitions):d} transitions')
 
     return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
 
@@ -106,7 +105,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
-            filename = 'atomic-data-qub/{0:d}.gz'.format(lowerlevelid)
+            filename = f'atomic-data-qub/{lowerlevelid:d}.gz'
             artisatomic.log_and_print(flog, 'Reading ' + filename)
             photdata = pd.read_csv(filename, delim_whitespace=True, header=None)
             phixstables = {}

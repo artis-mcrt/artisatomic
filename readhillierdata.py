@@ -242,7 +242,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 if twosplusone == -1 and atomic_number > 1:
                     # -1 indicates that the term could not be interpreted
                     if parity == -1:
-                        artisatomic.log_and_print(flog, "Can't find LS term in Hillier level name '" + levelname + "'")
+                        artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
                     # else:
                         # artisatomic.log_and_print(flog, "Can't find LS term in Hillier level name '{0:}' (parity is {1:})".format(levelname, parity))
                 else:
@@ -255,14 +255,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                         float(hillier_energy_levels[-1].lambdaangstrom)
 
                 if hillierlevelid != len(hillier_energy_levels) - 1:
-                    print('Hillier levels mismatch: id {0:d} found at entry number {1:d}'.format(
-                        len(hillier_energy_levels) - 1, hillierlevelid))
+                    print(f'Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number {hillierlevelid:d}')
                     sys.exit()
 
             if line.startswith('                        Oscillator strengths'):
                 break
 
-        artisatomic.log_and_print(flog, 'Read {:d} levels'.format(len(hillier_energy_levels[1:])))
+        artisatomic.log_and_print(flog, f'Read {len(hillier_energy_levels[1:]):d} levels')
 
         # defined_transition_ids = []
         for line in fhillierosc:
@@ -295,14 +294,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     transition_count_of_level_name[transition.nameto] += 1
 
                     if int(transition.hilliertransitionid) != len(transitions):
-                        print(filename + ', WARNING: Transition id {0:d} found at entry number {1:d}'.format(
-                            int(transition.hilliertransitionid), len(transitions)))
+                        print(f'{filename} WARNING: Transition id {int(transition.hilliertransitionid):d} found at entry number {len(transitions):d}')
                         sys.exit()
                 else:
-                    artisatomic.log_and_print(flog, 'FATAL: multiply-defined Hillier transition: {0} {1}'.format(
-                        transition.namefrom, transition.nameto))
+                    artisatomic.log_and_print(flog, f'FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}')
                     sys.exit()
-    artisatomic.log_and_print(flog, 'Read {:d} transitions'.format(len(transitions)))
+    artisatomic.log_and_print(flog, f'Read {len(transitions):d} transitions')
 
     return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
 
@@ -378,7 +375,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             sys.exit()
                         j_splitting_on = False
                     else:
-                        print('STOP! J-splitting not true or false: "{0}"'.format(row[0]))
+                        print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit()
 
                 if len(row) >= 2 and ' '.join(row[-2:]) == '!Configuration name' or ' '.join(row[-3:]) == '!Configuration name [*]':
@@ -396,7 +393,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if targetlevelname == '':
                         print("ERROR: no upper level name")
                         sys.exit()
-                    # print('Reading level {0} '{1}''.format(lowerlevelid, lowerlevelname))
+                    # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and ' '.join(row[-3:]) == '!Screened nuclear charge':
                     # 'Screened nuclear charge' appears mislabelled in the CMFGEN database
@@ -409,7 +406,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     pointnumber = 0
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Cross-section unit' and row[0] != 'Megabarns':
-                        print('Wrong cross-section unit: ' + row[0])
+                        print(f'Wrong cross-section unit: {row[0]}')
                         sys.exit()
 
                 row_is_all_floats = all(map(artisatomic.isfloat, row))
@@ -500,7 +497,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         if len(fitcoefficients) == 4:
                             n, l_start, l_end, nu_o = fitcoefficients
                             if l_end > n - 1:
-                                artisatomic.log_and_print(flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1))
+                                artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n,
@@ -529,11 +526,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             curenergy = phixstables[filenum][lowerlevelname][pointnumber][0]
                             prevenergy = phixstables[filenum][lowerlevelname][pointnumber - 1][0]
                             if curenergy == prevenergy:
-                                print('WARNING: photoionization table for {0} first column duplicated energy value of {1}'.format(
-                                      lowerlevelname, prevenergy))
+                                print(f'WARNING: photoionization table for {lowerlevelname} first column duplicated energy value of {prevenergy}')
                             elif curenergy < prevenergy:
-                                print('ERROR: photoionization table for {0} first column decreases with energy {1} followed by {2}'.format(
-                                      lowerlevelname, prevenergy, curenergy))
+                                print(f'ERROR: photoionization table for {lowerlevelname} first column decreases with energy {prevenergy} followed by {curenergy}')
                                 sys.exit()
 
                         pointnumber += 1
@@ -554,10 +549,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if (lowerlevelname != '' and lowerlevelname in phixstables and
                             targetlevelname in phixstables[lowerlevelname] and
                             numpointsexpected != len(phixstables[filenum][lowerlevelname])):
-                        print('photoionization_crosssections mismatch: expecting {0:d} rows but found {1:d}'.format(
-                            numpointsexpected, len(phixstables[filenum][lowerlevelname])))
-                        print('A={0}, ion_stage={1}, lowerlevel={2}, crosssectiontype={3}'.format(
-                            atomic_number, ion_stage, lowerlevelname, crosssectiontype))
+                        print(f'photoionization_crosssections mismatch: expecting {numpointsexpected:d} rows but found {len(phixstables[filenum][lowerlevelname]):d}')
+                        print(f'A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname}, crosssectiontype={crosssectiontype}')
                         sys.exit()
                     lowerlevelname = ''
                     crosssectiontype = -1
@@ -565,11 +558,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
         for crosssectiontype in sorted(phixs_type_levels.keys()):
             if crosssectiontype in unknown_phixs_types:
-                artisatomic.log_and_print(flog, 'WARNING {0} levels with UNKOWN cross-section type {1}: {2}'.format(
-                    len(phixs_type_levels[crosssectiontype]), crosssectiontype, phixs_type_labels[crosssectiontype]))
+                artisatomic.log_and_print(flog, f'WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKOWN cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
             else:
-                artisatomic.log_and_print(flog, '{0} levels with cross-section type {1}: {2}'.format(
-                    len(phixs_type_levels[crosssectiontype]), crosssectiontype, phixs_type_labels[crosssectiontype]))
+                artisatomic.log_and_print(flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
 
 
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args)
@@ -596,7 +587,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         if factor_sum_nofilter > 0.:  # else, it's probably all zeros, so leave it and "send" it to the ground state
             target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
             if len(target_configfactors) == 0:
-                print("HERE", lowerlevelname, target_configfactors_nofilter)
+                print("ERRORHERE", lowerlevelname, target_configfactors_nofilter)
                 print(reduced_phixstable)
             max_factor = max([x[1] for x in target_configfactors])
             factor_sum = sum([x[1] for x in target_configfactors])
@@ -810,17 +801,15 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if line.lstrip().startswith('Transition\T'):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
-                    artisatomic.log_and_print(flog, 'ERROR: Expected {0:d} temperature values, but header has {1:d} columns'.format(
-                                  num_expected_t_values, len(header_row)))
+                    artisatomic.log_and_print(flog, f'ERROR: Expected {num_expected_t_values:d} temperature values, but header has {len(header_row):d} columns')
                     sys.exit()
                 temperatures = row[-num_expected_t_values:]
-                artisatomic.log_and_print(flog, 'Temperatures available for effective collision strengths (units of {0:.1e} K):\n{1}'.format(
-                    t_scale_factor, ', '.join(temperatures)))
+                artisatomic.log_and_print(flog, f'Temperatures available for effective collision strengths (units of {t_scale_factor:.1e} K):\n{", ".join(temperatures)}')
                 match_sorted_temperatures = sorted(temperatures,
                                                    key=lambda t:abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
                 best_temperature = match_sorted_temperatures[0]
                 temperature_index = temperatures.index(best_temperature)
-                artisatomic.log_and_print(flog, 'Selecting {0:.3f} K'.format(float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor))
+                artisatomic.log_and_print(flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K")
                 continue
 
             if len(row) >= 2:
@@ -844,11 +833,10 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     id_lower = level_id_of_level_name[namefrom]
                     id_upper = level_id_of_level_name[nameto]
                     if id_lower >= id_upper:
-                        artisatomic.log_and_print(flog, 'WARNING: Transition ids are backwards or equal? {0} (level {1:d}) -> {2} (level {3:d})...discarding'.format(
-                            namefrom, id_lower, nameto, id_upper))
+                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are backwards or equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
                         discarded_transitions += 1
                     elif (id_lower, id_upper) in upsilondict:
-                        print('ERROR: Duplicate transition from {0} -> {1}'.format(namefrom, nameto))
+                        print(f'ERROR: Duplicate transition from {namefrom} -> {nameto}')
                         sys.exit()
                     else:
                         upsilondict[(id_lower, id_upper)] = upsilon
@@ -856,19 +844,16 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 except KeyError:
                     unlisted_from_message = ' (unlisted)' if namefrom not in level_id_of_level_name else ''
                     unlisted_to_message = ' (unlisted)' if nameto not in level_id_of_level_name else ''
-                    artisatomic.log_and_print(flog, 'Discarding upsilon={0:.3f} for {1}{2} -> {3}{4}'.format(
-                        upsilon, namefrom, unlisted_from_message, nameto, unlisted_to_message))
+                    artisatomic.log_and_print(flog, f'Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} -> {nameto}{unlisted_to_message}')
                     discarded_transitions += 1
 
     if len(upsilondict) + discarded_transitions < number_expected_transitions:
-        print('ERROR: file specified {0:d} transitions, but only {1:d} were found'.format(
-              number_expected_transitions, len(upsilondict) + discarded_transitions))
+        print(f'ERROR: file specified {number_expected_transitions:d} transitions, but only {len(upsilondict) + discarded_transitions:d} were found')
         sys.exit()
     elif len(upsilondict) + discarded_transitions > number_expected_transitions:
-        artisatomic.log_and_print(flog, 'WARNING: file specified {0:d} transitions, but {1:d} were found'.format(
-            number_expected_transitions, len(upsilondict) + discarded_transitions))
+        artisatomic.log_and_print(flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {len(upsilondict) + discarded_transitions:d} were found')
     else:
-        artisatomic.log_and_print(flog, 'Read {0} effective collision strengths '.format(len(upsilondict) + discarded_transitions))
+        artisatomic.log_and_print(flog, f'Read {len(upsilondict) + discarded_transitions} effective collision strengths ')
 
 
     return upsilondict
@@ -911,7 +896,7 @@ def read_hyd_phixsdata():
     hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term = read_levels_and_transitions(1, 1, open('/dev/null', 'w'))
 
     hyd_filename = 'atomic-data-hillier/atomic/HYD/I/5dec96/hyd_l_data.dat'
-    print('Reading hydrogen photoionization cross sections from ' + hyd_filename)
+    print(f'Reading hydrogen photoionization cross sections from {hyd_filename}')
     max_n = -1
     l_start_u = 0.
     with open(hyd_filename, 'r') as fhyd:
@@ -943,8 +928,7 @@ def read_hyd_phixsdata():
                 if len(xs_values) == num_points:
                     break
                 elif len(xs_values) > num_points:
-                    print('ERROR: too many datapoints for (n,l)=({0},{1}), expected {2} but found {3}'.format(
-                          n, l, num_points, len(xs_values)))
+                    print(f'ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found {len(xs_values)}')
                     sys.exit()
 
             hyd_phixs_energygrid_ryd[(n, l)] = [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
@@ -952,7 +936,7 @@ def read_hyd_phixsdata():
             #hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
     hyd_filename = 'atomic-data-hillier/atomic/HYD/I/5dec96/gbf_n_data.dat'
-    print('Reading hydrogen Gaunt factors from ' + hyd_filename)
+    print(f'Reading hydrogen Gaunt factors from {hyd_filename}')
     max_n = -1
     l_start_u = 0.
     with open(hyd_filename, 'r') as fhyd:
@@ -984,8 +968,7 @@ def read_hyd_phixsdata():
                 if len(gaunt_values) == num_points:
                     break
                 elif len(gaunt_values) > num_points:
-                    print('ERROR: too many datapoints for n={0}, expected {1} but found {2}'.format(
-                          n, num_points, len(gaunt_values)))
+                    print(f'ERROR: too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}')
                     sys.exit()
 
             hyd_gaunt_energygrid_ryd[n] = [e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)]

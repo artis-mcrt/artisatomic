@@ -90,6 +90,7 @@ def get_maxabs_elratio(a1, a2):
     maxabsratio = max(maxabsratio, 1 - ratio.min())
     return maxabsratio
 
+
 if __name__ == "__main__":
     print('3d7b2Fe', interpret_configuration('3d7b2Fe'))
     print(reduce_configuration('3d6_3P2e'))

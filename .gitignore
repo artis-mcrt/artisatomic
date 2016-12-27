@@ -8,3 +8,5 @@ __pycache__
 Icon?
 *.swp
 *.tmp
+
+output.txt
