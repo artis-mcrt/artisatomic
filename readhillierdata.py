@@ -172,7 +172,8 @@ hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 PYDIR = os.path.dirname(os.path.abspath(__file__))
-elsymbols = ['n'] + list(pd.read_csv(os.path.join(PYDIR, 'elements.csv'))['symbol'].values)
+atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
+elsymbols = ['n'] + list(atomicdata['symbol'].values)
 
 # hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
