@@ -1045,15 +1045,16 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
             num_forbidden_transitions += 1
             flog.write(f'Forbidden transition: lambda_angstrom= {float(transition.lambdaangstrom):7.1f}, {transition.namefrom:25s} to {transition.nameto:25s}\n')
 
-        ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
-            abs(float(transition.lambdaangstrom)), float(transition.A),
-            atomic_number, ion_stage,
-            hc_in_ev_cm * float(energy_levels[levelid_lower].energyabovegsinpercm),
-            float(energy_levels[levelid_lower].g), forbidden,
-            transition.namefrom, transition.nameto,
-            float(energy_levels[levelid_upper].g),
-            hc_in_ev_cm * float(energy_levels[levelid_upper].energyabovegsinpercm),
-            levelid_upper in level_ids_with_permitted_down_transitions))
+        if float(transition.A) > 0.0:  # ignore transitions that exist only because of their collisional data
+            ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
+                abs(float(transition.lambdaangstrom)), float(transition.A),
+                atomic_number, ion_stage,
+                hc_in_ev_cm * float(energy_levels[levelid_lower].energyabovegsinpercm),
+                float(energy_levels[levelid_lower].g), forbidden,
+                transition.namefrom, transition.nameto,
+                float(energy_levels[levelid_upper].g),
+                hc_in_ev_cm * float(energy_levels[levelid_upper].energyabovegsinpercm),
+                levelid_upper in level_ids_with_permitted_down_transitions))
 
         # ftransitiondata.write('{0:4d} {1:4d} {2:16.10E} {3:9.2e} {4:d}\n'.format(
         #     levelid_lower, levelid_upper, float(transition.A), coll_str, forbidden))
@@ -1107,6 +1108,7 @@ def write_compositionfile(listelements, args):
             ion_stage_max = max(listions)
             nions = ion_stage_max - ion_stage_min + 1
             fcomp.write(f'{atomic_number:d}  {nions:d}  {ion_stage_min:d}  {ion_stage_max:d}  -1 0.0 {atomic_weights[atomic_number]:.4f}\n')
+
 
 if __name__ == "__main__":
     # print(interpret_configuration('3d64s_4H'))
