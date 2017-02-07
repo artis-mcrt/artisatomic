@@ -26,7 +26,7 @@ ions_data = {
     (1, 2): ion_files('', '', hillier_rowformat_c, [''], ''),
 
     # He
-    (2, 1): ion_files('11may07', 'heioscdat_a7.dat', hillier_rowformat_a, ['heiphot_a7.dat'], 'heicol.dat'),
+    (2, 1): ion_files('11may07', 'heioscdat_a7.dat_old', hillier_rowformat_a, ['heiphot_a7.dat'], 'heicol.dat'),
     (2, 2): ion_files('5dec96', 'he2_osc.dat', hillier_rowformat_c, ['he2phot.dat'], 'he2col.dat'),
 
     # C
@@ -77,7 +77,7 @@ ions_data = {
     # Si
     (14, 1): ion_files('23nov11', 'SiI_OSC', hillier_rowformat_b, ['SiI_PHOT_DATA'], 'col_data'),
     (14, 2): ion_files('30oct12', 'si2_osc_nahar', hillier_rowformat_b, ['phot_op.dat'], 'si2_col'),
-    (14, 3): ion_files('5dec96b', 'osc_op_split_rev.dat', hillier_rowformat_a, ['phot_op.dat'], 'col_data'),
+    (14, 3): ion_files('5dec96b', 'osc_op_split_rev.dat_1jun12', hillier_rowformat_a, ['phot_op.dat'], 'col_data'),
     (14, 4): ion_files('30oct12', 'osc_op_split.dat', hillier_rowformat_b, ['phot_op.dat'], 'col_data.dat'),
 
     # P (IV and V are the only ions in CMFGEN)
@@ -799,11 +799,17 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(line.strip()) == 0:
                 continue  # skip blank lines
 
+            if (line.startswith("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2") or  # found in he2col.dat
+                line.startswith("Johnson values")):  # found in col_ariii
+                break
+
             if line.lstrip().startswith('Transition\T'):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
-                    artisatomic.log_and_print(flog, f'ERROR: Expected {num_expected_t_values:d} temperature values, but header has {len(header_row):d} columns')
-                    sys.exit()
+                    artisatomic.log_and_print(flog, f'WARNING: Expected {num_expected_t_values:d} temperature values, but header has {len(header_row):d} columns')
+                    num_expected_t_values = len(header_row) - 1
+                    artisatomic.log_and_print(flog, f'Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}')
+
                 temperatures = row[-num_expected_t_values:]
                 artisatomic.log_and_print(flog, f'Temperatures available for effective collision strengths (units of {t_scale_factor:.1e} K):\n{", ".join(temperatures)}')
                 match_sorted_temperatures = sorted(temperatures,
