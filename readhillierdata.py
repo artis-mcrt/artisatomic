@@ -135,8 +135,8 @@ ions_data = {
     (25, 5): ion_files('18oct00', 'mnv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Fe
-    (26, 1): ion_files('29apr04', 'fei_osc', hillier_rowformat_a, ['phot_smooth_3000'], ''),  # col_data
-    (26, 2): ion_files('16nov98', 'fe2osc_nahar_kurucz.dat', hillier_rowformat_c, ['../24may96/phot_op.dat'], 'fe2_col.dat'),
+    (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_0'], 'col_data'),
+    (26, 2): ion_files('10sep16', 'fe2_osc', hillier_rowformat_b, ['phot_op.dat'], 'fe2_col.dat'),
     (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformat_b, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
@@ -272,18 +272,24 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             row = (linesplitdash[0] + ' ' + '-'.join(linesplitdash[1:-1]) +
                    ' ' + linesplitdash[-1]).split()
 
-            if len(row) == 8 and all(map(artisatomic.isfloat, row[2:4])):
+            if (len(row) == 8 or (len(row) >= 10 and row[-1] == '|')) and all(map(artisatomic.isfloat, row[2:4])):
                 try:
                     lambda_value = float(row[4])
                 except ValueError:
                     lambda_value = -1
+
+                if len(row) == 8:
+                    hilliertransitionid = int(row[7])
+                else:
+                    hilliertransitionid = len(transitions) + 1
+
                 transition = hillier_transition_row(row[0], row[1],
                                                     float(row[2]),  # f
                                                     float(row[3]),  # A
                                                     lambda_value,
                                                     int(row[5]),  # i
                                                     int(row[6]),  # j
-                                                    int(row[7]),  # hilliertransitionid
+                                                    hilliertransitionid,  # hilliertransitionid
                                                     -1,  # lowerlevel
                                                     -1,  # upperlevel
                                                     -99)  # coll_str
@@ -839,8 +845,12 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 try:
                     id_lower = level_id_of_level_name[namefrom]
                     id_upper = level_id_of_level_name[nameto]
-                    if id_lower >= id_upper:
-                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are backwards or equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
+                    if id_lower > id_upper:
+                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
+                        id_lower, namefrom, id_upper, nameto = id_upper, nameto, id_lower, namefrom
+
+                    if id_lower == id_upper:
+                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
                         discarded_transitions += 1
                     elif (id_lower, id_upper) in upsilondict:
                         print(f'ERROR: Duplicate transition from {namefrom} -> {nameto}')
@@ -861,7 +871,6 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
         artisatomic.log_and_print(flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {len(upsilondict) + discarded_transitions:d} were found')
     else:
         artisatomic.log_and_print(flog, f'Read {len(upsilondict) + discarded_transitions} effective collision strengths ')
-
 
     return upsilondict
 

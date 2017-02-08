@@ -128,27 +128,27 @@ def process_files(listelements, args):
             with open(logfilepath, 'w') as flog:
                 log_and_print(flog, f'\n===========> {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:')
 
-                upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
-                if (atomic_number, ion_stage) in upsilondatafilenames:
-                    upsilonfilename = os.path.join('atomic-data-tiptopbase',
-                                                   upsilondatafilenames[(atomic_number, ion_stage)])
-                    log_and_print(flog, f'Reading effective collision strengths from {upsilonfilename}')
-                    upsilondatadf = pd.read_csv(upsilonfilename,
-                                                names=["Z", "ion_stage", "lower", "upper", "upsilon"],
-                                                index_col=False, header=None, sep=" ")
-                    if len(upsilondatadf) > 0:
-                        for _, row in upsilondatadf.iterrows():
-                            lower = int(row['lower'])
-                            upper = int(row['upper'])
-                            if upper < lower:
-                                print(f'Problem in {upsilondatafilenames[(atomic_number, ion_stage)]}, lower {lower} upper {upper}. Swapping lower and upper')
-                                old_lower = lower
-                                lower = upper
-                                upper = old_lower
-                            if (lower, upper) not in upsilondicts[i]:
-                                upsilondicts[i][(lower, upper)] = row['upsilon']
-                            else:
-                                log_and_print(flog, f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondicts[i][(lower, upper)]:5.2e} instead of using {row['upsilon']:5.2e}")
+                # upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
+                # if (atomic_number, ion_stage) in upsilondatafilenames:
+                #     upsilonfilename = os.path.join('atomic-data-tiptopbase',
+                #                                    upsilondatafilenames[(atomic_number, ion_stage)])
+                #     log_and_print(flog, f'Reading effective collision strengths from {upsilonfilename}')
+                #     upsilondatadf = pd.read_csv(upsilonfilename,
+                #                                 names=["Z", "ion_stage", "lower", "upper", "upsilon"],
+                #                                 index_col=False, header=None, sep=" ")
+                #     if len(upsilondatadf) > 0:
+                #         for _, row in upsilondatadf.iterrows():
+                #             lower = int(row['lower'])
+                #             upper = int(row['upper'])
+                #             if upper < lower:
+                #                 print(f'Problem in {upsilondatafilenames[(atomic_number, ion_stage)]}, lower {lower} upper {upper}. Swapping lower and upper')
+                #                 old_lower = lower
+                #                 lower = upper
+                #                 upper = old_lower
+                #             if (lower, upper) not in upsilondicts[i]:
+                #                 upsilondicts[i][(lower, upper)] = row['upsilon']
+                #             else:
+                #                 log_and_print(flog, f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondicts[i][(lower, upper)]:5.2e} instead of using {row['upsilon']:5.2e}")
 
                 if atomic_number == 27:
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
