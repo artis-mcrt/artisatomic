@@ -40,7 +40,8 @@ listelements = [
 ]
 
 # include everything we have data for
-listelements = readhillierdata.extend_ion_list(listelements)
+if __name__ == "__main__":
+    listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
