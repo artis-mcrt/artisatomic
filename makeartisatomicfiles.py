@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-from collections import namedtuple
+import argparse
 import itertools
-import os
-import sys
 import math
 import multiprocessing as mp
-import argparse
+import os
+import sys
+from collections import namedtuple
 
-from astropy import constants as const
-from astropy import units as u
 import numpy as np
 import pandas as pd
-from scipy import integrate
-from scipy import interpolate
-from manual_matches import nahar_configuration_replacements, hillier_name_replacements
+from astropy import constants as const
+from astropy import units as u
+from scipy import integrate, interpolate
+
+import readhillierdata
 import readnahardata
 import readqubdata
-import readhillierdata
+from manual_matches import (hillier_name_replacements,
+                            nahar_configuration_replacements)
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')

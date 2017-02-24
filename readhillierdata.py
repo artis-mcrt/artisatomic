@@ -3,11 +3,13 @@
 import math
 import os
 import sys
+from collections import defaultdict, namedtuple
+
 import numpy as np
 import pandas as pd
-from collections import namedtuple, defaultdict
 from astropy import constants as const
 from astropy import units as u
+
 import makeartisatomicfiles as artisatomic
 from manual_matches import hillier_name_replacements
 

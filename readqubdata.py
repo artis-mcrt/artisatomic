@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 
-from collections import namedtuple, defaultdict
+from collections import defaultdict, namedtuple
+
 import numpy as np
 import pandas as pd
 from astropy import constants as const
 from astropy import units as u
+
 import makeartisatomicfiles as artisatomic
+
 ryd_to_ev = u.rydberg.to('eV')
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value

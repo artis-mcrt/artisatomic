@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-from makeartisatomicfiles import get_term_as_tuple, interpret_configuration, score_config_match, reduce_configuration, interpret_parent_term
-import readhillierdata as rhd
+import numpy as np
 from astropy import constants as const
 from astropy import units as u
-import numpy as np
+
+import readhillierdata as rhd
+from makeartisatomicfiles import (get_term_as_tuple, interpret_configuration,
+                                  interpret_parent_term, reduce_configuration,
+                                  score_config_match)
 
 
 def test_reduce_configuration():
