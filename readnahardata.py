@@ -72,7 +72,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                 if row == ['0', '0', '0', '0']:
                     break
                 twosplusone = int(row[0])
-                l = int(row[1])
+                l_val = int(row[1])
                 parity = int(row[2])
                 number_of_states_in_symmetry = int(row[3])
 
@@ -84,12 +84,12 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                     nahar_core_state_id = int(row[2])
                     if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
                         flog.write("Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d}). Setting core state to 1 instead.\n".format(
-                            twosplusone, lchars[l], ['e', 'o'][parity],
+                            twosplusone, lchars[l_val], ['e', 'o'][parity],
                             indexinsymmetry, nahar_core_state_id,
                             len(nahar_core_states)))
                         nahar_core_state_id = 1
 
-                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l, parity, -1.0, 0, ''))
+                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l_val, parity, -1.0, 0, ''))
 
                     energyabovegsinpercm = \
                         (nahar_ionization_potential_rydberg +
@@ -101,9 +101,9 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                         corestateid=nahar_core_state_id,
                         energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),
                         energyabovegsinpercm=energyabovegsinpercm,
-                        g=twosplusone * (2 * l + 1)
+                        g=twosplusone * (2 * l_val + 1)
                     )
-                    nahar_level_index_of_state[(twosplusone, l, parity, indexinsymmetry)] = len(nahar_energy_levels) - 1
+                    nahar_level_index_of_state[(twosplusone, l_val, parity, indexinsymmetry)] = len(nahar_energy_levels) - 1
 
     #                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
     #                    nahar_energy_levels.pop()
@@ -139,7 +139,8 @@ def read_nahar_core_states(fenlist):
         nahar_core_states[c] = naharcorestaterow(
             int(row[0]), row[1], row[2], float(row[3]))
         if int(nahar_core_states[c].nahar_core_state_id) != c:
-            print(f'Nahar levels mismatch: id {c:d} found at entry number {int(nahar_core_states[c].nahar_core_state_id):d}')
+            print(f'Nahar levels mismatch: id {c:d} found at entry'
+                  f' number {int(nahar_core_states[c].nahar_core_state_id):d}')
             sys.exit()
     return nahar_core_states
 
@@ -217,7 +218,7 @@ def read_nahar_configurations(fenlist, flog):
             state = line[1:22]
 #               energy = float(line[29:29+8])
             twosplusone = int(state[18])
-            l = lchars.index(state[19])
+            l_val = lchars.index(state[19])
 
             if state[20] == 'o':
                 parity = 1
@@ -227,7 +228,7 @@ def read_nahar_configurations(fenlist, flog):
                 indexinsymmetry = alphabets.index(state[17]) + 1
 
             # print(state,energy,twosplusone,l,parity,indexinsymmetry)
-            nahar_configurations[(twosplusone, l, parity, indexinsymmetry)] = state
+            nahar_configurations[(twosplusone, l_val, parity, indexinsymmetry)] = state
         else:
             if found_table:
                 break
@@ -249,7 +250,8 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
             nahar_core_state_reduced_configuration = artisatomic.reduce_configuration(
                 nahar_core_state.configuration + '_' + nahar_core_state.term)
             core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
-            flog.write(f"\nMatching core state {core_state_id} '{nahar_core_state.configuration}_{nahar_core_state.term}' E={core_state_energy_ev:0.3f} eV to:\n")
+            flog.write(
+                f"\nMatching core state {core_state_id} '{nahar_core_state.configuration}_{nahar_core_state.term}' E={core_state_energy_ev:0.3f} eV to:\n")
 
             candidate_upper_levels = {}
             for upperlevelid, upperlevel in enumerate(energy_levels_upperion[1:], 1):
@@ -261,19 +263,21 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
                     upperlevelconfig = nahar_configurations_upperion.get(state_tuple, '-1')
                 energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
 
-                if artisatomic.reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:  # this ignores parent term
+                # this ignores parent term
+                if artisatomic.reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
                     ediff = energyev - core_state_energy_ev
                     upperlevelconfignoj = upperlevelconfig.split('[')[0]
                     if upperlevelconfignoj not in candidate_upper_levels:
                         candidate_upper_levels[upperlevelconfignoj] = [[], []]
                     candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
                     candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
-                    flog.write(f"Upper ion level {upperlevelid} '{upperlevelconfig}' E = {energyev:.4f} E_diff={ediff:.4f}\n")
+                    flog.write(
+                        f"Upper ion level {upperlevelid} '{upperlevelconfig}' E = {energyev:.4f} E_diff={ediff:.4f}\n")
 
             best_ediff = float('inf')
             best_match_upperlevelids = []
             for _, (ediffs, upperlevelids) in candidate_upper_levels.items():
-                avg_ediff = abs(sum(ediffs)/len(ediffs))
+                avg_ediff = abs(sum(ediffs) / len(ediffs))
                 if avg_ediff < best_ediff:
                     best_ediff = avg_ediff
                     best_match_upperlevelids = upperlevelids
@@ -285,7 +289,8 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
             # after matching process, still no upper levels matched!
             if not upper_level_ids_of_core_state_id[core_state_id]:
                 upper_level_ids_of_core_state_id[core_state_id] = [1]
-                artisatomic.log_and_print(flog, f"No upper levels matched. Defaulting to level 1 (reduced string: '{nahar_core_state_reduced_configuration}')")
+                artisatomic.log_and_print(
+                    flog, f"No upper levels matched. Defaulting to level 1 (reduced string: '{nahar_core_state_reduced_configuration}')")
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
     else:

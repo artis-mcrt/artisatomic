@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
-from astropy import constants as const
+# from astropy import constants as const
 from astropy import units as u
 
 import readhillierdata as rhd
@@ -39,7 +39,8 @@ def test_score_config_match():
     match1 = score_config_match('3d64s  (6D ) 5g  i5F ', '3d6(5D)4s5g_5Fe[4]')
     assert match1 >= 49
     assert score_config_match('3d64s  (6D ) 5g  (1S) i5F ', '3d6(5D)4s5g_5Fe[4]') == match1
-    assert score_config_match('3d6    (5D ) 6s  e6D ', '3d6(5D)6se6De[9/2]') > score_config_match('3d6    (5D ) 6s  e6D ', '3d6(5D)5s6De[9/2]')
+    assert score_config_match('3d6    (5D ) 6s  e6D ',
+                              '3d6(5D)6se6De[9/2]') > score_config_match('3d6    (5D ) 6s  e6D ', '3d6(5D)5s6De[9/2]')
 
     assert score_config_match('Eqv st (0S ) 0s  a4P', '3d5_4Pe[4]') == 5
     assert score_config_match('3d6    (5D ) 0s  b2F ', '3d7b2Fe') > 90

@@ -20,7 +20,8 @@ hillier_rowformat_b = 'levelname g energyabovegsinpercm freqtentothe15hz thresho
 hillier_rowformat_c = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
 
 # keys are (atomic number, ion stage)
-ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename', 'energylevelrowformat', 'photfilenames', 'coldatafilename'])
+ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename',
+                                     'energylevelrowformat', 'photfilenames', 'coldatafilename'])
 
 ions_data = {
     # H
@@ -184,8 +185,10 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 
 vy95_phixsfitrow = namedtuple('vy95phixsfit', ['n', 'l', 'E_th_eV', 'E_0', 'sigma_0', 'y_a', 'P', 'y_w'])
 
-hyd_phixs_energygrid_ryd, hyd_phixs = {}, {}  # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
+# keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
+hyd_phixs_energygrid_ryd, hyd_phixs = {}, {}
 hyd_gaunt_energygrid_ryd, hyd_gaunt_factor = {}, {}  # keys are n quantum number
+
 
 def hillier_ion_folder(atomic_number, ion_stage):
     return ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] + '/' + artisatomic.roman_numerals[ion_stage] + '/')
@@ -258,7 +261,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                         float(hillier_energy_levels[-1].lambdaangstrom)
 
                 if hillierlevelid != len(hillier_energy_levels) - 1:
-                    print(f'Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number {hillierlevelid:d}')
+                    print(
+                        f'Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number {hillierlevelid:d}')
                     sys.exit()
 
             if line.startswith('                        Oscillator strengths'):
@@ -303,10 +307,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     transition_count_of_level_name[transition.nameto] += 1
 
                     if int(transition.hilliertransitionid) != len(transitions):
-                        print(f'{filename} WARNING: Transition id {int(transition.hilliertransitionid):d} found at entry number {len(transitions):d}')
+                        print(
+                            f'{filename} WARNING: Transition id {int(transition.hilliertransitionid):d} found at entry number {len(transitions):d}')
                         sys.exit()
                 else:
-                    artisatomic.log_and_print(flog, f'FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}')
+                    artisatomic.log_and_print(
+                        flog, f'FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}')
                     sys.exit()
     artisatomic.log_and_print(flog, f'Read {len(transitions):d} transitions')
 
@@ -329,10 +335,14 @@ phixs_type_labels = {
     21: 'Opacity Project: scaled, smoothed [number of data poits]',
     22: 'energy is in units of threshold, cross section in Megabarns? [number of data points]',
 }
+
+
 def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))  # this gets partially overwritten anyway
+    # this gets partially overwritten anyway
+    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_targetconfig_fractions = [[] for _ in energy_levels]
-    # return np.zeros((len(energy_levels), args.nphixspoints)), photoionization_targetfractions  # TODO: replace with real data
+    # return np.zeros((len(energy_levels), args.nphixspoints)),
+    # photoionization_targetfractions  # TODO: replace with real data
 
     n_eff = ion_stage - 1  # effective nuclear charge (with be replaced with value in file if available)
     photfilenames = ions_data[(atomic_number, ion_stage)].photfilenames
@@ -341,7 +351,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     reduced_phixs_dict = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
 
-    j_splitting_on = False  # hopefully this is either on or off for all photoion files asssociated with a given ion
+    j_splitting_on = False  #  hopefully this is either on or off for all photoion files asssociated with a given ion
 
     phixs_type_levels = defaultdict(list)
     unknown_phixs_types = []
@@ -364,7 +374,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 row = line.split()
 
                 if len(row) >= 2 and ' '.join(row[-4:]) == '!Final state in ion':
-                    targetlevelname = row[0]  # this is not used because the upper ion's levels are not known at this time
+                    # this is not used because the upper ion's levels are not known at this time
+                    targetlevelname = row[0]
                     artisatomic.log_and_print(flog, 'Photoionisation target: ' + targetlevelname)
                     if '[' in targetlevelname:
                         print('STOP! target level contains a bracket (is J-split?)')
@@ -409,14 +420,13 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     # it is really an ionisation stage
                     n_eff = int(float(row[0])) - 1
 
-
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Number of cross-section points':
                     numpointsexpected = int(row[0])
                     pointnumber = 0
 
                 if len(row) >= 2 and ' '.join(row[1:]) == '!Cross-section unit' and row[0] != 'Megabarns':
-                        print(f'Wrong cross-section unit: {row[0]}')
-                        sys.exit()
+                    print(f'Wrong cross-section unit: {row[0]}')
+                    sys.exit()
 
                 row_is_all_floats = all(map(artisatomic.isfloat, row))
                 if crosssectiontype == 0:
@@ -434,7 +444,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 3:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
+                                lambda_angstrom, *fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(lowerlevelname))
 
@@ -444,10 +455,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         if len(fitcoefficients) == 3:
                             n, l_start, l_end = fitcoefficients
                             if l_end > n - 1:
-                                artisatomic.log_and_print(flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1))
+                                artisatomic.log_and_print(
+                                    flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1))
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
+                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
+                                    lambda_angstrom, n, l_start, l_end)
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
 
@@ -458,7 +471,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             scale, n = fitcoefficients
                             n = int(n)
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = scale * get_hydrogenic_n_phixstable(lambda_angstrom, n)
+                            phixstables[filenum][lowerlevelname] = scale * \
+                                get_hydrogenic_n_phixstable(lambda_angstrom, n)
 
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(lowerlevelname))
@@ -471,7 +485,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 5:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_opproject_phixstable(lambda_angstrom, *fitcoefficients)
+                            phixstables[filenum][lowerlevelname] = get_opproject_phixstable(
+                                lambda_angstrom, *fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                             # artisatomic.log_and_print(flog, 'Using OP project formula values for level {0}'.format(lowerlevelname))
@@ -481,7 +496,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 8:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_hummer_phixstable(lambda_angstrom, *fitcoefficients)
+                            phixstables[filenum][lowerlevelname] = get_hummer_phixstable(
+                                lambda_angstrom, *fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                             # print(lowerlevelname, "HUMMER")
@@ -496,7 +512,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace('D', 'E')))
                         if len(fitcoefficients) == 4:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(lambda_angstrom, *fitcoefficients)
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
+                                lambda_angstrom, *fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(lowerlevelname))
 
@@ -510,13 +527,14 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(lambda_angstrom, n,
-                                                                                                 l_start, l_end, nu_o=nu_o)
+                                                                                                    l_start, l_end, nu_o=nu_o)
                                 # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                 elif crosssectiontype == 9:
                     if len(row) == 8 and numpointsexpected > 0:
-                        fitcoefficients.append(vy95_phixsfitrow(int(row[0]), int(row[1]), *[float(x.replace('D', 'E')) for x in row[2:]]))
+                        fitcoefficients.append(vy95_phixsfitrow(int(row[0]), int(
+                            row[1]), *[float(x.replace('D', 'E')) for x in row[2:]]))
 
                         if len(fitcoefficients) * 8 == numpointsexpected:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
@@ -535,9 +553,11 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             curenergy = phixstables[filenum][lowerlevelname][pointnumber][0]
                             prevenergy = phixstables[filenum][lowerlevelname][pointnumber - 1][0]
                             if curenergy == prevenergy:
-                                print(f'WARNING: photoionization table for {lowerlevelname} first column duplicated energy value of {prevenergy}')
+                                print(
+                                    f'WARNING: photoionization table for {lowerlevelname} first column duplicated energy value of {prevenergy}')
                             elif curenergy < prevenergy:
-                                print(f'ERROR: photoionization table for {lowerlevelname} first column decreases with energy {prevenergy} followed by {curenergy}')
+                                print(
+                                    f'ERROR: photoionization table for {lowerlevelname} first column decreases with energy {prevenergy} followed by {curenergy}')
                                 sys.exit()
 
                         pointnumber += 1
@@ -558,8 +578,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if (lowerlevelname != '' and lowerlevelname in phixstables and
                             targetlevelname in phixstables[lowerlevelname] and
                             numpointsexpected != len(phixstables[filenum][lowerlevelname])):
-                        print(f'photoionization_crosssections mismatch: expecting {numpointsexpected:d} rows but found {len(phixstables[filenum][lowerlevelname]):d}')
-                        print(f'A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname}, crosssectiontype={crosssectiontype}')
+                        print(
+                            f'photoionization_crosssections mismatch: expecting {numpointsexpected:d} rows but found {len(phixstables[filenum][lowerlevelname]):d}')
+                        print(
+                            f'A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname}, crosssectiontype={crosssectiontype}')
                         sys.exit()
                     lowerlevelname = ''
                     crosssectiontype = -1
@@ -567,10 +589,11 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
         for crosssectiontype in sorted(phixs_type_levels.keys()):
             if crosssectiontype in unknown_phixs_types:
-                artisatomic.log_and_print(flog, f'WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKOWN cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
+                artisatomic.log_and_print(
+                    flog, f'WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKOWN cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
             else:
-                artisatomic.log_and_print(flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
-
+                artisatomic.log_and_print(
+                    flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
 
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args)
 
@@ -640,7 +663,8 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
             energyoffsetdivthreshold = energydivthreshold + (nu_o * 1e15 * h_in_ev_seconds) / thresholdenergyev
             thresholddivenergyoffset = energyoffsetdivthreshold ** -1
             if thresholddivenergyoffset < 1.0:
-                crosssection = sigmat * (beta + (1 - beta) * (thresholddivenergyoffset)) * (thresholddivenergyoffset ** s)
+                crosssection = sigmat * (beta + (1 - beta) * (thresholddivenergyoffset)) * \
+                    (thresholddivenergyoffset ** s)
             else:
                 crosssection = 0.
 
@@ -726,7 +750,7 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 
         crosssection = 10 ** (a + x * (b + x * (c + x * d)))
         if u > e:
-            crosssection *= (e/u) ** 2
+            crosssection *= (e / u) ** 2
 
         phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
 
@@ -805,26 +829,30 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
         for line in fcoldata:
             row = line.split()
             if len(line.strip()) == 0:
-                continue  # skip blank lines
+                continue  #  skip blank lines
 
             if (line.startswith("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2") or  # found in he2col.dat
-                line.startswith("Johnson values")):  # found in col_ariii
+                    line.startswith("Johnson values")):  # found in col_ariii
                 break
 
             if line.lstrip().startswith('Transition\T'):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
-                    artisatomic.log_and_print(flog, f'WARNING: Expected {num_expected_t_values:d} temperature values, but header has {len(header_row):d} columns')
+                    artisatomic.log_and_print(
+                        flog, f'WARNING: Expected {num_expected_t_values:d} temperature values, but header has {len(header_row):d} columns')
                     num_expected_t_values = len(header_row) - 1
-                    artisatomic.log_and_print(flog, f'Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}')
+                    artisatomic.log_and_print(
+                        flog, f'Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}')
 
                 temperatures = row[-num_expected_t_values:]
-                artisatomic.log_and_print(flog, f'Temperatures available for effective collision strengths (units of {t_scale_factor:.1e} K):\n{", ".join(temperatures)}')
+                artisatomic.log_and_print(
+                    flog, f'Temperatures available for effective collision strengths (units of {t_scale_factor:.1e} K):\n{", ".join(temperatures)}')
                 match_sorted_temperatures = sorted(temperatures,
-                                                   key=lambda t:abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
+                                                   key=lambda t: abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
                 best_temperature = match_sorted_temperatures[0]
                 temperature_index = temperatures.index(best_temperature)
-                artisatomic.log_and_print(flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K")
+                artisatomic.log_and_print(
+                    flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K")
                 continue
 
             if len(row) >= 2:
@@ -848,11 +876,13 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     id_lower = level_id_of_level_name[namefrom]
                     id_upper = level_id_of_level_name[nameto]
                     if id_lower > id_upper:
-                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
+                        artisatomic.log_and_print(
+                            flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
                         id_lower, namefrom, id_upper, nameto = id_upper, nameto, id_lower, namefrom
 
                     if id_lower == id_upper:
-                        artisatomic.log_and_print(flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
+                        artisatomic.log_and_print(
+                            flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
                         discarded_transitions += 1
                     elif (id_lower, id_upper) in upsilondict:
                         print(f'ERROR: Duplicate transition from {namefrom} -> {nameto}')
@@ -863,16 +893,20 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 except KeyError:
                     unlisted_from_message = ' (unlisted)' if namefrom not in level_id_of_level_name else ''
                     unlisted_to_message = ' (unlisted)' if nameto not in level_id_of_level_name else ''
-                    artisatomic.log_and_print(flog, f'Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} -> {nameto}{unlisted_to_message}')
+                    artisatomic.log_and_print(
+                        flog, f'Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} -> {nameto}{unlisted_to_message}')
                     discarded_transitions += 1
 
     if len(upsilondict) + discarded_transitions < number_expected_transitions:
-        print(f'ERROR: file specified {number_expected_transitions:d} transitions, but only {len(upsilondict) + discarded_transitions:d} were found')
+        print(
+            f'ERROR: file specified {number_expected_transitions:d} transitions, but only {len(upsilondict) + discarded_transitions:d} were found')
         sys.exit()
     elif len(upsilondict) + discarded_transitions > number_expected_transitions:
-        artisatomic.log_and_print(flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {len(upsilondict) + discarded_transitions:d} were found')
+        artisatomic.log_and_print(
+            flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {len(upsilondict) + discarded_transitions:d} were found')
     else:
-        artisatomic.log_and_print(flog, f'Read {len(upsilondict) + discarded_transitions} effective collision strengths ')
+        artisatomic.log_and_print(
+            flog, f'Read {len(upsilondict) + discarded_transitions} effective collision strengths ')
 
     return upsilondict
 
@@ -911,7 +945,8 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
 
 
 def read_hyd_phixsdata():
-    hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term = read_levels_and_transitions(1, 1, open('/dev/null', 'w'))
+    hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term = read_levels_and_transitions(
+        1, 1, open('/dev/null', 'w'))
 
     hyd_filename = 'atomic-data-hillier/atomic/HYD/I/5dec96/hyd_l_data.dat'
     print(f'Reading hydrogen photoionization cross sections from {hyd_filename}')
@@ -946,10 +981,12 @@ def read_hyd_phixsdata():
                 if len(xs_values) == num_points:
                     break
                 elif len(xs_values) > num_points:
-                    print(f'ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found {len(xs_values)}')
+                    print(
+                        f'ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found {len(xs_values)}')
                     sys.exit()
 
-            hyd_phixs_energygrid_ryd[(n, l)] = [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
+            hyd_phixs_energygrid_ryd[(n, l)] = [e_threshold_ev / ryd_to_ev * 10 **
+                                                (l_start_u + l_del_u * index) for index in range(num_points)]
             hyd_phixs[(n, l)] = [10 ** (8 + logxs) for logxs in xs_values]  # cross sections in Megabarns
             #hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
@@ -989,7 +1026,8 @@ def read_hyd_phixsdata():
                     print(f'ERROR: too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}')
                     sys.exit()
 
-            hyd_gaunt_energygrid_ryd[n] = [e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)]
+            hyd_gaunt_energygrid_ryd[n] = [e_threshold_ev / ryd_to_ev * 10 **
+                                           (n_start_u + n_del_u * index) for index in range(num_points)]
             hyd_gaunt_factor[n] = gaunt_values  # cross sections in Megabarns
 
 

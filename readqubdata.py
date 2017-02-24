@@ -57,7 +57,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
             qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
                                                 comment="C", names=list_headers,
-                                                dtype={'lower': np.int, 'upper': np.int}.update({z: np.float64 for z in list_headers[2:]}),
+                                                dtype={'lower': np.int, 'upper': np.int}.update(
+                                                    {z: np.float64 for z in list_headers[2:]}),
                                                 error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
             qubupsilondf_alltemps.query('upper!=-1', inplace=True)
             for _, row in qubupsilondf_alltemps.iterrows():
@@ -67,7 +68,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 if (lower, upper) not in upsilondict:
                     upsilondict[(lower, upper)] = upsilon
                 else:
-                    artisatomic.log_and_print(flog, f'Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}')
+                    artisatomic.log_and_print(
+                        flog, f'Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}')
 
         artisatomic.log_and_print(flog, f'Read {len(qub_energylevels[1:]):d} levels')
 
@@ -83,7 +85,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     forbidden = artisatomic.check_forbidden(qub_energylevels[id_upper], qub_energylevels[id_lower])
                     transition_count_of_level_name[namefrom] += 1
                     transition_count_of_level_name[nameto] += 1
-                    lamdaangstrom = 1.e8 / (qub_energylevels[id_upper].energyabovegsinpercm - qub_energylevels[id_lower].energyabovegsinpercm)
+                    lamdaangstrom = 1.e8 / \
+                        (qub_energylevels[id_upper].energyabovegsinpercm -
+                         qub_energylevels[id_lower].energyabovegsinpercm)
                     if (id_lower, id_upper) in upsilondict:
                         coll_str = upsilondict[(id_lower, id_upper)]
                     elif forbidden:
@@ -140,13 +144,15 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
 
             max_fraction = (max_scalefactor / scalefactorsum)
-            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
+            photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[
+                upperlevelid_withmaxfraction] / max_fraction
 
     elif atomic_number == 27 and ion_stage == 3:
         # photoionize to a single level ion
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
             if lowerlevelid <= 4:
-                photoionization_crosssections[lowerlevelid] = np.array([9.3380692, 7.015829602, 5.403975231, 4.250372872, 3.403086443, 2.766835319, 2.279802051, 1.900685772, 1.601177846, 1.361433037, 1.16725865, 1.008321909, 0.8769787, 0.76749151, 0.675496904, 0.597636429, 0.531296609, 0.474423066, 0.425385805, 0.382880364, 0.345854415, 0.313452694, 0.284975256, 0.259845541, 0.237585722, 0.217797532, 0.200147231, 0.184353724, 0.17017913, 0.157421217, 0.145907331, 0.135489462, 0.126040239, 0.117449648, 0.109622338, 0.102475382, 0.095936439, 0.089942202, 0.084437113, 0.079372279, 0.074704554, 0.070395769, 0.066412076, 0.062723384, 0.059302883, 0.056126637, 0.053173226, 0.050423446, 0.047860046, 0.045467498, 0.043231802, 0.041140312, 0.039181587, 0.037345256, 0.035621907, 0.034002983, 0.032480693, 0.031047932, 0.029698215, 0.028425611, 0.027224692, 0.026090478, 0.025018404, 0.02400427, 0.023044216, 0.022134683, 0.021272391, 0.020454314, 0.019677652, 0.018939819, 0.018238416, 0.017571225, 0.016936183, 0.016331377, 0.01575503, 0.015205486, 0.014681206, 0.014180754, 0.013702792, 0.013246071, 0.012809423, 0.012391758, 0.011992055, 0.011609359, 0.011242775, 0.010891464, 0.010554639, 0.010231561, 0.009921535, 0.009623909, 0.009338069, 0.009063438, 0.008799471, 0.008545656, 0.00830151, 0.008066575, 0.007840423, 0.007622646, 0.00741286, 0.007210703])
+                photoionization_crosssections[lowerlevelid] = np.array([9.3380692, 7.015829602, 5.403975231, 4.250372872, 3.403086443, 2.766835319, 2.279802051, 1.900685772, 1.601177846, 1.361433037, 1.16725865, 1.008321909, 0.8769787, 0.76749151, 0.675496904, 0.597636429, 0.531296609, 0.474423066, 0.425385805, 0.382880364, 0.345854415, 0.313452694, 0.284975256, 0.259845541, 0.237585722, 0.217797532, 0.200147231, 0.184353724, 0.17017913, 0.157421217, 0.145907331, 0.135489462, 0.126040239, 0.117449648, 0.109622338, 0.102475382, 0.095936439, 0.089942202, 0.084437113, 0.079372279, 0.074704554, 0.070395769, 0.066412076, 0.062723384, 0.059302883, 0.056126637, 0.053173226, 0.050423446,
+                                                                        0.047860046, 0.045467498, 0.043231802, 0.041140312, 0.039181587, 0.037345256, 0.035621907, 0.034002983, 0.032480693, 0.031047932, 0.029698215, 0.028425611, 0.027224692, 0.026090478, 0.025018404, 0.02400427, 0.023044216, 0.022134683, 0.021272391, 0.020454314, 0.019677652, 0.018939819, 0.018238416, 0.017571225, 0.016936183, 0.016331377, 0.01575503, 0.015205486, 0.014681206, 0.014180754, 0.013702792, 0.013246071, 0.012809423, 0.012391758, 0.011992055, 0.011609359, 0.011242775, 0.010891464, 0.010554639, 0.010231561, 0.009921535, 0.009623909, 0.009338069, 0.009063438, 0.008799471, 0.008545656, 0.00830151, 0.008066575, 0.007840423, 0.007622646, 0.00741286, 0.007210703])
 
     return photoionization_crosssections, photoionization_targetfractions
