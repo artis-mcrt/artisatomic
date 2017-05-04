@@ -37,6 +37,7 @@ listelements = [
     # (14, [3, 4]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
+    (28, [2, 3, 4, 5]),
 ]
 
 # include everything we have data for
@@ -165,7 +166,8 @@ def process_files(listelements, args):
                              atomic_number, ion_stage, flog)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
-                        photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels[i], args, flog)
+                        photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(
+                            atomic_number, ion_stage, energy_levels[i], args, flog)
 
                 elif atomic_number in [8, 26]:  # Hillier/Nahar hybrid
                     path_nahar_energy_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt'
@@ -201,7 +203,8 @@ def process_files(listelements, args):
                         upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
-                        photoionization_crosssections[i], hillier_photoion_targetconfigs[i] = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
+                        photoionization_crosssections[i], hillier_photoion_targetconfigs[i] = readhillierdata.read_phixs_tables(
+                            atomic_number, ion_stage, energy_levels[i], args, flog)
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,

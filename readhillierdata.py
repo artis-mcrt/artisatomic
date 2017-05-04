@@ -4,6 +4,7 @@ import math
 import os
 import sys
 from collections import defaultdict, namedtuple
+from contracts import contract
 
 import numpy as np
 import pandas as pd
@@ -44,9 +45,9 @@ ions_data = {
     (7, 3): ion_files('24mar07', 'niiiosc_rev.dat', hillier_rowformat_a, ['phot_sm_0_A.dat', 'phot_sm_0_B.dat'], 'niiicol.dat'),
 
     # O
-    (8, 1): ion_files('20sep11', 'oi_osc_mchf', hillier_rowformat_b, [''], 'oi_col'),
-    (8, 2): ion_files('23mar05', 'o2osc_fin.dat', hillier_rowformat_a, [''], 'o2col.dat'),
-    (8, 3): ion_files('15mar08', 'oiiiosc', hillier_rowformat_a, [''], 'col_data_oiii_butler_2012.dat'),
+    (8, 1): ion_files('20sep11', 'oi_osc_mchf', hillier_rowformat_b, ['phot_nosm_A', 'phot_nosm_B'], 'oi_col'),
+    (8, 2): ion_files('23mar05', 'o2osc_fin.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'o2col.dat'),
+    (8, 3): ion_files('15mar08', 'oiiiosc', hillier_rowformat_a, ['phot_sm_0'], 'col_data_oiii_butler_2012.dat'),
     (8, 4): ion_files('19nov07', 'fin_osc', hillier_rowformat_a, ['phot_sm_50_A', 'phot_sm_50_B'], 'col_oiv'),
 
     # F
@@ -138,7 +139,7 @@ ions_data = {
     (25, 5): ion_files('18oct00', 'mnv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Fe
-    (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_0'], 'col_data'),
+    (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_3000'], 'col_data'),
     (26, 2): ion_files('10sep16', 'fe2_osc', hillier_rowformat_b, ['phot_op.dat'], 'fe2_col.dat'),
     (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformat_b, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
@@ -554,10 +555,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             prevenergy = phixstables[filenum][lowerlevelname][pointnumber - 1][0]
                             if curenergy == prevenergy:
                                 print(
-                                    f'WARNING: photoionization table for {lowerlevelname} first column duplicated energy value of {prevenergy}')
+                                    f'WARNING: photoionization table for {lowerlevelname} first column duplicated '
+                                    f'energy value of {prevenergy}')
                             elif curenergy < prevenergy:
-                                print(
-                                    f'ERROR: photoionization table for {lowerlevelname} first column decreases with energy {prevenergy} followed by {curenergy}')
+                                print(f'ERROR: photoionization table for {lowerlevelname} first column decreases '
+                                      f'with energy {prevenergy} followed by {curenergy}')
+                                print(phixstables[filenum][lowerlevelname])
                                 sys.exit()
 
                         pointnumber += 1
@@ -646,7 +649,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     return photoionization_crosssections, photoionization_targetconfig_fractions
 
 
-def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
+@contract
+def get_seaton_phixstable(lambda_angstrom: 'float,>0', sigmat, beta, s, nu_o=None) -> 'array':
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
