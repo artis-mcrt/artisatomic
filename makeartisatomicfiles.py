@@ -1048,7 +1048,7 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
 
         if forbidden:
             num_forbidden_transitions += 1
-            flog.write(f'Forbidden transition: lambda_angstrom= {float(transition.lambdaangstrom):7.1f}, {transition.namefrom:25s} to {transition.nameto:25s}\n')
+            # flog.write(f'Forbidden transition: lambda_angstrom= {float(transition.lambdaangstrom):7.1f}, {transition.namefrom:25s} to {transition.nameto:25s}\n')
 
         if float(transition.A) > 0.0:  # ignore transitions that exist only because of their collisional data
             ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
