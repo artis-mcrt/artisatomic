@@ -5,7 +5,7 @@ import math
 import multiprocessing as mp
 import os
 import sys
-from collections import namedtuple
+from collections import defaultdict, namedtuple
 
 import numpy as np
 import pandas as pd
