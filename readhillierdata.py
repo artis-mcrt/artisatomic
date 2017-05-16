@@ -808,7 +808,6 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
 
 
 def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
-    electron_temperature = 6000
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
     upsilondict = {}
     coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
@@ -852,7 +851,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 artisatomic.log_and_print(
                     flog, f'Temperatures available for effective collision strengths (units of {t_scale_factor:.1e} K):\n{", ".join(temperatures)}')
                 match_sorted_temperatures = sorted(temperatures,
-                                                   key=lambda t: abs(float(t.replace('D', 'E')) * t_scale_factor - electron_temperature))
+                                                   key=lambda t: abs(float(t.replace('D', 'E')) * t_scale_factor - args.electrontemperature))
                 best_temperature = match_sorted_temperatures[0]
                 temperature_index = temperatures.index(best_temperature)
                 artisatomic.log_and_print(

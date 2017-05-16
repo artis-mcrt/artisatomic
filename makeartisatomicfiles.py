@@ -72,7 +72,10 @@ def main():
         help='Fraction of nu_edge incremented for each cross section point')
     parser.add_argument(
         '-optimaltemperature', type=int, default=3000,
-        help='Temperature to use when downsampling cross sections')
+        help='Temperature at which recombination rate should be constant when downsampling cross sections')
+    parser.add_argument(
+        '-electrontemperature', type=int, default=6000,
+        help='Temperature for choosing effective collision strengths')
     parser.add_argument(
         '--nophixs', action='store_true',
         help='Don''t generate cross sections and write to phixsdata_v2.txt file')
