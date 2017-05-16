@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import glob
 import itertools
 import math
 import multiprocessing as mp
@@ -83,8 +84,15 @@ def main():
     args = parser.parse_args()
     readhillierdata.read_hyd_phixsdata()
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
-    if not os.path.exists(log_folder):
+    if os.path.exists(log_folder):
+        # delete any existing log files
+        logfiles = glob.glob(os.path.join(log_folder, '*.txt'))
+        for logfile in logfiles:
+            os.remove(logfile)
+            print(logfile)
+    else:
         os.makedirs(log_folder)
+
     write_compositionfile(listelements, args)
     clear_files(args)
     process_files(listelements, args)
