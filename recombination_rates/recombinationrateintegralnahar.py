@@ -13,6 +13,33 @@ PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, '..', 'atomic_properties.txt'), delim_whitespace=True, comment='#')
 elsymbols = ['n'] + list(atomicdata['symbol'].values)
 
+nahar_level = namedtuple('naharlevel', 'twosplusone l parity indexinsymmetry')
+corestatetuple = namedtuple('corestate', 'twosplusone l parity energyryd config')
+wordtonumber = {
+    'doublet': 2,
+    'triplet': 3,
+    'quartet': 4,
+    'quintet': 5,
+    'septet': 7,
+}
+
+CLIGHT = 2.99792458e10  # Speed of light.
+CLIGHT2 = 8.9875518e20  # Speed of light squared.
+H = 6.6260755e-27  # Planck constant in erg seconds
+RYD = 2.1798741e-11  # Rydberg to ergs
+KB = 1.38065e-16  # Boltzmann constant
+SAHACONST = 2.0706659e-16  # Saha constant
+
+CLIGHTSQUARED = 8.9875518e20
+TWOOVERCLIGHTSQUARED = 2.2253001e-21
+TWOHOVERCLIGHTSQUARED = 1.4745007e-47
+CLIGHTSQUAREDOVERTWOH = 6.7819570e46
+HOVERKB = 4.799243681748932e-11
+FOURPI = 1.256637061600000e+01
+ONEOVER4PI = 7.957747153555701e-02
+HCLIGHTOVERFOURPI = 1.580764662876770e-17
+OSCSTRENGTHCONVERSION = 1.3473837e+21
+
 
 def reduce_phixs_tables(dicttables, nphixspoints, phixsnuincrement, optimaltemperature):
     dictout = {}
@@ -151,9 +178,30 @@ def reduce_phixs_tables(dicttables, nphixspoints, phixsnuincrement, optimaltempe
 
 
 def get_recombratetable(atomicnumber, ionstage):
-    temperatures = []
-    recombrates = defaultdict(list)
     with open(f'../atomic-data-nahar/{elsymbols[atomicnumber].lower()}{ionstage}.rrc.ls.txt', 'r') as filein:
+        temperatures = []
+        recombrates = defaultdict(list)
+        corestates = {}
+        while True:
+            line = filein.readline()
+            row = line.split()
+
+            if len(corestates.keys()) > 0 and line.startswith('--------------------------------------------------------------------------'):
+                break
+
+            elif line.rstrip().endswith('target information'):
+                lower_l = wordtonumber[row[1].lower()]
+                while True:
+                    line = filein.readline()
+                    if len(line.split()) == 6:
+                        break
+                ncorestates = int(filein.readline())
+                corestates[lower_l] = []
+                for n in range(ncorestates):
+                    row = filein.readline().split()
+                    corestate = corestatetuple(int(row[0]), int(row[1]), int(row[2]), float(row[3]), row[4])
+                    corestates[lower_l].append(corestate)
+
         while True:
             line = filein.readline()
             if not line or line.startswith('iii) State-specific RRC'):
@@ -186,123 +234,133 @@ def get_recombratetable(atomicnumber, ionstage):
             elif current_level != "-1" and len(recombrates[current_level]) < len(temperatures):
                 recombrates[current_level].extend([float(rate) for rate in row])
 
-    return np.array(temperatures), recombrates
+    return np.array(temperatures), recombrates, corestates
 
 
-def get_phixslist(atomicnumber, ionstage, lowerlevel):
-    phixslist = []
+def get_phixslist(atomicnumber, ionstage):
     with open(f'../atomic-data-nahar/{elsymbols[atomicnumber].lower()}{ionstage}.px.txt', 'r') as filein:
+        phixslist = {}
+
         while True:
             line = filein.readline()
-            if line.startswith(f'    {lowerlevel.twosplusone}    {lowerlevel.l}'
-                               f'    {lowerlevel.parity}    {lowerlevel.indexinsymmetry}'):
-                print(line)
+            if line.startswith(f'   {atomicnumber}   {atomicnumber - ionstage}    P'):
                 break
-        filein.readline()
-        filein.readline()
+
         while True:
-            line = filein.readline()
-            if not line or len(line.split()) != 2:
+            row = filein.readline().split()
+            if len(row) != 4:
                 break
-            row = line.split()
-            phixslist.append([float(row[0]), float(row[1])])
+
+            levelid = nahar_level(*[int(x) for x in row])
+            _, strnpoints = filein.readline().split()
+            npoints = int(strnpoints)
+            _, _ = filein.readline().split()  # binding energy
+            phixslist[levelid] = np.zeros((npoints, 2))
+
+            for n in range(npoints):
+                row = filein.readline().split()
+                phixslist[levelid][n][0] = float(row[0])
+                phixslist[levelid][n][1] = float(row[1])
 
     return phixslist
 
 
+def integral_euler(phixslist, T):
+    integral = 0.0
+    for i in range(0, len(phixslist) - 1):
+        nu = phixslist[i][0] * RYD / H
+        dnu = (phixslist[i + 1][0] - phixslist[i][0]) * RYD / H
+        sigma_bf = phixslist[i][1] * 1e-18  # from Megabarn to cm^2
+        dnu2 = dnu / 100.0
+        for nu2 in np.arange(nu, nu + dnu, dnu2):
+            # sigma_bf = np.interp(nu2, [nu, nu + dnu], [phixslist[i][1], phixslist[i + 1][1]]) * 1e-18
+            sigma_bf = phixslist[i][1] * 1e-18  # nearest to the left
+
+            integral += TWOOVERCLIGHTSQUARED * sigma_bf * (nu2 ** 2) * math.exp(-HOVERKB * nu2 / T) * dnu2
+    return integral
+
+
 def main():
-    CLIGHT = 2.99792458e10  # Speed of light.
-    CLIGHT2 = 8.9875518e20  # Speed of light squared.
-    H = 6.6260755e-27  # Planck constant in erg seconds
-    RYD = 2.1798741e-11  # Rydberg to ergs
-    KB = 1.38065e-16  # Boltzmann constant
-    SAHACONST = 2.0706659e-16  # Saha constant
+    T_goal = 2000
+    nphixspoints = 100
+    phixsnuincrement = 0.1
 
-    CLIGHTSQUARED = 8.9875518e20
-    TWOOVERCLIGHTSQUARED = 2.2253001e-21
-    TWOHOVERCLIGHTSQUARED = 1.4745007e-47
-    CLIGHTSQUAREDOVERTWOH = 6.7819570e46
-    HOVERKB = 4.799243681748932e-11
-    FOURPI = 1.256637061600000e+01
-    ONEOVER4PI = 7.957747153555701e-02
-    HCLIGHTOVERFOURPI = 1.580764662876770e-17
-    OSCSTRENGTHCONVERSION = 1.3473837e+21
+    atomicnumber = 26
+    ionstage = 3
 
+    temperatures, recombrates, corestates = get_recombratetable(atomicnumber, ionstage)
+    T_index = (np.abs(temperatures - T_goal)).argmin()
 
-    nahar_level = namedtuple('naharlevel', 'twosplusone l parity indexinsymmetry')
+    T = temperatures[T_index]  # Temperature in Kelvin
+
+    print(f'T(K):               {T:11.3e}')
+    print(f'nphixspoints:       {nphixspoints:11.3f}')
+    print(f'phixsnuincrement:   {phixsnuincrement:11.3f}')
+
+    recomb_total = 0
+    for _, recombrates_thislevel in recombrates.items():
+        recomb_total += recombrates_thislevel[T_index]
+    print(f'Nahar ion Alpha:    {recomb_total:11.3e}')
 
     # Fe II -> III ground state to ground state
     # lowerlevel = nahar_level(6, 2, 0, 1)
     # g_upper = 25
 
-    # Fe III -> IV ground state to ground state
-    lowerlevel = nahar_level(5, 2, 0, 1)
-    g_upper = 6
-    atomicnumber = 26
-    ionstage = 3
+    # Fe III -> IV
+    # transitionstrlist = ['70002301.0400', '70112301.0410']
+    transitionstrlist = ['50202401.0000', '50002301.0400', '50402302.0400']
 
-    T_goal = 6000
-    nphixspoints = 100
-    phixsnuincrement = 0.02
+    for transitionstr in transitionstrlist:
+        twosplusone = int(transitionstr[0])
+        lval = int(transitionstr[1:3])
+        parity = int(transitionstr[3])
+        zz = int(transitionstr[4:6])
+        icx = int(transitionstr[6:8])
 
-    temperatures, recombrates = get_recombratetable(atomicnumber, ionstage)
-    T_index = (np.abs(temperatures - T_goal)).argmin()
+        # index in symmetry??
+        indexinsymmetry = 1
+        lowerlevel = nahar_level(twosplusone, lval, parity, indexinsymmetry)
 
-    T = temperatures[T_index]  # Temperature in Kelvin
+        corestate = corestates[twosplusone][icx - 1]
+        g_upper = corestate.twosplusone * (corestate.l * 2 + 1)
 
-    transitionstr = '50202401.0000'
-    print(f'{transitionstr} alpha:   {recombrates[transitionstr][T_index]:11.3e}')
+        print(f'\n{transitionstr}')
 
-    recomb_total = 0
-    for _, recombrates_thislevel in recombrates.items():
-        recomb_total += recombrates_thislevel[T_index]
-    print(f'Total ion recomb rate: {recomb_total:11.3e}')
+        phixslistorig = get_phixslist(atomicnumber, ionstage)[lowerlevel]
 
-    phixslistorig = get_phixslist(atomicnumber, ionstage, lowerlevel)
+        E_threshold = phixslistorig[0][0] * RYD
 
-    E_threshold = phixslistorig[0][0] * RYD
+        g_lower = lowerlevel.twosplusone * (2 * lowerlevel.l + 1)
+        sahafactor = g_lower / g_upper * SAHACONST * (T ** -1.5) * math.exp(E_threshold / KB / T)
 
-    g_lower = lowerlevel.twosplusone * (2 * lowerlevel.l + 1)
-    sahafactor = g_lower / g_upper * SAHACONST * (T ** -1.5) * math.exp(E_threshold / KB / T)
+        print(f'  Nahar alpha:           {recombrates[transitionstr][T_index]:11.3e}')
+        print(f'  E_threshold(Ry):      {E_threshold / RYD:12.4e}')
+        # print(f'  Sahafactor:            {sahafactor:11.3e}')
 
-    print(f'nphixspoints:    {nphixspoints:d}')
-    print(f'phixsnuincrement:{phixsnuincrement:11.3e}')
-    print(f'T(K):            {T:11.3e}')
-    print(f'E_threshold(Ry): {E_threshold / RYD:11.3e}')
-    print(f'sahafactor:      {sahafactor:11.3e}')
+        phixslist_reduced = reduce_phixs_tables(
+            {'GS': np.array(phixslistorig)}, nphixspoints, phixsnuincrement, T)['GS']
 
-    phixslist_reduced = reduce_phixs_tables({'GS': np.array(phixslistorig)}, nphixspoints, phixsnuincrement, T)['GS']
-    for phixslist in (phixslistorig, phixslist_reduced):
-        print(f'\n{len(phixslist):d} points in list')
+        for phixslist in [phixslistorig]:  # , phixslist_reduced):
+            print(f'\n  {len(phixslist):d} points in list')
 
-        nu = phixslist[0][0] * RYD / H
-        sigma_bf = phixslist[0][1] * 1e-18
+            nu = phixslist[0][0] * RYD / H
+            sigma_bf = phixslist[0][1] * 1e-18
 
-        integral = 0.0
-        for i in range(0, len(phixslist) - 1):
-            nu = phixslist[i][0] * RYD / H
-            dnu = (phixslist[i + 1][0] - phixslist[i][0]) * RYD / H
-            sigma_bf = phixslist[i][1] * 1e-18  # from Megabarn to cm^2
-            dnu2 = dnu / 10.0
-            for nu2 in np.arange(nu, nu + dnu, dnu2):
-                sigma_bf = np.interp(nu2, [nu, nu + dnu], [phixslist[i][1], phixslist[i + 1][1]]) * 1e-18
+            integral = integral_euler(phixslist, T)
 
-                integral += TWOOVERCLIGHTSQUARED * sigma_bf * (nu2 ** 2) * math.exp(
-                    -HOVERKB * nu2 / T) * dnu2
+            def integrand(en_ryd, sigma_megabarns):
+                nu = en_ryd * RYD / H
+                sigmabf = sigma_megabarns * 1e-18
+                return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T)
 
-        def integrand(en_ryd, sigma_megabarns):
-            nu = en_ryd * RYD / H
-            sigmabf = sigma_megabarns * 1e-18
-            return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T)
+            arr_nu = [en_ryd * RYD / H for en_ryd, _ in phixslist]
+            arr_integrand = [integrand(en_ryd, sigma_megabarns) for en_ryd, sigma_megabarns in phixslist]
+            integral_simps = integrate.simps(arr_integrand, arr_nu)
+            integral_trapz = integrate.trapz(arr_integrand, arr_nu)
 
-        arr_nu = [en_ryd * RYD / H for en_ryd, _ in phixslist]
-        arr_integrand = [integrand(en_ryd, sigma_megabarns) for en_ryd, sigma_megabarns in phixslist]
-        integral_simps = integrate.simps(arr_integrand, arr_nu)
-        integral_trapz = integrate.trapz(arr_integrand, arr_nu)
-
-        print(f'integral part:   {integral:11.3e}  alpha: {4 * math.pi * sahafactor * integral:11.3e}')
-        print(f'integral_simps:  {integral_simps:11.3e}  alpha: {4 * math.pi * sahafactor * integral_simps:11.3e}')
-        print(f'integral_trapz:  {integral_trapz:11.3e}  alpha: {4 * math.pi * sahafactor * integral_trapz:11.3e}')
+            print(f'    integral_euler alpha: {4 * math.pi * sahafactor * integral:11.3e}')
+            print(f'    integral_simps alpha: {4 * math.pi * sahafactor * integral_simps:11.3e}')
+            print(f'    integral_trapz alpha: {4 * math.pi * sahafactor * integral_trapz:11.3e}')
 
 
 if __name__ == "__main__":
