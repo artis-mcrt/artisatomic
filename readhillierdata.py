@@ -598,7 +598,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 artisatomic.log_and_print(
                     flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
 
-        reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args)
+        reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args.optimaltemperature,
+                                                 args.nphixspoints, args.phixsnuincrement)
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             phixs_threshold = reduced_phixstable[0]
@@ -879,8 +880,8 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     id_lower = level_id_of_level_name[namefrom]
                     id_upper = level_id_of_level_name[nameto]
                     if id_lower > id_upper:
-                        artisatomic.log_and_print(
-                            flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
+                        # artisatomic.log_and_print(
+                        #     flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
                         id_lower, namefrom, id_upper, nameto = id_upper, nameto, id_lower, namefrom
 
                     if id_lower == id_upper:

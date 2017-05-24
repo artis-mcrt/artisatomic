@@ -120,7 +120,8 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             for targetlevel in range(1, ntargets + 1):
                 phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.][[0, targetlevel]].values
 
-            reduced_phixs_dict = artisatomic.reduce_phixs_tables(phixstables, args)
+            reduced_phixs_dict = artisatomic.reduce_phixs_tables(phixstables, args.optimaltemperature,
+                                                                 args.nphixspoints, args.phixsnuincrement)
             target_scalefactors = np.zeros(ntargets + 1)
             upperlevelid_withmaxfraction = 1
             max_scalefactor = 0.
@@ -167,11 +168,12 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             0.009338069, 0.009063438, 0.008799471, 0.008545656, 0.00830151, 0.008066575, 0.007840423,
             0.007622646, 0.00741286, 0.007210703]
 
-        if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.05:
+        if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
             phixsvalues = np.array(phixsvalues_const)
         else:
-            dict_phixstable = {'gs': np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues)))}
-            phixsvalues = artisatomic.reduce_phixs_tables(dict_phixstable, args)['gs']
+            dict_phixstable = {'gs': np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues_const)))}
+            phixsvalues = artisatomic.reduce_phixs_tables(
+                dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)['gs']
 
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]

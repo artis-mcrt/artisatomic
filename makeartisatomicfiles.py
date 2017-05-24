@@ -31,19 +31,17 @@ roman_numerals = (
 )
 
 listelements = [
-    # (1, [1, 2]),
-    # (6, [3, 4]),
-    # (8, [1, 2, 3]),
-    # (10, [1, 2]),
-    # (14, [3, 4]),
+    (14, [1, 2, 3, 4]),
+    (16, [1, 2, 3, 4]),
+    (20, [1, 2, 3, 4]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
     (28, [2, 3, 4, 5]),
 ]
 
 # include everything we have data for
-if __name__ == "__main__":
-    listelements = readhillierdata.extend_ion_list(listelements)
+# if __name__ == "__main__":
+#     listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
@@ -69,11 +67,12 @@ def main():
         '-nphixspoints', type=int, default=100,
         help='Number of cross section points to save in output')
     parser.add_argument(
-        '-phixsnuincrement', type=float, default=0.1,
+        '-phixsnuincrement', type=float, default=0.02,
         help='Fraction of nu_edge incremented for each cross section point')
     parser.add_argument(
-        '-optimaltemperature', type=int, default=3000,
-        help='Temperature at which recombination rate should be constant when downsampling cross sections')
+        '-optimaltemperature', type=int, default=6000,
+        help='(Electron and excitation) temperature at which recombination rate '
+             'should be constant when downsampling cross sections')
     parser.add_argument(
         '-electrontemperature', type=int, default=6000,
         help='Temperature for choosing effective collision strengths')
@@ -142,6 +141,9 @@ def process_files(listelements, args):
             with open(logfilepath, 'w') as flog:
                 log_and_print(flog, f'\n===========> {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:')
 
+                path_nahar_energy_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt'
+                path_nahar_px_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.px.txt'
+
                 # upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
                 # if (atomic_number, ion_stage) in upsilondatafilenames:
                 #     upsilonfilename = os.path.join('atomic-data-tiptopbase',
@@ -180,9 +182,24 @@ def process_files(listelements, args):
                         photoionization_crosssections[i], photoionization_targetfractions[i] = readqubdata.read_qub_photoionizations(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif atomic_number in [8, 26]:  # Hillier/Nahar hybrid
-                    path_nahar_energy_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt'
+                elif False:  # Nahar only
+                    (nahar_energy_levels, nahar_core_states[i],
+                     nahar_level_index_of_state, nahar_configurations[i]) = readnahardata.read_nahar_energy_level_file(
+                         path_nahar_energy_file, atomic_number, ion_stage, flog)
 
+                    if i < len(listions) - 1:  # don't get cross sections for top ion
+                        log_and_print(flog, f'Reading {path_nahar_px_file}')
+                        nahar_phixs_tables[i] = readnahardata.read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args)
+
+                    hillier_level_ids_matching_term = defaultdict(list)
+                    hillier_transitions = []
+                    hillier_energy_levels = ['IGNORE']
+                    (energy_levels[i], transitions[i], photoionization_crosssections[i]) = combine_hillier_nahar(
+                        hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
+                        nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
+                        nahar_phixs_tables[i], args, flog)
+
+                elif atomic_number in [8, 26]:  # Hillier/Nahar hybrid
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i]) = readnahardata.read_nahar_energy_level_file(
                          path_nahar_energy_file, atomic_number, ion_stage, flog)
@@ -192,8 +209,6 @@ def process_files(listelements, args):
                         readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                     if i < len(listions) - 1:  # don't get cross sections for top ion
-                        path_nahar_px_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.px.txt'
-
                         log_and_print(flog, f'Reading {path_nahar_px_file}')
                         nahar_phixs_tables[i] = readnahardata.read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args)
 
@@ -201,11 +216,12 @@ def process_files(listelements, args):
                         hillier_energy_levels, hillier_level_ids_matching_term, hillier_transitions,
                         nahar_energy_levels, nahar_level_index_of_state, nahar_configurations[i],
                         nahar_phixs_tables[i], args, flog)
-                    # reading the collision data must be done after the data sets have been combined so that the level numbers
-                    # are correct
+                    # reading the collision data (in terms of level names) must be done after the data sets have
+                    # been combined so that the level numbers are correct
                     if len(upsilondicts[i]) == 0:
                         upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
-                else:  # only Hillier data
+
+                else:  # Hillier data only
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i], hillier_level_ids_matching_term) = readhillierdata.read_levels_and_transitions(
                          atomic_number, ion_stage, flog)
@@ -369,7 +385,8 @@ def combine_hillier_nahar(hillier_energy_levels, hillier_level_ids_matching_term
         # process the phixs tables and attach them to any matching levels in the output list
 
         if not args.nophixs:
-            reduced_phixs_dict = reduce_phixs_tables(nahar_phixs_tables, args)
+            reduced_phixs_dict = reduce_phixs_tables(nahar_phixs_tables, args.optimaltemperature,
+                                                     args.nphixspoints, args.phixsnuincrement)
 
             for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_dict.items():
                 foundamatch = False
@@ -405,7 +422,7 @@ def chunks(listin, chunk_size):
     return [listin[i:i + chunk_size] for i in range(0, len(listin), chunk_size)]
 
 
-def reduce_phixs_tables(dicttables, args):
+def reduce_phixs_tables(dicttables, optimaltemperature, nphixspoints, phixsnuincrement, hideoutput=False):
     """
         Recieves a dictionary, with each item being a 2D array of energy and cross section points
         Returns a dictionary with the items having been downsampled into a 1D array
@@ -415,12 +432,14 @@ def reduce_phixs_tables(dicttables, args):
     out_q = mp.Queue()
     procs = []
 
-    print(f"Processing {len(dicttables.keys()):d} phixs tables")
+    if not hideoutput:
+        print(f"Processing {len(dicttables.keys()):d} phixs tables")
     nprocs = os.cpu_count()
     keylist = dicttables.keys()
     for procnum in range(nprocs):
         dicttablesslice = itertools.islice(dicttables.items(), procnum, len(keylist), nprocs)
-        procs.append(mp.Process(target=reduce_phixs_tables_worker, args=(dicttablesslice, args, out_q)))
+        procs.append(mp.Process(target=reduce_phixs_tables_worker, args=(
+            dicttablesslice, optimaltemperature, nphixspoints, phixsnuincrement, out_q)))
         procs[-1].start()
 
     dictout = {}
@@ -438,7 +457,7 @@ def reduce_phixs_tables(dicttables, args):
 # this method downsamples the photoionization cross section table to a
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
-def reduce_phixs_tables_worker(dicttables, args, out_q):
+def reduce_phixs_tables_worker(dicttables, optimaltemperature, nphixspoints, phixsnuincrement, out_q):
     dictout = {}
 
     ryd_to_hz = (u.rydberg / const.h).to('Hz').value
@@ -446,19 +465,19 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
 
     # proportional to recombination rate
     # nu0 = 1e16
-    # fac = math.exp(h_over_kb_in_K_sec * nu0 / args.optimaltemperature)
+    # fac = math.exp(h_over_kb_in_K_sec * nu0 / optimaltemperature)
 
     def integrand(nu):
-        return (nu ** 2) * math.exp(- h_over_kb_in_K_sec * nu / args.optimaltemperature)
+        return (nu ** 2) * math.exp(- h_over_kb_in_K_sec * nu / optimaltemperature)
 
     # def integrand_vec(nu_list):
-    #    return [(nu ** 2) * math.exp(- h_over_kb_in_K_sec * (nu - nu0) / args.optimaltemperature)
+    #    return [(nu ** 2) * math.exp(- h_over_kb_in_K_sec * (nu - nu0) / optimaltemperature)
     #            for nu in nu_list]
 
     integrand_vec = np.vectorize(integrand)
 
-    xgrid = np.linspace(1.0, 1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
-                        num=args.nphixspoints + 1, endpoint=False)
+    xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1),
+                        num=nphixspoints + 1, endpoint=False)
 
     # for key in keylist:
     #   tablein = dicttables[key]
@@ -476,12 +495,12 @@ def reduce_phixs_tables_worker(dicttables, args, out_q):
 
         # table says zero threshold, so avoid divide by zero
         if tablein[0][0] == 0.:
-            dictout[key] = np.zeros(args.nphixspoints)
+            dictout[key] = np.zeros(nphixspoints)
             continue
 
         # nu0 = tablein[0][0] * ryd_to_hz
 
-        arr_sigma_out = np.empty(args.nphixspoints)
+        arr_sigma_out = np.empty(nphixspoints)
         # x is nu/nu_edge
 
         sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind='linear', assume_sorted=True)
@@ -1123,7 +1142,47 @@ def write_compositionfile(listelements, args):
             ion_stage_min = min(listions)
             ion_stage_max = max(listions)
             nions = ion_stage_max - ion_stage_min + 1
-            fcomp.write(f'{atomic_number:d}  {nions:d}  {ion_stage_min:d}  {ion_stage_max:d}  -1 0.0 {atomic_weights[atomic_number]:.4f}\n')
+            fcomp.write(f'{atomic_number:d}  {nions:d}  {ion_stage_min:d}  {ion_stage_max:d}  '
+                        f'-1 0.0 {atomic_weights[atomic_number]:.4f}\n')
+
+
+def calculate_sahafact(g_lower, g_upper, T, E_threshold_erg):
+    KB = 1.38064852e-16  # Boltzmann constant [erg/K]
+    SAHACONST = 2.0706659e-16
+    return SAHACONST * g_lower / g_upper * T ** -1.5 * math.exp(E_threshold_erg / KB / T)
+
+
+def get_recomb_rate(phixstable, g_lower):
+    T_e = 6.31E+03
+    g_upper = 6
+
+    arr_energyryd = phixstable[:, 0]
+    # arr_nu = (arr_energyryd * u.rydberg / const.h).to('s-1').value
+    H = 6.6260755e-27  # Planck constant in erg seconds
+    RYD = 2.1798741e-11  # Rydberg to ergs
+    arr_nu = [en_ryd * RYD / H for en_ryd in arr_energyryd]
+
+    arr_sigma_megabarns = phixstable[:, 1]
+    # sigma_megabarns = interpolate.interp1d(arr_energyryd, arr_sigma_megabarns)
+
+    # E_threshold_erg = 30.6512220 * u.eV.to('erg')
+    E_threshold_erg = arr_energyryd[0] * u.rydberg.to('erg')
+    # print(f'Threshold is {E_threshold_erg * u.erg.to("Ry")} Ry')
+
+    sfac = calculate_sahafact(g_lower, g_upper, T_e, E_threshold_erg)
+
+    def integrand(en_ryd, sigma_megabarns):
+        TWOOVERCLIGHTSQUARED = 2.2253001e-21
+        HOVERKB = 4.799243681748932e-11
+        nu = en_ryd * RYD / H
+        sigmabf = sigma_megabarns * 1e-18
+        return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T_e)
+
+    arr_integrand = [integrand(en_ryd, sigma_mb) for en_ryd, sigma_mb in zip(arr_energyryd, arr_sigma_megabarns)]
+    integral = integrate.trapz(arr_integrand, arr_nu)
+    recomb_rate = 4 * math.pi * sfac * integral
+
+    return recomb_rate
 
 
 if __name__ == "__main__":
