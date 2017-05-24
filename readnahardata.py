@@ -187,8 +187,6 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
 
             nahar_phixs_tables[(twosplusone, l, parity, indexinsymmetry)] = phixsarray
 
-            #    np.genfromtxt(fenlist, max_rows=number_of_points)
-
     return nahar_phixs_tables
 
 
@@ -241,7 +239,8 @@ def get_naharphotoion_upperlevelids(energy_level, energy_levels_upperion, nahar_
     """
         Returns a list of upper level id numbers for a given energy level's photoionisation processes
     """
-    core_state_id = int(energy_level.corestateid)
+    # core_state_id = int(energy_level.corestateid)
+    core_state_id = 1  # temporary fix
     if core_state_id > 0 and core_state_id < len(nahar_core_states):
 
         if not upper_level_ids_of_core_state_id[core_state_id]:
