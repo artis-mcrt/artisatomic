@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-import itertools
+# import itertools
 import math
-import multiprocessing as mp
-import os
+# import os
 import sys
 from collections import defaultdict, namedtuple
 
 import matplotlib.pyplot as plt
-import numexpr as ne
+# import numexpr as ne
 import numpy as np
-import pandas as pd
-from astropy import constants as const
-from astropy import units as u
-from scipy import integrate, interpolate
+# import pandas as pd
+# from astropy import constants as const
+# from astropy import units as u
+from scipy import integrate
+# from scipy import interpolate
 
 import makeartisatomicfiles as artisatomic
 
@@ -247,10 +247,12 @@ def plot_phixs(phixstable, ptphixstable):
 def main():
     T_goal = 6.31E+03
     nphixspoints = 100
-    phixsnuincrement = 0.1
+    phixsnuincrement = 0.02
 
-    atomicnumber = 28
-    ionstage = 2
+    atomicnumber = 26
+    ionstage = 3
+
+    ionstr = artisatomic.elsymbols[atomicnumber] + ' ' + artisatomic.roman_numerals[ionstage]
 
     temperatures, recombrates, corestates, recomblevels, indexinsymmetryoflevel = read_recombrate_file(atomicnumber, ionstage)
     T_index = (np.abs(temperatures - T_goal)).argmin()
@@ -287,8 +289,6 @@ def main():
             continue
 
         twosplusone = recomblevel.twosplusone
-        lval = recomblevel.lval
-        parity = recomblevel.parity
         icx = recomblevel.icx
 
         # index in symmetry??
@@ -302,7 +302,7 @@ def main():
         uppergroundstate = corestates[twosplusone][0]
         g_upper = uppergroundstate.twosplusone * (uppergroundstate.lval * 2 + 1)
 
-        lowerlevel = nahar_level(twosplusone, lval, parity, indexinsymmetry)
+        lowerlevel = nahar_level(recomblevel.twosplusone, recomblevel.lval, recomblevel.parity, indexinsymmetry)
 
         try:
             binding_energy_ryd = binding_energy_ryd_all[lowerlevel]
@@ -317,8 +317,10 @@ def main():
         sahafactor = g_lower / g_upper * SAHACONST * (T ** -1.5) * math.exp(E_threshold / KB / T)
         # sahafactor2 = g_lower / g_upper * SAHACONST * math.exp(E_threshold / KB / T - 1.5 * math.log(T))
 
-        print(f'\n{strlevelid}')
-        print(f'  icx {icx}, {corestate}')
+        lspstr = f'{lowerlevel.twosplusone}{artisatomic.lchars[lowerlevel.lval]}{"e" if lowerlevel.parity == 0 else "o"}'
+
+        print(f'\n{ionstr} {strlevelid} {lowerlevel} {lspstr}')
+        print(f'  icx {icx} {corestate}')
         print(f'  g_upper:              {g_upper:12.3f}')
         print(f'  g_lower:              {g_lower:12.3f}')
         print(f'  First point (Ry):     {E_threshold / RYD:12.4e}')
