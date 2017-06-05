@@ -20,9 +20,8 @@ import makeartisatomicfiles as artisatomic
 # atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
 # elsymbols = ['n'] + list(atomicdata['symbol'].values)
 
-nahar_level = namedtuple('naharlevel', 'twosplusone lval parity indexinsymmetry')
 corestatetuple = namedtuple('corestate', 'twosplusone lval parity energyryd config')
-nahar_recomb_level = namedtuple('naharrecomblevel', 'levelid twosplusone lval parity indexinsymmetry energyryd zz icx')
+nahar_recomb_level = namedtuple('naharrecomblevel', 'strlevelid twosplusone lval parity indexinsymmetry energyryd zz icx')
 
 number_of_multiplicity = {
     'singlet': 1,
@@ -54,24 +53,33 @@ HCLIGHTOVERFOURPI = 1.580764662876770e-17
 OSCSTRENGTHCONVERSION = 1.3473837e+21
 
 
+def levelmatch(levela, levelb):
+    return (
+        levela.twosplusone == levelb.twosplusone and
+        levela.lval == levelb.lval and
+        levela.indexinsymmetry == levelb.indexinsymmetry)
+
+
 def reduce_and_reconstruct_phixs_tables(dicttables, optimaltemperature, nphixspoints, phixsnuincrement):
     print('Reducing phixs tables')
     dictout = {}
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1),
                         num=nphixspoints + 1, endpoint=False)
-    for key, phixstable_orig in dicttables.items():
-        phixstable = artisatomic.reduce_phixs_tables({'GS': phixstable_orig},
-                                                     optimaltemperature, nphixspoints, phixsnuincrement,
-                                                     hideoutput=True)['GS']
-        dictout[key] = np.array(list(zip(xgrid[:-1] * phixstable_orig[0][0], phixstable[:])))
+
+    dicttables_reduced = artisatomic.reduce_phixs_tables(
+        dicttables, optimaltemperature, nphixspoints, phixsnuincrement, hideoutput=False)
+
+    for key, phixstable_reduced in dicttables_reduced.items():
+        e_threshold_ryd = dicttables[key][0][0]
+        dictout[key] = np.array(list(zip(xgrid[:-1] * e_threshold_ryd, phixstable_reduced)))
 
     return dictout
 
 
 def read_recombrate_file(atomicnumber, ionstage):
     filename = f'atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.rrc.ls.txt'
-    # print(f'Reading {filename}')
+    print(f'Reading {filename}')
     with open(filename, 'r') as filein:
         temperatures = []
         recomblevels = []
@@ -83,20 +91,23 @@ def read_recombrate_file(atomicnumber, ionstage):
             line = filein.readline()
             row = line.split()
 
-            if len(corestates.keys()) > 0 and line.startswith('------------------------------------------------------------------'):
+            if corestates and line.startswith('------------------------------------------------------------------'):
                 break
 
-            elif line.rstrip().endswith('target information'):
-                lower_twosplusone = number_of_multiplicity[row[1].lower()]
+            elif line.rstrip().rstrip(':').endswith('target information'):
+                lower_twosplusone = number_of_multiplicity.get(row[1].lower(), -1)  # -1 means these are not split into different multiplicities
                 while True:
                     line = filein.readline()
                     row = line.split()
-                    if len(row) >= 3 and row[0] == f'{atomicnumber:d}' and row[1] == f'{atomicnumber - ionstage:d}' and row[2] == 'T':
+                    if (len(row) >= 3 and row[0] == f'{atomicnumber:d}' and
+                            row[1] == f'{atomicnumber - ionstage:d}' and row[2] == 'T'):
                         break
                 ncorestates = int(filein.readline())
                 corestates[lower_twosplusone] = []
                 for _ in range(ncorestates):
                     row = filein.readline().split()
+                    if len(row) == 6:
+                        row = row[1:]  # truncate the core state number in some files (fe2.rrc.ls.txt)
                     corestate = corestatetuple(int(row[0]), int(row[1]), int(row[2]), float(row[3]), row[4])
                     corestates[lower_twosplusone].append(corestate)
 
@@ -107,21 +118,26 @@ def read_recombrate_file(atomicnumber, ionstage):
             if len(row) == 4 and all(map(artisatomic.isfloat, row)):
                 energyryd = float(row[1])
                 strlevelid = row[2]
-                statweight = float(row[3])
+                statweight = int(float(row[3]))
 
-                twosplusone = int(strlevelid[0])
-                lval = int(strlevelid[1:3])
-                parity = int(strlevelid[3])
-                zz = int(strlevelid[4:6])
-                icx = int(strlevelid[6:8])
+                if len(strlevelid) > 8:
+                    twosplusone = int(strlevelid[0])
+                    lval = int(strlevelid[1:3])
+                    parity = int(strlevelid[3])
+                    zz = int(strlevelid[4:6])
+                    icx = int(strlevelid[6:8])
 
-                symmetrymatches[(twosplusone, lval, parity)] += 1
-                indexinsymmetryoflevel[strlevelid] = symmetrymatches[(twosplusone, lval, parity)]
-                recomb_level = nahar_recomb_level(levelid=strlevelid,
-                                                  twosplusone=twosplusone, lval=lval, parity=parity,
-                                                  indexinsymmetry=indexinsymmetryoflevel[strlevelid],
-                                                  energyryd=energyryd, zz=zz, icx=icx)
-                recomblevels.append(recomb_level)
+                    if statweight != twosplusone * (lval * 2 + 1):
+                        print('Error: stat weight inconsistent with (2S + 1)(2L + 1)')
+                        sys.exit()
+
+                    symmetrymatches[(twosplusone, lval, parity)] += 1
+                    indexinsymmetryoflevel[strlevelid] = symmetrymatches[(twosplusone, lval, parity)]
+                    recomb_level = nahar_recomb_level(strlevelid=strlevelid,
+                                                      twosplusone=twosplusone, lval=lval, parity=parity,
+                                                      indexinsymmetry=indexinsymmetryoflevel[strlevelid],
+                                                      energyryd=energyryd, zz=zz, icx=icx)
+                    recomblevels.append(recomb_level)
 
             if not line or line.startswith('iii) State-specific RRC'):
                 break
@@ -152,7 +168,7 @@ def read_recombrate_file(atomicnumber, ionstage):
             elif current_level != "-1" and len(recombrates[current_level]) < len(temperatures):
                 recombrates[current_level].extend([float(rate) for rate in row])
 
-    return np.array(temperatures), recombrates, corestates, recomblevels, indexinsymmetryoflevel
+    return np.array(temperatures), recombrates, corestates, recomblevels
 
 
 def get_phixslist(atomicnumber, ionstage, partial=False):
@@ -173,8 +189,9 @@ def get_phixslist(atomicnumber, ionstage, partial=False):
             if len(row) != 4 or row == ['0', '0', '0', '0']:
                 break
 
-            levelid = nahar_level(*[int(x) for x in row])
-            _, strnpoints = filein.readline().split()
+            levelid = tuple(int(x) for x in row)
+            row = filein.readline().split()
+            strnpoints = row[1]
             npoints = int(strnpoints)
             be, _ = filein.readline().split()  # binding energy
             binding_energy_ryd[levelid] = float(be)
@@ -189,21 +206,6 @@ def get_phixslist(atomicnumber, ionstage, partial=False):
                 phixslist[levelid][n][1] = float(row[1])
 
     return phixslist, binding_energy_ryd
-
-
-def recomb_integral_euler(phixslist, T):
-    integral = 0.0
-    for i in range(0, len(phixslist) - 1):
-        nu = phixslist[i][0] * RYD / H
-        dnu = (phixslist[i + 1][0] - phixslist[i][0]) * RYD / H
-        sigma_bf = phixslist[i][1] * 1e-18  # from Megabarn to cm^2
-        dnu2 = dnu / 100.0
-        for nu2 in np.arange(nu, nu + dnu, dnu2):
-            # sigma_bf = np.interp(nu2, [nu, nu + dnu], [phixslist[i][1], phixslist[i + 1][1]]) * 1e-18
-            sigma_bf = phixslist[i][1] * 1e-18  # nearest to the left
-
-            integral += TWOOVERCLIGHTSQUARED * sigma_bf * (nu2 ** 2) * math.exp(-HOVERKB * nu2 / T) * dnu2
-    return integral
 
 
 def plot_phixs(phixstable, ptphixstable):
@@ -244,17 +246,80 @@ def plot_phixs(phixstable, ptphixstable):
     plt.close()
 
 
+def recomb_integral_euler(phixslist, T):
+    integral = 0.0
+    for i in range(0, len(phixslist) - 1):
+        nu = phixslist[i][0] * RYD / H
+        dnu = (phixslist[i + 1][0] - phixslist[i][0]) * RYD / H
+        sigma_bf = phixslist[i][1] * 1e-18  # from Megabarn to cm^2
+        dnu2 = dnu / 10.0
+        # print(nu, nu + dnu, dnu2)
+        for nu2 in np.arange(nu, nu + dnu, dnu2):
+            # sigma_bf = np.interp(nu2, [nu, nu + dnu], [phixslist[i][1], phixslist[i + 1][1]]) * 1e-18
+            sigma_bf = phixslist[i][1] * 1e-18  # nearest to the left
+
+            integral += TWOOVERCLIGHTSQUARED * sigma_bf * (nu2 ** 2) * math.exp(-HOVERKB * nu2 / T) * dnu2
+    return integral
+
+
+def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
+    E_threshold = phixslist[0][0] * RYD
+    # sahafactor = float(ne.evaluate("g_lower / g_upper * SAHACONST * (T ** -1.5) * exp(E_threshold / KB / T)"))
+    sahafactor = g_lower / g_upper * SAHACONST * (T ** -1.5) * math.exp(E_threshold / KB / T)
+    # sahafactor2 = g_lower / g_upper * SAHACONST * math.exp(E_threshold / KB / T - 1.5 * math.log(T))
+
+    if kind == "euler":
+        integral = recomb_integral_euler(phixslist, T)
+    else:
+        def integrand(en_ryd, sigma_megabarns):
+            nu = en_ryd * RYD / H
+            sigmabf = sigma_megabarns * 1e-18
+            return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T)
+
+        arr_nu = [en_ryd * RYD / H for en_ryd in phixslist[:, 0]]
+        arr_integrand = [integrand(en_ryd, sigma_megabarns) for en_ryd, sigma_megabarns in phixslist]
+
+        if kind == "simps":
+            integral = integrate.simps(arr_integrand, arr_nu)
+        elif kind == "trapz":
+            integral = integrate.trapz(arr_integrand, arr_nu)
+        else:
+            print(f"UNKNOWN INTEGRAL KIND: {kind}")
+            sys.exit()
+
+    alpha = 4 * math.pi * sahafactor * integral
+
+    # attempt at using Nahar form of recombination rate integral
+    # def integrand_nahar(en, sigma_megabarns):
+    #     epsilon = en - E_threshold
+    #     sigmabf = sigma_megabarns * 1e-18
+    #     return (en ** 2) * sigmabf * math.exp(- HOVERKB * epsilon / T)
+
+    # arr_en = [en_ryd * RYD for en_ryd, _ in phixslist]
+    # arr_epsilon = [en - E_threshold for en in arr_en]
+    # arr_sigmamb = [sigma_megabarns for _, sigma_megabarns in phixslist]
+    # arr_integrand = [integrand_nahar(en, sigma_megabarns) for en, sigma_megabarns in zip(arr_en, arr_sigmamb)]
+    # integral_trapz = integrate.trapz(arr_integrand, arr_epsilon)
+    #
+    # factor = g_lower / g_upper * 2 / (KB * T * math.sqrt(2 * math.pi * (ME ** 3) * KB * CLIGHT2 * T))
+    #
+    # print(f'    Nahar integral_trapz alpha: {factor * integral_trapz:11.3e}  = '
+    #       f'{factor * integral_trapz / alpha_nahar:6.3f} * Nahar')
+    return alpha
+
+
 def main():
-    T_goal = 6.31E+03
-    nphixspoints = 100
-    phixsnuincrement = 0.02
+    # T_goal = 6.31E+03
+    T_goal = 6000
+    nphixspoints = 50
+    phixsnuincrement = 0.03
 
     atomicnumber = 26
-    ionstage = 3
+    ionstage = 1
+    do_reduced_list = True
 
     ionstr = artisatomic.elsymbols[atomicnumber] + ' ' + artisatomic.roman_numerals[ionstage]
-
-    temperatures, recombrates, corestates, recomblevels, indexinsymmetryoflevel = read_recombrate_file(atomicnumber, ionstage)
+    temperatures, recombrates, corestates, recomblevels = read_recombrate_file(atomicnumber, ionstage)
     T_index = (np.abs(temperatures - T_goal)).argmin()
 
     T = temperatures[T_index]  # Temperature in Kelvin
@@ -263,124 +328,119 @@ def main():
     print(f'nphixspoints:       {nphixspoints:11.3f}')
     print(f'phixsnuincrement:   {phixsnuincrement:11.3f}')
 
-    # count = 0
-    # for transitionstr in recombrates.keys():
-    #     icx = int(transitionstr[6:8])
-    #     # if icx == 1:
-    #     count += 1
-    # print(f'Count: {count}')
-
     phixsall, binding_energy_ryd_all = get_phixslist(atomicnumber, ionstage, partial=True)
-    phixslist_reduced = reduce_and_reconstruct_phixs_tables(phixsall, 3000, nphixspoints, phixsnuincrement)
-    # phixslist_reduced = phixsall
 
-    ion_alpha = 0.
-    ion_alpha_reduced = 0.
-    for recomblevel in recomblevels:
+    # for testing, select a level
+    # recomblevels = [x for x in recomblevels if x.twosplusone == 4 and x.lval == 3 and x.parity == 0 and x.indexinsymmetry == 1]
+    # phixsall = {k: v for k, v in phixsall.items() if k == (4, 3, 0, 1)}
 
+    if do_reduced_list:
+        phixslist_reduced = reduce_and_reconstruct_phixs_tables(phixsall, 3000, nphixspoints, phixsnuincrement)
+
+    calculated_alpha_sum = defaultdict(float)
+
+    # list the levels defined in the phix file missing from the rrc file
+    # extrarecomblevels = []
+    # for lowerlevel in phixsall:
+    #     recomblevelfound = False
+    #     for recomblevel in recomblevels:
+    #         if levelmatch(recomblevel, lowerlevel):
+    #             recomblevelfound = True
+    #             break
+    #     if not recomblevelfound:
+    #         print(lowerlevel)
+    #         recomb_level = nahar_recomb_level(strlevelid="PX LEVEL",
+    #                                           twosplusone=lowerlevel.twosplusone, lval=lowerlevel.lval,
+    #                                           parity=lowerlevel.parity,
+    #                                           indexinsymmetry=lowerlevel.indexinsymmetry,
+    #                                           energyryd=-99., zz=-1, icx=1)
+    #         extrarecomblevels.append(recomb_level)
+
+    # recomblevels.extend(extrarecomblevels)
+    sorted_lowerlevels = list(sorted(recomblevels, key=lambda x: x.energyryd))
+    for lowerlevel in sorted_lowerlevels[:]:
         # ignore unbound states
-        if recomblevel.energyryd > 0.:
+        if lowerlevel.energyryd > 0.:
             continue
-
-        strlevelid = recomblevel.levelid
 
         # some energy levels have no recombination rates listed in rrc file
-        if strlevelid not in recombrates.keys():
+        if lowerlevel.strlevelid not in recombrates.keys():
             continue
 
-        twosplusone = recomblevel.twosplusone
-        icx = recomblevel.icx
-
-        # index in symmetry??
-        indexinsymmetry = indexinsymmetryoflevel[strlevelid]
-
-        if icx <= len(corestates[twosplusone]):
-            corestate = corestates[twosplusone][icx - 1]
+        if lowerlevel.twosplusone in corestates and lowerlevel.icx <= len(corestates[lowerlevel.twosplusone]):
+            corestate = corestates[lowerlevel.twosplusone][lowerlevel.icx - 1]
+        elif -1 in corestates and lowerlevel.icx <= len(corestates[-1]):
+            corestate = corestates[-1][lowerlevel.icx - 1]
         else:
-            corestate = 'DOES NOT EXIST'
+            corestate = 'NOT FOUND'
 
-        uppergroundstate = corestates[twosplusone][0]
+        if lowerlevel.twosplusone in corestates:
+            uppergroundstate = corestates[lowerlevel.twosplusone][0]
+        else:
+            uppergroundstate = corestates[list(corestates.keys())[0]][0]
         g_upper = uppergroundstate.twosplusone * (uppergroundstate.lval * 2 + 1)
 
-        lowerlevel = nahar_level(recomblevel.twosplusone, recomblevel.lval, recomblevel.parity, indexinsymmetry)
+        term_index = (
+            lowerlevel.twosplusone, lowerlevel.lval, lowerlevel.parity, lowerlevel.indexinsymmetry)
 
         try:
-            binding_energy_ryd = binding_energy_ryd_all[lowerlevel]
+            binding_energy_ryd = binding_energy_ryd_all[term_index]
         except KeyError:
-            print(f'State {recomblevel} from rrc file is not found in px file')
+            print(f'State {lowerlevel} from rrc file is not found in px file')
             continue
 
-        E_threshold = phixsall[lowerlevel][0][0] * RYD
+        E_threshold = phixsall[term_index][0][0] * RYD
 
-        g_lower = lowerlevel.twosplusone * (2 * lowerlevel.lval + 1)
-        # sahafactor = float(ne.evaluate("g_lower / g_upper * SAHACONST * (T ** -1.5) * exp(E_threshold / KB / T)"))
-        sahafactor = g_lower / g_upper * SAHACONST * (T ** -1.5) * math.exp(E_threshold / KB / T)
-        # sahafactor2 = g_lower / g_upper * SAHACONST * math.exp(E_threshold / KB / T - 1.5 * math.log(T))
+        g_lower = term_index[0] * (2 * term_index[1] + 1)
+        # g_lower = 9
 
-        lspstr = f'{lowerlevel.twosplusone}{artisatomic.lchars[lowerlevel.lval]}{"e" if lowerlevel.parity == 0 else "o"}'
+        termstr = (f'{term_index[0]}{artisatomic.lchars[term_index[1]]}' +
+                   ("e" if term_index[2] == 0 else "o"))
 
-        print(f'\n{ionstr} {strlevelid} {lowerlevel} {lspstr}')
-        print(f'  icx {icx} {corestate}')
+        print(f'\n{ionstr} {lowerlevel.strlevelid} {term_index} {termstr}')
+        print(f'  icx {lowerlevel.icx} {corestate}')
         print(f'  g_upper:              {g_upper:12.3f}')
         print(f'  g_lower:              {g_lower:12.3f}')
         print(f'  First point (Ry):     {E_threshold / RYD:12.4e}')
         print(f'  Binding energy (Ry):  {binding_energy_ryd:12.4e}')
-        print(f'  Level energy (Ry):    {recomblevel.energyryd:12.4e}')
-        print(f'  Saha factor:          {sahafactor:12.3e}')
+        print(f'  Level energy (Ry):    {lowerlevel.energyryd:12.4e}')
 
-        alpha_nahar = recombrates[strlevelid][T_index]
+        if lowerlevel.strlevelid in recombrates:
+            alpha_nahar = recombrates[lowerlevel.strlevelid][T_index]
+        else:
+            alpha_nahar = -1
         print(f'\n  Nahar alpha:           {alpha_nahar:12.3e}')
 
         # plot_phixs(phixsall[lowerlevel], ptphixsall[lowerlevel])
 
-        for reduced, phixslist in enumerate([phixsall[lowerlevel], phixslist_reduced[lowerlevel]]):
-            print(f'\n  {len(phixslist):d} points in list')
+        list_phixslists = [phixsall]
+        if do_reduced_list:
+            list_phixslists.append(phixslist_reduced)
 
-            # integral_euler = recomb_integral_euler(phixslist, T)
+        for reduced, phixsdict in enumerate(list_phixslists):
+            print(f'\n  {len(phixsdict[term_index]):d} points in list')
+            # print(phixsdict[term_index])
+            for kind in ['euler', 'trapz']:
+                tag = ('reduced_' if reduced == 1 else '') + kind
+                alpha = calculate_level_alpha(
+                    phixsdict[term_index], g_lower, g_upper, T, kind=kind)
+                calculated_alpha_sum[tag] += alpha
 
-            def integrand(en_ryd, sigma_megabarns):
-                nu = en_ryd * RYD / H
-                sigmabf = sigma_megabarns * 1e-18
-                return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T)
-
-            arr_nu = [en_ryd * RYD / H for en_ryd in phixslist[:, 0]]
-            arr_integrand = [integrand(en_ryd, sigma_megabarns) for en_ryd, sigma_megabarns in phixslist]
-            # integral_simps = integrate.simps(arr_integrand, arr_nu)
-            integral_trapz = integrate.trapz(arr_integrand, arr_nu)
-
-            factor = 4 * math.pi * sahafactor
-            # print(f'    integral_euler alpha: {factor * integral_euler:11.3e} = {factor * integral_euler / alpha_nahar:6.3f} * Nahar')
-            # print(f'    integral_simps alpha: {factor * integral_simps:11.3e} = {factor * integral_simps / alpha_nahar:6.3f} * Nahar')
-            print(f'    integral_trapz alpha: {factor * integral_trapz:11.3e} '
-                  f'= {factor * integral_trapz / alpha_nahar:6.3f} * Nahar     '
-                  f'(abs error {abs(factor * integral_trapz - alpha_nahar):6.1e})')
-            if reduced == 0:
-                ion_alpha += factor * integral_trapz
-            else:
-                ion_alpha_reduced += factor * integral_trapz
-
-            # def integrand_nahar(en, sigma_megabarns):
-            #     epsilon = en - E_threshold
-            #     sigmabf = sigma_megabarns * 1e-18
-            #     return (en ** 2) * sigmabf * math.exp(- HOVERKB * epsilon / T)
-
-            # arr_en = [en_ryd * RYD for en_ryd, _ in phixslist]
-            # arr_epsilon = [en - E_threshold for en in arr_en]
-            # arr_sigmamb = [sigma_megabarns for _, sigma_megabarns in phixslist]
-            # arr_integrand = [integrand_nahar(en, sigma_megabarns) for en, sigma_megabarns in zip(arr_en, arr_sigmamb)]
-            # integral_trapz = integrate.trapz(arr_integrand, arr_epsilon)
-            #
-            # factor = g_lower / g_upper * 2 / (KB * T * math.sqrt(2 * math.pi * (ME ** 3) * KB * CLIGHT2 * T))
-            #
-            # print(f'    Nahar integral_trapz alpha: {factor * integral_trapz:11.3e}  = {factor * integral_trapz / alpha_nahar:6.3f} * Nahar')
+                print(f'    integral_{tag} alpha: {alpha:11.3e} ', end='')
+                if alpha_nahar > 0:
+                    print(f'= {alpha / alpha_nahar:6.3f} * Nahar     '
+                          f'(abs error {abs(alpha - alpha_nahar):6.1e})')
+                else:
+                    print()
 
     nahar_recomb_total = 0
     for _, recombrates_thislevel in recombrates.items():
         nahar_recomb_total += recombrates_thislevel[T_index]
 
-    print(f'\nNahar ion Alpha:                    {nahar_recomb_total:13.3e}')
-    print(f'Calculated ion Alpha:                 {ion_alpha:11.3e} = {ion_alpha / nahar_recomb_total:7.4f} * Nahar')
-    print(f'Calculated ion Alpha (reduced phixs): {ion_alpha_reduced:11.3e} = {ion_alpha_reduced / nahar_recomb_total:7.4f} * Nahar')
+    print(f'\nSummed alphas (ion Alpha low-n):')
+    print(f'  Nahar:                    {nahar_recomb_total:11.3e}')
+    for tag, alpha in calculated_alpha_sum.items():
+        print(f'  Calculated {tag + ":":14} {alpha:11.3e} = {alpha / nahar_recomb_total:7.4f} * Nahar')
 
 
 if __name__ == "__main__":
