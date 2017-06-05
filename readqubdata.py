@@ -109,6 +109,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_targetfractions = [[(1, 1.)] for _ in energy_levels]
+    photoionization_thresholds_ev = np.zeros((len(energy_levels)))
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
@@ -116,7 +117,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             artisatomic.log_and_print(flog, 'Reading ' + filename)
             photdata = pd.read_csv(filename, delim_whitespace=True, header=None)
             phixstables = {}
-            ntargets = 40
+            # ntargets = 40
+            ntargets = 4  # just the 4Fe ground quartet
+            photoionization_thresholds_ev[lowerlevelid] = -1.
+            # photoionization_thresholds_ev[lowerlevelid] = photdata.loc[0][0]
+
             for targetlevel in range(1, ntargets + 1):
                 phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.][[0, targetlevel]].values
 
@@ -176,8 +181,9 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)['gs']
 
         for lowerlevelid in range(1, len(energy_levels)):
+            photoionization_thresholds_ev[lowerlevelid] = -1.
             photoionization_targetfractions[lowerlevelid] = [(1, 1.)]
             if lowerlevelid <= 4:
                 photoionization_crosssections[lowerlevelid] = phixsvalues
 
-    return photoionization_crosssections, photoionization_targetfractions
+    return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev

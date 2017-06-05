@@ -148,11 +148,12 @@ ions_data = {
     # Co
     (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformat_a, ['phot_nosm'], 'Co2_COL_DATA'),
     (27, 3): ion_files('30oct12', 'coiii_osc.dat', hillier_rowformat_b, ['phot_nosm'], 'col_data.dat'),
-    # (27, 4): ion_files('4jan12', 'coiv_osc.dat', hillier_rowformat_b, ['phot_data'], 'col_data.dat'),
+    (27, 4): ion_files('4jan12', 'coiv_osc.dat', hillier_rowformat_b, ['phot_data'], 'col_data.dat'),
     # (27, 5): ion_files('18oct00', 'cov_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Ni
     (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data'], 'col_data_bautista'),
+    # (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data_crude'], 'col_data_bautista'),
     (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformat_b, ['phot_data.dat'], 'col_data.dat'),
     (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
     (28, 5): ion_files('18oct00', 'nkv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
@@ -197,7 +198,7 @@ def hillier_ion_folder(atomic_number, ion_stage):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     hillier_energy_levels = ['IGNORE']
-    hillier_level_ids_matching_term = defaultdict(list)
+    hillier_levelnamesnoJ_matching_term = defaultdict(list)
     transition_count_of_level_name = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
     transitions = []
@@ -208,7 +209,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             'energylevel', 'levelname qub_id twosplusone l j energyabovegsinpercm g parity')
 
         hillier_energy_levels.append(qub_energy_level_row('I', 1, 0, 0, 0, 0., 10, 0))
-        return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
+        return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_levelnamesnoJ_matching_term
 
     row_format_energy_level = ions_data[(atomic_number, ion_stage)].energylevelrowformat
     filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
@@ -253,8 +254,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     # else:
                         # artisatomic.log_and_print(flog, "Can't find LS term in Hillier level name '{0:}' (parity is {1:})".format(levelname, parity))
                 else:
-                    if levelname not in hillier_level_ids_matching_term[(twosplusone, l, parity)]:
-                        hillier_level_ids_matching_term[(twosplusone, l, parity)].append(hillierlevelid)
+                    levelnamenoJ = levelname.split('[')[0]
+                    if levelnamenoJ not in hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
+                        hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)].append(levelnamenoJ)
 
                 # if this is the ground state
                 if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
@@ -290,16 +292,17 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 else:
                     hilliertransitionid = len(transitions) + 1
 
-                transition = hillier_transition_row(row[0], row[1],
-                                                    float(row[2]),  # f
-                                                    float(row[3]),  # A
-                                                    lambda_value,
-                                                    int(row[5]),  # i
-                                                    int(row[6]),  # j
-                                                    hilliertransitionid,  # hilliertransitionid
-                                                    -1,  # lowerlevel
-                                                    -1,  # upperlevel
-                                                    -99)  # coll_str
+                transition = hillier_transition_row(namefrom = row[0],
+                                                    nameto = row[1],
+                                                    f = float(row[2]),
+                                                    A = float(row[3]),
+                                                    lambdaangstrom = lambda_value,
+                                                    i = int(row[5]),
+                                                    j = int(row[6]),
+                                                    hilliertransitionid = hilliertransitionid,
+                                                    lowerlevel = -1,
+                                                    upperlevel = -1,
+                                                    coll_str = -99)
 
                 if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
                     #                    defined_transition_ids.append(int(transition.hilliertransitionid))
@@ -317,7 +320,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     sys.exit()
     artisatomic.log_and_print(flog, f'Read {len(transitions):d} transitions')
 
-    return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term
+    # filter out levels with no transitions
+    hillier_energy_levels = [hillier_energy_levels[0], *[
+        level for level in hillier_energy_levels[1:] if transition_count_of_level_name[level.levelname] > 0]]
+
+    return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_levelnamesnoJ_matching_term
 
 
 # cross section types
@@ -341,6 +348,7 @@ phixs_type_labels = {
 def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
+    photoionization_thresholds_ev = np.zeros((len(energy_levels)))
     photoionization_targetconfig_fractions = [[] for _ in energy_levels]
     # return np.zeros((len(energy_levels), args.nphixspoints)),
     # photoionization_targetfractions  # TODO: replace with real data
@@ -406,6 +414,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     fitcoefficients = []
                     numpointsexpected = 0
                     lowerlevelid = 1
+                    # find the first matching level (several matches by differ by J values)
                     for levelid, energy_level in enumerate(energy_levels[1:], 1):
                         this_levelnamenoj = energy_level.levelname.split('[')[0]
                         if this_levelnamenoj == lowerlevelname:
@@ -547,7 +556,19 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     if len(row) == 2 and row_is_all_floats and lowerlevelname != '':
                         if lowerlevelname not in phixstables[filenum]:
                             phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
-                        xspoint = float(row[0].replace('D', 'E')), float(row[1].replace('D', 'E'))
+
+                        lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
+                        thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+                        enryd = float(row[0].replace('D', 'E'))
+
+                        if crosssectiontype in [20, 21]:  # the x value is actually a fraction of the threshold, not an energy
+                            if pointnumber == 0 and abs(enryd - 1.0) > 0.2:
+                                print(lowerlevelname, 'cross section type:', crosssectiontype, enryd, ' is not near one? might be energy', thresholdenergyryd)
+                            enryd *= thresholdenergyryd
+                        elif pointnumber == 0 and bs(enryd - 1.0) < 0.2:
+                            print(lowerlevelname, 'cross section type:', crosssectiontype, enryd, ' is near one? might not be energy', thresholdenergyryd)
+
+                        xspoint = enryd, float(row[1].replace('D', 'E'))
                         phixstables[filenum][lowerlevelname][pointnumber] = xspoint
 
                         if pointnumber > 0:
@@ -562,7 +583,6 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                                       f'with energy {prevenergy} followed by {curenergy}')
                                 print(phixstables[filenum][lowerlevelname])
                                 sys.exit()
-
                         pointnumber += 1
 
                 elif crosssectiontype != -1:
@@ -598,8 +618,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 artisatomic.log_and_print(
                     flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
 
-        reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(phixstables[filenum], args.optimaltemperature,
-                                                 args.nphixspoints, args.phixsnuincrement)
+        # testing
+        # print('3d8(3F)4s_4Fe')
+        # print(phixstables[filenum]['3d8(3F)4s_4Fe'])
+        reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(
+           phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)
+        # print(reduced_phixstables_onetarget['3d8(3F)4s_4Fe'])
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             phixs_threshold = reduced_phixstable[0]
@@ -637,6 +661,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
     # now the non-J-split cross sections are mapped onto J-split levels
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
+
         for levelid, energy_level in enumerate(energy_levels[1:], 1):
             if j_splitting_on:
                 levelname_b = energy_level.levelname
@@ -647,7 +672,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 photoionization_crosssections[levelid] = phixstable
                 photoionization_targetconfig_fractions[levelid] = phixs_targetconfigfractions_of_levelname[levelname_b]
 
-    return photoionization_crosssections, photoionization_targetconfig_fractions
+                # photoionization_thresholds_ev[levelid] = energy_level.thresholdenergyev
+                photoionization_thresholds_ev[levelid] = hc_in_ev_angstrom / float(energy_level.lambdaangstrom)
+
+    return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
 
 
 @contract
@@ -662,7 +690,7 @@ def get_seaton_phixstable(lambda_angstrom: 'float,>0', sigmat, beta, s, nu_o=Non
 
         if nu_o is None:
             thresholddivenergy = energydivthreshold ** -1
-            crosssection = sigmat * (beta + (1 - beta) * (thresholddivenergy)) * (thresholddivenergy ** s)
+            crosssection = sigmat * (beta + (1 - beta) * thresholddivenergy) * (thresholddivenergy ** s)
         else:
             thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
             energyoffsetdivthreshold = energydivthreshold + (nu_o * 1e15 * h_in_ev_seconds) / thresholdenergyev

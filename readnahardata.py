@@ -20,6 +20,8 @@ alphabets = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ '
 reversedalphabets = 'zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA '
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 
+term_index_tuple = namedtuple('term_index', 'twosplusone lval parity indexinsymmetry')
+
 
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
     nahar_energy_level_row = namedtuple(
@@ -108,7 +110,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     #                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
     #                    nahar_energy_levels.pop()
 
-    return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations)
+    return (nahar_energy_levels, nahar_core_states, nahar_level_index_of_state, nahar_configurations, nahar_ionization_potential_rydberg)
 
 
 def read_nahar_core_states(fenlist):
@@ -147,6 +149,7 @@ def read_nahar_core_states(fenlist):
 
 def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     nahar_phixs_tables = {}
+    thresholds_ev_dict = {}
     with open(path_nahar_px_file, 'r') as fenlist:
         while True:
             line = fenlist.readline()
@@ -176,7 +179,8 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
             twosplusone, l, parity, indexinsymmetry = int(row[0]), int(row[1]), int(row[2]), int(row[3])
 
             number_of_points = int(fenlist.readline().split()[1])
-            _ = float(fenlist.readline().split()[0])  # nahar_binding_energy_rydberg
+            binding_energy_ryd = float(fenlist.readline().split()[0])
+            thresholds_ev_dict[(twosplusone, l, parity, indexinsymmetry)] = binding_energy_ryd * 13.605698065
 
             if not args.nophixs:
                 phixsarray = np.array([list(map(float, fenlist.readline().split())) for p in range(number_of_points)])
@@ -187,7 +191,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
 
             nahar_phixs_tables[(twosplusone, l, parity, indexinsymmetry)] = phixsarray
 
-    return nahar_phixs_tables
+    return nahar_phixs_tables, thresholds_ev_dict
 
 
 def read_nahar_configurations(fenlist, flog):

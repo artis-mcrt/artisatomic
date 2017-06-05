@@ -17,6 +17,17 @@ nahar_configuration_replacements = {
 
     # Fe I
     'Eqv st (0S ) 0s  a5D':  '3d6_4s2_5De',  # Fe I groundstate
+    '3d64s  (6D ) 5s  b5D': '3d6(5D)4s5s_e5De',
+    '3d64s  (6D ) 4d  c5D': '3d6(5D)4s4d_f5De',
+    '3d64s  (6D ) 4d  a5G': '3d6(5D)4s4d_e5Ge',
+    '3d64s  (6D ) 4d  b5P': '3d6(5D)4s4d_e5Pe',
+    '3d7    (4F ) 4d  c5P': '3d7(4F)4d_f5Pe',
+    '3d64s  (6D ) 5d  d5P': '3d6(5D)4s5d_5Pe',
+    '3d64s  (4D ) 4d  e5P': '3d6(5D)4s4d_5Pe',
+    '3d64s  (4G ) 4p  t5Fo': '3d6(3D)4s4p_5Fo',
+    '3d64s  (6D ) 5s  a7D': '3d6(5D)4s5s_e7De',
+    '3d64s  (6D ) 6s  c7D': '3d6(5D)4s6s_g7De',
+    '3d7    (4F ) 5s  b5F': '3d7(4F)5s_e5Fe',
 
     # Fe II
     '3d6    (3P ) 0s  b4G': '3d54s2b4Ge',
