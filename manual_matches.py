@@ -30,6 +30,8 @@ nahar_configuration_replacements = {
     '3d7    (4F ) 5s  b5F': '3d7(4F)5s_e5Fe',
 
     # Fe II
+    '3d6    (5D ) 0s  a4P': '3d7_a4Pe',
+    '3d6    (5D ) 0s  a4F': '3d7_a4Fe',
     '3d6    (3P ) 0s  b4G': '3d54s2b4Ge',
     '3d6    (3P ) 0s  a6S': '3d54s2a6Se',
     '3d6    (5D ) 0s  b2F': '3d7b2Fe',
