@@ -31,9 +31,9 @@ roman_numerals = (
 )
 
 listelements = [
-    # (14, [1, 2, 3, 4]),
-    # (16, [1, 2, 3, 4]),
-    # (20, [1, 2, 3, 4]),
+    (14, [1, 2, 3, 4]),
+    (16, [1, 2, 3, 4]),
+    (20, [1, 2, 3, 4]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
     (28, [2, 3, 4, 5]),
@@ -887,11 +887,11 @@ def score_config_match(config_a, config_b):
 
     if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_b or term_parity_a != term_parity_b:
         return 0
-    # elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1:
-    #     if indexinsymmetry_a == indexinsymmetry_b:
-    #         return 100  # exact match between Hillier and Nahar
-    #     else:
-    #         return 0  # both correspond to Nahar states but do not match
+    elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1 and ('0s' in electron_config_a or '0' not in electron_config_b):
+        if indexinsymmetry_a == indexinsymmetry_b:
+            return 100  # exact match between Hillier and Nahar
+        else:
+            return 0  # both correspond to Nahar states but do not match
     elif electron_config_a == electron_config_b:
         return 99
     elif len(electron_config_a) > 0 and len(electron_config_b) > 0:
@@ -901,7 +901,7 @@ def score_config_match(config_a, config_b):
         index_a, index_b = 0, 0
 
         non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith('(')])
-        non_term_pieces_b = sum([1 for b in electron_config_a if not b.startswith('(')])
+        non_term_pieces_b = sum([1 for b in electron_config_b if not b.startswith('(')])
         # go through the configuration piece by piece
         while index_a < len(electron_config_a) and index_b < len(electron_config_b):
             piece_a = electron_config_a[index_a]  # an orbital electron count or a parent term
@@ -923,6 +923,7 @@ def score_config_match(config_a, config_b):
                     pass
                 else:
                     return 0
+
                 index_a += 1
                 index_b += 1
 
