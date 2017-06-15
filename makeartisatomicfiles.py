@@ -561,8 +561,9 @@ def reduce_phixs_tables_worker(
         sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind='linear', assume_sorted=True)
 
         for i, _ in enumerate(xgrid[:-1]):
-            enlow = xgrid[i] * threshold_old_ryd
-            enhigh = xgrid[i + 1] * threshold_old_ryd
+            iprevious = max(i - 1, 0)
+            enlow = 0.5 * (xgrid[iprevious] + xgrid[i]) * threshold_old_ryd
+            enhigh = 0.5 * (xgrid[i] + xgrid[i + 1]) * threshold_old_ryd
 
             # start of interval interpolated point, Nahar points, and end of interval interpolated point
             samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
