@@ -486,7 +486,7 @@ def reduce_phixs_tables(dicttables, optimaltemperature, nphixspoints, phixsnuinc
 
     if not hideoutput:
         print(f"Processing {len(dicttables.keys()):d} phixs tables")
-    nprocs = 1#os.cpu_count()
+    nprocs = os.cpu_count()
     keylist = dicttables.keys()
     for procnum in range(nprocs):
         dicttablesslice = itertools.islice(dicttables.items(), procnum, len(keylist), nprocs)
