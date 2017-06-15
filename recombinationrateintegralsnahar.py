@@ -315,7 +315,7 @@ def main():
     phixsnuincrement = 0.03
 
     atomicnumber = 26
-    ionstage = 1
+    ionstage = 2
     do_reduced_list = True
 
     ionstr = artisatomic.elsymbols[atomicnumber] + ' ' + artisatomic.roman_numerals[ionstage]
