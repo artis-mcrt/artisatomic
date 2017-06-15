@@ -18,8 +18,7 @@ import makeartisatomicfiles as artisatomic
 # from astropy import units as u
 
 
-def get_ionrecombrates_fromfile(filename, atomicnumber, ionstage):
-    # filename = f'atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.rrc.ls.txt'
+def read_nahar_rrcfile(filename):
     print(f'Reading {filename}')
 
     header_row = []
@@ -84,7 +83,7 @@ def main():
                     lowerionstage = int(ionstr[len(elsymbol):])
                     upperionstage = lowerionstage + 1
                     atomic_number = artisatomic.elsymbols.index(elsymbol.title())
-                    dfrecombrates = get_ionrecombrates_fromfile(filename, atomic_number, ion_stage)
+                    dfrecombrates = read_nahar_rrcfile(filename)
                     frecombrates.write(f'{atomic_number} {upperionstage} {len(dfrecombrates)}\n')
                     for _, row in dfrecombrates.iterrows():
                         frecombrates.write(f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n")
