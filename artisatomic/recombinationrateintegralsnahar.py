@@ -14,7 +14,7 @@ import numpy as np
 from scipy import integrate
 # from scipy import interpolate
 
-import makeartisatomicfiles as artisatomic
+import artisatomic
 
 # PYDIR = os.path.dirname(os.path.abspath(__file__))
 # atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')

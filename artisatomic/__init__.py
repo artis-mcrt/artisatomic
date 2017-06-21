@@ -14,11 +14,11 @@ from astropy import constants as const
 from astropy import units as u
 from scipy import integrate, interpolate
 
-import readhillierdata
-import readnahardata
-import readqubdata
-from manual_matches import (hillier_name_replacements,
-                            nahar_configuration_replacements)
+import artisatomic.readhillierdata
+import artisatomic.readnahardata
+import artisatomic.readqubdata
+from artisatomic.manual_matches import (
+    hillier_name_replacements, nahar_configuration_replacements)
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')

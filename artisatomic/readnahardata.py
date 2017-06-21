@@ -8,7 +8,7 @@ import numpy as np
 from astropy import constants as const
 from astropy import units as u
 
-import makeartisatomicfiles as artisatomic
+import artisatomic
 
 ryd_to_ev = u.rydberg.to('eV')
 
