@@ -4,9 +4,8 @@ import numpy as np
 from astropy import units as u
 
 import readhillierdata as rhd
-from makeartisatomicfiles import (get_term_as_tuple, interpret_configuration,
-                                  interpret_parent_term, reduce_configuration,
-                                  score_config_match)
+from artisatomic import (
+    get_term_as_tuple, interpret_configuration, interpret_parent_term, reduce_configuration, score_config_match)
 
 
 def test_reduce_configuration():

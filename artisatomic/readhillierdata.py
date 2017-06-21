@@ -11,8 +11,8 @@ import pandas as pd
 from astropy import constants as const
 from astropy import units as u
 
-import makeartisatomicfiles as artisatomic
-from manual_matches import hillier_name_replacements
+import artisatomic
+from artisatomic.manual_matches import hillier_name_replacements
 
 # need to also include collision strengths from e.g., o2col.dat
 

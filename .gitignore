@@ -1,14 +1,13 @@
 /atomic-data-hillier/atomic
 artis_files*
 !artis_files_example_old
-transition_guide/transitions_*.*
 __pycache__
-.pyc
+*.pyc
 .cache
 Icon?
 *.swp
 *.tmp
-
+*.egg-info
 output.txt
 
 atomic-data-qub/1
