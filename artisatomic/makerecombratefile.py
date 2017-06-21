@@ -12,7 +12,7 @@ import pandas as pd
 import pidly
 
 import artistools as at
-import makeartisatomicfiles as artisatomic
+import artisatomic
 
 # from astropy import constants as const
 # from astropy import units as u
