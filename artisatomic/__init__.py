@@ -1208,45 +1208,6 @@ def write_compositionfile(listelements, args):
                         f'-1 0.0 {atomic_weights[atomic_number]:.4f}\n')
 
 
-def calculate_sahafact(g_lower, g_upper, T, E_threshold_erg):
-    KB = 1.38064852e-16  # Boltzmann constant [erg/K]
-    SAHACONST = 2.0706659e-16
-    return SAHACONST * g_lower / g_upper * T ** -1.5 * math.exp(E_threshold_erg / KB / T)
-
-
-def get_recomb_rate(phixstable, g_lower):
-    T_e = 6.31E+03
-    g_upper = 6
-
-    arr_energyryd = phixstable[:, 0]
-    # arr_nu = (arr_energyryd * u.rydberg / const.h).to('s-1').value
-    H = 6.6260755e-27  # Planck constant in erg seconds
-    RYD = 2.1798741e-11  # Rydberg to ergs
-    arr_nu = [en_ryd * RYD / H for en_ryd in arr_energyryd]
-
-    arr_sigma_megabarns = phixstable[:, 1]
-    # sigma_megabarns = interpolate.interp1d(arr_energyryd, arr_sigma_megabarns)
-
-    # E_threshold_erg = 30.6512220 * u.eV.to('erg')
-    E_threshold_erg = arr_energyryd[0] * u.rydberg.to('erg')
-    # print(f'Threshold is {E_threshold_erg * u.erg.to("Ry")} Ry')
-
-    sfac = calculate_sahafact(g_lower, g_upper, T_e, E_threshold_erg)
-
-    def integrand(en_ryd, sigma_megabarns):
-        TWOOVERCLIGHTSQUARED = 2.2253001e-21
-        HOVERKB = 4.799243681748932e-11
-        nu = en_ryd * RYD / H
-        sigmabf = sigma_megabarns * 1e-18
-        return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T_e)
-
-    arr_integrand = [integrand(en_ryd, sigma_mb) for en_ryd, sigma_mb in zip(arr_energyryd, arr_sigma_megabarns)]
-    integral = integrate.trapz(arr_integrand, arr_nu)
-    recomb_rate = 4 * math.pi * sfac * integral
-
-    return recomb_rate
-
-
 if __name__ == "__main__":
     # print(interpret_configuration('3d64s_4H'))
     # print(interpret_configuration('3d6(3H)4sa4He[11/2]'))
