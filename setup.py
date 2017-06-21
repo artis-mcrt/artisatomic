@@ -43,6 +43,7 @@ setup(
     entry_points={
         'console_scripts': [
             'makeartisatomicfiles = artisatomic:main',
+            'makerecombratefile = artisatomic.makerecombratefile:main',
         ]
     },
     python_requires='>==3.6',
