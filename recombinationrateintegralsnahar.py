@@ -311,8 +311,8 @@ def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
 def main():
     # T_goal = 6.31E+03
     T_goal = 6000
-    nphixspoints = 50
-    phixsnuincrement = 0.03
+    nphixspoints = 100
+    phixsnuincrement = 0.05
 
     atomicnumber = 26
     ionstage = 2
@@ -420,7 +420,7 @@ def main():
         for reduced, phixsdict in enumerate(list_phixslists):
             print(f'\n  {len(phixsdict[term_index]):d} points in list')
             # print(phixsdict[term_index])
-            for kind in ['euler', 'trapz']:
+            for kind in ['trapz', 'simps']:  # 'euler',
                 tag = ('reduced_' if reduced == 1 else '') + kind
                 alpha = calculate_level_alpha(
                     phixsdict[term_index], g_lower, g_upper, T, kind=kind)
