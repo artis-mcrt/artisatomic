@@ -31,17 +31,16 @@ roman_numerals = (
 )
 
 listelements = [
-    (14, [1, 2, 3, 4]),
-    (16, [1, 2, 3, 4]),
-    (20, [1, 2, 3, 4]),
+    # (14, [1, 2, 3, 4]),
+    # (16, [1, 2, 3, 4]),
+    # (20, [1, 2, 3, 4]),
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
     (28, [2, 3, 4, 5]),
 ]
 
 # include everything we have data for
-# if __name__ == "__main__":
-#     listelements = readhillierdata.extend_ion_list(listelements)
+listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
