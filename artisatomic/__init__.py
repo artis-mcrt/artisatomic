@@ -736,8 +736,8 @@ def interpret_parent_term(strin):
 
     twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
 
-    if lposition < len(strin)-1 and strin[lposition+1:] != 'e':
-        jvalue = int(strin[lposition+1:])
+    if lposition < len(strin) - 1 and strin[lposition + 1:] not in ['e', 'o']:
+        jvalue = int(strin[lposition + 1:])
     else:
         jvalue = -1
     return (twosplusone, l, jvalue)
@@ -887,7 +887,7 @@ def score_config_match(config_a, config_b):
 
     if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_b or term_parity_a != term_parity_b:
         return 0
-    elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1 and ('0s' in electron_config_a or '0' not in electron_config_b):
+    elif indexinsymmetry_a != -1 and indexinsymmetry_b != -1 and ('0s' not in electron_config_a and '0s' not in electron_config_b):
         if indexinsymmetry_a == indexinsymmetry_b:
             return 100  # exact match between Hillier and Nahar
         else:
@@ -898,6 +898,8 @@ def score_config_match(config_a, config_b):
         parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is consistent, 1 is definite match
         parent_term_index_a, parent_term_index_b = -1, -1
         matched_pieces = 0
+        if '0s' in electron_config_a or '0s' in electron_config_b:
+            matched_pieces += 0.5  # make sure 0s states gets matched to something
         index_a, index_b = 0, 0
 
         non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith('(')])
@@ -919,10 +921,11 @@ def score_config_match(config_a, config_b):
             else:  # orbital occupation piece
                 if piece_a == piece_b:
                     matched_pieces += 1
-                elif '0s' in [piece_a, piece_b]:  # wildcard piece
-                    pass
-                else:
-                    return 0
+                # elif '0s' in [piece_a, piece_b]:  # wildcard piece
+                #     matched_pieces += 0.5
+                    # pass
+                # else:
+                #     return 0
 
                 index_a += 1
                 index_b += 1
@@ -964,7 +967,6 @@ def score_config_match(config_a, config_b):
                     # print(orbitaldiff, spindiff, maxspindiff, ldiff, maxldiff, config_a, config_b)
                     parent_term_match = 0.
                     return 0
-
         score = int(98 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
         return score
     else:
