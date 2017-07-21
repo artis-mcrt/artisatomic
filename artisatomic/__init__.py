@@ -413,7 +413,7 @@ def combine_hillier_nahar(hillier_energy_levels, hillier_levelnamesnoJ_matching_
                     sumhillierstatweights = sum([hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state])
                     flog.write(f'<E> = {avghillierenergyabovegsinev:.3f} eV, g_sum = {sumhillierstatweights:.1f}: \n')
                     if abs(nahar_energyabovegsinev / avghillierenergyabovegsinev - 1) > 0.5:
-                        flog.write(f'ENERGY DESCREPANCY WARNING\n')
+                        flog.write(f'ENERGY DISCREPANCY WARNING\n')
 
                 strhilliermatches = '\n'.join(['{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})'.format(hillier_energy_levels[k].levelname, hc_in_ev_cm * float(
                     hillier_energy_levels[k].energyabovegsinpercm), hillier_energy_levels[k].g, hillier_energy_levels[k].matchscore) for k in hillier_level_ids_matching_this_nahar_state])
