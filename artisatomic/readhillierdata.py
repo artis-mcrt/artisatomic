@@ -561,12 +561,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
                         enryd = float(row[0].replace('D', 'E'))
 
-                        if crosssectiontype in [20, 21]:  # the x value is actually a fraction of the threshold, not an energy
+                        if crosssectiontype in [20, 21, 22]:  # the x value is actually a fraction of the threshold, not an energy
                             if pointnumber == 0 and abs(enryd - 1.0) > 0.2:
                                 print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is not near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
                             enryd *= thresholdenergyryd
-                        elif pointnumber == 0 and abs(enryd - 1.0) < 0.2:
-                            print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
+                        # elif pointnumber == 0 and abs(enryd - 1.0) < 0.2:
+                        #     print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
 
                         xspoint = enryd, float(row[1].replace('D', 'E'))
                         phixstables[filenum][lowerlevelname][pointnumber] = xspoint
