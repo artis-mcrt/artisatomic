@@ -1103,7 +1103,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
         except AttributeError:
             level_comment = level_comment.rstrip()
 
-        fatommodels.write(f'{levelid:5d} {hc_in_ev_cm * float(energylevel.energyabovegsinpercm):19.16f} {float(energylevel.g):7.3f} {transitioncount:4d} {level_comment:}\n')
+        fatommodels.write(f'{levelid:5d} {hc_in_ev_cm * float(energylevel.energyabovegsinpercm):19.16f} {float(energylevel.g):8.3f} {transitioncount:4d} {level_comment:}\n')
 
     fatommodels.write('\n')
 
