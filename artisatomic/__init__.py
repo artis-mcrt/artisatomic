@@ -40,7 +40,7 @@ listelements = [
 ]
 
 # include everything we have data for
-listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readhillierdata.extend_ion_list(listelements)
 
 ryd_to_ev = u.rydberg.to('eV')
 
@@ -59,9 +59,7 @@ def main():
     parser.add_argument(
         '-output_folder_logs', action='store',
         default='atomic_data_logs', help='Folder for log files')
-    parser.add_argument(
-        '-output_folder_transition_guide', action='store',
-        default='transition_guide', help='')
+
     parser.add_argument(
         '-nphixspoints', type=int, default=50,
         help='Number of cross section points to save in output')
@@ -988,10 +986,6 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
     atomic_number, listions = listelements[elementindex]
     upsilon_transition_row = namedtuple('transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
-    with open(os.path.join(args.output_folder_transition_guide, f'transitions_{elsymbols[atomic_number]}.txt'), 'w') as ftransitionguide:
-        ftransitionguide.write('{0:>16s} {1:>12s} {2:>3s} {3:>9s} {4:>17s} {5:>17s} {6:>10s} {7:25s} {8:25s} {9:>17s} {10:>17s} {11:>19s}\n'.format(
-            'lambda_angstroms', 'A', 'Z', 'ion_stage', 'lower_energy_Ev', 'lower_statweight', 'forbidden', 'lower_level', 'upper_level', 'upper_statweight', 'upper_energy_Ev', 'upper_has_permitted'))
-
     for i, ion_stage in enumerate(listions):
         upsilondict = upsilondicts[i]
         ionstr = f'{elsymbols[atomic_number]} {roman_numerals[ion_stage]}'
@@ -1055,9 +1049,8 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
         with open(os.path.join(args.output_folder, 'adata.txt'), 'a') as fatommodels:
             write_adata(fatommodels, atomic_number, ion_stage, energy_levels[i], ionization_energies[i], transition_count_of_level_name[i], args, flog)
 
-        with open(os.path.join(args.output_folder, 'transitiondata.txt'), 'a') as ftransitiondata, \
-                open(os.path.join(args.output_folder_transition_guide, f'transitions_{elsymbols[atomic_number]}.txt'), 'a') as ftransitionguide:
-            write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args, flog)
+        with open(os.path.join(args.output_folder, 'transitiondata.txt'), 'a') as ftransitiondata:
+            write_transition_data(ftransitiondata, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args, flog)
 
         if i < len(listions) - 1 and not args.nophixs:  # ignore the top ion
             if len(photoionization_targetfractions[i]) < 1:
@@ -1110,7 +1103,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
     fatommodels.write('\n')
 
 
-def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_stage, energy_levels,
+def write_transition_data(ftransitiondata, atomic_number, ion_stage, energy_levels,
                           transitions, upsilondict, args, flog):
     log_and_print(flog, "Writing to 'transitiondata.txt'")
 
@@ -1140,17 +1133,6 @@ def write_transition_data(ftransitiondata, ftransitionguide, atomic_number, ion_
         if forbidden:
             num_forbidden_transitions += 1
             # flog.write(f'Forbidden transition: lambda_angstrom= {float(transition.lambdaangstrom):7.1f}, {transition.namefrom:25s} to {transition.nameto:25s}\n')
-
-        if float(transition.A) > 0.0:  # ignore transitions that exist only because of their collisional data
-            ftransitionguide.write('{0:16.1f} {1:12E} {2:3d} {3:9d} {4:17.2f} {5:17.4f} {6:10b} {7:25s} {8:25s} {9:17.2f} {10:17.4f} {11:19b}\n'.format(
-                abs(float(transition.lambdaangstrom)), float(transition.A),
-                atomic_number, ion_stage,
-                hc_in_ev_cm * float(energy_levels[levelid_lower].energyabovegsinpercm),
-                float(energy_levels[levelid_lower].g), forbidden,
-                transition.namefrom, transition.nameto,
-                float(energy_levels[levelid_upper].g),
-                hc_in_ev_cm * float(energy_levels[levelid_upper].energyabovegsinpercm),
-                levelid_upper in level_ids_with_permitted_down_transitions))
 
         # ftransitiondata.write('{0:4d} {1:4d} {2:16.10E} {3:9.2e} {4:d}\n'.format(
         #     levelid_lower, levelid_upper, float(transition.A), coll_str, forbidden))
