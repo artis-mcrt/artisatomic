@@ -30,7 +30,7 @@ class PyTest(TestCommand):
 print(datetime.datetime.now().isoformat())
 setup(
     name="artisatomic",
-    version=datetime.datetime.now().isoformat(),
+    version='0.1dev', # datetime.datetime.now().isoformat(),
     author="Luke Shingles",
     author_email="luke.shingles@gmail.com",
     packages=find_packages(),
