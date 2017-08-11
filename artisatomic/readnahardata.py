@@ -212,7 +212,10 @@ def read_nahar_configurations(fenlist, flog):
             sys.exit()
 
         if line.startswith(' Ion ground state'):
-            nahar_ionization_potential_rydberg = -float(line.split('=')[2])
+            nahar_ionization_potential_rydberg_str = line.split('=')[2]
+            if 'E' not in nahar_ionization_potential_rydberg_str:
+                nahar_ionization_potential_rydberg_str = nahar_ionization_potential_rydberg_str.replace('+', 'E+')
+            nahar_ionization_potential_rydberg = -float(nahar_ionization_potential_rydberg_str)
             flog.write(f'Ionization potential = {nahar_ionization_potential_rydberg * ryd_to_ev:.4f} eV\n')
 
         if line.startswith(' ') and len(line) > 36 and artisatomic.isfloat(line[29:29 + 8]):

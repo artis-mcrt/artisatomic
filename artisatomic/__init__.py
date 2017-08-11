@@ -17,8 +17,7 @@ from scipy import integrate, interpolate
 import artisatomic.readhillierdata
 import artisatomic.readnahardata
 import artisatomic.readqubdata
-from artisatomic.manual_matches import (
-    hillier_name_replacements, nahar_configuration_replacements)
+from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
