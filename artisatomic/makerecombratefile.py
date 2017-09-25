@@ -75,8 +75,32 @@ def main():
                 print(f'{artisatomic.elsymbols[atomic_number]} {upperionstage}->{lowerionstage}')
 
                 print(atomic_number, lowerionstage)
-                rrcfiles = glob.glob(f'atomic-data-nahar/{artisatomic.elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt')
-                if rrcfiles:
+                rrcfiles = glob.glob(
+                    f'atomic-data-nahar/{artisatomic.elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt')
+
+                if atomic_number == 28:
+                    frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
+                    # Shull & Steenberg 1982
+                    if lowerionstage == 1:
+                        A_rad, X_rad = 3.60e-13, 0.700
+                    elif lowerionstage == 2:
+                        A_rad, X_rad = 1.00e-12, 0.700
+                    elif lowerionstage == 3:
+                        A_rad, X_rad = 1.40e-12, 0.700
+                    elif lowerionstage == 4:
+                        A_rad, X_rad = 1.60e-12, 0.700
+                    elif lowerionstage == 5:
+                        A_rad, X_rad = 3.85e-12, 0.746
+                    elif lowerionstage == 6:
+                        A_rad, X_rad = 9.05e-12, 0.682
+
+                    arr_logT_e = np.arange(1.0, 9.1, 0.1)
+                    for logT_e in arr_logT_e:
+                        T_e = 10 ** logT_e
+                        rrc = A_rad * (T_e / 1e4) ** - X_rad
+                        frecombrates.write(f"{logT_e:.1f} {-1.0} {rrc}\n")
+
+                elif rrcfiles:  # use Nahar's vlaues if available
                     filename = rrcfiles[0]
                     ionstr = os.path.basename(filename).split('.')[0]  # should be something like 'fe2'
                     elsymbol = ionstr.rstrip('0123456789')
@@ -87,7 +111,8 @@ def main():
                     frecombrates.write(f'{atomic_number} {upperionstage} {len(dfrecombrates)}\n')
                     for _, row in dfrecombrates.iterrows():
                         frecombrates.write(f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n")
-                else:
+
+                else:  # use Chianti
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
                     frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
                     for logT_e in arr_logT_e:
