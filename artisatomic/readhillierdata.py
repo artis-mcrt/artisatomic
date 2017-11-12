@@ -844,17 +844,31 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
         artisatomic.log_and_print(flog, 'No collisional data file specified')
         return upsilondict
 
-    discarded_transitions = 0
-
-    level_id_of_level_name = {}
+    found_nonjsplit_transition = False
+    level_ids_of_level_name = {}
     for levelid in range(1, len(energy_levels)):
         if hasattr(energy_levels[levelid], 'levelname'):
-            level_id_of_level_name[energy_levels[levelid].levelname] = levelid
+            levelname = energy_levels[levelid].levelname
+
+            levelnamenoJ = levelname.split('[')[0]
+            if levelname != levelnamenoJ:  # levels are J split
+                level_ids_of_level_name[levelname] = [levelid]
+            elif not found_nonjsplit_transition:
+                artisatomic.log_and_print(flog, 'Found at least one transition specifying level name with no J value')
+                found_nonjsplit_transition = True
+
+            # keep track of the level ids of states that differ by J only
+            # in case the collisional data level names are not J split
+            try:
+                level_ids_of_level_name[levelnamenoJ].append(levelid)
+            except KeyError:
+                level_ids_of_level_name[levelnamenoJ] = [levelid]
 
     filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
                             ions_data[(atomic_number, ion_stage)].folder,
                             coldatafilename)
     artisatomic.log_and_print(flog, 'Reading ' + filename)
+    coll_lines_in = 0
     with open(filename, 'r') as fcoldata:
         header_row = []
         temperature_index = -1
@@ -904,41 +918,51 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
 
                 namefrom, nameto = map(str.strip, namefromnameto.split('-'))
                 upsilon = float(upsilonvalues[temperature_index].replace('D', 'E'))
+                coll_lines_in += 1
                 try:
-                    id_lower = level_id_of_level_name[namefrom]
-                    id_upper = level_id_of_level_name[nameto]
-                    if id_lower > id_upper:
-                        # artisatomic.log_and_print(
-                        #     flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
-                        id_lower, namefrom, id_upper, nameto = id_upper, nameto, id_lower, namefrom
+                    id_lower_list = []
+                    id_upper_list = []
+                    for id_upper in level_ids_of_level_name[nameto]:
+                        for id_lower in level_ids_of_level_name[namefrom]:
+                            if id_lower > id_upper:
+                                artisatomic.log_and_print(
+                                    flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
+                                id_lower, id_upper = id_upper, id_lower
+                            elif id_lower == id_upper:
+                                artisatomic.log_and_print(
+                                    flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
+                            elif (id_lower, id_upper) in upsilondict:
+                                print(f'ERROR: Duplicate collisional transition from {namefrom} ({id_lower}) -> {nameto} ({id_upper}). Keeping existing collision strength.')
+                                # sys.exit()
+                            else:
+                                id_lower_list.append(id_lower)
+                                id_upper_list.append(id_upper)
 
-                    if id_lower == id_upper:
-                        artisatomic.log_and_print(
-                            flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
-                        discarded_transitions += 1
-                    elif (id_lower, id_upper) in upsilondict:
-                        print(f'ERROR: Duplicate transition from {namefrom} -> {nameto}')
-                        sys.exit()
-                    else:
-                        upsilondict[(id_lower, id_upper)] = upsilon
+                    upper_g_sum = sum([energy_levels[id_upper].g for id_upper in id_upper_list])
+
+                    for id_upper in id_upper_list:
+                        for id_lower in id_lower_list:
+                            upsilondict[(id_lower, id_upper)] = upsilon * energy_levels[id_upper].g / upper_g_sum
+
                     # print(namefrom, nameto, upsilon)
                 except KeyError:
-                    unlisted_from_message = ' (unlisted)' if namefrom not in level_id_of_level_name else ''
-                    unlisted_to_message = ' (unlisted)' if nameto not in level_id_of_level_name else ''
+                    unlisted_from_message = ' (unlisted)' if namefrom not in level_ids_of_level_name else ''
+                    unlisted_to_message = ' (unlisted)' if nameto not in level_ids_of_level_name else ''
                     artisatomic.log_and_print(
                         flog, f'Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} -> {nameto}{unlisted_to_message}')
-                    discarded_transitions += 1
 
-    if len(upsilondict) + discarded_transitions < number_expected_transitions:
+    if coll_lines_in < number_expected_transitions:
         print(
-            f'ERROR: file specified {number_expected_transitions:d} transitions, but only {len(upsilondict) + discarded_transitions:d} were found')
+            f'ERROR: file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found')
         sys.exit()
-    elif len(upsilondict) + discarded_transitions > number_expected_transitions:
+    elif coll_lines_in > number_expected_transitions:
         artisatomic.log_and_print(
-            flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {len(upsilondict) + discarded_transitions:d} were found')
+            flog, f'WARNING: file specified {number_expected_transitions:d} transitions, but {coll_lines_in:d} were found')
     else:
         artisatomic.log_and_print(
-            flog, f'Read {len(upsilondict) + discarded_transitions} effective collision strengths ')
+            flog, f'Read {coll_lines_in} effective collision strengths ')
+        artisatomic.log_and_print(
+            flog, f'Output {len(upsilondict)} effective collision strengths ')
 
     return upsilondict
 
