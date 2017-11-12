@@ -1139,7 +1139,7 @@ def write_transition_data(ftransitiondata, atomic_number, ion_stage, energy_leve
 
     ftransitiondata.write('\n')
 
-    log_and_print(flog, f'Wrote out {len(transitions):d} transitions, of which {num_forbidden_transitions:d} are forbidden and {num_collision_strengths_applied:d} had collision strengths')
+    log_and_print(flog, f'Output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and {num_collision_strengths_applied:d} have collision strengths')
 
 
 def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
