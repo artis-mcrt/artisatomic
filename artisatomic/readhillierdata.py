@@ -919,30 +919,27 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 namefrom, nameto = map(str.strip, namefromnameto.split('-'))
                 upsilon = float(upsilonvalues[temperature_index].replace('D', 'E'))
                 coll_lines_in += 1
+
                 try:
-                    id_lower_list = []
-                    id_upper_list = []
-                    for id_upper in level_ids_of_level_name[nameto]:
-                        for id_lower in level_ids_of_level_name[namefrom]:
-                            if id_lower > id_upper:
+                    if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
+                        artisatomic.log_and_print(
+                            flog, f'WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} '
+                            f'-> {nameto} {level_ids_of_level_name[nameto]}.')
+                        namefrom, nameto = nameto, namefrom
+
+                    for id_lower in level_ids_of_level_name[namefrom]:
+                        id_upper_list = [levelid for levelid in level_ids_of_level_name[nameto] if levelid > id_lower]
+                        upper_g_sum = sum([energy_levels[id_upper].g for id_upper in id_upper_list])
+
+                        for id_upper in id_upper_list:
+                            # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
+                            upsilonscaled = upsilon * energy_levels[id_upper].g / upper_g_sum
+                            if (id_lower, id_upper) in upsilondict:
                                 artisatomic.log_and_print(
-                                    flog, f'WARNING: Transition ids are backwards {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...swapping levels')
-                                id_lower, id_upper = id_upper, id_lower
-                            elif id_lower == id_upper:
-                                artisatomic.log_and_print(
-                                    flog, f'WARNING: Transition ids are equal? {namefrom} (level {id_lower:d}) -> {nameto} (level {id_upper:d})...discarding')
-                            elif (id_lower, id_upper) in upsilondict:
-                                print(f'ERROR: Duplicate collisional transition from {namefrom} ({id_lower}) -> {nameto} ({id_upper}). Keeping existing collision strength.')
-                                # sys.exit()
+                                    flog, f'ERROR: Duplicate collisional transition from {namefrom} <-> {nameto} ({id_lower} -> {id_upper}).'
+                                    f'Keeping existing collision strength of {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of {upsilonscaled:.2e}.')
                             else:
-                                id_lower_list.append(id_lower)
-                                id_upper_list.append(id_upper)
-
-                    upper_g_sum = sum([energy_levels[id_upper].g for id_upper in id_upper_list])
-
-                    for id_upper in id_upper_list:
-                        for id_lower in id_lower_list:
-                            upsilondict[(id_lower, id_upper)] = upsilon * energy_levels[id_upper].g / upper_g_sum
+                                upsilondict[(id_lower, id_upper)] = upsilonscaled
 
                     # print(namefrom, nameto, upsilon)
                 except KeyError:
