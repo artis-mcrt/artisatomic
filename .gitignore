@@ -11,5 +11,16 @@ Icon?
 output.txt
 
 atomic-data-qub/1
+atomic-data-hillier/*
+!atomic-data-hillier/atomic/
+atomic-data-hillier/atomic/*
+!atomic-data-hillier/atomic/NICK/
+atomic-data-hillier/atomic/NICK/*
+!atomic-data-hillier/atomic/NICK/II/
+atomic-data-hillier/atomic/NICK/II/*
+!atomic-data-hillier/atomic/NICK/II/30oct12
+atomic-data-hillier/atomic/NICK/II/30oct12/*
+!atomic-data-hillier/atomic/NICK/II/30oct12/col_data_bautista_ljs_swap23
+
 
 recombination_rates/phixs.pdf
