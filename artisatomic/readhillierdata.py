@@ -927,14 +927,26 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             f'-> {nameto} {level_ids_of_level_name[nameto]}.')
                         namefrom, nameto = nameto, namefrom
 
+                    # add collisions within the lower and upper terms with unknown collision strengths
                     for id_lower in level_ids_of_level_name[namefrom]:
+                        for id_lower2 in level_ids_of_level_name[namefrom]:
+                            if id_lower < id_lower2 and (id_lower, id_lower2) not in upsilondict:
+                                upsilondict[(id_lower, id_lower2)] = -2.0
+
+                    for id_upper in level_ids_of_level_name[nameto]:
+                        for id_upper2 in level_ids_of_level_name[nameto]:
+                            if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
+                                upsilondict[(id_upper, id_upper2)] = -2.0
+
+                    for id_lower in level_ids_of_level_name[namefrom]:
+
                         id_upper_list = [levelid for levelid in level_ids_of_level_name[nameto] if levelid > id_lower]
                         upper_g_sum = sum([energy_levels[id_upper].g for id_upper in id_upper_list])
 
                         for id_upper in id_upper_list:
                             # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
                             upsilonscaled = upsilon * energy_levels[id_upper].g / upper_g_sum
-                            if (id_lower, id_upper) in upsilondict:
+                            if (id_lower, id_upper) in upsilondict and upsilondict[(id_lower, id_upper)] >= 0.:
                                 artisatomic.log_and_print(
                                     flog, f'ERROR: Duplicate collisional transition from {namefrom} <-> {nameto} ({id_lower} -> {id_upper}).'
                                     f'Keeping existing collision strength of {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of {upsilonscaled:.2e}.')
