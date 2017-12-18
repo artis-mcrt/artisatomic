@@ -183,7 +183,7 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readqubdata.read_qub_photoionizations(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif False:  # Nahar only
+                elif False:  # Nahar only, usually just for testing purposes
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i],
                      ionization_energy_ev[i]) = readnahardata.read_nahar_energy_level_file(
