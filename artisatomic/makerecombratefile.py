@@ -18,8 +18,9 @@ import artisatomic
 # from astropy import units as u
 
 
-def read_nahar_rrcfile(filename):
-    print(f'Reading {filename}')
+def read_nahar_rrcfile(filename, noprint=False):
+    if not noprint:
+        print(f'Reading {filename}')
 
     header_row = []
     with open(filename, 'r') as filein:
@@ -62,8 +63,21 @@ def main():
     dir(idl)
     idl.setecho("False")
 
-    atomic_number = 26
-    ion_stage = 1
+    # Shull & Steenberg 1982
+    A_rad, X_rad = {}, {}
+    A_rad[26, 1], X_rad[26, 1] = 1.42e-13, 0.891
+    A_rad[26, 2], X_rad[26, 2] = 1.02e-12, 0.843
+    A_rad[26, 3], X_rad[26, 3] = 3.32e-12, 0.746
+    A_rad[26, 4], X_rad[26, 4] = 7.80e-12, 0.682
+    A_rad[26, 5], X_rad[26, 5] = 1.51e-11, 0.699
+    A_rad[26, 6], X_rad[26, 6] = 2.62e-11, 0.728
+
+    A_rad[28, 1], X_rad[28, 1] = 3.60e-13, 0.700
+    A_rad[28, 2], X_rad[28, 2] = 1.00e-12, 0.700
+    A_rad[28, 3], X_rad[28, 3] = 1.40e-12, 0.700
+    A_rad[28, 4], X_rad[28, 4] = 1.60e-12, 0.700
+    A_rad[28, 5], X_rad[28, 5] = 3.85e-12, 0.746
+    A_rad[28, 6], X_rad[28, 6] = 9.05e-12, 0.682
 
     dfcomposition = at.get_composition_data('artis_files/compositiondata.txt')
 
@@ -78,41 +92,45 @@ def main():
                 rrcfiles = glob.glob(
                     f'atomic-data-nahar/{artisatomic.elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt')
 
-                if atomic_number == 28:
-                    frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
-                    # Shull & Steenberg 1982
-                    if lowerionstage == 1:
-                        A_rad, X_rad = 3.60e-13, 0.700
-                    elif lowerionstage == 2:
-                        A_rad, X_rad = 1.00e-12, 0.700
-                    elif lowerionstage == 3:
-                        A_rad, X_rad = 1.40e-12, 0.700
-                    elif lowerionstage == 4:
-                        A_rad, X_rad = 1.60e-12, 0.700
-                    elif lowerionstage == 5:
-                        A_rad, X_rad = 3.85e-12, 0.746
-                    elif lowerionstage == 6:
-                        A_rad, X_rad = 9.05e-12, 0.682
+                if False:
+                    pass
 
-                    arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                    for logT_e in arr_logT_e:
-                        T_e = 10 ** logT_e
-                        rrc = A_rad * (T_e / 1e4) ** - X_rad
-                        frecombrates.write(f"{logT_e:.1f} {-1.0} {rrc}\n")
+                #
+                # elif atomic_number == 28:  # Pure Shull & Steenberg 1982
+                #     arr_logT_e = np.arange(1.0, 9.1, 0.1)
+                #     frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
+                #     for logT_e in arr_logT_e:
+                #         T_e = 10 ** logT_e
+                #         rrc = A_rad[atomic_number, lowerionstage] * (T_e / 1e4) ** - X_rad[atomic_number, lowerionstage]
+                #         frecombrates.write(f"{logT_e:.1f} {-1.0} {rrc}\n")
 
-                elif rrcfiles:  # use Nahar's vlaues if available
-                    filename = rrcfiles[0]
-                    ionstr = os.path.basename(filename).split('.')[0]  # should be something like 'fe2'
+                elif rrcfiles:  # use Nahar's values if available
+                    naharfilename = rrcfiles[0]
+                    ionstr = os.path.basename(naharfilename).split('.')[0]  # should be something like 'fe2'
                     elsymbol = ionstr.rstrip('0123456789')
                     lowerionstage = int(ionstr[len(elsymbol):])
                     upperionstage = lowerionstage + 1
                     atomic_number = artisatomic.elsymbols.index(elsymbol.title())
-                    dfrecombrates = read_nahar_rrcfile(filename)
+                    dfrecombrates = read_nahar_rrcfile(naharfilename)
                     frecombrates.write(f'{atomic_number} {upperionstage} {len(dfrecombrates)}\n')
                     for _, row in dfrecombrates.iterrows():
                         frecombrates.write(f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n")
 
-                else:  # use Chianti
+                # elif atomic_number == 28 and lowerionstage >= 3:
+                #     # Get Nahar's boost factors relative to SS82 for Fe, and apply them to the SS82 rates for Ni
+                #     rrcfiles = glob.glob(
+                #         f'atomic-data-nahar/fe{lowerionstage - 2}.rrc*.txt')
+                #     dfrecombrates = read_nahar_rrcfile(rrcfiles[0], noprint=True)
+                #     frecombrates.write(f'{atomic_number} {upperionstage} {len(dfrecombrates)}\n')
+                #     for _, row in dfrecombrates.iterrows():
+                #         T_e = 10 ** row['logT']
+                #         rrc_fe_ss82 = A_rad[26, lowerionstage - 2] * (T_e / 1e4) ** - X_rad[26, lowerionstage - 2]
+                #         rrc_ni_ss82 = A_rad[28, lowerionstage] * (T_e / 1e4) ** - X_rad[28, lowerionstage]
+                #         rrc_total = rrc_ni_ss82 * (row['RRC_total'] / rrc_fe_ss82)
+                #         print(f"Log T {row['logT']} Nahar/SS1982 boost factor: {(row['RRC_total'] / rrc_fe_ss82)}")
+                #         frecombrates.write(f"{row['logT']} {-1.0} {rrc_total}\n")
+
+                else:  # otherwise use Chianti
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
                     frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
                     for logT_e in arr_logT_e:
