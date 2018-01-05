@@ -11,7 +11,7 @@ Icon?
 output.txt
 
 atomic-data-qub/1
-atomic-data-hillier/*
+atomic-data-hillier/*.tar.gz
 !atomic-data-hillier/atomic/
 atomic-data-hillier/atomic/*
 !atomic-data-hillier/atomic/NICK/
