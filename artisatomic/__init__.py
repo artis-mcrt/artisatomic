@@ -39,10 +39,11 @@ listelements = [
 ]
 
 # include everything we have data for
-# listelements = readhillierdata.extend_ion_list(listelements)
+listelements = readhillierdata.extend_ion_list(listelements)
+
+USE_QUB_COBALT = False
 
 ryd_to_ev = u.rydberg.to('eV')
-
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
@@ -166,7 +167,7 @@ def process_files(listelements, args):
 
                 # if False:
                 #     pass
-                if atomic_number == 27:
+                if USE_QUB_COBALT and atomic_number == 27:
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
