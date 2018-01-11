@@ -144,12 +144,16 @@ ions_data = {
     (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformat_b, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
+    (26, 6): ion_files('18oct00', 'fevi_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
+    (26, 7): ion_files('18oct00', 'fevii_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
 
     # Co
     (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformat_a, ['phot_nosm'], 'Co2_COL_DATA'),
     (27, 3): ion_files('30oct12', 'coiii_osc.dat', hillier_rowformat_b, ['phot_nosm'], 'col_data.dat'),
     (27, 4): ion_files('4jan12', 'coiv_osc.dat', hillier_rowformat_b, ['phot_data'], 'col_data.dat'),
-    # (27, 5): ion_files('18oct00', 'cov_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (27, 5): ion_files('18oct00', 'cov_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (27, 6): ion_files('18oct00', 'covi_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (27, 7): ion_files('18oct00', 'covii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Ni
     (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data'], 'col_data_bautista_ljs_swap23'),
@@ -157,6 +161,8 @@ ions_data = {
     (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformat_b, ['phot_data.dat'], 'col_data.dat'),
     (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
     (28, 5): ion_files('18oct00', 'nkv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (28, 6): ion_files('18oct00', 'nkvi_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (28, 7): ion_files('18oct00', 'nkvii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Cu, Zn and above are not in CMGFEN?
 }
