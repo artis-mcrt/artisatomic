@@ -19,6 +19,7 @@ from artisatomic.manual_matches import hillier_name_replacements
 hillier_rowformat_a = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4'
 hillier_rowformat_b = 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6'
 hillier_rowformat_c = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
+hillier_rowformat_d = 'levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid'
 
 # keys are (atomic number, ion stage)
 ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename',
@@ -146,6 +147,7 @@ ions_data = {
     (26, 5): ion_files('18oct00', 'fev_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
     (26, 6): ion_files('18oct00', 'fevi_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 7): ion_files('18oct00', 'fevii_osc.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
+    (26, 8): ion_files('8may97', 'feviii_osc_kb_rk.dat', hillier_rowformat_d, ['phot_sm_3000_rev.dat'], 'col_guess.dat'),
 
     # Co
     (27, 2): ion_files('15nov11', 'fin_osc_bound', hillier_rowformat_a, ['phot_nosm'], 'Co2_COL_DATA'),
@@ -274,7 +276,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                         f'Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number {hillierlevelid:d}')
                     sys.exit()
 
-            if line.startswith('                        Oscillator strengths'):
+            if line.lstrip().startswith('Oscillator strengths'):
                 break
 
         artisatomic.log_and_print(flog, f'Read {len(hillier_energy_levels[1:]):d} levels')
@@ -297,13 +299,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     hilliertransitionid = int(row[7])
                 else:
                     hilliertransitionid = len(transitions) + 1
-
+                # print(row)
                 transition = hillier_transition_row(namefrom = row[0],
                                                     nameto = row[1],
-                                                    f = float(row[2]),
-                                                    A = float(row[3]),
+                                                    f = float(row[2].replace('D', 'E')),
+                                                    A = float(row[3].replace('D', 'E')),
                                                     lambdaangstrom = lambda_value,
-                                                    i = int(row[5]),
+                                                    i = int(row[5].rstrip('-')),
                                                     j = int(row[6]),
                                                     hilliertransitionid = hilliertransitionid,
                                                     lowerlevel = -1,
@@ -319,7 +321,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     if int(transition.hilliertransitionid) != len(transitions):
                         print(
                             f'{filename} WARNING: Transition id {int(transition.hilliertransitionid):d} found at entry number {len(transitions):d}')
-                        sys.exit()
+                        # sys.exit()
                 else:
                     artisatomic.log_and_print(
                         flog, f'FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}')
