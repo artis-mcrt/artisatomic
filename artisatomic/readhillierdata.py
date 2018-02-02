@@ -276,7 +276,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                         f'Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number {hillierlevelid:d}')
                     sys.exit()
 
-            if line.lstrip().startswith('Oscillator strengths'):
+            if line.lstrip().startswith('Oscillator strengths') and len(hillier_energy_levels) > 1:
                 break
 
         artisatomic.log_and_print(flog, f'Read {len(hillier_energy_levels[1:]):d} levels')
