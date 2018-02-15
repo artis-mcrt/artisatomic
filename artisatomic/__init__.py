@@ -206,7 +206,7 @@ def process_files(listelements, args):
 
                     print(energy_levels[i][0:3])
 
-                elif False:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
+                elif False and atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid Don't combine Hillier/Nahar data
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i],
                      nahar_ionization_potential_rydberg) = readnahardata.read_nahar_energy_level_file(
