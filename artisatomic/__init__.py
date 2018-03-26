@@ -1147,7 +1147,8 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
                      photoionization_crosssections, photoionization_targetfractions,
                      photoionization_thresholds_ev, args, flog):
     log_and_print(flog, "Writing to 'phixsdata2.txt'")
-    flog.write(f'Downsampling cross sections assuming T={args.optimaltemperature} Kelvin\n')
+    flog.write(f'Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, '
+               f'nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n')
 
     if photoionization_crosssections[1][0] == 0.:
         log_and_print(flog, 'ERROR: ground state has zero photoionization cross section')
