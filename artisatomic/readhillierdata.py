@@ -570,7 +570,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         enryd = float(row[0].replace('D', 'E'))
 
                         if crosssectiontype in [20, 21, 22]:  # the x value is actually a fraction of the threshold, not an energy
-                            if pointnumber == 0 and abs(enryd - 1.0) > 0.2:
+                            if pointnumber == 0 and abs(enryd - 1.0) > 0.5:
                                 print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is not near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
                             enryd *= thresholdenergyryd
                         # elif pointnumber == 0 and abs(enryd - 1.0) < 0.2:
