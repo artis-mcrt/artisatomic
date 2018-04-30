@@ -935,7 +935,8 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             f'-> {nameto} {level_ids_of_level_name[nameto]}.')
                         namefrom, nameto = nameto, namefrom
 
-                    # add collisions within the lower and upper terms with unknown collision strengths
+                    # add forbidden collisions between states within lower and upper terms if
+                    # the upper and lower levels have no J specified
                     for id_lower in level_ids_of_level_name[namefrom]:
                         for id_lower2 in level_ids_of_level_name[namefrom]:
                             if id_lower < id_lower2 and (id_lower, id_lower2) not in upsilondict:
