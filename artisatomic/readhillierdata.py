@@ -99,7 +99,8 @@ ions_data = {
     # (17, 4): ion_files('15feb01', 'clivosc_fin.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_data.dat'),
 
     # Ar
-    (18, 1): ion_files('9sep11', 'fin_osc', hillier_rowformat_b, ['phot_nosm'], 'col_guess'),
+    # (18, 1): ion_files('9sep11', 'fin_osc', hillier_rowformat_b, ['phot_nosm'], 'col_guess'),
+    (18, 1): ion_files('9sep11', 'fin_osc_ljs', hillier_rowformat_b, ['phot_nosm'], 'col_guess'),
     (18, 2): ion_files('9sep11', 'fin_osc', hillier_rowformat_b, ['phot_nosm'], 'col_data'),
     (18, 3): ion_files('19nov07', 'fin_osc', hillier_rowformat_a, ['phot_nosm'], 'col_ariii'),
     (18, 4): ion_files('1dec99', 'fin_osc.dat', hillier_rowformat_c, ['phot_sm_3000.dat'], 'col_data.dat'),
