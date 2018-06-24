@@ -159,7 +159,7 @@ ions_data = {
     (27, 7): ion_files('18oct00', 'covii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Ni
-    (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data'], 'col_data_bautista_ljs_swap23'),
+    (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data'], 'col_data_bautista'),
     # (28, 2): ion_files('30oct12', 'nkii_osc.dat', hillier_rowformat_a, ['phot_data_crude'], 'col_data_bautista'),
     (28, 3): ion_files('27aug12', 'nkiii_osc.dat', hillier_rowformat_b, ['phot_data.dat'], 'col_data.dat'),
     (28, 4): ion_files('18oct00', 'nkiv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
