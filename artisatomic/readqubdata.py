@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from astropy import constants as const
 from astropy import units as u
+from pathlib import Path
 
 import artisatomic
 
@@ -16,64 +17,71 @@ hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
 lchars = 'SPDFGHIKLMNOPQRSTUVWXYZ'
 
+qub_energy_level_row = namedtuple(
+    'energylevel', 'levelname qub_id twosplusone l j energyabovegsinpercm g parity')
 
-def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
-    qub_energy_level_row = namedtuple(
-        'energylevel', 'levelname qub_id twosplusone l j energyabovegsinpercm g parity')
-    qub_transition_row = namedtuple(
-        'transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
-    transition_count_of_level_name = defaultdict(int)
-    qub_energylevels = ['IGNORE']
-    qub_transitions = []
+
+def read_adf04(filepath, flog):
+    energylevels = ['IGNORE']
     upsilondict = {}
     ionization_energy_ev = 0.
+    artisatomic.log_and_print(flog, f'Reading {filepath}')
+    with open(filepath, 'r') as fleveltrans:
+        line = fleveltrans.readline()
+        row = line.split()
+        ionization_energy_ev = float(row[4].split('(')[0]) * hc_in_ev_cm
+        while True:
+            line = fleveltrans.readline()
+            if not line or line.startswith('   -1'):
+                break
+            config = line[5:21].strip()
+            energylevel = qub_energy_level_row(
+                config, int(line[:5]), int(line[25:26]),
+                int(line[27:28]), float(line[29:33]), float(line[34:55]), 0.0, 0)
+            parity = artisatomic.get_parity_from_config(config)
+
+            levelname = energylevel.levelname + '_{0:d}{1:}{2:}[{3:d}/2]_id={4:}'.format(
+                energylevel.twosplusone, lchars[energylevel.l],
+                ['e', 'o'][parity], int(2 * energylevel.j), energylevel.qub_id)
+
+            g = (2 * energylevel.j + 1)
+            energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
+            energylevels.append(energylevel)
+
+        upsilonheader = fleveltrans.readline().split()
+        list_tempheaders = [f'upsT={x:}' for x in upsilonheader[2:]]
+        list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
+        qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
+                                            comment="C", names=list_headers,
+                                            dtype={'lower': np.int, 'upper': np.int}.update(
+                                                {z: np.float64 for z in list_headers[2:]}),
+                                            error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
+        qubupsilondf_alltemps.query('upper!=-1', inplace=True)
+        for _, row in qubupsilondf_alltemps.iterrows():
+            lower = int(row['lower'])
+            upper = int(row['upper'])
+            upsilon = float(row['upsT=5.01+03'].replace('-', 'E-').replace('+', 'E+'))
+            if (lower, upper) not in upsilondict:
+                upsilondict[(lower, upper)] = upsilon
+            else:
+                artisatomic.log_and_print(
+                    flog, f'Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}')
+
+    artisatomic.log_and_print(flog, f'Read {len(energylevels[1:]):d} levels')
+
+    return ionization_energy_ev, energylevels, upsilondict
+
+
+def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
+    qub_transition_row = namedtuple(
+        'transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
     if (atomic_number == 27) and (ion_stage == 3):
-        artisatomic.log_and_print(flog, 'Reading atomic-data-qub/adf04_v1')
-        with open('atomic-data-qub/adf04_v1', 'r') as fleveltrans:
-            line = fleveltrans.readline()
-            row = line.split()
-            ionization_energy_ev = float(row[4].split('(')[0]) * hc_in_ev_cm
-            while True:
-                line = fleveltrans.readline()
-                if not line or line.startswith('   -1'):
-                    break
-                config = line[5:21].strip()
-                energylevel = qub_energy_level_row(
-                    config, int(line[:5]), int(line[25:26]),
-                    int(line[27:28]), float(line[29:33]), float(line[34:55]), 0.0, 0)
-                parity = artisatomic.get_parity_from_config(config)
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(Path('atomic-data-qub', 'co_tyndall', 'adf04_v1'), flog)
 
-                levelname = energylevel.levelname + '_{0:d}{1:}{2:}[{3:d}/2]_id={4:}'.format(
-                    energylevel.twosplusone, lchars[energylevel.l],
-                    ['e', 'o'][parity], int(2 * energylevel.j), energylevel.qub_id)
-
-                g = (2 * energylevel.j + 1)
-                energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
-                qub_energylevels.append(energylevel)
-
-            upsilonheader = fleveltrans.readline().split()
-            list_tempheaders = [f'upsT={x:}' for x in upsilonheader[2:]]
-            list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
-            qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
-                                                comment="C", names=list_headers,
-                                                dtype={'lower': np.int, 'upper': np.int}.update(
-                                                    {z: np.float64 for z in list_headers[2:]}),
-                                                error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
-            qubupsilondf_alltemps.query('upper!=-1', inplace=True)
-            for _, row in qubupsilondf_alltemps.iterrows():
-                lower = int(row['lower'])
-                upper = int(row['upper'])
-                upsilon = float(row['upsT=5.01+03'].replace('-', 'E-').replace('+', 'E+'))
-                if (lower, upper) not in upsilondict:
-                    upsilondict[(lower, upper)] = upsilon
-                else:
-                    artisatomic.log_and_print(
-                        flog, f'Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}')
-
-        artisatomic.log_and_print(flog, f'Read {len(qub_energylevels[1:]):d} levels')
-
-        with open('atomic-data-qub/adf04rad_v1', 'r') as ftrans:
+        qub_transitions = []
+        transition_count_of_level_name = defaultdict(int)
+        with open(Path('atomic-data-qub', 'co_tyndall', 'adf04rad_v1'), 'r') as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
@@ -98,6 +106,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     qub_transitions.append(transition)
 
     elif (atomic_number == 27) and (ion_stage == 4):
+        transition_count_of_level_name = defaultdict(int)
+        qub_energylevels = ['IGNORE']
+        qub_transitions = []
+        upsilondict = {}
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row('groundstate', 1, 0, 0, 0, 0., 10, 0))
 
@@ -113,7 +125,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
-            filename = f'atomic-data-qub/{lowerlevelid:d}.gz'
+            filename = f'atomic-data-qub/co_tyndall/{lowerlevelid:d}.gz'
             artisatomic.log_and_print(flog, 'Reading ' + filename)
             photdata = pd.read_csv(filename, delim_whitespace=True, header=None)
             phixstables = {}
@@ -131,7 +143,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             upperlevelid_withmaxfraction = 1
             max_scalefactor = 0.
             for upperlevelid in reduced_phixs_dict:
-                # take the ratio of cross sections at the threshold energyies
+                # take the ratio of cross sections at the threshold energies
                 scalefactor = reduced_phixs_dict[upperlevelid][0]
                 target_scalefactors[upperlevelid] = scalefactor
                 # target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
