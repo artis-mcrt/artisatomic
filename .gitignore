@@ -1,7 +1,9 @@
 /atomic-data-hillier/atomic
 artis_files*
+*.pdf
 !artis_files_example_old
 __pycache__
+.eggs
 *.pyc
 .cache
 Icon?
