@@ -3,14 +3,15 @@ from collections import defaultdict, namedtuple
 from astropy import constants as const
 import artisatomic
 # from astropy import units as u
+import os.path
 
-# filename = h5py.File('atomic-data-He/aoife.hdf5')
-filename = h5py.File('/Users/ccollins/artis_nebular/artis-atomic/atomic-data-He/aoife.hdf5')
+
+filenameAoifedataset = h5py.File(os.path.join(os.getcwd(), "atomic-data-He/aoife.hdf5"))
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
 def read_ionization_data(atomic_number, ion_stage):
-    ionization_data = filename['/ionization_data'].value
+    ionization_data = filenameAoifedataset['/ionization_data'].value
 
     ionization_dict = {}
     for atomic_num, ion_number, ionization_energy in ionization_data:
@@ -25,7 +26,7 @@ def read_ionization_data(atomic_number, ion_stage):
 
 
 def read_levels_data(atomic_number, ion_stage):
-    levels_data = filename['/levels_data'].value
+    levels_data = filenameAoifedataset['/levels_data'].value
 
     energy_levels = ['IGNORE']
     # TODO energyinRydbergs change back to energyabovegsinpercm
@@ -48,7 +49,7 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
-    lines_data = (filename['/lines_data'].value)
+    lines_data = (filenameAoifedataset['/lines_data'].value)
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
