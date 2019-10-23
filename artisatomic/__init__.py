@@ -18,6 +18,7 @@ import artisatomic.readhillierdata
 import artisatomic.readnahardata
 import artisatomic.readqubdata
 from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
+import artisatomic.readHedata
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
@@ -167,7 +168,15 @@ def process_files(listelements, args):
 
                 # if False:
                 #     pass
-                if USE_QUB_COBALT and atomic_number == 27:
+
+                # Call readHedata for He III
+                if atomic_number == 2 and ion_stage == 3:
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readHedata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif USE_QUB_COBALT and atomic_number == 27:
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
