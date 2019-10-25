@@ -6,12 +6,13 @@ import artisatomic
 import os.path
 
 
-filenameAoifedataset = h5py.File(os.path.join(os.getcwd(), "atomic-data-He/aoife.hdf5"))
+filename_aoife_dataset = h5py.File(os.path.join(os.getcwd(), "atomic-data-helium-boyle/aoife.hdf5"))
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
+
 def read_ionization_data(atomic_number, ion_stage):
-    ionization_data = filenameAoifedataset['/ionization_data'].value
+    ionization_data = filename_aoife_dataset['/ionization_data'].value
 
     ionization_dict = {}
     for atomic_num, ion_number, ionization_energy in ionization_data:
@@ -26,7 +27,7 @@ def read_ionization_data(atomic_number, ion_stage):
 
 
 def read_levels_data(atomic_number, ion_stage):
-    levels_data = filenameAoifedataset['/levels_data'].value
+    levels_data = filename_aoife_dataset['/levels_data'].value
 
     energy_levels = ['IGNORE']
     # TODO energyinRydbergs change back to energyabovegsinpercm
@@ -49,16 +50,19 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
-    lines_data = (filenameAoifedataset['/lines_data'].value)
+    lines_data = (filename_aoife_dataset['/lines_data'].value)
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     lines_row = namedtuple("transition", 'atomic_number ion_stage lowerlevel upperlevel A lambdaangstrom coll_str')
 
     for rowtuple in lines_data:
-        line_id, wavelength, atomic_num, ion_number, f_ul, f_lu, level_number_lower, level_number_upper, nu, B_lu, B_ul, A_ul = rowtuple
+        (line_id, wavelength, atomic_num, ion_number, f_ul, f_lu,
+         level_number_lower, level_number_upper, nu, B_lu, B_ul, A_ul) = rowtuple
+
         coll_str = -1  # TODO
-        line = lines_row(atomic_num, ion_number, int(level_number_lower + 1), int(level_number_upper + 1), A_ul, wavelength, coll_str)
+        line = lines_row(atomic_num, ion_number, int(level_number_lower + 1), int(level_number_upper + 1),
+                         A_ul, wavelength, coll_str)
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
         # print(line)
@@ -76,7 +80,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
 
-
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
     # ionization_energy_in_ev = -1
 
@@ -84,5 +87,3 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
-
-
