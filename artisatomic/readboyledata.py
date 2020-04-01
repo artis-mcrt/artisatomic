@@ -6,7 +6,7 @@ import artisatomic
 import os.path
 
 
-filename_aoife_dataset = h5py.File(os.path.join(os.getcwd(), "atomic-data-helium-boyle/aoife.hdf5"))
+filename_aoife_dataset = h5py.File(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle/aoife.hdf5"), 'r')
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
