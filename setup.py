@@ -30,7 +30,7 @@ class PyTest(TestCommand):
 print(datetime.datetime.now().isoformat())
 setup(
     name="artisatomic",
-    version='0.1dev', # datetime.datetime.now().isoformat(),
+    version='0.1dev',  # datetime.datetime.now().isoformat(),
     author="Luke Shingles",
     author_email="luke.shingles@gmail.com",
     packages=find_packages(),
@@ -44,6 +44,7 @@ setup(
         'console_scripts': [
             'makeartisatomicfiles = artisatomic:main',
             'makerecombratefile = artisatomic.makerecombratefile:main',
+            'convertartisatomictopythonrt = artisatomic.converttopythonrt:main',
         ]
     },
     python_requires='>==3.6',
