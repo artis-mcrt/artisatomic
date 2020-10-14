@@ -60,9 +60,8 @@ def main():
     parser.add_argument(
         '-output_folder_logs', action='store',
         default='atomic_data_logs', help='Folder for log files')
-
     parser.add_argument(
-        '-nphixspoints', type=int, default=50,
+        '-nphixspoints', type=int, default=100,
         help='Number of cross section points to save in output')
     parser.add_argument(
         '-phixsnuincrement', type=float, default=0.03,
