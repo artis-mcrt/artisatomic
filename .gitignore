@@ -14,6 +14,7 @@ output.txt
 
 atomic-data-qub/1
 
+*.nosync
 atomic-data-hillier/*.tar.gz
 
 !atomic-data-hillier/atomic/ARG/
@@ -24,8 +25,16 @@ atomic-data-hillier/atomic/ARG/I/*
 atomic-data-hillier/atomic/ARG/I/9sep11/*
 !atomic-data-hillier/atomic/ARG/I/9sep11/fin_osc_ljs
 
+!atomic-data-hillier/atomic/FE/
+atomic-data-hillier/atomic/FE/*
+!atomic-data-hillier/atomic/FE/I/
+atomic-data-hillier/atomic/FE/I/*
+!atomic-data-hillier/atomic/FE/I/07sep16/
+atomic-data-hillier/atomic/FE/I/07sep16/*
+!atomic-data-hillier/atomic/FE/I/07sep16/col_data_ljs
+
 recombination_rates/phixs.pdf
 .DS_Store
 .idea
 atomic-data-He/aoife.hdf5
-.tags
+.tags*

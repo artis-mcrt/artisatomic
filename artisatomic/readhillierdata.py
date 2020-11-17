@@ -643,8 +643,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             # add the new phixs table, or replace the
             # existing one if this target has a larger threshold cross section
             if lowerlevelname not in reduced_phixs_dict or \
-                    phixs_threshold > reduced_phixs_dict[lowerlevelname][0]:
-                reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+        for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
+            try:
+                phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
 
     # normalise the target factors and scale the phixs table
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
@@ -654,8 +655,11 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
         # filter out low fraction targets
         factor_sum_nofilter = sum([x[1] for x in target_configfactors_nofilter])
-        if factor_sum_nofilter > 0.:  # else, it's probably all zeros, so leave it and "send" it to the ground state
+
+        if factor_sum_nofilter > 0.:
+            # if these are false, it's probably all zeros, so leave it and "send" it to the ground state
             target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
+
             if len(target_configfactors) == 0:
                 print("ERRORHERE", lowerlevelname, target_configfactors_nofilter)
                 print(reduced_phixstable)
@@ -1122,3 +1126,45 @@ def extend_ion_list(listelements):
             listelements.append((atomic_number, [ion_stage],))
     listelements.sort(key=lambda x: x[0])
     return listelements
+
+
+def plot_phixs(atomic_number, ion_stage, energy_levels, phixstables, reduced_phixstables, args):
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+
+    print("STARTING PHIXS PLOT")
+
+    xgrid = np.linspace(1.0, 1.0 + args.phixsnuincrement * (args.nphixspoints + 1),
+                        num=args.nphixspoints + 1, endpoint=False)
+
+    nrows = 25
+    fig, axes = plt.subplots(
+        nrows=nrows, ncols=1, sharey=False,
+        figsize=(8, 6 * (0.25 + nrows * 0.4)),
+        tight_layout={"pad": 0.2, "w_pad": 0.0, "h_pad": 0.0})
+
+    ionstr = f'{artisatomic.elsymbols[atomic_number]} {artisatomic.roman_numerals[ion_stage]}'
+
+    for levelnum, ax in enumerate(axes, 1):
+        levelname = energy_levels[levelnum].levelname
+        levelnamenoj = levelname.split('[')[0]
+        if levelnamenoj not in phixstables:
+            continue
+        threshold = phixstables[levelnamenoj][0][0]
+
+        levellabel = ionstr + ' ' + f'{levelnum} {levelnamenoj}'
+
+        ax.plot(phixstables[levelnamenoj][:, 0], phixstables[levelnamenoj][:, 1], label=f'Hillier {levellabel}')
+
+        ax.step(xgrid[:-1] * threshold, reduced_phixstables[levelnamenoj], where='mid',
+                label=f'ARTIS {levellabel}')
+
+        ax.legend(loc='best', handlelength=1, frameon=False, numpoints=1)
+        ax.set_xlim(xmin=threshold * 0.97, xmax=threshold * 5)
+
+    filenameout = f"phixs {ionstr}.pdf"
+    fig.savefig(Path(filenameout).open('wb'), format='pdf')
+    # plt.show()
+    print(f'Saved {filenameout}')
+    plt.close()
+
