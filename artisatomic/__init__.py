@@ -544,14 +544,14 @@ def reduce_phixs_tables_worker(
     # for key in keylist:
     #   tablein = dicttables[key]
     for key, tablein in dicttables:
-        # filter zero points out of the table
-        firstnonzeroindex = 0
-        for i, point in enumerate(tablein):
-            if point[1] != 0.:
-                firstnonzeroindex = i
-                break
-        if firstnonzeroindex != 0:
-            tablein = tablein[firstnonzeroindex:]
+        # # filter zero points out of the table
+        # firstnonzeroindex = 0
+        # for i, point in enumerate(tablein):
+        #     if point[1] != 0.:
+        #         firstnonzeroindex = i
+        #         break
+        # if firstnonzeroindex != 0:
+        #     tablein = tablein[firstnonzeroindex:]
 
         # table says zero threshold, so avoid divide by zero
         if tablein[0][0] == 0.:

@@ -21,6 +21,12 @@ hillier_rowformat_b = 'levelname g energyabovegsinpercm freqtentothe15hz thresho
 hillier_rowformat_c = 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid'
 hillier_rowformat_d = 'levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid'
 
+hillier_rowformat = {
+    '17-Jun-2014': 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6',
+    '17-Oct-2000': 'levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4',
+    'NOT_SPECIFIED': 'levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid',
+}
+
 # keys are (atomic number, ion stage)
 ion_files = namedtuple('ion_files', ['folder', 'levelstransitionsfilename',
                                      'energylevelrowformat', 'photfilenames', 'coldatafilename'])
@@ -221,20 +227,59 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         hillier_energy_levels.append(qub_energy_level_row('I', 1, 0, 0, 0, 0., 10, 0))
         return hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_levelnamesnoJ_matching_term
 
-    row_format_energy_level = ions_data[(atomic_number, ion_stage)].energylevelrowformat
     filename = os.path.join(hillier_ion_folder(atomic_number, ion_stage),
                             ions_data[(atomic_number, ion_stage)].folder,
                             ions_data[(atomic_number, ion_stage)].levelstransitionsfilename)
     artisatomic.log_and_print(flog, 'Reading ' + filename)
-    hillier_energy_level_row = namedtuple(
-        'energylevel', row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
     hillier_transition_row = namedtuple(
         'transition', 'namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str')
 
+    prev_line = ''
     with open(filename, 'r') as fhillierosc:
+        expected_energy_levels = -1
+        expected_transitions = -1
+        row_format_energy_level = None
+        format_date = 'NOT_SPECIFIED'
         for line in fhillierosc:
             row = line.split()
+            if line.startswith('**************************') and prev_line:
+                headerline = prev_line
+                headerline = headerline.replace('ID', 'hillierlevelid')
+                headerline = headerline.replace('E(cm^-1)', 'energyabovegsinpercm')
+                headerline = headerline.replace('10^15 Hz', 'freqtentothe15hz')
+                headerline = headerline.replace('eV', 'thresholdenergyev')
+                headerline = headerline.replace('Lam(A)', 'lambdaangstrom')
+                headerline = headerline.replace('ARAD', 'arad')
+                row_format_energy_level = 'levelname ' + ' '.join(headerline.lower().split())
+                print('File contains columns:')
+                print(f'  {row_format_energy_level}')
+            elif line.rstrip().endswith('!Number of energy levels'):
+                expected_energy_levels = int(row[0])
+                artisatomic.log_and_print(flog, f'File specifies {expected_energy_levels:d} levels')
+            elif line.rstrip().endswith('!Number of transitions'):
+                expected_transitions = int(row[0])
+                artisatomic.log_and_print(flog, f'File specifies {expected_transitions:d} transitions')
+            elif len(row) == 3 and row[1] == '!Format' and row[2] == 'date':
+                format_date = row[0]
+                print(f'Format date: {format_date}')
 
+            if expected_energy_levels >= 0 and not row:
+                break
+            prev_line = line.strip()
+
+        if not row_format_energy_level:
+            assert(format_date == 'NOT_SPECIFIED')
+            row_format_energy_level = ions_data[(atomic_number, ion_stage)].energylevelrowformat
+
+        print('Manually specified columns:')
+        print(f'  {ions_data[(atomic_number, ion_stage)].energylevelrowformat}')
+        assert(row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat)
+
+        hillier_energy_level_row = namedtuple(
+            'energylevel', row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
+
+        for line in fhillierosc:
+            row = line.split()
             # check for right number of columns and that are all numbers except first column
             if len(row) == len(row_format_energy_level.split()) and all(map(artisatomic.isfloat, row[1:])):
                 hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, '', -1)
@@ -282,6 +327,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 break
 
         artisatomic.log_and_print(flog, f'Read {len(hillier_energy_levels[1:]):d} levels')
+        assert(len(hillier_energy_levels[1:]) == expected_energy_levels)
 
         # defined_transition_ids = []
         for line in fhillierosc:
@@ -328,7 +374,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                     artisatomic.log_and_print(
                         flog, f'FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}')
                     sys.exit()
+
     artisatomic.log_and_print(flog, f'Read {len(transitions):d} transitions')
+    assert(len(transitions) == expected_transitions)
 
     # filter out levels with no transitions
     hillier_energy_levels = [hillier_energy_levels[0], *[
@@ -623,7 +671,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         for crosssectiontype in sorted(phixs_type_levels.keys()):
             if crosssectiontype in unknown_phixs_types:
                 artisatomic.log_and_print(
-                    flog, f'WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKOWN cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
+                    flog, f'WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
             else:
                 artisatomic.log_and_print(
                     flog, f'{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}: {phixs_type_labels[crosssectiontype]}')
@@ -635,17 +683,29 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
            phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)
         # print(reduced_phixstables_onetarget['3d8(3F)4s_4Fe'])
 
-        for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            phixs_threshold = reduced_phixstable[0]
-            phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
-                (phixstargets[filenum], phixs_threshold))
+        # if atomic_number == 26 and ion_stage == 1:
+        if args.plotphixs:
+            plot_phixs(atomic_number, ion_stage, energy_levels,
+                       phixstables[filenum], reduced_phixstables_onetarget, args)
 
-            # add the new phixs table, or replace the
-            # existing one if this target has a larger threshold cross section
-            if lowerlevelname not in reduced_phixs_dict or \
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             try:
+                phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
                 phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
+                    (phixstargets[filenum], phixs_at_threshold))
+
+                # add the new phixs table, or replace the
+                # existing one if this target has a larger threshold cross section
+                # if lowerlevelname not in reduced_phixs_dict or \
+                #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
+                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                if lowerlevelname not in reduced_phixs_dict:
+                    reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                else:
+                    print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
+                    # sys.exit()
+            except IndexError:
+                print("WARNING: No non-zero cross section points")
 
     # normalise the target factors and scale the phixs table
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
@@ -670,8 +730,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 target_fraction = target_factor / factor_sum
                 phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
-            # e.g. if the target with the highest fraction has 50%, the cross sections need to be multiplied by two
-            reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
+            # e.g. if the target (non-J-split) with the highest fraction has 50%, the cross sections need to be multiplied by two
+            # reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
+            reduced_phixs_dict[lowerlevelname] = reduced_phixstable #/ (max_factor / factor_sum)
 
     # now the non-J-split cross sections are mapped onto J-split levels
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
