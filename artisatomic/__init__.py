@@ -76,6 +76,9 @@ def main():
     parser.add_argument(
         '--nophixs', action='store_true',
         help='Don''t generate cross sections and write to phixsdata_v2.txt file')
+    parser.add_argument(
+        '--plotphixs', action='store_true',
+        help='Generate cross section plots')
 
     args = parser.parse_args()
     readhillierdata.read_hyd_phixsdata()
@@ -182,7 +185,7 @@ def process_files(listelements, args):
                          upsilondicts[i]) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
                     else:  # hillier levels and transitions
                         # if ion_stage == 2:
-                            # upsilondicts[i] = read_storey_2016_upsilondata(flog)
+                        #     upsilondicts[i] = read_storey_2016_upsilondata(flog)
                         (ionization_energy_ev[i], energy_levels[i], transitions[i],
                          transition_count_of_level_name[i], hillier_levelnamesnoJ_matching_term) = readhillierdata.read_levels_and_transitions(
                              atomic_number, ion_stage, flog)
