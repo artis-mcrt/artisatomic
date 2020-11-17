@@ -14,3 +14,10 @@ Extract the tarball in this directory (which should go into the subfolder called
 ```sh
 tar -xvzf atomic_data_15nov16.tar.gz
 ```
+
+
+Add in the customised files:
+
+```sh
+rsync -av atomic_diff/ atomic/
+```
