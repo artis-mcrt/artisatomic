@@ -850,8 +850,8 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, c in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c ** 2)
+    for index, cb in enumerate(energygrid):
+        energydivthreshold = 1 + 20 * (cb ** 2)
         u = energydivthreshold
 
         x = math.log10(min(u, e))
