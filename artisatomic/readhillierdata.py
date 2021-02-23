@@ -184,7 +184,7 @@ elsymboltohilliercode = {
     'S': 'SUL', 'Cl': 'CHL', 'Ar': 'ARG', 'K': 'POT',
     'Ca': 'CA', 'Sc': 'SCAN', 'Ti': 'TIT', 'V': 'VAN',
     'Cr': 'CHRO', 'Mn': 'MAN', 'Fe': 'FE', 'Co': 'COB',
-    'Ni': 'NICK'
+    'Ni': 'NICK', 'Ba': 'BAR',
 }
 
 ryd_to_ev = u.rydberg.to('eV')
