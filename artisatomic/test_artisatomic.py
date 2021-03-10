@@ -99,7 +99,7 @@ def get_maxabs_elratio(a1, a2):
 #     artisatomic.main(output_folder='testoutput', nophixs=True)
 
 
-if __name__ == "__main__":
-    print('3d7b2Fe', interpret_configuration('3d7b2Fe'))
-    print(reduce_configuration('3d6_3P2e'))
-    test_hydrogenic_phixs()
+# if __name__ == "__main__":
+#     print('3d7b2Fe', interpret_configuration('3d7b2Fe'))
+#     print(reduce_configuration('3d6_3P2e'))
+#     test_hydrogenic_phixs()
