@@ -4,7 +4,6 @@ import math
 import os
 import sys
 from collections import defaultdict, namedtuple
-from contracts import contract
 
 import numpy as np
 import pandas as pd
@@ -753,8 +752,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
 
 
-@contract
-def get_seaton_phixstable(lambda_angstrom: 'float,>0', sigmat, beta, s, nu_o=None) -> 'array':
+def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
