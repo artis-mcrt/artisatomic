@@ -945,6 +945,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     with open(filename, 'r') as fcoldata:
         header_row = []
         temperature_index = -1
+        num_expected_t_values = -1
         for line in fcoldata:
             row = line.split()
             if len(line.strip()) == 0:
