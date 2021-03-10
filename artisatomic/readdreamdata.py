@@ -7,8 +7,9 @@ import os.path
 from pathlib import Path
 import pandas as pd
 
-dreamdatapath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5")
-dreamdata = pd.pandas.read_hdf(dreamdatapath)
+dreamdatapath = Path(os.path.dirname(os.path.abspath(__file__)), "..",
+                     "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5")
+dreamdata = pd.pandas.read_hdf(dreamdatapath) if dreamdatapath.exists() else None
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
 
