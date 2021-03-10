@@ -3,7 +3,7 @@ import numpy as np
 # from astropy import constants as const
 from astropy import units as u
 
-import readhillierdata as rhd
+import artisatomic.readhillierdata as rhd
 from artisatomic import (
     get_term_as_tuple, interpret_configuration, interpret_parent_term, reduce_configuration, score_config_match)
 
@@ -42,7 +42,7 @@ def test_score_config_match():
                               '3d6(5D)6se6De[9/2]') > score_config_match('3d6    (5D ) 6s  e6D ', '3d6(5D)5s6De[9/2]')
 
     assert score_config_match('Eqv st (0S ) 0s  a4P', '3d5_4Pe[4]') == 5
-    assert score_config_match('3d6    (5D ) 0s  b2F ', '3d7b2Fe') > 90
+    assert score_config_match('3d6    (5D ) 0s  b2F ', '3d7b2Fe') > 12
     assert score_config_match('3d5    (2D ) 4p  v3Po', '3d5(b2D)4p_3Po') == 98
 
 
