@@ -14,11 +14,11 @@ from astropy import constants as const
 from astropy import units as u
 from scipy import integrate, interpolate
 
-import artisatomic.readhillierdata
-import artisatomic.readnahardata
-import artisatomic.readqubdata
+import artisatomic.readhillierdata as readhillierdata
+import artisatomic.readnahardata as readnahardata
+import artisatomic.readqubdata as readqubdata
 from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
-import artisatomic.readboyledata
+import artisatomic.readboyledata as readboyledata
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
@@ -131,10 +131,9 @@ def process_files(listelements, args):
         upsilondicts = [{} for x in listions]
 
         energy_levels = [[] for x in listions]
-        # keys are level ids, values are lists of (energy in Rydberg,
-        # cross section in Mb) tuples
+        # index matches level id
         photoionization_thresholds_ev = [[] for _ in listions]
-        photoionization_crosssections = [[] for _ in listions]
+        photoionization_crosssections = [[] for _ in listions]  # list of cross section in Mb
         photoionization_targetfractions = [[] for _ in listions]
 
         for i, ion_stage in enumerate(listions):
@@ -244,11 +243,12 @@ def process_files(listelements, args):
 
                 else:  # Hillier data only
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                     transition_count_of_level_name[i], hillier_levelnamesnoJ_matching_term) = readhillierdata.read_levels_and_transitions(
-                         atomic_number, ion_stage, flog)
+                     transition_count_of_level_name[i], hillier_levelnamesnoJ_matching_term) = (
+                          readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog))
 
                     if len(upsilondicts[i]) == 0:
-                        upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
+                        upsilondicts[i] = readhillierdata.read_coldata(
+                            atomic_number, ion_stage, energy_levels[i], flog, args)
 
                     if i < len(listions) - 1 and not args.nophixs:  # don't get cross sections for top ion
                         (photoionization_crosssections[i], hillier_photoion_targetconfigs[i],

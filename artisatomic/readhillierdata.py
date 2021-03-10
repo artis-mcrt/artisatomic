@@ -956,7 +956,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     line.startswith("Johnson values")):  # found in col_ariii
                 break
 
-            if line.lstrip().startswith('Transition\T'):  # found the header row
+            if line.lstrip().startswith(r'Transition\T'):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
                     artisatomic.log_and_print(
