@@ -50,38 +50,46 @@ hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description='Produce an ARTIS atomic database by combining Hillier and Nahar data sets.')
-    parser.add_argument(
-        '-output_folder', action='store',
-        default='artis_files', help='Folder for output files')
-    parser.add_argument(
-        '-output_folder_logs', action='store',
-        default='atomic_data_logs', help='Folder for log files')
-    parser.add_argument(
-        '-nphixspoints', type=int, default=100,
-        help='Number of cross section points to save in output')
-    parser.add_argument(
-        '-phixsnuincrement', type=float, default=0.03,
-        help='Fraction of nu_edge incremented for each cross section point')
-    parser.add_argument(
-        '-optimaltemperature', type=int, default=6000,
-        help='(Electron and excitation) temperature at which recombination rate '
-             'should be constant when downsampling cross sections')
-    parser.add_argument(
-        '-electrontemperature', type=int, default=6000,
-        help='Temperature for choosing effective collision strengths')
-    parser.add_argument(
-        '--nophixs', action='store_true',
-        help='Don''t generate cross sections and write to phixsdata_v2.txt file')
-    parser.add_argument(
-        '--plotphixs', action='store_true',
-        help='Generate cross section plots')
+def main(args=None, argsraw=None, **kwargs):
+    if args is None:
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            description='Plot estimated spectra from bound-bound transitions.')
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+            description='Produce an ARTIS atomic database by combining Hillier and Nahar data sets.')
+        parser.add_argument(
+            '-output_folder', action='store',
+            default='artis_files', help='Folder for output files')
+        parser.add_argument(
+            '-output_folder_logs', action='store',
+            default='atomic_data_logs', help='Folder for log files')
+        parser.add_argument(
+            '-nphixspoints', type=int, default=100,
+            help='Number of cross section points to save in output')
+        parser.add_argument(
+            '-phixsnuincrement', type=float, default=0.03,
+            help='Fraction of nu_edge incremented for each cross section point')
+        parser.add_argument(
+            '-optimaltemperature', type=int, default=6000,
+            help='(Electron and excitation) temperature at which recombination rate '
+                 'should be constant when downsampling cross sections')
+        parser.add_argument(
+            '-electrontemperature', type=int, default=6000,
+            help='Temperature for choosing effective collision strengths')
+        parser.add_argument(
+            '--nophixs', action='store_true',
+            help='Don''t generate cross sections and write to phixsdata_v2.txt file')
+        parser.add_argument(
+            '--plotphixs', action='store_true',
+            help='Generate cross section plots')
 
-    args = parser.parse_args()
+        parser.set_defaults(**kwargs)
+        args = parser.parse_args(argsraw)
+
     readhillierdata.read_hyd_phixsdata()
+
+    os.makedirs(args.output_folder, exist_ok=True)
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
     if os.path.exists(log_folder):
         # delete any existing log files
@@ -90,7 +98,7 @@ def main():
             os.remove(logfile)
             print(logfile)
     else:
-        os.makedirs(log_folder)
+        os.makedirs(log_folder, exist_ok=True)
 
     write_compositionfile(listelements, args)
     clear_files(args)
