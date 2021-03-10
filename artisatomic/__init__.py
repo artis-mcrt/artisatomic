@@ -19,6 +19,7 @@ import artisatomic.readnahardata as readnahardata
 import artisatomic.readqubdata as readqubdata
 from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
 import artisatomic.readboyledata as readboyledata
+import artisatomic.readdreamdata as readdreamdata
 
 PYDIR = os.path.dirname(os.path.abspath(__file__))
 atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
