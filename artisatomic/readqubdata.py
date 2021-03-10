@@ -53,8 +53,8 @@ def read_adf04(filepath, flog):
         list_headers = ['upper', 'lower', 'ignore'] + list_tempheaders
         qubupsilondf_alltemps = pd.read_csv(fleveltrans, index_col=False, delim_whitespace=True,
                                             comment="C", names=list_headers,
-                                            dtype={'lower': np.int, 'upper': np.int}.update(
-                                                {z: np.float64 for z in list_headers[2:]}),
+                                            dtype={'lower': int, 'upper': int}.update(
+                                                {z: float for z in list_headers[2:]}),
                                             error_bad_lines=False, skip_blank_lines=True, keep_default_na=False)
         qubupsilondf_alltemps.query('upper!=-1', inplace=True)
         for _, row in qubupsilondf_alltemps.iterrows():
