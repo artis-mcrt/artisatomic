@@ -38,3 +38,5 @@ recombination_rates/phixs.pdf
 .idea
 atomic-data-He/aoife.hdf5
 .tags*
+testoutput
+testoutput/*
