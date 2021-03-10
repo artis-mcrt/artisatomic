@@ -3,10 +3,13 @@ from collections import defaultdict, namedtuple
 from astropy import constants as const
 import artisatomic
 # from astropy import units as u
+from pathlib import Path
 import os.path
 
 
-filename_aoife_dataset = h5py.File(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle/aoife.hdf5"), 'r')
+datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
+
+filename_aoife_dataset = h5py.File(datafilepath, 'r') if datafilepath.exists() else None
 
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
