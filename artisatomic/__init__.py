@@ -255,7 +255,8 @@ def process_files(listelements, args):
                     if len(upsilondicts[i]) == 0:
                         upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
-                else:  # Hillier data only
+                elif atomic_number <= 56:  # Hillier data only
+
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i], hillier_levelnamesnoJ_matching_term) = (
                           readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog))
@@ -268,6 +269,12 @@ def process_files(listelements, args):
                         (photoionization_crosssections[i], hillier_photoion_targetconfigs[i],
                          photoionization_thresholds_ev[i]) = readhillierdata.read_phixs_tables(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
+
+                else:  # DREAM database of Z > 57
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readdreamdata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
