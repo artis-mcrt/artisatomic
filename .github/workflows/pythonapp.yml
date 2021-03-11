@@ -68,7 +68,6 @@ jobs:
           cd ..
 
     - name: Extract CMFGEN atomic data
-      if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       run: |
           cd atomic-data-hillier/
           tar -xzf atomic_data_15nov16.tar.gz
