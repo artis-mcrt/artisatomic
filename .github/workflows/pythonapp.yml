@@ -71,7 +71,7 @@ jobs:
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       run: |
           cd atomic-data-hillier/
-          tar -xvzf atomic_data_15nov16.tar.gz
+          tar -xzf atomic_data_15nov16.tar.gz
           rsync -av atomic_diff/ atomic/
           cd ..
 
@@ -79,12 +79,14 @@ jobs:
       run: |
         makeartisatomicfiles -output_folder test_output
 
-    - name: Zip and upload output files
+    - name: tar and zip output files
       run: |
-        xz -v test_output/*.txt
+        tar -cvf artis_files.tar test_output/*
+        xz -v artis_files.tar
+
+    - name: Upload output files
       uses: actions/upload-artifact@v2
       with:
         name: artis_files
         path: |
-          test_output/*.xz
-          test_output/atomic_data_logs/*.txt
+          artis_files.tar.xz
