@@ -13,7 +13,7 @@ jobs:
       uses: actions/checkout@v2
 
     - name: Set up Python 3.8
-      uses: actions/setup-python@v2
+      uses: actions/setup-python@v2.3.4
       with:
         python-version: '3.8'
 
@@ -51,18 +51,24 @@ jobs:
       run: |
         pytest
 
-    - name: Cache cmfgenatomicdata
+    - name: Cache CMFGEN atomic data
       uses: actions/cache@v2.1.4
       id: cache-cmfgendata
       with:
-          path: "atomic-data-hillier/atomic/"
-          key: atomic_data_15nov16.tar.gz
+          path: "atomic-data-hillier/atomic_data_15nov16.tar.gz"
+          key: "atomic-data-hillier/atomic_data_15nov16.tar.gz"
 
-    - name: Download and extract CMFGEN atomic data
+    - name: Download CMFGEN atomic data
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       run: |
           cd atomic-data-hillier/
           curl -O http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz
+          cd ..
+
+    - name: Extract CMFGEN atomic data
+      if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
+      run: |
+          cd atomic-data-hillier/
           tar -xvzf atomic_data_15nov16.tar.gz
           rsync -av atomic_diff/ atomic/
           cd ..
@@ -75,7 +81,7 @@ jobs:
     - name: Upload output files
       uses: actions/upload-artifact@v2
       with:
-        name: artis_files-output
+        # name: artis_files-output
         path: |
           test_output/*.xz
           test_output/atomic_data_logs/*.txt
