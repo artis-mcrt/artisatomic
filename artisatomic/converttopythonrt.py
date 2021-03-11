@@ -10,7 +10,6 @@ from pathlib import Path
 # import numexpr as ne
 import numpy as np
 import pandas as pd
-import pidly
 
 import artistools as at
 # import artisatomic
