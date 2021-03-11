@@ -41,6 +41,13 @@ jobs:
       run: |
         python -m pip install -e .
 
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
     - name: Cache CMFGEN atomic data
       uses: actions/cache@v2.1.4
       id: cache-cmfgendata
@@ -59,16 +66,8 @@ jobs:
       run: |
           cd atomic-data-hillier/
           tar -xzf atomic_data_15nov16.tar.gz
-          rsync -av atomic_diff/ atomic/
+          rsync -a atomic_diff/ atomic/
           cd ..
-
-    - name: Lint with flake8
-      run: |
-        pip install flake8
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
     - name: Test with pytest
       run: |
