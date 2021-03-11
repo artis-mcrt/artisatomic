@@ -4,11 +4,13 @@ on: [push]
 
 jobs:
   build:
-    runs-on: ${{ matrix.os }}
     strategy:
         matrix:
             os: [ubuntu-latest]
+
+    runs-on: ${{ matrix.os }}
     steps:
+
     - name: Checkout Code
       uses: actions/checkout@v2.3.4
 
@@ -76,12 +78,13 @@ jobs:
     - name: Generate artis atomic data files
       run: |
         makeartisatomicfiles -output_folder test_output
-        xz -v test_output/*.txt
 
-    - name: Upload output files
+    - name: Zip and upload output files
+      run: |
+        xz -v test_output/*.txt
       uses: actions/upload-artifact@v2
       with:
-        # name: artis_files
+        name: artis_files
         path: |
           test_output/*.xz
           test_output/atomic_data_logs/*.txt
