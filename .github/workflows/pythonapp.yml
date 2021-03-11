@@ -36,7 +36,7 @@ jobs:
       uses: actions/cache@v2.1.4
       id: cache-cmfgendata
       with:
-          path: "atomic-data-hillier"
+          path: "atomic-data-hillier/atomic/"
           key: atomic_data_15nov16.tar.gz
     - name: Download and extract CMFGEN atomic data
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'

@@ -45,7 +45,8 @@ listelements = [
 ]
 
 # include everything we have data for
-listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readdreamdata.extend_ion_list(listelements)
 
 USE_QUB_COBALT = False
 
