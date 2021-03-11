@@ -31,3 +31,27 @@ jobs:
       run: |
         pip install pytest
         pytest
+    - name: Cache cmfgenatomicdata
+      uses: actions/cache@v2.1.4
+      id: cache-cmfgendata
+      with:
+          path: "atomic-data-hillier"
+          key: atomic_data_15nov16.tar.gz
+    - name: Download and extract CMFGEN atomic data
+      if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
+      run: |
+          cd atomic-data-hillier/
+          curl -O http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz
+          tar -xvzf atomic_data_15nov16.tar.gz
+          rsync -av atomic_diff/ atomic/
+          cd ..
+    - name: Generate artis atomic data files
+      run: |
+        find atomic-data-hillier -type d
+        makeartisatomicfiles -output_folder test_output
+
+    - name: Upload output files
+      uses: actions/upload-artifact@v2
+      with:
+        name: artis_files-output
+        path: test_output
