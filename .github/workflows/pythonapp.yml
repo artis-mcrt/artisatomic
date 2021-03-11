@@ -11,17 +11,34 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v2
+
     - name: Set up Python 3.8
       uses: actions/setup-python@v2
       with:
         python-version: '3.8'
-    - name: Install dependencies and package
+
+    - name: Get pip cache dir
+      id: pip-cache
+      run: |
+        echo "::set-output name=dir::$(pip cache dir)"
+
+    - name: Cache pip
+      uses: actions/cache@v2
+      with:
+        path: ${{ steps.pip-cache.outputs.dir }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+         ${{ runner.os }}-pip-
+
+    - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install numpy
-        python -m pip install pytest
         python -m pip install -r requirements.txt
+
+    - name: Install artisatomic
+      run: |
         python -m pip install -e .
+
     - name: Lint with flake8
       run: |
         pip install flake8
@@ -29,15 +46,18 @@ jobs:
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+
     - name: Test with pytest
       run: |
         pytest
+
     - name: Cache cmfgenatomicdata
       uses: actions/cache@v2.1.4
       id: cache-cmfgendata
       with:
           path: "atomic-data-hillier/atomic/"
           key: atomic_data_15nov16.tar.gz
+
     - name: Download and extract CMFGEN atomic data
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       run: |
@@ -46,13 +66,16 @@ jobs:
           tar -xvzf atomic_data_15nov16.tar.gz
           rsync -av atomic_diff/ atomic/
           cd ..
+
     - name: Generate artis atomic data files
       run: |
-        find atomic-data-hillier -type d
         makeartisatomicfiles -output_folder test_output
+        xz -v test_output/*.txt
 
     - name: Upload output files
       uses: actions/upload-artifact@v2
       with:
         name: artis_files-output
-        path: test_output
+        path: |
+          test_output/*.xz
+          test_output/atomic_data_logs/*.txt
