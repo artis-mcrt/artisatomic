@@ -32,12 +32,16 @@ roman_numerals = (
 )
 
 listelements = [
+    # (2, [1, 2]),
+    # (8, [1, 2, 3, 4]),
     # (14, [1, 2, 3, 4]),
     # (16, [1, 2, 3, 4]),
     # (20, [1, 2, 3, 4]),
-    # (26, [1, 2, 3, 4, 5]),
-    # (27, [2, 3, 4]),
-    # (28, [2, 3, 4, 5]),
+    (26, [1, 2, 3, 4, 5]),
+    (27, [2, 3, 4]),
+    (28, [2, 3, 4, 5]),
+    # (56, [2]),
+    # (58, [2]),
 ]
 
 # include everything we have data for
@@ -225,7 +229,7 @@ def process_files(listelements, args):
 
                     print(energy_levels[i][0:3])
 
-                elif False:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
+                elif False and atomic_number in [26, ]:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i],
                      nahar_ionization_potential_rydberg) = readnahardata.read_nahar_energy_level_file(
