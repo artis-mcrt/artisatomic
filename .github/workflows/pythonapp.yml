@@ -77,9 +77,13 @@ jobs:
       run: |
         makeartisatomicfiles -output_folder test_output
 
+    - name: check output files
+      run: |
+        md5sum test_output/*
+        md5sum -c <(echo cf7056da25cab2c71e7719c48b11b716 test_output/adata.txt)
+
     - name: tar and zip output files
       run: |
-        md5sum test_output/**/*
         tar -cvzf artis_files.tar.gz test_output/*
 
     - name: Upload output files
