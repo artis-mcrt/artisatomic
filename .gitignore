@@ -10,6 +10,7 @@ Icon?
 *.swp
 *.tmp
 *.egg-info
+.pytest_cache
 output.txt
 
 atomic-data-qub/1
