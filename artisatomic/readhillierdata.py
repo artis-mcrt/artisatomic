@@ -273,7 +273,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         print('Manually specified columns:')
         print(f'  {ions_data[(atomic_number, ion_stage)].energylevelrowformat}')
         assert(row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat)
-        assert(row_format_energy_level == hillier_rowformat[format_date])
+        # assert(row_format_energy_level == hillier_rowformat[format_date])
 
         hillier_energy_level_row = namedtuple(
             'energylevel', row_format_energy_level + ' corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore')
