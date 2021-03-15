@@ -57,17 +57,15 @@ jobs:
 
     - name: Download CMFGEN atomic data
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
+      working-directory: atomic-data-hillier/
       run: |
-          cd atomic-data-hillier/
           curl -O http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz
-          cd ..
 
     - name: Extract CMFGEN atomic data
+      working-directory: atomic-data-hillier/
       run: |
-          cd atomic-data-hillier/
           tar -xzf atomic_data_15nov16.tar.gz
           rsync -a atomic_diff/ atomic/
-          cd ..
 
     - name: Test with pytest
       run: |
@@ -77,10 +75,13 @@ jobs:
       run: |
         makeartisatomicfiles -output_folder test_output
 
-    - name: check output files
+    - name: Checksum output files
       run: |
-        md5sum test_output/*
-        md5sum -c <(echo cf7056da25cab2c71e7719c48b11b716 test_output/adata.txt)
+        md5sum test_output/*.txt
+        md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c test_output/adata.txt)
+        md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 test_output/compositiondata.txt)
+        md5sum -c <(echo cb0b9a2e5952986b9d99fff3cf9855d6 test_output/phixsdata_v2.txt)
+        md5sum -c <(echo cd240462da8b7e55b6ead0d0bd3adb40 test_output/transitiondata.txt)
 
     - name: tar and zip output files
       run: |
