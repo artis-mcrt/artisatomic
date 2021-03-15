@@ -79,6 +79,7 @@ jobs:
 
     - name: tar and zip output files
       run: |
+        md5sum test_output/**/*
         tar -cvzf artis_files.tar.gz test_output/*
 
     - name: Upload output files
