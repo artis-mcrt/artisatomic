@@ -3,5 +3,5 @@ Download the atomic data from
 
 From the command-line you can download the files using:
 ```sh
-download-nahar.py
+./download-nahar.py
 ```
