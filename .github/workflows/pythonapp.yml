@@ -56,18 +56,9 @@ jobs:
           path: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
           key: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
 
-    - name: Download CMFGEN atomic data
-      if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
+    - name: Download/extract CMFGEN atomic data
       working-directory: atomic-data-hillier/
-      run: |
-          curl -O https://psweb.mp.qub.ac.uk/artis/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.xz
-          md5sum -c atomic_data_15nov16.tar.xz.md5
-
-    - name: Extract CMFGEN atomic data
-      working-directory: atomic-data-hillier/
-      run: |
-          tar -xf atomic_data_15nov16.tar.xz
-          rsync -a atomic_diff/ atomic/
+      run: . ./setup_cmfgen_data.sh
 
     - name: Test with pytest
       run: |

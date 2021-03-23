@@ -4,20 +4,8 @@ Download the atomic data from
 As of Jan 5, 2018 the latest version is at:
 <http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz>
 
-From the command-line you can download the file with curl.
-```sh
-curl -O http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz
-```
-
-Extract the tarball in this directory (which should go into the subfolder called 'atomic').
+From the command-line you can download the file with curl and extract the data.
 
 ```sh
-tar -xvzf atomic_data_15nov16.tar.gz
-```
-
-
-Add in the customised files:
-
-```sh
-rsync -av atomic_diff/ atomic/
+. ./setup_cmfgen_data.sh
 ```
