@@ -53,14 +53,14 @@ jobs:
       uses: actions/cache@v2.1.4
       id: cache-cmfgendata
       with:
-          path: "atomic-data-hillier/atomic_data_15nov16.tar.gz"
-          key: "atomic-data-hillier/atomic_data_15nov16.tar.gz"
+          path: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
+          key: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
 
     - name: Download CMFGEN atomic data
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       working-directory: atomic-data-hillier/
       run: |
-          curl -O https://psweb.mp.qub.ac.uk/artis/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.gz
+          curl -O https://psweb.mp.qub.ac.uk/artis/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.xz
 
     - name: Extract CMFGEN atomic data
       working-directory: atomic-data-hillier/
