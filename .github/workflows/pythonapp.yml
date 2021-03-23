@@ -58,7 +58,7 @@ jobs:
 
     - name: Download/extract CMFGEN atomic data
       working-directory: atomic-data-hillier/
-      run: . ./setup_cmfgen_data.sh
+      run: source ./setup_cmfgen_data.sh
 
     - name: Test with pytest
       run: |
