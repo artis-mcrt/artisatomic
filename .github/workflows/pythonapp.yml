@@ -61,11 +61,12 @@ jobs:
       working-directory: atomic-data-hillier/
       run: |
           curl -O https://psweb.mp.qub.ac.uk/artis/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.xz
+          md5sum -c atomic_data_15nov16.tar.xz.md5
 
     - name: Extract CMFGEN atomic data
       working-directory: atomic-data-hillier/
       run: |
-          tar -xzf atomic_data_15nov16.tar.gz
+          tar -xzf atomic_data_15nov16.tar.xz
           rsync -a atomic_diff/ atomic/
 
     - name: Test with pytest
