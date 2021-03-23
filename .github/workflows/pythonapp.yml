@@ -60,7 +60,7 @@ jobs:
       if: steps.cache-cmfgendata.outputs.cache-hit != 'true'
       working-directory: atomic-data-hillier/
       run: |
-          curl -O http://kookaburra.phyast.pitt.edu/hillier/cmfgen_files/atomic_data_15nov16.tar.gz
+          curl -O https://psweb.mp.qub.ac.uk/artis/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.gz
 
     - name: Extract CMFGEN atomic data
       working-directory: atomic-data-hillier/
