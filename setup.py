@@ -34,7 +34,7 @@ setup(
     author="Luke Shingles",
     author_email="luke.shingles@gmail.com",
     packages=find_packages(),
-    url="https://github.com/ssim/artis-atomic",
+    url="https://github.com/artis-mcrt/artisatomic",
     description="Tools to create an atomic database for use with ARTIS.",
     long_description=open(
         os.path.join(os.path.dirname(__file__), "README.md")).read(),
