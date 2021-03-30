@@ -23,6 +23,7 @@ selectedelements = None  # select all
 OSCSTRENGTHCONVERSION = 1.3473837e+21
 # = ME * pow(CLIGHT,3) / (8 * pow(QE*PI, 2)) * A_ul
 
+
 def main():
     modelpath = Path()
     hc = (const.h * const.c).to('eV Angstrom').value
@@ -94,6 +95,7 @@ def main():
                             # the photoionisation cross-sections in the database are given in Mbarn = 1e6 * 1e-28m^2
                             # to convert to cgs units multiply by 1e-18
                             photfile.write(f'PhotMac {x * ion.ion_pot:15.6f} {xs * targetfrac * 1e-18:15.7e}\n')
+
 
 if __name__ == "__main__":
     main()

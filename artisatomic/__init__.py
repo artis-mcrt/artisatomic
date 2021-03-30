@@ -7,6 +7,7 @@ import multiprocessing as mp
 import os
 import sys
 from collections import defaultdict, namedtuple
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -21,8 +22,8 @@ from artisatomic.manual_matches import (hillier_name_replacements, nahar_configu
 import artisatomic.readboyledata as readboyledata
 import artisatomic.readdreamdata as readdreamdata
 
-PYDIR = os.path.dirname(os.path.abspath(__file__))
-atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
+PYDIR = Path(__file__).parent.absolute()
+atomicdata = pd.read_csv(PYDIR / 'atomic_properties.txt', delim_whitespace=True, comment='#')
 elsymbols = ['n'] + list(atomicdata['symbol'].values)
 atomic_weights = ['n'] + list(atomicdata['mass'].values)
 
