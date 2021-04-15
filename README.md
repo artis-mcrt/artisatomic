@@ -12,7 +12,7 @@ Then from within the repository directory run:
 python3 -m pip install -e .
 ```
 
-NOTE: if you get an error on macOS >= 11 when installing the dependency `tables', run brew install hdf5 c-blosc
+Tip: if you get an error on macOS >= 11 when installing the dependency 'tables', first run brew install hdf5 c-blosc
 
 ## Usage
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. This code is not user friendly at all are requires manual editing of the Python scripts to change ions and data sources.
