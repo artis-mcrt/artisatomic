@@ -147,7 +147,8 @@ ions_data = {
     # (25, 5): ion_files('18oct00', 'mnv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
 
     # Fe
-    (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_3000'], 'col_data_ljs'),
+    (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_3000'], 'col_data'),
+    # (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_3000'], 'col_data_ljs'),
     (26, 2): ion_files('10sep16', 'fe2_osc', hillier_rowformat_b, ['phot_op.dat'], 'fe2_col.dat'),
     (26, 3): ion_files('30oct12', 'FeIII_OSC', hillier_rowformat_b, ['phot_sm_3000.dat'], 'col_data.dat'),
     (26, 4): ion_files('18oct00', 'feiv_osc_rev2.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
