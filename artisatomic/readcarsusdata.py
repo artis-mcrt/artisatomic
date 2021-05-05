@@ -1,9 +1,3 @@
-from carsus.io.nist import NISTWeightsComp, NISTIonizationEnergies
-from carsus.io.kurucz import GFALLReader
-# from carsus.io.zeta import KnoxLongZeta
-# from carsus.io.chianti_ import ChiantiReader
-# from carsus.io.output import TARDISAtomData
-
 from collections import defaultdict, namedtuple
 from astropy import constants as const
 import artisatomic
@@ -88,6 +82,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_charge = ion_stage - 1
 
     print(f'Reading CARSUS database for Z={atomic_number} ion_stage {ion_stage}')
+
+    from carsus.io.nist import NISTWeightsComp, NISTIonizationEnergies
+    from carsus.io.kurucz import GFALLReader
+    # from carsus.io.zeta import KnoxLongZeta
+    # from carsus.io.chianti_ import ChiantiReader
+    # from carsus.io.output import TARDISAtomData
 
     path_gfall = str((Path(__file__).parent.absolute() / '..' / 'atomic-data-kurucz' / 'gfall_latest.dat').resolve())
     gfall_reader = GFALLReader(ions=f'{artisatomic.elsymbols[atomic_number]} {ion_charge}', fname=path_gfall)
