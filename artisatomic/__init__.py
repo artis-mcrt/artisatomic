@@ -20,6 +20,7 @@ import artisatomic.readnahardata as readnahardata
 import artisatomic.readqubdata as readqubdata
 from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
 import artisatomic.readboyledata as readboyledata
+import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
 
 PYDIR = Path(__file__).parent.absolute()
@@ -47,6 +48,7 @@ listelements = [
 
 # include everything we have data for
 # listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readcarsusdata.extend_ion_list(listelements)
 # listelements = readdreamdata.extend_ion_list(listelements)
 
 USE_QUB_COBALT = False
@@ -55,6 +57,21 @@ ryd_to_ev = u.rydberg.to('eV')
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 hc_in_ev_angstrom = (const.h * const.c).to('eV angstrom').value
 h_in_ev_seconds = const.h.to('eV s').value
+
+
+def drop_handlers(list_ions):
+    """
+        Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]
+    """
+    list_out = []
+    for ion_stage in list_ions:
+            handler = None
+            try:
+                if len(ion_stage) == 2:
+                    list_out.append(ion_stage[0])
+            except TypeError:
+                list_out.append(ion_stage)
+    return list_out
 
 
 def main(args=None, argsraw=None, **kwargs):
@@ -106,7 +123,6 @@ def main(args=None, argsraw=None, **kwargs):
             print(logfile)
     else:
         os.makedirs(log_folder, exist_ok=True)
-
     write_compositionfile(listelements, args)
     clear_files(args)
     process_files(listelements, args)
@@ -152,10 +168,34 @@ def process_files(listelements, args):
         photoionization_targetfractions = [[] for _ in listions]
 
         for i, ion_stage in enumerate(listions):
+            handler = None
+            try:
+                if len(ion_stage) == 2:
+                    ion_stage, handler = ion_stage
+            except TypeError:
+                pass
+
+            if handler is None:
+                if atomic_number == 2 and ion_stage == 3:
+                    handler = 'boyle'
+                elif USE_QUB_COBALT and atomic_number == 27:
+                    handler = 'qub_cobalt'
+                elif False:  # Nahar only, usually just for testing purposes
+                    handler = 'nahar'
+                elif False and atomic_number in [26, ]:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
+                    handler = 'hiller_nahar'
+                elif atomic_number <= 28 or atomic_number == 56:  # Hillier data only
+                    handler = 'hillier'
+                elif atomic_number >= 57:  # DREAM database of Z > 57
+                    handler = 'dream'
+                else:
+                    handler = 'carsus'
+
             logfilepath = os.path.join(args.output_folder, args.output_folder_logs,
                                        f'{elsymbols[atomic_number].lower()}{ion_stage:d}.txt')
             with open(logfilepath, 'w') as flog:
                 log_and_print(flog, f'\n===========> {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:')
+                log_and_print(flog, f'Source handler: {handler}')
 
                 path_nahar_energy_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt'
                 path_nahar_px_file = f'atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt'
@@ -186,13 +226,13 @@ def process_files(listelements, args):
                 #     pass
 
                 # Call readHedata for He III
-                if atomic_number == 2 and ion_stage == 3:
+                if handler == 'boyle':
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readboyledata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif USE_QUB_COBALT and atomic_number == 27:
+                elif handler == 'qub_cobalt':
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                         (ionization_energy_ev[i], energy_levels[i],
                          transitions[i], transition_count_of_level_name[i],
@@ -209,7 +249,7 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readqubdata.read_qub_photoionizations(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif False:  # Nahar only, usually just for testing purposes
+                elif handler == 'nahar':
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i],
                      ionization_energy_ev[i]) = readnahardata.read_nahar_energy_level_file(
@@ -231,7 +271,7 @@ def process_files(listelements, args):
 
                     print(energy_levels[i][0:3])
 
-                elif False and atomic_number in [26, ]:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
+                elif handler == 'hillier_nahar':  # Hillier/Nahar hybrid
                     (nahar_energy_levels, nahar_core_states[i],
                      nahar_level_index_of_state, nahar_configurations[i],
                      nahar_ionization_potential_rydberg) = readnahardata.read_nahar_energy_level_file(
@@ -256,7 +296,7 @@ def process_files(listelements, args):
                     if len(upsilondicts[i]) == 0:
                         upsilondicts[i] = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels[i], flog, args)
 
-                elif atomic_number <= 56:  # Hillier data only
+                elif handler == 'hillier':  # Hillier data only
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i], hillier_levelnamesnoJ_matching_term) = (
@@ -271,11 +311,20 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readhillierdata.read_phixs_tables(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                else:  # DREAM database of Z > 57
+                elif handler == 'carsus':  # tardis Carsus
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif handler == 'dream':  # DREAM database of Z >= 57
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readdreamdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
+
+                else:
+                    assert False
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
@@ -1020,6 +1069,11 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
     upsilon_transition_row = namedtuple('transition', 'lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str')
 
     for i, ion_stage in enumerate(listions):
+        try:
+            if len(ion_stage) == 2:
+                ion_stage, handler = ion_stage
+        except TypeError:
+            pass
         upsilondict = upsilondicts[i]
         ionstr = f'{elsymbols[atomic_number]} {roman_numerals[ion_stage]}'
 
@@ -1047,14 +1101,20 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
 
             coll_str = transition.coll_str
             if coll_str < 5:
-                forbidden = check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
                 if (id_lower, id_upper) in upsilondict:
                     coll_str = upsilondict[(id_lower, id_upper)]
-                elif forbidden:
-                    coll_str = -2.
                 else:
-                    coll_str = -1.
+                    if hasattr(transition, 'forbidden'):
+                        forbidden = transition.Forbidden
+                    else:
+                        forbidden = check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
+
+                    if forbidden:
+                        coll_str = -2.
+                    else:
+                        coll_str = -1.
                 updaterequired = True
+
             if updaterequired:
                 transitions[i][transitionid] = transition._replace(
                     lowerlevel=id_lower, upperlevel=id_upper,
@@ -1218,6 +1278,7 @@ def write_compositionfile(listelements, args):
         fcomp.write(f'{len(listelements):d}\n')
         fcomp.write(f'0\n0\n')
         for (atomic_number, listions) in listelements:
+            listions = drop_handlers(listions)
             ion_stage_min = min(listions)
             ion_stage_max = max(listions)
             nions = ion_stage_max - ion_stage_min + 1
