@@ -21,12 +21,12 @@ def extend_ion_list(listelements):
         for (tmp_atomic_number, list_ions) in listelements:
             if tmp_atomic_number == atomic_number:
                 if ion_stage not in list_ions:
-                    list_ions.append(ion_stage)
+                    list_ions.append((ion_stage, 'dream'))
                     list_ions.sort()
                 found_element = True
 
         if not found_element:
-            listelements.append((atomic_number, [ion_stage],))
+            listelements.append((atomic_number, [(ion_stage, 'dream')],))
 
     listelements.sort(key=lambda x: x[0])
 
@@ -49,7 +49,6 @@ def energytuplefromrow(row, prefix):
 
 
 def read_levels_data(dflines):
-
     energy_levels = []
 
     for prefix in ['Lower', 'Upper']:
@@ -62,7 +61,7 @@ def read_levels_data(dflines):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ['energy_levels'] + energy_levels
+    return ['IGNORE'] + energy_levels
 
 
 def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):
@@ -118,7 +117,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dfiondata.insert(2, "Upper_index",
                      dfiondata.apply(lambda row: get_level_index(row, prefix='Upper'), axis=1).values, allow_duplicates=True)
-    print(dfiondata)
 
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels)
 

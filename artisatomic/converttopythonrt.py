@@ -79,7 +79,7 @@ def main():
                     dftransitions.eval('lower_energy_ev = @ion.levels.loc[lower].energy_ev.values', inplace=True)
                     dftransitions.eval('lambda_angstroms = @hc / (upper_energy_ev - lower_energy_ev)', inplace=True)
 
-                    c_angps = const.c.to('angstrom/s').value
+                    c_angps = 2.99792458e18  # speed of light in angstroms per second
                     dftransitions.eval('fosc = upper_g / lower_g * @OSCSTRENGTHCONVERSION / (@c_angps / lambda_angstroms) ** 2 * A', inplace=True)
 
                     for _, transition in dftransitions.iterrows():
