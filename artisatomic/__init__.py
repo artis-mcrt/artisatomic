@@ -20,7 +20,7 @@ import artisatomic.readnahardata as readnahardata
 import artisatomic.readqubdata as readqubdata
 from artisatomic.manual_matches import (hillier_name_replacements, nahar_configuration_replacements)
 import artisatomic.readboyledata as readboyledata
-import artisatomic.readcarsusdata as readcarsusdata
+# import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
 
 PYDIR = Path(__file__).parent.absolute()
