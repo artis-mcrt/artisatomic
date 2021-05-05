@@ -43,6 +43,7 @@ gfall_reader = None
 def get_levelname(row):
     return f'{row.label},enpercm={row.energy},j={row.j}'
 
+
 def read_levels_data(dflevels):
     energy_level_tuple = namedtuple(
         'energylevel', 'levelname energyabovegsinpercm g parity')
@@ -93,7 +94,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dflevels = gfall_reader.extract_levels().loc[atomic_number, ion_charge]
 
-    print(dflevels)
+    # print(dflevels)
 
     # from nistasd import NISTLines
     #
@@ -107,14 +108,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels = read_levels_data(dflevels)
 
-    for x in energy_levels:
-        print(x)
+    # for x in energy_levels:
+    #     print(x)
 
     dflines = gfall_reader.extract_lines().loc[atomic_number, ion_charge]
 
     dflines.eval('A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)   ', inplace=True)
 
-    print(dflines)
+    # print(dflines)
 
     transitions, transition_count_of_level_name = read_lines_data(
         energy_levels, dflines)
