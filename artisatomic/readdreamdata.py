@@ -9,11 +9,21 @@ import pandas as pd
 
 dreamdatapath = Path(os.path.dirname(os.path.abspath(__file__)), "..",
                      "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5")
-dreamdata = pd.read_hdf(dreamdatapath) if dreamdatapath.exists() else None
+dreamdata = None
 hc_in_ev_cm = (const.h * const.c).to('eV cm').value
 
 
+def init_dreamdata():
+    global dreamdata
+    if dreamdata is None:
+        dreamdatapath = Path(os.path.dirname(os.path.abspath(__file__)), "..",
+                             "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5")
+        dreamdata = pd.read_hdf(dreamdatapath) if dreamdatapath.exists() else None
+
+
 def extend_ion_list(listelements):
+    init_dreamdata()
+
     for atomic_number, charge in dreamdata.index.unique():
         ion_stage = charge + 1
 
@@ -86,6 +96,7 @@ def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    init_dreamdata()
     charge = ion_stage - 1
     dfiondata = dreamdata.loc[(atomic_number, charge)]
     print(f'Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}')
