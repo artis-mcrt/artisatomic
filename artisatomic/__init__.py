@@ -311,11 +311,11 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readhillierdata.read_phixs_tables(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif handler == 'carsus':  # tardis Carsus
-
-                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                     transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
-                        atomic_number, ion_stage, flog)
+                # elif handler == 'carsus':  # tardis Carsus
+                #
+                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                #      transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
+                #         atomic_number, ion_stage, flog)
 
                 elif handler == 'dream':  # DREAM database of Z >= 57
 
