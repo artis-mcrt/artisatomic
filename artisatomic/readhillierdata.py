@@ -212,7 +212,9 @@ hyd_gaunt_energygrid_ryd, hyd_gaunt_factor = {}, {}  # keys are n quantum number
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
-    return ('atomic-data-hillier/atomic/' + atomic_number_to_hillier_code[atomic_number] + '/' + artisatomic.roman_numerals[ion_stage] + '/')
+    return str((artisatomic.PYDIR / '..' / 'atomic-data-hillier' / 'atomic' /
+               atomic_number_to_hillier_code[atomic_number] /
+               artisatomic.roman_numerals[ion_stage]).resolve())
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -1093,7 +1095,7 @@ def read_hyd_phixsdata():
     hillier_ionization_energy_ev, hillier_energy_levels, transitions, transition_count_of_level_name, hillier_level_ids_matching_term = read_levels_and_transitions(
         1, 1, open('/dev/null', 'w'))
 
-    hyd_filename = 'atomic-data-hillier/atomic/HYD/I/5dec96/hyd_l_data.dat'
+    hyd_filename = hillier_ion_folder(1, 1) + '/5dec96/hyd_l_data.dat'
     print(f'Reading hydrogen photoionization cross sections from {hyd_filename}')
     max_n = -1
     l_start_u = 0.
@@ -1135,7 +1137,7 @@ def read_hyd_phixsdata():
             hyd_phixs[(n, l)] = [10 ** (8 + logxs) for logxs in xs_values]  # cross sections in Megabarns
             #hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
-    hyd_filename = 'atomic-data-hillier/atomic/HYD/I/5dec96/gbf_n_data.dat'
+    hyd_filename = hillier_ion_folder(1, 1) + '/5dec96/gbf_n_data.dat'
     print(f'Reading hydrogen Gaunt factors from {hyd_filename}')
     max_n = -1
     l_start_u = 0.
