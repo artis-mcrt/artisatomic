@@ -324,6 +324,7 @@ def process_files(listelements, args):
                         atomic_number, ion_stage, flog)
 
                 else:
+                    print(f'Unknown handler: {handler}')
                     assert False
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
