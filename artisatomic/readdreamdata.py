@@ -7,6 +7,7 @@ import os.path
 from pathlib import Path
 import pandas as pd
 
+# the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = Path(os.path.dirname(os.path.abspath(__file__)), "..",
                      "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5")
 dreamdata = None
