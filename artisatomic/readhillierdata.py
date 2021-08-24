@@ -882,7 +882,6 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):
     for index, c_en in enumerate(energygrid):
         energydivthreshold = 1 + 20 * (c_en ** 2)
 
-        thresholddivenergy = energydivthreshold ** -1
         x = math.log10(energydivthreshold)
 
         if x < e:
