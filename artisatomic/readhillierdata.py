@@ -593,7 +593,13 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
                 elif crosssectiontype == 8:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(int(float(row[0].replace('D', 'E'))))
+                        if len(fitcoefficients) <= 2:
+                            # first three params should be integers
+                            fitcoefficients.append(int(float(row[0].replace('D', 'E'))))
+                        else:
+                            # fourth param is a float
+                            fitcoefficients.append(float(row[0].replace('D', 'E')))
+
                         if len(fitcoefficients) == 4:
                             n, l_start, l_end, nu_o = fitcoefficients
                             if l_end > n - 1:
@@ -766,18 +772,25 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
     for index, c in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c ** 2)
+        energy_div_threshold = 1 + 20 * (c ** 2)
 
         if nu_o is None:
-            thresholddivenergy = energydivthreshold ** -1
-            crosssection = sigmat * (beta + (1 - beta) * thresholddivenergy) * (thresholddivenergy ** s)
+            threshold_div_energy = energy_div_threshold ** -1
+            crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy ** s)
         else:
-            thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
-            energyoffsetdivthreshold = energydivthreshold + (nu_o * 1e15 * h_in_ev_seconds) / thresholdenergyev
-            thresholddivenergyoffset = energyoffsetdivthreshold ** -1
-            if thresholddivenergyoffset < 1.0:
-                crosssection = sigmat * (beta + (1 - beta) * (thresholddivenergyoffset)) * \
-                    (thresholddivenergyoffset ** s)
+            # type 7
+            # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
+            # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
+            #                       Offset was beeing added to the current frequency instead
+            #                       of the ionization edge.
+
+            threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
+            offset_threshold_div_energy = (energy_div_threshold ** -1) * (
+                1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev)
+
+            if offset_threshold_div_energy < 1.0:
+                crosssection = sigmat * (beta + (1 - beta) * (offset_threshold_div_energy)) * \
+                    (offset_threshold_div_energy ** s)
             else:
                 crosssection = 0.
 
