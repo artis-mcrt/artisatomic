@@ -794,7 +794,7 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
             else:
                 crosssection = 0.
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
+        phixstable[index] = energy_div_threshold * thresholdenergyryd, crosssection
     return phixstable
 
 
