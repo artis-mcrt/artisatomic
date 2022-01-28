@@ -1042,7 +1042,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             upsilonscaled = upsilon * energy_levels[id_upper].g / upper_g_sum
                             if (id_lower, id_upper) in upsilondict and upsilondict[(id_lower, id_upper)] >= 0.:
                                 artisatomic.log_and_print(
-                                    flog, f'ERROR: Duplicate collisional transition from {namefrom} <-> {nameto} ({id_lower} -> {id_upper}).'
+                                    flog, f'ERROR: Duplicate collisional transition from {namefrom} <-> {nameto} ({id_lower} -> {id_upper}). '
                                     f'Keeping existing collision strength of {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of {upsilonscaled:.2e}.')
                             else:
                                 upsilondict[(id_lower, id_upper)] = upsilonscaled
