@@ -23,7 +23,8 @@ import artisatomic.readboyledata as readboyledata
 # import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
 
-PYDIR = Path(__file__).parent.absolute()
+
+PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / 'atomic_properties.txt', delim_whitespace=True, comment='#')
 elsymbols = ['n'] + list(atomicdata['symbol'].values)
 atomic_weights = ['n'] + list(atomicdata['mass'].values)
