@@ -12,21 +12,31 @@ def write_sorted_transitionblock(fileout, transitionblock):
 
 
 def main():
-    inputfolder = Path('/Volumes/GoogleDrive/Shared drives/ARTIS/artis-atomic_private/artis_classic_atomicdata')
-    outputfolder = Path(__file__).parent.absolute() / 'artis_files'
+    inputfolder = Path('/Volumes/GoogleDrive/Shared drives/ARTIS/artis_http_public/artisatomic/artis_classic_atomicdata/classic_data_2')
+    # outputfolder = Path(__file__).parent.absolute() / 'artis_files'
+    outputfolder = Path(inputfolder) / 'new_artis_format'
 
     outputfolder.mkdir(parents=True, exist_ok=True)
 
-    print(f"migrating old atomic data")
+    print("migrating old atomic data")
     print(f"  input folder:  {inputfolder}")
     print(f"  output folder: {outputfolder}")
 
     # same format is valid
-    shutil.copy(inputfolder / 'ATOM.MODELS', outputfolder / 'adata.txt')
-    print(f"copied ATOM.MODELS to adata.txt (old format is valid)")
+    if (inputfolder / 'ATOM.MODELS').exists():
+        adatainputfile = inputfolder / 'ATOM.MODELS'
+    else:
+        adatainputfile = inputfolder / 'adata.txt'
+    shutil.copy(adatainputfile, outputfolder / 'adata.txt')
+    print("copied file to adata.txt (old format is valid)")
+
+    if (inputfolder / 'LINELIST').exists():
+        linelistfile = inputfolder / 'LINELIST'
+    else:
+        linelistfile = inputfolder / 'transitiondata.txt'
 
     # mark all lines as permitted
-    with open(inputfolder / 'LINELIST', 'r') as flinelist:
+    with open(linelistfile, 'r') as flinelist:
         path_transdata = outputfolder / 'transitiondata.txt'
         print(f"writing {path_transdata}")
         transitionblock = []
@@ -46,7 +56,7 @@ def main():
                     ftransdata.write(f'{atomic_number:7d}{ion_stage:7d}{ion_ntrans:12d}')
                     transitionblock = []
 
-                elif len(row) == 4:  # transition row
+                elif len(row) in [4, 5]:  # transition row
                     transid = int(row[0])
                     levelid_lower = int(row[1])
                     levelid_upper = int(row[2])
@@ -74,8 +84,13 @@ def main():
             write_sorted_transitionblock(ftransdata, transitionblock)
             transitionblock = []
 
+    if (inputfolder / 'PHIXS').exists():
+        phixsfile = inputfolder / 'PHIXS'
+    else:
+        phixsfile = inputfolder / 'phixsdata.txt'
+
     # prepend new lines for table size and increment
-    with open(inputfolder / 'PHIXS', 'r') as fadataold:
+    with open(phixsfile, 'r') as fadataold:
         path_phixsdata = outputfolder / 'phixsdata_v2.txt'
         print(f"writing {path_phixsdata}")
         with path_phixsdata.open('w') as fadatanew:
