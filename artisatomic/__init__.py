@@ -66,7 +66,6 @@ def drop_handlers(list_ions):
     """
     list_out = []
     for ion_stage in list_ions:
-            handler = None
             try:
                 if len(ion_stage) == 2:
                     list_out.append(ion_stage[0])
