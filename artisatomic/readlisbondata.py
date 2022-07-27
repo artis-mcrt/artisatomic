@@ -165,7 +165,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     print(f'Reading Lisbon data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman})')
 
-    LISPATH = '/Users/luke/Dropbox/GitHub/opacities/atomic_LIP'
+    LISPATH = '/Users/luke/Dropbox/GitHub/opacities/SystematicCalculations'
 
     # nd_2_lvl = LISPATH + '/Nd/NdIII/NdIII_Levels.csv'
     # nd_2_lns = LISPATH + '/Nd/NdIII/NdIII_Transitions.csv'
