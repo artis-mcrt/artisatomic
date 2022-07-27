@@ -48,8 +48,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         str_ip_line = fin.readline()
         ionization_energy_in_ev = float(str_ip_line.removeprefix('# IP = '))
         print(f'ionization energy: {ionization_energy_in_ev} eV')
+        assert fin.readline().strip() == '# Energy levels'
+        assert fin.readline().strip() == '# num  weight parity      E(eV)      configuration'
 
-        with pd.read_fwf(fin, delim_whitespace=True, iterator=True, comment='#', colspecs=[
+        with pd.read_fwf(fin, iterator=True, colspecs=[
                 (0, 7), (7, 15), (15, 19), (19, 34), (34, None)], names=['num', 'weight', 'parity', 'energy_ev', 'configuration']) as reader:
             dflevels = reader.get_chunk(levelcount)
             # print(dflevels)
@@ -68,9 +70,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
         assert fin.readline().strip() == '# Transitions'
         assert fin.readline().strip() == '# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)'
-
-        with pd.read_fwf(fin, delim_whitespace=True, iterator=True, comment='#', names=['num_u', 'num_l', 'wavelength' ,'g_u_times_A', 'log(g_l*f)']) as reader:
-            dftransitions = reader.get_chunk(transitioncount)
+        with pd.read_fwf(fin, iterator=True, colspecs=[
+                (0, 7), (7, 15), (15, 29), (29, 43), (43, None)], names=['num_u', 'num_l', 'wavelength', 'g_u_times_A', 'log(g_l*f)']) as reader:
+            dftransitions = reader.get_chunk(15)
 
             # print(dftransitions)
             transitiontuple = namedtuple('transition', 'lowerlevel upperlevel A coll_str')
