@@ -26,7 +26,6 @@ import artisatomic.readdreamdata as readdreamdata
 # import artisatomic.readfacdata as readfacdata
 import artisatomic.readtanakajpltdata as readtanakajpltdata
 
-
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / 'atomic_properties.txt', delim_whitespace=True, comment='#')
 elsymbols = ['n'] + list(atomicdata['symbol'].values)
@@ -316,11 +315,11 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readhillierdata.read_phixs_tables(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                elif handler == 'carsus' and 'artisatomic.readcarsusdata' in sys.modules:  # tardis Carsus
+                # elif handler == 'carsus':  # tardis Carsus
 
-                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                     transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
-                        atomic_number, ion_stage, flog)
+                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                #      transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
+                #         atomic_number, ion_stage, flog)
 
                 elif handler == 'dream' and 'artisatomic.readdreamdata' in sys.modules:  # DREAM database of Z >= 57
 
