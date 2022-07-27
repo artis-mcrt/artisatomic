@@ -22,8 +22,8 @@ from artisatomic.manual_matches import (hillier_name_replacements, nahar_configu
 import artisatomic.readboyledata as readboyledata
 # import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
-# import artisatomic.readlisbondata as readlisbondata
-# import artisatomic.readfacdata as readfacdata
+import artisatomic.readlisbondata as readlisbondata
+import artisatomic.readfacdata as readfacdata
 import artisatomic.readtanakajpltdata as readtanakajpltdata
 
 PYDIR = Path(__file__).parent.resolve()
