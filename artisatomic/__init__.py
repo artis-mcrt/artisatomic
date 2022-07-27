@@ -22,8 +22,8 @@ from artisatomic.manual_matches import (hillier_name_replacements, nahar_configu
 import artisatomic.readboyledata as readboyledata
 # import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
-import artisatomic.readlisbondata as readlisbondata
-import artisatomic.readfacdata as readfacdata
+# import artisatomic.readlisbondata as readlisbondata
+# import artisatomic.readfacdata as readfacdata
 import artisatomic.readtanakajpltdata as readtanakajpltdata
 
 
@@ -316,39 +316,38 @@ def process_files(listelements, args):
                          photoionization_thresholds_ev[i]) = readhillierdata.read_phixs_tables(
                             atomic_number, ion_stage, energy_levels[i], args, flog)
 
-                # elif handler == 'carsus':  # tardis Carsus
-                #
-                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                #      transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
-                #         atomic_number, ion_stage, flog)
+                elif handler == 'carsus' and 'artisatomic.readcarsusdata' in sys.modules:  # tardis Carsus
 
-                elif handler == 'dream':  # DREAM database of Z >= 57
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif handler == 'dream' and 'artisatomic.readdreamdata' in sys.modules:  # DREAM database of Z >= 57
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readdreamdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif handler == 'lisbon':  # DREAM database of Z >= 57
+                elif handler == 'lisbon' and 'artisatomic.readlisbondata' in sys.modules:
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readlisbondata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif handler == 'fac':  # DREAM database of Z >= 57
+                elif handler == 'fac' and 'artisatomic.readfacdata' in sys.modules:
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readfacdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif handler == 'tanakajplt':  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+                elif handler == 'tanakajplt' and 'artisatomic.readtanakajpltdata' in sys.modules:  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readtanakajpltdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
                 else:
-                    print(f'Unknown handler: {handler}')
-                    assert False
+                    raise ValueError(f'Unknown handler: {handler}')
 
         write_output_files(elementindex, energy_levels, transitions, upsilondicts,
                            ionization_energy_ev, transition_count_of_level_name,
