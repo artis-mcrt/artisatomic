@@ -22,7 +22,7 @@ from artisatomic.manual_matches import (hillier_name_replacements, nahar_configu
 import artisatomic.readboyledata as readboyledata
 # import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
-import artisatomic.readlisbondata as readlisbondata
+# import artisatomic.readlisbondata as readlisbondata
 import artisatomic.readfacdata as readfacdata
 import artisatomic.readtanakajpltdata as readtanakajpltdata
 
@@ -321,25 +321,25 @@ def process_files(listelements, args):
                 #      transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
                 #         atomic_number, ion_stage, flog)
 
-                elif handler == 'dream' and 'artisatomic.readdreamdata' in sys.modules:  # DREAM database of Z >= 57
+                elif handler == 'dream':  # DREAM database of Z >= 57
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readdreamdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif handler == 'lisbon' and 'artisatomic.readlisbondata' in sys.modules:
+                # elif handler == 'lisbon':
 
-                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                     transition_count_of_level_name[i]) = readlisbondata.read_levels_and_transitions(
-                        atomic_number, ion_stage, flog)
+                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                #      transition_count_of_level_name[i]) = readlisbondata.read_levels_and_transitions(
+                #         atomic_number, ion_stage, flog)
 
-                elif handler == 'fac' and 'artisatomic.readfacdata' in sys.modules:
+                elif handler == 'fac':
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readfacdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
-                elif handler == 'tanakajplt' and 'artisatomic.readtanakajpltdata' in sys.modules:  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+                elif handler == 'tanakajplt':  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readtanakajpltdata.read_levels_and_transitions(
