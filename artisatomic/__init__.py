@@ -22,6 +22,9 @@ from artisatomic.manual_matches import (hillier_name_replacements, nahar_configu
 import artisatomic.readboyledata as readboyledata
 # import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
+import artisatomic.readlisbondata as readlisbondata
+import artisatomic.readfacdata as readfacdata
+import artisatomic.readtanakajpltdata as readtanakajpltdata
 
 
 PYDIR = Path(__file__).parent.resolve()
@@ -51,6 +54,8 @@ listelements = [
 # listelements = readhillierdata.extend_ion_list(listelements)
 # listelements = readcarsusdata.extend_ion_list(listelements)
 # listelements = readdreamdata.extend_ion_list(listelements)
+# listelements = readfacdata.extend_ion_list(listelements)
+# listelements = readtanakajpltdata.extend_ion_list(listelements)
 
 USE_QUB_COBALT = False
 
@@ -66,11 +71,11 @@ def drop_handlers(list_ions):
     """
     list_out = []
     for ion_stage in list_ions:
-            try:
-                if len(ion_stage) == 2:
-                    list_out.append(ion_stage[0])
-            except TypeError:
-                list_out.append(ion_stage)
+        try:
+            if len(ion_stage) == 2:
+                list_out.append(ion_stage[0])
+        except TypeError:
+            list_out.append(ion_stage)
     return list_out
 
 
@@ -321,6 +326,24 @@ def process_files(listelements, args):
 
                     (ionization_energy_ev[i], energy_levels[i], transitions[i],
                      transition_count_of_level_name[i]) = readdreamdata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif handler == 'lisbon':  # DREAM database of Z >= 57
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readlisbondata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif handler == 'fac':  # DREAM database of Z >= 57
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readfacdata.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog)
+
+                elif handler == 'tanakajplt':  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+
+                    (ionization_energy_ev[i], energy_levels[i], transitions[i],
+                     transition_count_of_level_name[i]) = readtanakajpltdata.read_levels_and_transitions(
                         atomic_number, ion_stage, flog)
 
                 else:
