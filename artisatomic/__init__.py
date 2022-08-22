@@ -28,6 +28,7 @@ import artisatomic.readtanakajpltdata as readtanakajpltdata
 
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / 'atomic_properties.txt', delim_whitespace=True, comment='#')
+atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
 elsymbols = ['n'] + list(atomicdata['symbol'].values)
 atomic_weights = ['n'] + list(atomicdata['mass'].values)
 
