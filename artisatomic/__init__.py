@@ -125,7 +125,7 @@ def main(args=None, argsraw=None, **kwargs):
         logfiles = glob.glob(os.path.join(log_folder, '*.txt'))
         for logfile in logfiles:
             os.remove(logfile)
-            print(logfile)
+            print('deleting', logfile)
     else:
         os.makedirs(log_folder, exist_ok=True)
     write_compositionfile(listelements, args)
@@ -1182,7 +1182,7 @@ def write_output_files(elementindex, energy_levels, transitions, upsilondicts,
 
 
 def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args, flog):
-    log_and_print(flog, "Writing to 'adata.txt'")
+    log_and_print(flog, f"Writing {len(energy_levels[1:])} levels to 'adata.txt'")
     fatommodels.write(f'{atomic_number:12d}{ion_stage:12d}{len(energy_levels) - 1:12d}{ionization_energy:15.7f}\n')
 
     for levelid, energylevel in enumerate(energy_levels[1:], 1):
@@ -1221,7 +1221,7 @@ def write_adata(fatommodels, atomic_number, ion_stage, energy_levels, ionization
 
 def write_transition_data(ftransitiondata, atomic_number, ion_stage, energy_levels,
                           transitions, upsilondict, args, flog):
-    log_and_print(flog, "Writing to 'transitiondata.txt'")
+    log_and_print(flog, f"Writing {len(transitions)} transitions to 'transitiondata.txt'")
 
     num_forbidden_transitions = 0
     num_collision_strengths_applied = 0
@@ -1256,21 +1256,23 @@ def write_transition_data(ftransitiondata, atomic_number, ion_stage, energy_leve
 
     ftransitiondata.write('\n')
 
-    log_and_print(flog, f'Output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and {num_collision_strengths_applied:d} have collision strengths')
+    log_and_print(flog, f'  output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and {num_collision_strengths_applied:d} have collision strengths')
 
 
 def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
                      photoionization_crosssections, photoionization_targetfractions,
                      photoionization_thresholds_ev, args, flog):
-    log_and_print(flog, "Writing to 'phixsdata2.txt'")
+    log_and_print(flog, f"Writing {len(photoionization_crosssections)} phixs tables to 'phixsdata2.txt'")
     flog.write(f'Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, '
                f'nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n')
 
-    if photoionization_crosssections[1][0] == 0.:
+    if len(photoionization_crosssections) >= 2 and photoionization_crosssections[1][0] == 0.:
         log_and_print(flog, 'ERROR: ground state has zero photoionization cross section')
         sys.exit()
 
     for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
+        if not targetlist:
+            continue
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
         if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
             if len(targetlist) > 0:
@@ -1297,6 +1299,7 @@ def write_phixs_data(fphixs, atomic_number, ion_stage, energy_levels,
 
 
 def write_compositionfile(listelements, args):
+    print("Writing compositiondata.txt")
     with open(os.path.join(args.output_folder, 'compositiondata.txt'), 'w') as fcomp:
         fcomp.write(f'{len(listelements):d}\n')
         fcomp.write(f'0\n0\n')
