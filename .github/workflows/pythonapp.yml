@@ -60,7 +60,7 @@ jobs:
 
             - name: Checksum output files
               run: |
-                  cat test_output/adata.txt
+                  cat test_output/compositiondata.txt
                   md5sum test_output/*.txt
                   md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c test_output/adata.txt)
                   md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 test_output/compositiondata.txt)
@@ -68,10 +68,12 @@ jobs:
                   md5sum -c <(echo cd240462da8b7e55b6ead0d0bd3adb40 test_output/transitiondata.txt)
 
             - name: tar and zip output files
+              if: always()
               run: |
                   tar -cvzf artis_files.tar.gz test_output/*
 
             - name: Upload output files
+              if: always()
               uses: actions/upload-artifact@v2
               with:
                   name: artis_files.tar.gz
