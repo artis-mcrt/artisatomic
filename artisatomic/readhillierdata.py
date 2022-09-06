@@ -1075,6 +1075,8 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
     targetlist_of_targetconfig = defaultdict(list)
 
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+        if lowerlevelid not in hillier_photoion_targetconfigs:
+            continue
         for targetconfig, targetconfig_fraction in hillier_photoion_targetconfigs[lowerlevelid]:
             if targetconfig not in targetlist_of_targetconfig:
                 # sometimes the target has a slash, e.g. '3d7_4Fe/3d7_a4Fe'
@@ -1190,9 +1192,9 @@ def read_hyd_phixsdata():
             hyd_gaunt_factor[n] = gaunt_values  # cross sections in Megabarns
 
 
-def extend_ion_list(listelements):
+def extend_ion_list(listelements, maxionstage=None) -> None:
     for (atomic_number, ion_stage) in ions_data.keys():
-        if atomic_number == 1:
+        if atomic_number == 1 or ion_stage is not None and ion_stage > maxionstage:
             continue  # skip hydrogen
         found_element = False
         for (tmp_atomic_number, list_ions) in listelements:
