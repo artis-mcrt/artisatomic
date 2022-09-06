@@ -74,7 +74,7 @@ listelements = [
 ]
 
 # include everything we have data for
-listelements = readhillierdata.extend_ion_list(listelements)
+# listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5)
 # listelements = readcarsusdata.extend_ion_list(listelements)
 # listelements = readdreamdata.extend_ion_list(listelements)
 # listelements = readfacdata.extend_ion_list(listelements)
