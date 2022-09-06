@@ -1314,7 +1314,7 @@ def read_hyd_phixsdata():
 
 def extend_ion_list(listelements, maxionstage=None):
     for atomic_number, ion_stage in ions_data.keys():
-        if atomic_number == 1 or (ion_stage is not None and ion_stage > maxionstage):
+        if atomic_number == 1 or (maxionstage is not None and ion_stage > maxionstage):
             continue  # skip hydrogen
         found_element = False
         for tmp_atomic_number, list_ions in listelements:
