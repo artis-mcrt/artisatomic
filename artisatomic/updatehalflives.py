@@ -21,7 +21,7 @@ def main():
                               names=['A', 'Z', 'Q[MeV]', 'Egamma[MeV]', 'Eelec[MeV]',
                                      'Eneutrino[MeV]', 'tau[s]'])
 
-    for index, row in dfbetaminus.query('Z == 83').iterrows():
+    for index, row in dfbetaminus.query('Z == 83 and A == 215').iterrows():
         z = int(row['Z'])
         a = int(row['A'])
         strnuclide = artisatomic.elsymbols[z].lower() + str(a)
@@ -41,7 +41,7 @@ def main():
                 # print(strheader)
                 assert strheader == 'A  	Element	Z  	N  	Par. Elevel	Unc. 	JPi       	Dec Mode	T1/2 (txt)    	T1/2 (num)        	Daughter	Radiation	Rad subtype 	Rad Ene.  	Unc       	EP Ene.   	Unc       	Rad Int.  	Unc       	Dose        	Unc'
                 # dfnuclide = pd.read_fwf(io.StringIO(strtable))
-                dfnuclide = pd.read_csv(io.StringIO(strtable), delimiter='\t')
+                dfnuclide = pd.read_csv(io.StringIO(strtable), delimiter='\t', dtype={'Par. Elevel': str})
                 newcols = []
                 for index, colname in enumerate(dfnuclide.columns):
                     colname = colname.strip()
@@ -52,27 +52,36 @@ def main():
                 dfnuclide['Dec Mode'] = dfnuclide['Dec Mode'].str.strip()
                 dfnuclide['Radiation'] = dfnuclide['Radiation'].str.strip()
                 dfnuclide['Rad subtype'] = dfnuclide['Rad subtype'].str.strip()
-                dfnuclide.query("`Par. Elevel` == 0")
-                if not dfnuclide.empty:
-                    print('  file half-life: ', row['tau[s]'] * math.log(2))
-                    print('  NNDC half-life: ', dfnuclide.iloc[0]['T1/2 (num)'])
-                # dfbetaminus = dfnuclide.query("`Dec Mode` == 'B-'")
-                # if not dfbetaminus.empty:
-                    print('  file Eelec: ', row['Eelec[MeV]'] * 1000, 'keV')
-                    dfrad_e = dfnuclide.query("Radiation == 'BM' or Radiation == 'E'")
-                    e_elec = (dfrad_e['Rad Ene.'] * dfrad_e['Rad Int.']).sum() / 100.
-                    print('  NNDC Eelec: ', e_elec, 'keV')
-
-                    print('  file Egamma: ', row['Egamma[MeV]'] * 1000, 'keV')
-                    dfrad_g = dfnuclide.query("Radiation == 'G' and `Rad subtype` == ''")
-                    e_gamma = (dfrad_g['Rad Ene.'] * dfrad_g['Rad Int.']).sum() / 100.
-                    print('  NNDC Egamma: ', e_gamma, 'keV')
-
-                    # print('  file Ealpha: ', row['Eelec[MeV]'] * 1000, 'keV')
-                    dfrad_a = dfnuclide.query("Radiation == 'A' and `Rad subtype` == ''")
-                    e_alpha = (dfrad_a['Rad Ene.'] * dfrad_a['Rad Int.']).sum() / 100.
-                    print('  NNDC Ealpha: ', e_alpha, 'keV')
+                dfnuclide['Par. Elevel'] = dfnuclide['Par. Elevel'].str.strip()
                 # print(dfnuclide)
+                # dfnuclide.query("`Par. Elevel` == '0.0'", inplace=True)
+                # print(dfnuclide)
+                for parelevel, dfdecay in dfnuclide.groupby('Par. Elevel'):
+                    try:
+                        is_groundlevel = float(parelevel) == 0.
+                    except ValueError:
+                        is_groundlevel = False
+                    print(f'  Parent_Elevel: {parelevel} is_groundlevel: {is_groundlevel}')
+                    if not dfdecay.empty:
+                        print('    file half-life: ', row['tau[s]'] * math.log(2))
+                        print('    NNDC half-life: ', dfdecay.iloc[0]['T1/2 (num)'])
+                    # dfbetaminus = dfnuclide.query("`Dec Mode` == 'B-'")
+                    # if not dfbetaminus.empty:
+                        print('    file Eelec: ', row['Eelec[MeV]'] * 1000, 'keV')
+                        dfrad_e = dfdecay.query("Radiation == 'BM' or Radiation == 'E'")
+                        e_elec = (dfrad_e['Rad Ene.'] * dfrad_e['Rad Int.']).sum() / 100.
+                        print('    NNDC Eelec: ', e_elec, 'keV')
+
+                        print('    file Egamma: ', row['Egamma[MeV]'] * 1000, 'keV')
+                        dfrad_g = dfdecay.query("Radiation == 'G' and `Rad subtype` == ''")
+                        e_gamma = (dfrad_g['Rad Ene.'] * dfrad_g['Rad Int.']).sum() / 100.
+                        print('    NNDC Egamma: ', e_gamma, 'keV')
+
+                        # print('  file Ealpha: ', row['Eelec[MeV]'] * 1000, 'keV')
+                        dfrad_a = dfdecay.query("Radiation == 'A' and `Rad subtype` == ''")
+                        e_alpha = (dfrad_a['Rad Ene.'] * dfrad_a['Rad Int.']).sum() / 100.
+                        print('    NNDC Ealpha: ', e_alpha, 'keV')
+                    # print(dfnuclide)
             else:
                 pass
                 # print('no data returned')
