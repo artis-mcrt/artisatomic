@@ -3,7 +3,6 @@ from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-import h5py
 from astropy import constants as const
 
 import artisatomic
@@ -13,7 +12,13 @@ import artisatomic
 
 datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
-filename_aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
+try:
+    import h5py
+
+    filename_aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
+except ModuleNotFoundError:
+    filename_aoife_dataset = False
+
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 

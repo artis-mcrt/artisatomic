@@ -414,6 +414,8 @@ def process_files(listelements, args):
                             hillier_photoion_targetconfigs[i],
                             photoionization_thresholds_ev[i],
                         ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels[i], args, flog)
+                    else:
+                        hillier_photoion_targetconfigs[i] = None
 
                 # elif handler == 'carsus':  # tardis Carsus
 
@@ -422,6 +424,7 @@ def process_files(listelements, args):
                 #         atomic_number, ion_stage, flog)
 
                 elif handler == "dream":  # DREAM database of Z >= 57
+                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -436,6 +439,7 @@ def process_files(listelements, args):
                 #         atomic_number, ion_stage, flog)
 
                 elif handler == "fac":
+                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -444,6 +448,7 @@ def process_files(listelements, args):
                     ) = readfacdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "tanakajplt":  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
