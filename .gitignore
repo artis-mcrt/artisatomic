@@ -22,3 +22,4 @@ recombination_rates/phixs.pdf
 .tags*
 testoutput
 testoutput/*
+_version.py
