@@ -223,8 +223,8 @@ hyd_phixs_energygrid_ryd: dict[tuple[int, int], float] = {}
 hyd_phixs: dict[tuple[int, int], float] = {}
 
 # keys are n quantum number
-hyd_gaunt_energygrid_ryd: dict[tuple[int, int], float] = {}
-hyd_gaunt_factor: dict[tuple[int, int], float] = {}
+hyd_gaunt_energygrid_ryd: dict[int, float] = {}
+hyd_gaunt_factor: dict[int, float] = {}
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -1186,8 +1186,8 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
     targetlist_of_targetconfig = defaultdict(list)
 
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
-        if lowerlevelid not in hillier_photoion_targetconfigs:
-            continue
+        # if lowerlevelid not in hillier_photoion_targetconfigs:
+        #     continue
         for targetconfig, targetconfig_fraction in hillier_photoion_targetconfigs[lowerlevelid]:
             if targetconfig not in targetlist_of_targetconfig:
                 # sometimes the target has a slash, e.g. '3d7_4Fe/3d7_a4Fe'
