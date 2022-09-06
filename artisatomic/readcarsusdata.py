@@ -1,13 +1,17 @@
-from collections import defaultdict, namedtuple
-from astropy import constants as const
-import artisatomic
-# from astropy import units as u
 import os.path
+from collections import defaultdict
+from collections import namedtuple
 from pathlib import Path
+
 import pandas as pd
+from astropy import constants as const
+
+import artisatomic
+
+# from astropy import units as u
 
 
-hc_in_ev_cm = (const.h * const.c).to('eV cm').value
+hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 # ionization_energies = NISTIonizationEnergies('Sr')
 gfall_reader = None
@@ -34,34 +38,34 @@ gfall_reader = None
 #
 #     return listelements
 
+
 def get_levelname(row):
-    return f'{row.label},enpercm={row.energy},j={row.j}'
+    return f"{row.label},enpercm={row.energy},j={row.j}"
 
 
 def read_levels_data(dflevels):
-    energy_level_tuple = namedtuple(
-        'energylevel', 'levelname energyabovegsinpercm g parity')
+    energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
 
     energy_levels = []
 
     for index, row in dflevels.iterrows():
-
-        parity = - index  # give a unique parity so that all transitions are permitted
+        parity = -index  # give a unique parity so that all transitions are permitted
         energyabovegsinpercm = float(row.energy)
         g = 2 * row.j + 1
         newlevel = energy_level_tuple(
-            levelname=get_levelname(row), parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
+            levelname=get_levelname(row), parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
+        )
         energy_levels.append(newlevel)
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ['IGNORE'] + energy_levels
+    return ["IGNORE"] + energy_levels
 
 
 def read_lines_data(energy_levels, dflines):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple('transition', 'lowerlevel upperlevel A coll_str')
+    transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
 
     for (lowerindex, upperindex), row in dflines.iterrows():
         lowerlevel = lowerindex + 1
@@ -81,16 +85,17 @@ def read_lines_data(energy_levels, dflines):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_charge = ion_stage - 1
 
-    print(f'Reading CARSUS database for Z={atomic_number} ion_stage {ion_stage}')
+    print(f"Reading CARSUS database for Z={atomic_number} ion_stage {ion_stage}")
 
     from carsus.io.nist import NISTWeightsComp, NISTIonizationEnergies
     from carsus.io.kurucz import GFALLReader
+
     # from carsus.io.zeta import KnoxLongZeta
     # from carsus.io.chianti_ import ChiantiReader
     # from carsus.io.output import TARDISAtomData
 
-    path_gfall = str((Path(__file__).parent.absolute() / '..' / 'atomic-data-kurucz' / 'gfall_latest.dat').resolve())
-    gfall_reader = GFALLReader(ions=f'{artisatomic.elsymbols[atomic_number]} {ion_charge}', fname=path_gfall)
+    path_gfall = str((Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz" / "gfall_latest.dat").resolve())
+    gfall_reader = GFALLReader(ions=f"{artisatomic.elsymbols[atomic_number]} {ion_charge}", fname=path_gfall)
 
     dflevels = gfall_reader.extract_levels().loc[atomic_number, ion_charge]
 
@@ -113,12 +118,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dflines = gfall_reader.extract_lines().loc[atomic_number, ion_charge]
 
-    dflines.eval('A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)   ', inplace=True)
+    dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)   ", inplace=True)
 
     # print(dflines)
 
-    transitions, transition_count_of_level_name = read_lines_data(
-        energy_levels, dflines)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
 
     # ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
     ionization_energy_in_ev = -1

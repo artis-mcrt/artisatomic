@@ -6,9 +6,9 @@
 ##################
 
 - Atomic number = 26 - 88
-- Charge state = from neutral to triply charged ions 
+- Charge state = from neutral to triply charged ions
 
-# File format 
+# File format
 X = Atomic number
 Y = Spectroscopic notation of ionization state (1 = I, 2 = II, 3 = III, and 4 = IV)
 

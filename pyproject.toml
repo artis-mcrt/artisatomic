@@ -1,0 +1,37 @@
+[build-system]
+requires = ["psutil>=5.9.0", "setuptools>=45", "setuptools_scm[toml]>=6.3", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "artisatomic"
+authors = [
+    {name = "ARTIS Collaboration", email = "luke.shingles@gmail.com"},
+]
+description="Tools to create an atomic database for use with ARTIS."
+readme = "README.md"
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+]
+dynamic = ["version", "dependencies", "entry-points"]
+requires-python = ">=3.8"
+
+[tool.black]
+line-length = 120
+preview = true
+
+[tool.mypy]
+python_version = '3.10'
+exclude = "(build)|(tests)"
+ignore_missing_imports = true
+files = 'artistools/**/*.py'
+
+[tool.pylint]
+max-line-length = 120
+errors-only = true
+
+[tool.pylint.typecheck]
+ignored-modules = ["astropy", "extinction"]
+
+[tool.setuptools_scm]
+write_to = "_version.py"
+local_scheme = "no-local-version"
