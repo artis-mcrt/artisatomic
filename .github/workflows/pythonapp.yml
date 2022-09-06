@@ -1,88 +1,78 @@
+---
 name: Build and test
 
 on: [push]
 
 jobs:
-  build:
-    strategy:
-        matrix:
-            os: [ubuntu-latest]
+    build:
+        strategy:
+            matrix:
+                os: [ubuntu-latest]
 
-    runs-on: ${{ matrix.os }}
-    steps:
+        runs-on: ${{ matrix.os }}
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
 
-    - name: Checkout Code
-      uses: actions/checkout@v2.3.4
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  cache: pip
+                  python-version: '3.10'
 
-    - name: Set up Python 3.9
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.9'
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  python -m pip install -r requirements.txt
 
-    - name: Get pip cache dir
-      id: pip-cache
-      run: |
-        echo "::set-output name=dir::$(pip cache dir)"
+            - name: Install artisatomic
+              run: |
+                  python -m pip install -e .
 
-    - name: Cache pip
-      uses: actions/cache@v2.1.4
-      with:
-        path: ${{ steps.pip-cache.outputs.dir }}
-        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-        restore-keys: |
-         ${{ runner.os }}-pip-
+            - name: Lint with flake8
+              working-directory: artisatomic/
+              run: |
+                  # stop the build if there are Python syntax errors or undefined names
+                  flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+                  # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
+                  flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
+            - name: Cache CMFGEN atomic data
+              uses: actions/cache@v3
+              id: cache-cmfgendata
+              with:
+                  path: atomic-data-hillier/atomic_data_15nov16.tar.xz
+                  key: atomic-data-hillier/atomic_data_15nov16.tar.xz
 
-    - name: Install artisatomic
-      run: |
-        python -m pip install -e .
+            - name: Download/extract CMFGEN atomic data
+              working-directory: atomic-data-hillier/
+              run: source ./setup_cmfgen_data.sh
 
-    - name: Lint with flake8
-      working-directory: artisatomic/
-      run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+            - name: Test with pytest
+              run: |
+                  pytest
 
-    - name: Cache CMFGEN atomic data
-      uses: actions/cache@v2.1.4
-      id: cache-cmfgendata
-      with:
-          path: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
-          key: "atomic-data-hillier/atomic_data_15nov16.tar.xz"
+            - name: Generate artis atomic data files
+              run: |
+                  makeartisatomicfiles -output_folder test_output
 
-    - name: Download/extract CMFGEN atomic data
-      working-directory: atomic-data-hillier/
-      run: source ./setup_cmfgen_data.sh
+            - name: Checksum output files
+              run: |
+                  cat test_output/adata.txt
+                  md5sum test_output/*.txt
+                  md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c test_output/adata.txt)
+                  md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 test_output/compositiondata.txt)
+                  md5sum -c <(echo 1c9b987f4eebc22003050a168d0c091d test_output/phixsdata_v2.txt)
+                  md5sum -c <(echo cd240462da8b7e55b6ead0d0bd3adb40 test_output/transitiondata.txt)
 
-    - name: Test with pytest
-      run: |
-        pytest
+            - name: tar and zip output files
+              run: |
+                  tar -cvzf artis_files.tar.gz test_output/*
 
-    - name: Generate artis atomic data files
-      run: |
-        makeartisatomicfiles -output_folder test_output
-
-    - name: Checksum output files
-      run: |
-        cat test_output/adata.txt
-        md5sum test_output/*.txt
-        md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c test_output/adata.txt)
-        md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 test_output/compositiondata.txt)
-        md5sum -c <(echo 1c9b987f4eebc22003050a168d0c091d test_output/phixsdata_v2.txt)
-        md5sum -c <(echo cd240462da8b7e55b6ead0d0bd3adb40 test_output/transitiondata.txt)
-
-    - name: tar and zip output files
-      run: |
-        tar -cvzf artis_files.tar.gz test_output/*
-
-    - name: Upload output files
-      uses: actions/upload-artifact@v2
-      with:
-        name: artis_files.tar.gz
-        path: artis_files.tar.gz
+            - name: Upload output files
+              uses: actions/upload-artifact@v2
+              with:
+                  name: artis_files.tar.gz
+                  path: artis_files.tar.gz
