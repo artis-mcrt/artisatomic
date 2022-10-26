@@ -30,7 +30,7 @@ setup(
             "convertartisatomictopythonrt = artisatomic.converttopythonrt:main",
         ]
     },
-    python_requires=">==3.8",
+    python_requires=">==3.9",
     setup_requires=["psutil>=5.9.0", "setuptools>=45", "setuptools_scm[toml]>=6.2", "wheel"],
     tests_require=["pytest", "pytest-runner", "pytest-cov"],
 )
