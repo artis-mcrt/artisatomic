@@ -1186,6 +1186,8 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
     targetlist_of_targetconfig = defaultdict(list)
 
     for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+        if hillier_photoion_targetconfigs is None:
+            continue
         if lowerlevelid in hillier_photoion_targetconfigs and hillier_photoion_targetconfigs[lowerlevelid] is None:
             continue  # photoionisation flagged as not available
 
