@@ -22,8 +22,9 @@ preview = true
 [tool.mypy]
 python_version = '3.11'
 exclude = "(build)|(tests)"
+packages = "artisatomic"
 ignore_missing_imports = true
-files = 'artisatomic/**/*.py'
+warn_unused_configs = true
 
 [tool.pylint]
 max-line-length = 120

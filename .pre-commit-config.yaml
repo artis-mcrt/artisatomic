@@ -45,15 +45,15 @@ repos:
       hooks:
           - id: mypy
             # language: system
-            additional_dependencies: [numpy, types-PyYAML]
+            additional_dependencies: [numpy, types-PyYAML, types-requests, types-tabulate]
             types: [python]
             require_serial: true
             # verbose: true
-    - repo: local
-      hooks:
-          - id: pylint
-            name: pylint
-            entry: pylint
-            language: system
-            types: [python]
-            args: [-rn, -sn, --errors-only]
+    # - repo: local
+    #   hooks:
+    #       - id: pylint
+    #         name: pylint
+    #         entry: pylint
+    #         language: system
+    #         types: [python]
+    #         args: [-rn, -sn, --errors-only]
