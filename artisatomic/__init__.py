@@ -5,10 +5,14 @@ import itertools
 import math
 import multiprocessing as mp
 import os
+import queue
 import sys
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
+from typing import Any
+from typing import Optional
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -88,17 +92,17 @@ hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
 h_in_ev_seconds = const.h.to("eV s").value
 
 
-def drop_handlers(list_ions):
+def drop_handlers(list_ions: list[Union[int, tuple[int, str]]]) -> list[int]:
     """
     Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]
     """
     list_out = []
     for ion_stage in list_ions:
-        try:
-            if len(ion_stage) == 2:
-                list_out.append(ion_stage[0])
-        except TypeError:
+        if isinstance(ion_stage, int):
             list_out.append(ion_stage)
+        else:
+            list_out.append(ion_stage[0])
+
     return list_out
 
 
@@ -165,7 +169,7 @@ def main(args=None, argsraw=None, **kwargs):
     process_files(listelements, args)
 
 
-def clear_files(args):
+def clear_files(args: argparse.Namespace) -> None:
     # clear out the file contents, so these can be appended to later
     with open(os.path.join(args.output_folder, "adata.txt"), "w"), open(
         os.path.join(args.output_folder, "transitiondata.txt"), "w"
@@ -176,42 +180,40 @@ def clear_files(args):
                 fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
-def process_files(listelements, args):
+def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace) -> None:
     for elementindex, (atomic_number, listions) in enumerate(listelements):
         if not listions:
             continue
 
         nahar_core_states = [["IGNORE"] for x in listions]  # list of named tuples (naharcorestaterow)
-        hillier_photoion_targetconfigs = [[] for x in listions]
+        hillier_photoion_targetconfigs: list = [[] for x in listions]
 
         # keys are (2S+1, L, parity), values are strings of electron configuration
-        nahar_configurations = [{} for x in listions]
+        nahar_configurations: list[dict[tuple, str]] = [{} for x in listions]
 
         # keys are (2S+1, L, parity, indexinsymmetry), values are lists of (energy
         # in Rydberg, cross section in Mb) tuples
-        nahar_phixs_tables = [{} for x in listions]
+        nahar_phixs_tables: list[dict[tuple, list[tuple]]] = [{} for x in listions]
 
         ionization_energy_ev = [0.0 for x in listions]
-        thresholds_ev_dict = [{} for x in listions]
+        thresholds_ev_dict: list[dict] = [{} for x in listions]
 
         # list of named tuples (hillier_transition_row)
-        transitions = [[] for x in listions]
-        transition_count_of_level_name = [{} for x in listions]
-        upsilondicts = [{} for x in listions]
+        transitions: list = [[] for x in listions]
+        transition_count_of_level_name: list[dict] = [{} for x in listions]
+        upsilondicts: list[dict] = [{} for x in listions]
 
-        energy_levels = [[] for x in listions]
+        energy_levels: list = [[] for x in listions]
         # index matches level id
-        photoionization_thresholds_ev = [[] for _ in listions]
-        photoionization_crosssections = [[] for _ in listions]  # list of cross section in Mb
-        photoionization_targetfractions = [[] for _ in listions]
+        photoionization_thresholds_ev: list = [[] for _ in listions]
+        photoionization_crosssections: list = [[] for _ in listions]  # list of cross section in Mb
+        photoionization_targetfractions: list = [[] for _ in listions]
 
         for i, ion_stage in enumerate(listions):
             handler = None
-            try:
-                if len(ion_stage) == 2:
-                    ion_stage, handler = ion_stage
-            except TypeError:
-                pass
+
+            if not isinstance(ion_stage, int):
+                ion_stage, handler = ion_stage
 
             if handler is None:
                 if atomic_number == 2 and ion_stage == 3:
@@ -322,7 +324,7 @@ def process_files(listelements, args):
                         )
 
                     hillier_levelnamesnoJ_matching_term = defaultdict(list)
-                    hillier_transitions = []
+                    hillier_transitions: list = []
                     hillier_energy_levels = ["IGNORE"]
                     (
                         energy_levels[i],
@@ -476,7 +478,7 @@ def process_files(listelements, args):
         )
 
 
-def read_storey_2016_upsilondata(flog):
+def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
     upsilondict = {}
 
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
@@ -755,7 +757,7 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
-def isfloat(value):
+def isfloat(value: Any) -> bool:
     try:
         float(value.replace("D", "E"))
         return True
@@ -764,23 +766,26 @@ def isfloat(value):
 
 
 # split a list into evenly sized chunks
-def chunks(listin, chunk_size):
+def chunks(listin: list, chunk_size: int) -> list:
     return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]
 
 
-def reduce_phixs_tables(dicttables, optimaltemperature, nphixspoints, phixsnuincrement, hideoutput=False):
+def reduce_phixs_tables(
+    dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, hideoutput: bool = False
+) -> dict:
     """
     Receives a dictionary, with each item being a 2D array of energy and cross section points
     Returns a dictionary with the items having been downsampled into a 1D array
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
-    out_q = mp.Queue()
+    out_q: queue.Queue = mp.Queue()
     procs = []
 
     if not hideoutput:
         print(f"Processing {len(dicttables.keys()):d} phixs tables")
     nprocs = os.cpu_count()
+    assert nprocs is not None
     keylist = dicttables.keys()
     for procnum in range(nprocs):
         dicttablesslice = itertools.islice(dicttables.items(), procnum, len(keylist), nprocs)
@@ -807,7 +812,9 @@ def reduce_phixs_tables(dicttables, optimaltemperature, nphixspoints, phixsnuinc
 # this method downsamples the photoionization cross section table to a
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
-def reduce_phixs_tables_worker(dicttables, optimaltemperature, nphixspoints, phixsnuincrement, out_q):
+def reduce_phixs_tables_worker(
+    dicttables: dict, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, out_q: queue.Queue
+) -> None:
     dictout = {}
 
     ryd_to_hz = (u.rydberg / const.h).to("Hz").value
@@ -946,11 +953,11 @@ def reduce_phixs_tables_worker(dicttables, optimaltemperature, nphixspoints, phi
     out_q.put(dictout)
 
 
-def check_forbidden(levela, levelb):
+def check_forbidden(levela, levelb) -> bool:
     return levela.parity == levelb.parity
 
 
-def weightedavgenergyinev(energylevels_thision, ids):
+def weightedavgenergyinev(energylevels_thision, ids) -> float:
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
@@ -960,7 +967,7 @@ def weightedavgenergyinev(energylevels_thision, ids):
     return genergysum / gsum
 
 
-def weightedavgthresholdinev(energylevels_thision, ids):
+def weightedavgthresholdinev(energylevels_thision, ids) -> float:
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
@@ -977,7 +984,7 @@ lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 # reads a Hillier level name and returns the term
 # tuple (twosplusone, l, parity)
-def get_term_as_tuple(config):
+def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     config = config.split("[")[0]
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
@@ -1026,7 +1033,7 @@ def get_term_as_tuple(config):
 
 # e.g. turn '(4F)' into (4, 3, -1)
 # or '(4F1) into (4, 3, 1)
-def interpret_parent_term(strin):
+def interpret_parent_term(strin: str) -> tuple[int, int, int]:
     strin = strin.strip("()")
     lposition = -1
     for charpos, char in reversed(list(enumerate(strin))):
@@ -1049,7 +1056,7 @@ def interpret_parent_term(strin):
 # e.g. convert "3d64s  (6D ) 8p  j5Fo" to "3d64s8p_5Fo",
 # similar to Hillier style "3d6(5D)4s8p_5Fo" but without the parent term
 # (and mysterious letter before the term if present)
-def reduce_configuration(instr):
+def reduce_configuration(instr: str) -> str:
     if instr == "-1":
         return "-1"
     instr = instr.split("[")[0]  # remove trailing bracketed J value
@@ -1069,7 +1076,7 @@ def reduce_configuration(instr):
     return outstr
 
 
-def remove_bracketed_part(instr):
+def remove_bracketed_part(instr: str) -> str:
     """
     Operates on a string by removing anything between parentheses (including the parentheses)
     e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'
@@ -1088,7 +1095,7 @@ def remove_bracketed_part(instr):
     return outstr
 
 
-def interpret_configuration(instr_orig):
+def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, int]:
     max_n = 20  # maximum possible principle quantum number n
     instr = instr_orig
     instr = instr.split("[")[0]  # remove trailing bracketed J value
@@ -1131,7 +1138,7 @@ def interpret_configuration(instr_orig):
             indexinsymmetry = alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
-    electron_config = []
+    electron_config: list[str] = []
     if not instr.startswith("Eqv st"):
         while instr:
             if instr[-1].upper() in lchars:
@@ -1173,7 +1180,7 @@ def interpret_configuration(instr_orig):
     return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
 
 
-def get_parity_from_config(instr):
+def get_parity_from_config(instr) -> int:
     configsplit = interpret_configuration(instr)[0]
     lsum = 0
     for orbitalstr in configsplit:
@@ -1583,15 +1590,17 @@ def write_phixs_data(
             fphixs.write(f"{crosssection:16.8E}\n")
 
 
-def write_compositionfile(listelements, args):
+def write_compositionfile(
+    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace
+) -> None:
     print("Writing compositiondata.txt")
     with open(os.path.join(args.output_folder, "compositiondata.txt"), "w") as fcomp:
         fcomp.write(f"{len(listelements):d}\n")
         fcomp.write("0\n0\n")
         for atomic_number, listions in listelements:
-            listions = drop_handlers(listions)
-            ion_stage_min = min(listions)
-            ion_stage_max = max(listions)
+            listions_nohandlers: list[int] = drop_handlers(listions)
+            ion_stage_min = min(listions_nohandlers)
+            ion_stage_max: int = max(listions_nohandlers)
             nions = ion_stage_max - ion_stage_min + 1
             fcomp.write(
                 f"{atomic_number:d}  {nions:d}  {ion_stage_min:d}  {ion_stage_max:d}  "

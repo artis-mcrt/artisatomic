@@ -5,7 +5,9 @@ import sys
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
-from typing import Dict
+from typing import Any
+from typing import Optional
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -240,16 +242,18 @@ def hillier_ion_folder(atomic_number, ion_stage):
     )
 
 
-def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    hillier_energy_levels = ["IGNORE"]
-    hillier_levelnamesnoJ_matching_term = defaultdict(list)
-    transition_count_of_level_name = defaultdict(int)
+def read_levels_and_transitions(
+    atomic_number: int, ion_stage: int, flog
+) -> tuple[float, list, list, defaultdict[str, int], defaultdict[tuple[int, int, int], list[str]]]:
+    hillier_energy_levels: list = ["IGNORE"]
+    hillier_levelnamesnoJ_matching_term: defaultdict[tuple[int, int, int], list[str]] = defaultdict(list)
+    transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
-    transitions = []
+    transitions: list = []
 
     if atomic_number == 1 and ion_stage == 2:
         ionization_energy_ev = 0.0
-        qub_energy_level_row = namedtuple(
+        qub_energy_level_row = namedtuple(  # type: ignore
             "energylevel", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
         )
 
@@ -268,7 +272,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
     )
     artisatomic.log_and_print(flog, "Reading " + filename)
-    hillier_transition_row = namedtuple(
+    hillier_transition_row = namedtuple(  # type: ignore
         "transition", "namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str"
     )
 
@@ -314,7 +318,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat
         # assert(row_format_energy_level == hillier_rowformat[format_date])
 
-        hillier_energy_level_row = namedtuple(
+        hillier_energy_level_row = namedtuple(  # type: ignore
             "energylevel",
             row_format_energy_level + " corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore",
         )
@@ -323,19 +327,19 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             row = line.split()
             # check for right number of columns and that are all numbers except first column
             if len(row) == len(row_format_energy_level.split()) and all(map(artisatomic.isfloat, row[1:])):
-                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, "", -1)
+                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, "", -1)  # type: ignore
 
-                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip("-"))
-                levelname = hillier_energy_level.levelname
+                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip("-"))  # type: ignore
+                levelname = hillier_energy_level.levelname  # type: ignore
                 if levelname not in hillier_name_replacements:
                     (twosplusone, l, parity) = artisatomic.get_term_as_tuple(levelname)
                 else:
                     (twosplusone, l, parity) = artisatomic.get_term_as_tuple(hillier_name_replacements[levelname])
 
-                hillier_energy_level = hillier_energy_level._replace(
+                hillier_energy_level = hillier_energy_level._replace(  # type: ignore
                     hillierlevelid=hillierlevelid,
-                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace("D", "E")),
-                    g=float(hillier_energy_level.g),
+                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace("D", "E")),  # type: ignore
+                    g=float(hillier_energy_level.g),  # type: ignore
                     twosplusone=twosplusone,
                     l=l,
                     parity=parity,
@@ -344,7 +348,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 hillier_energy_levels.append(hillier_energy_level)
 
                 if twosplusone == -1 and atomic_number > 1:
-                    # -1 indicates that the term could not be interpreted
+                    # -1 indicates that the term could not be interpreted
                     if parity == -1:
                         artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
                     # else:
@@ -355,8 +359,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                         hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)].append(levelnamenoJ)
 
                 # if this is the ground state
-                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)
+                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:  # type: ignore
+                    hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)  # type: ignore
 
                 if hillierlevelid != len(hillier_energy_levels) - 1:
                     print(
@@ -572,7 +576,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 3:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(  # type: ignore
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
@@ -1315,7 +1319,9 @@ def read_hyd_phixsdata():
             hyd_gaunt_factor[n] = gaunt_values  # cross sections in Megabarns
 
 
-def extend_ion_list(listelements, maxionstage=None):
+def extend_ion_list(
+    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], maxionstage: Optional[int] = None
+):
     for atomic_number, ion_stage in ions_data.keys():
         if atomic_number == 1 or (maxionstage is not None and ion_stage > maxionstage):
             continue  # skip
