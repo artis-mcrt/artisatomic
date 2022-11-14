@@ -16,7 +16,7 @@ from artisatomic.cFACReader import GetLines
 
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-BASEPATH = "/Users/luke/Dropbox/GitHub/opacities/SystematicCalculations"
+BASEPATH = "/Volumes/GoogleDrive/Shared drives/Atomic Data Group/opacities/SystematicCalculations"
 
 
 def extend_ion_list(listelements):
@@ -114,6 +114,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = -1
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels and {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
