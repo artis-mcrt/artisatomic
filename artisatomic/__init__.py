@@ -64,7 +64,7 @@ roman_numerals = (
     "XX",
 )
 
-listelements = [
+listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]] = [
     # (2, [1, 2]),
     # (8, [1, 2, 3, 4]),
     # (14, [1, 2, 3, 4]),
