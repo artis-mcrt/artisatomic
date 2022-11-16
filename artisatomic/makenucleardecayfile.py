@@ -32,7 +32,7 @@ def main():
 
     dfmodel, _, _ = at.inputmodel.get_modeldata(
         "/Volumes/GoogleDrive/My"
-        " Drive/artis_runs/kilonova_SFHo_1d_0p2day/kilonova_SFHo_1d_0p2day_ufix_grey_20220413_cambridge"
+        " Drive/Archive/Mergers/SFHo_long/SFHo_long_snapshot/artismodel_SFHo_long-radius-entropy_0p05d"
     )
     nuclist = [at.get_z_a_nucname(c) for c in dfmodel.columns if c.startswith("X_") and not c.endswith("Fegroup")]
 
