@@ -100,7 +100,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     levels_file = ion_folder + f"/{elsym}{ion_stage_roman}.lev.asc"
     lines_file = ion_folder + f"/{elsym}{ion_stage_roman}.tr.asc"
 
-    print(f"Reading FAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {ion_folder}")
+    print(
+        f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
+        f" {ion_folder}"
+    )
 
     dflevels = GetLevels(filename=levels_file, Z=atomic_number, Get_csv=False, Get_dat=False)
     # print(dflevels)

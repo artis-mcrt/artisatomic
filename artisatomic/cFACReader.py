@@ -28,7 +28,9 @@ def GetLevels_FAC(filename):
     names = ["Ilev", "Ibase", "Energy", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
     levels_FAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names)
     levels_FAC["Config"] = levels_FAC["Configs"].apply(lambda x: " ".join(x.split(".")))
-    levels_FAC["Config rel"] = levels_FAC["Config rel"].apply(lambda x: x.replace(".", " "))
+    levels_FAC["Config rel"] = levels_FAC["Config rel"].apply(
+        lambda x: x.replace(".", " ") if isinstance(x, str) else x
+    )
     levels_FAC["g"] = levels_FAC["2J"].apply(lambda x: x + 1)
     levels_FAC = levels_FAC[["Config", "Config rel", "P", "2J", "g", "Energy"]].copy()
     levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: s.replace("1", ""))
@@ -110,7 +112,7 @@ def GetLevels(filename, Z, ion_name=0, date=date.today(), Get_csv=True, Get_dat=
     GState = linecache.getline(filename, 8)[8:]
     IonStage = Z - int(float(linecache.getline(filename, 6)[6:].strip()))
     version_FAC = linecache.getline(filename, 1).split(" ")[0]
-
+    print("FAC/cFAC: ", version_FAC)
     if version_FAC == "FAC":
         levels = GetLevels_FAC(filename)
     elif version_FAC == "cFAC":
