@@ -9,6 +9,7 @@ import queue
 import sys
 from collections import defaultdict
 from collections import namedtuple
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from typing import Optional
@@ -64,18 +65,21 @@ roman_numerals = (
     "XX",
 )
 
-listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]] = [
-    # (2, [1, 2]),
-    # (8, [1, 2, 3, 4]),
-    # (14, [1, 2, 3, 4]),
-    # (16, [1, 2, 3, 4]),
-    # (20, [1, 2, 3, 4]),
+listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]]
+
+listelements = [
     (26, [1, 2, 3, 4, 5]),
     (27, [2, 3, 4]),
     (28, [2, 3, 4, 5]),
-    # (56, [2]),
-    # (58, [2]),
 ]
+
+# listelements = [
+#     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
+#     (39, [(1, "carsus"), (2, "carsus")]),
+#     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
+#     (92, [(2, "fac"), (3, "fac")]),
+#     (94, [(2, "fac"), (3, "fac")]),
+# ]
 
 # include everything we have data for
 # listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5)
@@ -152,6 +156,7 @@ def main(args=None, argsraw=None, **kwargs):
         parser.set_defaults(**kwargs)
         args = parser.parse_args(argsraw)
 
+    assert len(listelements) > 0
     readhillierdata.read_hyd_phixsdata()
 
     os.makedirs(args.output_folder, exist_ok=True)
@@ -267,6 +272,7 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
 
                 # if False:
                 #     pass
+                hillier_photoion_targetconfigs[i] = None
 
                 # Call readHedata for He III
                 if handler == "boyle":
@@ -426,7 +432,6 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
                 #         atomic_number, ion_stage, flog)
 
                 elif handler == "dream":  # DREAM database of Z >= 57
-                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -434,14 +439,15 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
                         transition_count_of_level_name[i],
                     ) = readdreamdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
-                # elif handler == 'lisbon':
-
-                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                #      transition_count_of_level_name[i]) = readlisbondata.read_levels_and_transitions(
-                #         atomic_number, ion_stage, flog)
+                # elif handler == "lisbon":
+                #     (
+                #         ionization_energy_ev[i],
+                #         energy_levels[i],
+                #         transitions[i],
+                #         transition_count_of_level_name[i],
+                #     ) = readlisbondata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "fac":
-                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -450,7 +456,6 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
                     ) = readfacdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "tanakajplt":  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
-                    hillier_photoion_targetconfigs[i] = None
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -768,6 +773,30 @@ def isfloat(value: Any) -> bool:
 # split a list into evenly sized chunks
 def chunks(listin: list, chunk_size: int) -> list:
     return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]
+
+
+@lru_cache(maxsize=1)
+def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
+    """
+    get a dictionary where dictioniz[(atomic_number, ion_sage)] = ionization_energy_ev
+    """
+    dfnist = pd.read_table(
+        PYDIR / "nist_ionization.txt",
+        sep="\t",
+        usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+    )
+
+    dictioniz = {}
+    for atomic_number, ion_charge, ioniz_ev in dfnist[
+        ["At. num", "Ion Charge", "Ionization Energy (a) (eV)"]
+    ].itertuples(index=False):
+        try:
+            ion_stage = int(ion_charge) + 1
+            dictioniz[(int(atomic_number), ion_stage)] = ioniz_ev
+        except ValueError:
+            pass
+
+    return dictioniz
 
 
 def reduce_phixs_tables(
