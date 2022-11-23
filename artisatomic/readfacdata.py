@@ -100,9 +100,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     levels_file = ion_folder + f"/{elsym}{ion_stage_roman}.lev.asc"
     lines_file = ion_folder + f"/{elsym}{ion_stage_roman}.tr.asc"
 
-    print(
+    artisatomic.log_and_print(
+        flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {ion_folder}"
+        f" {ion_folder}",
     )
 
     dflevels = GetLevels(filename=levels_file, Z=atomic_number, Get_csv=False, Get_dat=False)
@@ -115,7 +116,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
 
-    ionization_energy_in_ev = -1
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
     artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels and {len(transitions)} transitions")
 
