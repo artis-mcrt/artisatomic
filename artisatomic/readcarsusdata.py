@@ -17,6 +17,39 @@ hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 gfall_reader = None
 
 
+def find_gfall(atomic_number: int, ion_charge: int) -> Path:
+    path_gfall = (
+        Path(__file__).parent.absolute()
+        / ".."
+        / "atomic-data-kurucz"
+        / "extendedatoms"
+        / f"gf{atomic_number:02d}{ion_charge:02d}.lines"
+    ).resolve()
+
+    if not path_gfall.is_file():
+        path_gfall = (
+            Path(__file__).parent.absolute()
+            / ".."
+            / "atomic-data-kurucz"
+            / "extendedatoms"
+            / f"gf{atomic_number:02d}{ion_charge:02d}z.lines"
+        ).resolve()
+
+    if not path_gfall.is_file():
+        path_gfall = (
+            Path(__file__).parent.absolute()
+            / ".."
+            / "atomic-data-kurucz"
+            / "zztar"
+            / f"gf{atomic_number:02d}{ion_charge:02d}.all"
+        ).resolve()
+
+    if not path_gfall.is_file():
+        raise FileNotFoundError(f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}")
+
+    return path_gfall
+
+
 # def extend_ion_list(listelements):
 #     selected_ions = [(38, 1)]
 #     for atomic_number, charge in selected_ions:
@@ -85,48 +118,27 @@ def read_lines_data(energy_levels, dflines):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_charge = ion_stage - 1
 
-    print(f"Reading CARSUS database for Z={atomic_number} ion_stage {ion_stage}")
+    artisatomic.log_and_print(flog, f"Using Kurucz via CARSUS for Z={atomic_number} ion_stage {ion_stage}")
 
-    from carsus.io.nist import NISTWeightsComp, NISTIonizationEnergies
     from carsus.io.kurucz import GFALLReader
 
-    # from carsus.io.zeta import KnoxLongZeta
-    # from carsus.io.chianti_ import ChiantiReader
-    # from carsus.io.output import TARDISAtomData
-
-    path_gfall = str((Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz" / "gfall_latest.dat").resolve())
-    gfall_reader = GFALLReader(ions=f"{artisatomic.elsymbols[atomic_number]} {ion_charge}", fname=path_gfall)
+    # path_gfall = (Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz" / "gfall.dat").resolve()
+    path_gfall = find_gfall(atomic_number, ion_charge)
+    artisatomic.log_and_print(flog, f"Reading {path_gfall}")
+    gfall_reader = GFALLReader(ions=f"{artisatomic.elsymbols[atomic_number]} {ion_charge}", fname=str(path_gfall))
 
     dflevels = gfall_reader.extract_levels().loc[atomic_number, ion_charge]
 
-    # print(dflevels)
-
-    # from nistasd import NISTLines
-    #
-    # nist = NISTLines(spectrum='Ce')
-    # energy_levels = nist.get_energy_level_data()
-    # print("energy_levels.keys() = ", energy_levels['Ce I'])
-    # for ion_stage in energy_levels:
-    #     print("Number of energy levels: {0} for {1}".format(len(energy_levels[ion_stage]), ion_stage))
-    #     df = pd.DataFrame(energy_levels[ion_stage])
-    #     print(df)
-
     energy_levels = read_levels_data(dflevels)
 
-    # for x in energy_levels:
-    #     print(x)
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
 
     dflines = gfall_reader.extract_lines().loc[atomic_number, ion_charge]
 
     dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)   ", inplace=True)
 
-    # print(dflines)
-
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
 
-    # ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
-    ionization_energy_in_ev = -1
-
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

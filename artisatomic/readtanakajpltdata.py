@@ -46,18 +46,18 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     with open(jpltpath / filename) as fin:
-        print(fin.readline().strip())
-        print(fin.readline().strip())
-        print(fin.readline().strip())
+        artisatomic.log_and_print(flog, fin.readline().strip())
+        artisatomic.log_and_print(flog, fin.readline().strip())
+        artisatomic.log_and_print(flog, fin.readline().strip())
         assert fin.readline().strip() == f"# {atomic_number} {ion_stage}"
         levelcount, transitioncount = [int(x) for x in fin.readline().removeprefix("# ").split()]
-        print(f"levels: {levelcount}")
-        print(f"transitions: {transitioncount}")
+        artisatomic.log_and_print(flog, f"levels: {levelcount}")
+        artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
 
         fin.readline()
         str_ip_line = fin.readline()
         ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
-        print(f"ionization energy: {ionization_energy_in_ev} eV")
+        artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
         assert fin.readline().strip() == "# Energy levels"
         assert fin.readline().strip() == "# num  weight parity      E(eV)      configuration"
 
