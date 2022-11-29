@@ -22,8 +22,9 @@ def extend_ion_list(listelements):
 
     for atomic_number, ion_stage in tanakaions:
         found_element = False
-        for tmp_atomic_number, list_ions in listelements:
+        for tmp_atomic_number, list_ions_handlers in listelements:
             if tmp_atomic_number == atomic_number:
+                list_ions = [x if isinstance(x, int) else x[0] for x in list_ions_handlers]
                 if ion_stage not in list_ions:
                     list_ions.append((ion_stage, "tanakajplt"))
                     list_ions.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
