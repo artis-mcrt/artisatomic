@@ -36,11 +36,10 @@ def extend_ion_list(listelements):
 
         found_element = False
         for tmp_atomic_number, list_ions_handlers in listelements:
-            list_ions = [x if isinstance(x, int) else x[0] for x in list_ions_handlers]
             if tmp_atomic_number == atomic_number:
-                if ion_stage not in list_ions:
-                    list_ions.append((ion_stage, "dream"))
-                    list_ions.sort()
+                if ion_stage not in [x if isinstance(x, int) else x[0] for x in list_ions_handlers]:
+                    list_ions_handlers.append((ion_stage, "dream"))
+                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
                 found_element = True
 
         if not found_element:
