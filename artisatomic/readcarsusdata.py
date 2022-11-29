@@ -140,5 +140,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
