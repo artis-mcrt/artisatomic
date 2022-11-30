@@ -23,6 +23,7 @@ from scipy import integrate
 from scipy import interpolate
 
 import artisatomic.readboyledata as readboyledata
+import artisatomic.readcarsusdata as readcarsusdata
 import artisatomic.readdreamdata as readdreamdata
 import artisatomic.readfacdata as readfacdata
 import artisatomic.readhillierdata as readhillierdata
@@ -32,7 +33,6 @@ import artisatomic.readtanakajpltdata as readtanakajpltdata
 from artisatomic.manual_matches import hillier_name_replacements
 from artisatomic.manual_matches import nahar_configuration_replacements
 
-# import artisatomic.readcarsusdata as readcarsusdata
 # import artisatomic.readlisbondata as readlisbondata
 
 PYDIR = Path(__file__).parent.resolve()
@@ -424,11 +424,13 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
                     else:
                         hillier_photoion_targetconfigs[i] = None
 
-                # elif handler == 'carsus':  # tardis Carsus
-
-                #     (ionization_energy_ev[i], energy_levels[i], transitions[i],
-                #      transition_count_of_level_name[i]) = readcarsusdata.read_levels_and_transitions(
-                #         atomic_number, ion_stage, flog)
+                elif handler == "carsus":  # tardis Carsus
+                    (
+                        ionization_energy_ev[i],
+                        energy_levels[i],
+                        transitions[i],
+                        transition_count_of_level_name[i],
+                    ) = readcarsusdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "dream":  # DREAM database of Z >= 57
                     (
