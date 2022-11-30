@@ -81,7 +81,7 @@ def read_lines_data(energy_levels, dflines, flog):
         upperlevel = int(row["Upper"]) + 1
         if lowerlevel > upperlevel:
             artisatomic.log_and_print(
-                flog, "WARNING swapping transition {upperlevel} -> {lowerlevel} to {lowerlevel} -> {upperlevel}"
+                flog, f"WARNING swapping transition {upperlevel} -> {lowerlevel} to {lowerlevel} -> {upperlevel}"
             )
             lowerlevel, upperlevel = upperlevel, lowerlevel
         assert upperlevel != lowerlevel
