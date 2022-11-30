@@ -79,6 +79,7 @@ def read_lines_data(energy_levels, dflines):
     for index, row in dflines.iterrows():
         lowerlevel = int(row["Lower"]) + 1
         upperlevel = int(row["Upper"]) + 1
+        assert lowerlevel < upperlevel
         A = row["TR_rate[1/s]"]
 
         transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A, coll_str=-1)
