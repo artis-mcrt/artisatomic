@@ -810,7 +810,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
                     # sys.exit()
             except IndexError:
-                print("WARNING: No non-zero cross section points for {lowerlevelname}")
+                print(f"WARNING: No non-zero cross section points for {lowerlevelname}")
 
     # normalise the target factors and scale the phixs table
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
