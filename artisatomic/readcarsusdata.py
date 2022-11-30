@@ -1,4 +1,3 @@
-import os.path
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
@@ -8,12 +7,9 @@ from astropy import constants as const
 
 import artisatomic
 
-# from astropy import units as u
-
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
-# ionization_energies = NISTIonizationEnergies('Sr')
 gfall_reader = None
 
 
