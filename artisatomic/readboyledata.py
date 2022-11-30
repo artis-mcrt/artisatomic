@@ -17,7 +17,7 @@ try:
 
     filename_aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
 except ModuleNotFoundError:
-    filename_aoife_dataset = False
+    filename_aoife_dataset = None
 
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
