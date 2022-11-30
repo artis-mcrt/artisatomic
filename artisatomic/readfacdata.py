@@ -100,17 +100,27 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     levels_file = ion_folder + f"/{elsym}{ion_stage_roman}.lev.asc"
     lines_file = ion_folder + f"/{elsym}{ion_stage_roman}.tr.asc"
 
+    if atomic_number == 92 and ion_stage in [2, 3]:
+        ion_folder = (
+            "/Volumes/GoogleDrive/Shared drives/Atomic Data"
+            f" Group/Paper_Nd_U/FAC/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
+        )
+        levels_file = ion_folder + f"/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.lev.asc"
+        lines_file = ion_folder + f"/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.tr.asc"
+
     artisatomic.log_and_print(
         flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
         f" {ion_folder}",
     )
 
+    assert Path(levels_file).exists()
     dflevels = GetLevels(filename=levels_file, Z=atomic_number, Get_csv=False, Get_dat=False)
     # print(dflevels)
 
     energy_levels = read_levels_data(dflevels)
 
+    assert Path(lines_file).exists()
     dflines = GetLines(filename=lines_file, Z=atomic_number, Get_csv=False, Get_dat=False)
     # print(dflines)
 
