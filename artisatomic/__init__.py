@@ -179,10 +179,9 @@ def clear_files(args: argparse.Namespace) -> None:
     with open(os.path.join(args.output_folder, "adata.txt"), "w"), open(
         os.path.join(args.output_folder, "transitiondata.txt"), "w"
     ):
-        if not args.nophixs:
-            with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w") as fphixs:
-                fphixs.write(f"{args.nphixspoints:d}\n")
-                fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
+        with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w") as fphixs:
+            fphixs.write(f"{args.nphixspoints:d}\n")
+            fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
 def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace) -> None:
