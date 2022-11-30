@@ -71,7 +71,7 @@ def read_levels_data(dflevels):
     return ["IGNORE"] + energy_levels
 
 
-def read_lines_data(energy_levels, dflines):
+def read_lines_data(energy_levels, dflines, flog):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
@@ -79,7 +79,12 @@ def read_lines_data(energy_levels, dflines):
     for index, row in dflines.iterrows():
         lowerlevel = int(row["Lower"]) + 1
         upperlevel = int(row["Upper"]) + 1
-        assert lowerlevel < upperlevel
+        if lowerlevel > upperlevel:
+            artisatomic.log_and_print(
+                flog, "WARNING swapping transition {upperlevel} -> {lowerlevel} to {lowerlevel} -> {upperlevel}"
+            )
+            lowerlevel, upperlevel = upperlevel, lowerlevel
+        assert upperlevel != lowerlevel
         A = row["TR_rate[1/s]"]
 
         transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A, coll_str=-1)
@@ -121,14 +126,15 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels = read_levels_data(dflevels)
 
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+
     assert Path(lines_file).exists()
     dflines = GetLines(filename=lines_file, Z=atomic_number, Get_csv=False, Get_dat=False)
-    # print(dflines)
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, flog)
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels and {len(transitions)} transitions")
+    artisatomic.log_and_print(flog, f"Read {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
