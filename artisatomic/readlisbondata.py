@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pandas as pd
 from astropy import constants as const
-from carsus.util import parse_selected_species
 
 import artisatomic
 
@@ -52,6 +51,8 @@ class LisbonReader:
             Dictionary containing one dictionary per species with
             keys `levels` and `lines`.
         """
+        from carsus.util import parse_selected_species
+
         lvl_list = []
         lns_list = []
         for ion, parser in data.items():
