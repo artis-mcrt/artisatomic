@@ -1555,7 +1555,7 @@ def write_transition_data(
         # ftransitiondata.write('{0:4d} {1:4d} {2:16.10E} {3:9.2e} {4:d}\n'.format(
         #     levelid_lower, levelid_upper, float(transition.A), coll_str, forbidden))
         ftransitiondata.write(
-            f"{levelid_lower:4d} {levelid_upper:4d} {float(transition.A):16.10E} {coll_str:9.2e} {forbidden:d}\n"
+            f"{levelid_lower:4d} {levelid_upper:4d} {float(transition.A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
         )
 
     ftransitiondata.write("\n")
