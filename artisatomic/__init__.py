@@ -1541,6 +1541,7 @@ def write_transition_data(
     for transition in transitions:
         levelid_lower = transition.lowerlevel
         levelid_upper = transition.upperlevel
+        assert levelid_lower < levelid_upper
         coll_str = transition.coll_str
 
         if coll_str > 0:
