@@ -1,13 +1,13 @@
 import os
+import re
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-from astropy import constants as const
+import numpy as np
+import pandas as pd
 
 import artisatomic
-from artisatomic.cFACReader import GetLevels
-from artisatomic.cFACReader import GetLines
 
 # from astropy import units as u
 # import os.path
@@ -15,8 +15,150 @@ from artisatomic.cFACReader import GetLines
 # from carsus.util import parse_selected_species
 
 
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 BASEPATH = "/Volumes/GoogleDrive/Shared drives/Atomic Data Group/opacities/SystematicCalculations"
+
+# PANDAS_ENGINE = "pyarrow"
+PANDAS_ENGINE = None
+
+# Constants
+me = 9.10938e-28  # grams
+NA = 6.0221409e23  # mol^-1
+cspeed = 29979245800  # cm/s
+kB = 0.6950356  # cm-1 K
+echarge = 4.8e-10  # statC
+hc = 4.1357e-15 * cspeed
+
+
+def Convert_ev_cm(energyev):
+    return energyev / hc
+
+
+def GetLevels_FAC(filename):
+    widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
+    names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
+
+    levels_FAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine=PANDAS_ENGINE)
+
+    levels_FAC["Config"] = levels_FAC["Configs"].apply(lambda x: " ".join(x.split(".")))
+    levels_FAC["Config rel"] = levels_FAC["Config rel"].apply(
+        lambda x: x.replace(".", " ") if isinstance(x, str) else x
+    )
+    levels_FAC["g"] = levels_FAC["2J"].apply(lambda x: x + 1)
+
+    levels_FAC = levels_FAC[["Ilev", "Config", "Config rel", "P", "2J", "g", "Energy_ev"]]
+
+    levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: s.replace("1", ""))
+    levels_FAC["energypercm"] = [Convert_ev_cm(e) for e in levels_FAC["Energy_ev"]]
+
+    return levels_FAC
+
+
+def GetLevels_cFAC(filename):
+    widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
+    names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
+
+    levels_cFAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine=PANDAS_ENGINE)
+
+    levels_cFAC["Config"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[0])
+    levels_cFAC["Config rel"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[1])
+
+    levels_cFAC["g"] = levels_cFAC["2J"].apply(lambda x: x + 1)
+
+    levels_cFAC = levels_cFAC[["Ilev", "Config", "Config rel", "P", "g", "Energy_ev"]]
+
+    levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: s.replace("1", ""))
+    levels_cFAC["energypercm"] = [Convert_ev_cm(e) for e in levels_cFAC["Energy_ev"]]
+
+    return levels_cFAC
+
+
+def GetLevels(filename, Z):
+    """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
+
+    Parameters
+    ----------
+    data : str
+        Filename of cFAC ascii output for the energy levels
+
+    Z: int
+        Ion atomic number
+
+    """
+
+    headerlines = []
+    with open(filename, "rt") as f:
+        for _ in range(10):
+            headerlines.append(f.readline())
+
+    GState = headerlines[7][8:]
+    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    version_FAC = headerlines[0].split(" ")[0]
+    print("FAC/cFAC: ", version_FAC)
+    if version_FAC == "FAC":
+        levels = GetLevels_FAC(filename)
+    elif version_FAC == "cFAC":
+        levels = GetLevels_cFAC(filename)
+    else:
+        raise Exception("No FAC-like code detected on output file")
+
+    return levels
+
+
+def GetLines_FAC(filename):
+    names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
+
+    widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
+    trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine=PANDAS_ENGINE)
+    trans_FAC["Wavelength[Ang]"] = trans_FAC["DeltaE[eV]"].apply(lambda e: (1 / Convert_ev_cm(e)) * 1e8)
+    trans_FAC["DeltaE[cm^-1]"] = trans_FAC["DeltaE[eV]"].apply(lambda e: Convert_ev_cm(e))
+    trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
+    trans_FAC = trans_FAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    return trans_FAC
+
+
+def GetLines_cFAC(filename):
+    names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
+
+    widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
+    trans_cFAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine=PANDAS_ENGINE)
+    trans_cFAC["Wavelength[Ang]"] = trans_cFAC["DeltaE[eV]"].apply(lambda e: (1 / Convert_ev_cm(e)) * 1e8)
+    trans_cFAC["DeltaE[cm^-1]"] = trans_cFAC["DeltaE[eV]"].apply(lambda e: Convert_ev_cm(e))
+    trans_cFAC = trans_cFAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    trans_cFAC = trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
+    return trans_cFAC
+
+
+def GetLines(filename, Z):
+    """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
+
+    Parameters
+    ----------
+    data : str
+        Filename of cFAC ascii output for the transitions
+
+    Z: int
+        Ion atomic number
+
+    """
+
+    headerlines = []
+    with open(filename, "rt") as f:
+        for _ in range(11):
+            headerlines.append(f.readline())
+
+    GState = headerlines[8][8:]
+    Multi = headerlines[10][9:]
+    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    version_FAC = headerlines[0].split(" ")[0]
+
+    if version_FAC == "FAC":
+        lines = GetLines_FAC(filename)
+    elif version_FAC == "cFAC":
+        lines = GetLines_cFAC(filename)
+    else:
+        raise Exception("No FAC-like code detected on output file")
+
+    return lines
 
 
 def extend_ion_list(listelements):
@@ -55,10 +197,13 @@ def read_levels_data(dflevels):
     energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
 
     energy_levels = []
+    ilev_enlevelindex_map = {}
 
+    dflevels.sort_values(by="energypercm", inplace=True, ignore_index=True)
     for index, row in dflevels.iterrows():
+        ilev_enlevelindex_map[int(row["Ilev"])] = index
         parity = row["P"]
-        energyabovegsinpercm = float(row["Energy[cm^-1]"])
+        energyabovegsinpercm = float(row["energypercm"])
         g = row["g"]
 
         newlevel = energy_level_tuple(
@@ -68,24 +213,20 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ["IGNORE"] + energy_levels
+    return ["IGNORE"] + energy_levels, ilev_enlevelindex_map
 
 
-def read_lines_data(energy_levels, dflines, flog):
+def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
 
     for index, row in dflines.iterrows():
-        lowerlevel = int(row["Lower"]) + 1
-        upperlevel = int(row["Upper"]) + 1
-        if lowerlevel > upperlevel:
-            artisatomic.log_and_print(
-                flog, f"WARNING swapping transition {upperlevel} -> {lowerlevel} to {lowerlevel} -> {upperlevel}"
-            )
-            lowerlevel, upperlevel = upperlevel, lowerlevel
-        assert upperlevel != lowerlevel
-        A = row["TR_rate[1/s]"]
+        lowerlevel = ilev_enlevelindex_map[int(row["Lower"])] + 1
+        upperlevel = ilev_enlevelindex_map[int(row["Upper"])] + 1
+        assert lowerlevel < upperlevel
+
+        A = row["A"]
 
         transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A, coll_str=-1)
 
@@ -121,17 +262,18 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
 
     assert Path(levels_file).exists()
-    dflevels = GetLevels(filename=levels_file, Z=atomic_number, Get_csv=False, Get_dat=False)
+    dflevels = GetLevels(filename=levels_file, Z=atomic_number)
     # print(dflevels)
 
-    energy_levels = read_levels_data(dflevels)
+    # map associates source file level numbers with energy-sorted level numbers (0 indexed)
+    energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
     artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
 
     assert Path(lines_file).exists()
-    dflines = GetLines(filename=lines_file, Z=atomic_number, Get_csv=False, Get_dat=False)
+    dflines = GetLines(filename=lines_file, Z=atomic_number)
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, flog)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog)
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
