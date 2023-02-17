@@ -1639,9 +1639,14 @@ def write_compositionfile(
         fcomp.write("0\n0\n")
         for atomic_number, listions in listelements:
             listions_nohandlers: list[int] = drop_handlers(listions)
-            ion_stage_min = min(listions_nohandlers)
-            ion_stage_max: int = max(listions_nohandlers)
-            nions = ion_stage_max - ion_stage_min + 1
+            ion_stage_min: int = 0
+            ion_stage_max: int = 0
+            nions: int = 0
+            if listions_nohandlers:
+                ion_stage_min = min(listions_nohandlers)
+                ion_stage_max = max(listions_nohandlers)
+                nions = ion_stage_max - ion_stage_min + 1
+
             fcomp.write(
                 f"{atomic_number:d}  {nions:d}  {ion_stage_min:d}  {ion_stage_max:d}  "
                 f"-1 0.0 {atomic_weights[atomic_number]:.4f}\n"
