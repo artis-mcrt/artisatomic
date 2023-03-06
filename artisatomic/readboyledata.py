@@ -41,7 +41,7 @@ def read_ionization_data(atomic_number, ion_stage):
 def read_levels_data(atomic_number, ion_stage):
     levels_data = filename_aoife_dataset["/levels_data"].value
 
-    energy_levels = ["IGNORE"]
+    energy_levels = [None]
     # TODO energyinRydbergs change back to energyabovegsinpercm
     energy_level_row = namedtuple(
         "energylevel", "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname"

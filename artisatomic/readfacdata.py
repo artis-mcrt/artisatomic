@@ -213,7 +213,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ["IGNORE"] + energy_levels, ilev_enlevelindex_map
+    return [None] + energy_levels, ilev_enlevelindex_map
 
 
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
