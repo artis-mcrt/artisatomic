@@ -83,7 +83,7 @@ def read_levels_data(dflines):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ["IGNORE"] + energy_levels
+    return [None] + energy_levels
 
 
 def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):

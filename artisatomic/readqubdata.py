@@ -23,7 +23,7 @@ qub_energy_level_row = namedtuple(
 
 
 def read_adf04(filepath, flog):
-    energylevels = ["IGNORE"]
+    energylevels = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
@@ -84,8 +84,10 @@ def read_adf04(filepath, flog):
             else:
                 artisatomic.log_and_print(
                     flog,
-                    f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
-                    f" {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}",
+                    (
+                        f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
+                        f" {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}"
+                    ),
                 )
 
     artisatomic.log_and_print(flog, f"Read {len(energylevels[1:]):d} levels")
@@ -130,7 +132,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
-        qub_energylevels = ["IGNORE"]
+        qub_energylevels = [None]
         qub_transitions = []
         upsilondict = {}
         ionization_energy_ev = 54.9000015
