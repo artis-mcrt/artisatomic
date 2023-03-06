@@ -189,7 +189,7 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
         if not listions:
             continue
 
-        nahar_core_states = [["IGNORE"] for x in listions]  # list of named tuples (naharcorestaterow)
+        nahar_core_states = [[None] for x in listions]  # list of named tuples (naharcorestaterow)
         hillier_photoion_targetconfigs: list = [[] for x in listions]
 
         # keys are (2S+1, L, parity), values are strings of electron configuration
@@ -330,7 +330,7 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
 
                     hillier_levelnamesnoJ_matching_term = defaultdict(list)
                     hillier_transitions: list = []
-                    hillier_energy_levels = ["IGNORE"]
+                    hillier_energy_levels = [None]
                     (
                         energy_levels[i],
                         transitions[i],
@@ -630,8 +630,10 @@ def combine_hillier_nahar(
                 else:
                     log_and_print(
                         flog,
-                        f"No electron configuration for {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index"
-                        f" {indexinsymmetry:d}",
+                        (
+                            f"No electron configuration for {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index"
+                            f" {indexinsymmetry:d}"
+                        ),
                     )
             else:
                 flog.write(f"No Hillier levels with term {twosplusone:d}{lchars[l]}{['e', 'o'][parity]}\n")
@@ -710,8 +712,10 @@ def combine_hillier_nahar(
 
     log_and_print(
         flog,
-        f"Included {len(hillier_energy_levels) - 1} levels from Hillier dataset and added"
-        f" {len(added_nahar_levels)} levels from Nahar phixs tables for a total of {len(energy_levels) - 1} levels",
+        (
+            f"Included {len(hillier_energy_levels) - 1} levels from Hillier dataset and added"
+            f" {len(added_nahar_levels)} levels from Nahar phixs tables for a total of {len(energy_levels) - 1} levels"
+        ),
     )
 
     # sort the concatenated energy level list by energy
@@ -751,8 +755,10 @@ def combine_hillier_nahar(
                 if not foundamatch:
                     log_and_print(
                         flog,
-                        "No Hillier or Nahar state to match with photoionization crosssection of"
-                        f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}",
+                        (
+                            "No Hillier or Nahar state to match with photoionization crosssection of"
+                            f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}"
+                        ),
                     )
 
     return energy_levels, hillier_transitions, photoionization_crosssections, photoionization_thresholds_ev
@@ -1563,8 +1569,10 @@ def write_transition_data(
 
     log_and_print(
         flog,
-        f"  output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and"
-        f" {num_collision_strengths_applied:d} have collision strengths",
+        (
+            f"  output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and"
+            f" {num_collision_strengths_applied:d} have collision strengths"
+        ),
     )
 
 

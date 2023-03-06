@@ -245,7 +245,7 @@ def hillier_ion_folder(atomic_number, ion_stage):
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list, list, defaultdict[str, int], defaultdict[tuple[int, int, int], list[str]]]:
-    hillier_energy_levels: list = ["IGNORE"]
+    hillier_energy_levels: list = [None]
     hillier_levelnamesnoJ_matching_term: defaultdict[tuple[int, int, int], list[str]] = defaultdict(list)
     transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
@@ -363,9 +363,12 @@ def read_levels_and_transitions(
                     hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)  # type: ignore
 
                 if hillierlevelid != len(hillier_energy_levels) - 1:
-                    print(
-                        f"Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number"
-                        f" {hillierlevelid:d}"
+                    artisatomic.log_and_print(
+                        flog,
+                        (
+                            f"Hillier levels mismatch: id {len(hillier_energy_levels) - 1:d} found at entry number"
+                            f" {hillierlevelid:d}"
+                        ),
                     )
                     sys.exit()
 
