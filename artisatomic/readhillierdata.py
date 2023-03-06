@@ -768,14 +768,18 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             if crosssectiontype in unknown_phixs_types:
                 artisatomic.log_and_print(
                     flog,
-                    f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
-                    f" {crosssectiontype}: {phixs_type_labels[crosssectiontype]}",
+                    (
+                        f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
+                        f" {crosssectiontype}: {phixs_type_labels[crosssectiontype]}"
+                    ),
                 )
             else:
                 artisatomic.log_and_print(
                     flog,
-                    f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
-                    f" {phixs_type_labels[crosssectiontype]}",
+                    (
+                        f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
+                        f" {phixs_type_labels[crosssectiontype]}"
+                    ),
                 )
 
         # testing
@@ -1074,8 +1078,10 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 if len(header_row) != num_expected_t_values + 1:
                     artisatomic.log_and_print(
                         flog,
-                        f"WARNING: Expected {num_expected_t_values:d} temperature values, but header has"
-                        f" {len(header_row):d} columns",
+                        (
+                            f"WARNING: Expected {num_expected_t_values:d} temperature values, but header has"
+                            f" {len(header_row):d} columns"
+                        ),
                     )
                     num_expected_t_values = len(header_row) - 1
                     artisatomic.log_and_print(
@@ -1086,8 +1092,10 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 temperatures = row[-num_expected_t_values:]
                 artisatomic.log_and_print(
                     flog,
-                    "Temperatures available for effective collision strengths (units of"
-                    f' {t_scale_factor:.1e} K):\n{", ".join(temperatures)}',
+                    (
+                        "Temperatures available for effective collision strengths (units of"
+                        f" {t_scale_factor:.1e} K):\n{', '.join(temperatures)}"
+                    ),
                 )
                 match_sorted_temperatures = sorted(
                     temperatures,
@@ -1123,8 +1131,10 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
                         artisatomic.log_and_print(
                             flog,
-                            f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
-                            f"-> {nameto} {level_ids_of_level_name[nameto]}.",
+                            (
+                                f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
+                                f"-> {nameto} {level_ids_of_level_name[nameto]}."
+                            ),
                         )
                         namefrom, nameto = nameto, namefrom
 
@@ -1150,10 +1160,12 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             if (id_lower, id_upper) in upsilondict and upsilondict[(id_lower, id_upper)] >= 0.0:
                                 artisatomic.log_and_print(
                                     flog,
-                                    f"ERROR: Duplicate collisional transition from {namefrom} <->"
-                                    f" {nameto} ({id_lower} -> {id_upper}). Keeping existing collision strength of"
-                                    f" {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of"
-                                    f" {upsilonscaled:.2e}.",
+                                    (
+                                        f"ERROR: Duplicate collisional transition from {namefrom} <->"
+                                        f" {nameto} ({id_lower} -> {id_upper}). Keeping existing collision strength of"
+                                        f" {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of"
+                                        f" {upsilonscaled:.2e}."
+                                    ),
                                 )
                             else:
                                 upsilondict[(id_lower, id_upper)] = upsilonscaled
@@ -1164,8 +1176,10 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
                     artisatomic.log_and_print(
                         flog,
-                        f"Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
-                        f" {nameto}{unlisted_to_message}",
+                        (
+                            f"Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
+                            f" {nameto}{unlisted_to_message}"
+                        ),
                     )
 
     if coll_lines_in < number_expected_transitions:
@@ -1326,17 +1340,17 @@ def extend_ion_list(
         if atomic_number == 1 or (maxionstage is not None and ion_stage > maxionstage):
             continue  # skip
         found_element = False
-        for tmp_atomic_number, list_ions in listelements:
+        for tmp_atomic_number, list_ions_handlers in listelements:
             if tmp_atomic_number == atomic_number:
-                if ion_stage not in list_ions:
-                    list_ions.append(ion_stage)
-                    list_ions.sort()
+                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
+                    list_ions_handlers.append((ion_stage, "hillier"))
+                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
                 found_element = True
         if not found_element:
             listelements.append(
                 (
                     atomic_number,
-                    [ion_stage],
+                    [(ion_stage, "hillier")],
                 )
             )
     listelements.sort(key=lambda x: x[0])
