@@ -24,6 +24,7 @@ def extend_ion_list(listelements):
         found_element = False
         for tmp_atomic_number, list_ions_handlers in listelements:
             if tmp_atomic_number == atomic_number:
+                # add an ion that is not present in the element's list
                 if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
                     list_ions_handlers.append((ion_stage, "tanakajplt"))
                     list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
@@ -74,7 +75,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             # print(dflevels)
 
             energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
-            energy_levels = ["IGNORE"]
+            energy_levels = [None]
             for row in dflevels.itertuples(index=False):
                 parity = 1 if row.parity.strip() == "odd" else 0
                 energyabovegsinpercm = float(row.energy_ev / hc_in_ev_cm)

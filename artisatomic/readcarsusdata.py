@@ -68,7 +68,7 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 #     return listelements
 
 
-def get_levelname(row):
+def get_levelname(row) -> str:
     return f"{row.label},enpercm={row.energy},j={row.j}"
 
 
@@ -88,7 +88,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return ["IGNORE"] + energy_levels
+    return [None] + energy_levels
 
 
 def read_lines_data(energy_levels, dflines):
@@ -131,7 +131,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dflines = gfall_reader.extract_lines().loc[atomic_number, ion_charge]
 
-    dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)   ", inplace=True)
+    dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)", inplace=True)
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
     artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
