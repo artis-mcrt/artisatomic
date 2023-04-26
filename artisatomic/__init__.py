@@ -97,9 +97,7 @@ h_in_ev_seconds = const.h.to("eV s").value
 
 
 def drop_handlers(list_ions: list[Union[int, tuple[int, str]]]) -> list[int]:
-    """
-    Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]
-    """
+    """Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]."""
     list_out = []
     for ion_stage in list_ions:
         if isinstance(ion_stage, int):
@@ -176,12 +174,13 @@ def main(args=None, argsraw=None, **kwargs):
 
 def clear_files(args: argparse.Namespace) -> None:
     # clear out the file contents, so these can be appended to later
-    with open(os.path.join(args.output_folder, "adata.txt"), "w"), open(
-        os.path.join(args.output_folder, "transitiondata.txt"), "w"
+    with (
+        open(os.path.join(args.output_folder, "adata.txt"), "w"),
+        open(os.path.join(args.output_folder, "transitiondata.txt"), "w"),
+        open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w") as fphixs,
     ):
-        with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w") as fphixs:
-            fphixs.write(f"{args.nphixspoints:d}\n")
-            fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
+        fphixs.write(f"{args.nphixspoints:d}\n")
+        fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
 def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace) -> None:
@@ -490,7 +489,7 @@ def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
     log_and_print(flog, f"Reading effective collision strengths from {filename}")
 
-    with open(filename, "r") as fstoreydata:
+    with open(filename) as fstoreydata:
         found_tablestart = False
         while True:
             line = fstoreydata.readline()
@@ -580,10 +579,11 @@ def combine_hillier_nahar(
                 if nahar_configuration_this_state != "_CONFIG NOT FOUND_":
                     level_match_scores = []
                     for levelname in hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
-                        if levelname in hillier_name_replacements:
-                            altlevelname = hillier_name_replacements[levelname]
-                        else:
-                            altlevelname = levelname
+                        altlevelname = (
+                            hillier_name_replacements[levelname]
+                            if levelname in hillier_name_replacements
+                            else levelname
+                        )
 
                         if hillier_energy_levels[levelids_of_levelnamenoJ[levelname][0]].indexinsymmetry >= 0:
                             # already matched this level to something
@@ -672,7 +672,7 @@ def combine_hillier_nahar(
                 #      for k in hillier_level_ids_matching_this_nahar_state]) + ']'
 
                 flog.write(
-                    "Matched Nahar phixs for {0:d}{1}{2} index {3:d} '{4}' (E = {5:.3f} eV, g = {6:.1f}) to \n".format(
+                    "Matched Nahar phixs for {:d}{}{} index {:d} '{}' (E = {:.3f} eV, g = {:.1f}) to \n".format(
                         twosplusone,
                         lchars[l],
                         ["e", "o"][parity],
@@ -696,7 +696,7 @@ def combine_hillier_nahar(
 
                 strhilliermatches = "\n".join(
                     [
-                        "{0} ({1:.3f} eV, g = {2:.1f}, match_score = {3:.1f})".format(
+                        "{} ({:.3f} eV, g = {:.1f}, match_score = {:.1f})".format(
                             hillier_energy_levels[k].levelname,
                             hc_in_ev_cm * float(hillier_energy_levels[k].energyabovegsinpercm),
                             hillier_energy_levels[k].g,
@@ -726,7 +726,7 @@ def combine_hillier_nahar(
         photoionization_crosssections = np.zeros(
             (len(energy_levels), args.nphixspoints)
         )  # this probably gets overwritten anyway
-        photoionization_thresholds_ev = np.zeros((len(energy_levels)))
+        photoionization_thresholds_ev = np.zeros(len(energy_levels))
 
         # process the phixs tables and attach them to any matching levels in the output list
 
@@ -784,9 +784,7 @@ def chunks(listin: list, chunk_size: int) -> list:
 
 @lru_cache(maxsize=1)
 def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
-    """
-    get a dictionary where dictioniz[(atomic_number, ion_sage)] = ionization_energy_ev
-    """
+    """Get a dictionary where dictioniz[(atomic_number, ion_sage)] = ionization_energy_ev."""
     dfnist = pd.read_table(
         PYDIR / "nist_ionization.txt",
         sep="\t",
@@ -809,9 +807,8 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
 def reduce_phixs_tables(
     dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, hideoutput: bool = False
 ) -> dict:
-    """
-    Receives a dictionary, with each item being a 2D array of energy and cross section points
-    Returns a dictionary with the items having been downsampled into a 1D array
+    """Receives a dictionary, with each item being a 2D array of energy and cross section points
+    Returns a dictionary with the items having been downsampled into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
@@ -907,13 +904,12 @@ def reduce_phixs_tables_worker(
             samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
 
             if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
-                if i == 0:
-                    if len(samples_in_interval) != 0:
-                        print(
-                            "adding first point {0:.4e} {1:w.4e} {2:.4e}".format(
-                                enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow) / enlow)
-                            )
+                if i == 0 and len(samples_in_interval) != 0:
+                    print(
+                        "adding first point {:.4e} {:w.4e} {:.4e}".format(
+                            enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow) / enlow)
                         )
+                    )
                 if enlow <= tablein[-1][0]:
                     new_crosssection = sigma_interp(enlow)
                     if new_crosssection < 0:
@@ -1082,10 +1078,9 @@ def interpret_parent_term(strin: str) -> tuple[int, int, int]:
 
     twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
 
-    if lposition < len(strin) - 1 and strin[lposition + 1 :] not in ["e", "o"]:
-        jvalue = int(strin[lposition + 1 :])
-    else:
-        jvalue = -1
+    jvalue = (
+        int(strin[lposition + 1 :]) if lposition < len(strin) - 1 and strin[lposition + 1 :] not in ["e", "o"] else -1
+    )
     return (twosplusone, l, jvalue)
 
 
@@ -1113,9 +1108,8 @@ def reduce_configuration(instr: str) -> str:
 
 
 def remove_bracketed_part(instr: str) -> str:
-    """
-    Operates on a string by removing anything between parentheses (including the parentheses)
-    e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'
+    """Operates on a string by removing anything between parentheses (including the parentheses)
+    e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'.
     """
     outstr = ""
     in_brackets = False
@@ -1168,10 +1162,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
     ):
         # to catch e.g., '3d6(5D)6d4Ge[9/2]' occupation piece 6d, not index d
         # and 3d7b2Fe is at index b, (keep it from conflicting into the orbital occupation)
-        if term_parity == 1:
-            indexinsymmetry = reversedalphabets.index(instr[-1]) + 1
-        else:
-            indexinsymmetry = alphabets.index(instr[-1]) + 1
+        indexinsymmetry = reversedalphabets.index(instr[-1]) + 1 if term_parity == 1 else alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
     electron_config: list[str] = []
@@ -1179,10 +1170,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         while instr:
             if instr[-1].upper() in lchars:
                 try:
-                    if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n:
-                        startpos = -3
-                    else:
-                        startpos = -2
+                    startpos = -3 if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n else -2
                 except ValueError:
                     startpos = (
                         -3
@@ -1197,10 +1185,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 instr = instr[:left_bracket_pos]
             elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
                 if instr[-2].upper() in lchars:
-                    if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n:
-                        startpos = -4
-                    else:
-                        startpos = -3
+                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n else -3
                     electron_config.insert(0, instr[-3:])
                     instr = instr[:-3]
                 else:
@@ -1221,10 +1206,7 @@ def get_parity_from_config(instr) -> int:
     lsum = 0
     for orbitalstr in configsplit:
         l = lchars.lower().index(orbitalstr[1])
-        if len(orbitalstr[2:]) > 0:
-            nelec = int(orbitalstr[2:])
-        else:
-            nelec = 1
+        nelec = int(orbitalstr[2:]) if len(orbitalstr[2:]) > 0 else 1
         lsum += l * nelec
 
     return lsum % 2
@@ -1306,10 +1288,11 @@ def score_config_match(config_a, config_b):
                     parent_term_match = 0.0
                     return 0
             else:  # parent terms occur at different locations. are they consistent?
-                if parent_term_index_b > parent_term_index_a:
-                    orbitaldiff = electron_config_b[parent_term_index_a:parent_term_index_b]
-                else:
-                    orbitaldiff = electron_config_a[parent_term_index_b:parent_term_index_a]
+                orbitaldiff = (
+                    electron_config_b[parent_term_index_a:parent_term_index_b]
+                    if parent_term_index_b > parent_term_index_a
+                    else electron_config_a[parent_term_index_b:parent_term_index_a]
+                )
 
                 maxldiff = 0
                 maxspindiff = 0  # two times s
@@ -1398,15 +1381,13 @@ def write_output_files(
                 if (id_lower, id_upper) in upsilondict:
                     coll_str = upsilondict[(id_lower, id_upper)]
                 else:
-                    if hasattr(transition, "forbidden"):
-                        forbidden = transition.Forbidden
-                    else:
-                        forbidden = check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
+                    forbidden = (
+                        transition.Forbidden
+                        if hasattr(transition, "forbidden")
+                        else check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
+                    )
 
-                    if forbidden:
-                        coll_str = -2.0
-                    else:
-                        coll_str = -1.0
+                    coll_str = -2.0 if forbidden else -1.0
                 updaterequired = True
 
             if updaterequired:
@@ -1486,10 +1467,9 @@ def write_adata(
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{len(energy_levels) - 1:12d}{ionization_energy:15.7f}\n")
 
     for levelid, energylevel in enumerate(energy_levels[1:], 1):
-        if hasattr(energylevel, "levelname"):
-            transitioncount = transition_count_of_level_name.get(energylevel.levelname, 0)
-        else:
-            transitioncount = 0
+        transitioncount = (
+            transition_count_of_level_name.get(energylevel.levelname, 0) if hasattr(energylevel, "levelname") else 0
+        )
 
         level_comment = ""
         try:
@@ -1602,10 +1582,7 @@ def write_phixs_data(
             continue
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
         if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
-            if len(targetlist) > 0:
-                upperionlevelid = targetlist[0][0]
-            else:
-                upperionlevelid = 1
+            upperionlevelid = targetlist[0][0] if len(targetlist) > 0 else 1
 
             fphixs.write(
                 f"{atomic_number:12d}{ion_stage + 1:12d}{upperionlevelid:8d}{ion_stage:12d}{lowerlevelid:8d}{threshold_ev:16.6E}\n"

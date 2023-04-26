@@ -24,7 +24,7 @@ def read_nahar_rrcfile(filename, noprint=False):
         print(f"Reading {filename}")
 
     header_row = []
-    with open(filename, "r") as filein:
+    with open(filename) as filein:
         while True:
             line = filein.readline()
             if line.strip().startswith("TOTAL RECOMBINATION RATE"):

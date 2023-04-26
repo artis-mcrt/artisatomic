@@ -27,7 +27,7 @@ def read_adf04(filepath, flog):
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
-    with open(filepath, "r") as fleveltrans:
+    with open(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
@@ -62,7 +62,7 @@ def read_adf04(filepath, flog):
 
         upsilonheader = fleveltrans.readline().split()
         list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
-        list_headers = ["upper", "lower", "ignore"] + list_tempheaders
+        list_headers = ["upper", "lower", "ignore", *list_tempheaders]
         qubupsilondf_alltemps = pd.read_csv(
             fleveltrans,
             index_col=False,
@@ -105,7 +105,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
-        with open(Path("atomic-data-qub", "co_tyndall", "adf04rad_v1"), "r") as ftrans:
+        with open(Path("atomic-data-qub", "co_tyndall", "adf04rad_v1")) as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
@@ -146,7 +146,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_targetfractions = [[(1, 1.0)] for _ in energy_levels]
-    photoionization_thresholds_ev = np.zeros((len(energy_levels)))
+    photoionization_thresholds_ev = np.zeros(len(energy_levels))
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:

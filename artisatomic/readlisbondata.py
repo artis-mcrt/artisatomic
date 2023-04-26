@@ -15,8 +15,7 @@ hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 
 class LisbonReader:
-    """
-    Copied from Andreas Floers code in git.gsi.de:nucastro/opacities.git
+    """Copied from Andreas Floers code in git.gsi.de:nucastro/opacities.git
     Class for extracting levels and lines from the Lisbon Atomic Group.
 
     Mimics the GFALLReader class.
@@ -29,8 +28,7 @@ class LisbonReader:
     """
 
     def __init__(self, data, priority=10):
-        """
-        Parameters
+        """Parameters
         ----------
         data : dict
             Dictionary containing one dictionary per species with
@@ -92,7 +90,6 @@ class LisbonReader:
         lines = pd.concat(lns_list)
         self.levels = levels
         self.lines = lines
-        return
 
 
 # def extend_ion_list(listelements):
@@ -137,7 +134,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None] + energy_levels
+    return [None, *energy_levels]
 
 
 def read_lines_data(energy_levels, dflines):

@@ -48,7 +48,7 @@ for ionindex in range(4):
     ylistartisold = []
     ylistSS82 = []  # radiative recombination
     ylistSS82withDI = []  # radiative and dielectric recombination
-    with open(folderprefix + "recombinationartisoutput.txt", "r") as filein:
+    with open(folderprefix + "recombinationartisoutput.txt") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "0" and int(row[5]) == ionindex:
@@ -71,7 +71,7 @@ for ionindex in range(4):
                 # print('DER Correction',alphadSS82/ylistSS82[-1])
     #    print(Arad[ionindex],Bdi[ionindex],T0[ionindex],T1[ionindex])
 
-    with open(folderprefix + "recombinationartisoutputold.txt", "r") as filein:
+    with open(folderprefix + "recombinationartisoutputold.txt") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "21" and int(row[5]) == ionindex:
@@ -82,10 +82,10 @@ for ionindex in range(4):
                 ylistartisold.append(float(row[9]) * weightfactor)
 
     axes[ionindex].plot(
-        xlistartisold, ylistartisold, marker="None", lw=2, label="Fe {0} ARTIS old".format(romannumerals[ionindex + 1])
+        xlistartisold, ylistartisold, marker="None", lw=2, label="Fe {} ARTIS old".format(romannumerals[ionindex + 1])
     )
     axes[ionindex].plot(
-        xlist, ylist, marker="None", lw=2, label="Fe {0} ARTIS Hillier".format(romannumerals[ionindex + 1])
+        xlist, ylist, marker="None", lw=2, label="Fe {} ARTIS Hillier".format(romannumerals[ionindex + 1])
     )
     axes[ionindex].set_xlim(xmin=3.5, xmax=xlist[-1])
     #    axes[ionindex].set_ylim(ymin=min(ylist+ylistSS82+ylistartisold),ymax=max(ylist+ylistSS82+ylistartisold)*3)
@@ -99,20 +99,20 @@ for ionindex in range(4):
     # ('recombinationartisoutput-naharptpx.txt','Fe {0} ARTIS Nahar.ptpx'.format(romannumerals[ionindex+1])),
     #    for (artisoutputfilename,strlabel) in [('recombinationartisoutput-naharpx.txt','Fe {0} ARTIS Nahar.px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpx-togsonly.txt','Fe {0} ARTIS Nahar.(>gs).px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpx_gsoldcode.txt','Fe {0} ARTIS Nahar.oldcode.(>gs).px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpxnaharlevelsgsonly.txt','Fe {0} ARTIS Nahar.(>gs).px.Nahar.levels'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpxnaharlevels.txt','Fe {0} ARTIS Nahar.px.Nahar.levels'.format(romannumerals[ionindex+1]))]:
     for artisoutputfilename, strlabel in [
-        ("recombinationartisoutput-naharpx.txt", "Fe {0} ARTIS Nahar.px".format(romannumerals[ionindex + 1])),
+        ("recombinationartisoutput-naharpx.txt", "Fe {} ARTIS Nahar.px".format(romannumerals[ionindex + 1])),
         (
             "recombinationartisoutput-naharpxnaharlevels.txt",
-            "Fe {0} ARTIS Nahar.px.Nahar.levels".format(romannumerals[ionindex + 1]),
+            "Fe {} ARTIS Nahar.px.Nahar.levels".format(romannumerals[ionindex + 1]),
         ),
         (
             "recombinationartisoutput_hilliernaharcombined.txt",
-            "Fe {0} ARTIS Nahar.px.NaharHillier.levels".format(romannumerals[ionindex + 1]),
+            "Fe {} ARTIS Nahar.px.NaharHillier.levels".format(romannumerals[ionindex + 1]),
         ),
-        ("recombinationartisoutput-Oct2016.txt", "Fe {0} ARTIS Oct 2016".format(romannumerals[ionindex + 1])),
+        ("recombinationartisoutput-Oct2016.txt", "Fe {} ARTIS Oct 2016".format(romannumerals[ionindex + 1])),
     ]:
         xlist = []
         ylist = []
-        with open(folderprefix + artisoutputfilename, "r") as filein:
+        with open(folderprefix + artisoutputfilename) as filein:
             for line in filein:
                 row = line.split()
                 if line.startswith("Alpha result:") and row[3] == "0" and int(row[5]) == ionindex:
@@ -130,7 +130,7 @@ def naharfeiitonumber(strin):
 
 xlist = []
 ylist = []
-with open(folderprefix + "recombinationdatanahar97fei.txt", "r") as filein:
+with open(folderprefix + "recombinationdatanahar97fei.txt") as filein:
     for line in filein:
         row = line.split()
         xlist.append(float(row[0]))
@@ -145,7 +145,7 @@ for filename, label, ax in [
 ]:
     xlist = []
     ylist = []
-    with open(folderprefix + filename, "r") as filein:
+    with open(folderprefix + filename) as filein:
         for line in filein:
             row = line.split()
             xlist.append(float(row[0]))

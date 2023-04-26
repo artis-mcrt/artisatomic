@@ -84,9 +84,8 @@ def GetLevels(filename, Z):
         Ion atomic number
 
     """
-
     headerlines = []
-    with open(filename, "rt") as f:
+    with open(filename) as f:
         for _ in range(10):
             headerlines.append(f.readline())
 
@@ -140,9 +139,8 @@ def GetLines(filename, Z):
         Ion atomic number
 
     """
-
     headerlines = []
-    with open(filename, "rt") as f:
+    with open(filename) as f:
         for _ in range(11):
             headerlines.append(f.readline())
 
@@ -213,7 +211,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None] + energy_levels, ilev_enlevelindex_map
+    return [None, *energy_levels], ilev_enlevelindex_map
 
 
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
