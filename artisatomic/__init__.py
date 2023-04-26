@@ -22,14 +22,14 @@ from astropy import units as u
 from scipy import integrate
 from scipy import interpolate
 
-import artisatomic.readboyledata as readboyledata
-import artisatomic.readcarsusdata as readcarsusdata
-import artisatomic.readdreamdata as readdreamdata
-import artisatomic.readfacdata as readfacdata
-import artisatomic.readhillierdata as readhillierdata
-import artisatomic.readnahardata as readnahardata
-import artisatomic.readqubdata as readqubdata
-import artisatomic.readtanakajpltdata as readtanakajpltdata
+from artisatomic import readboyledata
+from artisatomic import readcarsusdata
+from artisatomic import readdreamdata
+from artisatomic import readfacdata
+from artisatomic import readhillierdata
+from artisatomic import readnahardata
+from artisatomic import readqubdata
+from artisatomic import readtanakajpltdata
 from artisatomic.manual_matches import hillier_name_replacements
 from artisatomic.manual_matches import nahar_configuration_replacements
 
@@ -38,8 +38,8 @@ from artisatomic.manual_matches import nahar_configuration_replacements
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", delim_whitespace=True, comment="#")
 atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
-elsymbols = ["n"] + list(atomicdata["symbol"].values)
-atomic_weights = ["n"] + list(atomicdata["mass"].values)
+elsymbols = ["n", *list(atomicdata["symbol"].values)]
+atomic_weights = ["n", *list(atomicdata["mass"].values)]
 
 roman_numerals = (
     "",
