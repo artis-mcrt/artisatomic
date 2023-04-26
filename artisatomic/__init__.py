@@ -225,10 +225,10 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
                     handler = "qub_cobalt"
                 elif False:  # Nahar only, usually just for testing purposes
                     handler = "nahar"
-                elif False and atomic_number in [
-                    26,
-                ]:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
-                    handler = "hiller_nahar"
+                # elif atomic_number in [
+                #     26,
+                # ]:  # atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):  # Hillier/Nahar hybrid
+                #     handler = "hiller_nahar"
                 elif atomic_number <= 28 or atomic_number == 56:  # Hillier data only
                     handler = "hillier"
                 elif atomic_number >= 57:  # DREAM database of Z > 57
