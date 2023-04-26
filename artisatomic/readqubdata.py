@@ -48,7 +48,7 @@ def read_adf04(filepath, flog):
             )
             parity = artisatomic.get_parity_from_config(config)
 
-            levelname = energylevel.levelname + "_{0:d}{1:}{2:}[{3:d}/2]_id={4:}".format(
+            levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
                 lchars[energylevel.l],
                 ["e", "o"][parity],
