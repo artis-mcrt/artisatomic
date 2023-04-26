@@ -40,7 +40,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
         artisatomic.log_and_print(flog, path_nahar_energy_file + " does not exist")
     else:
         artisatomic.log_and_print(flog, "Reading " + path_nahar_energy_file)
-        with open(path_nahar_energy_file, "r") as fenlist:
+        with open(path_nahar_energy_file) as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 
             nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
@@ -177,7 +177,7 @@ def read_nahar_core_states(fenlist):
 def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     nahar_phixs_tables = {}
     thresholds_ev_dict = {}
-    with open(path_nahar_px_file, "r") as fenlist:
+    with open(path_nahar_px_file) as fenlist:
         while True:
             line = fenlist.readline()
             if not line:
@@ -280,9 +280,7 @@ def get_naharphotoion_upperlevelids(
     upper_level_ids_of_core_state_id,
     flog,
 ):
-    """
-    Returns a list of upper level id numbers for a given energy level's photoionisation processes
-    """
+    """Returns a list of upper level id numbers for a given energy level's photoionisation processes."""
     # core_state_id = int(energy_level.corestateid)
     core_state_id = 1  # temporary fix
     if core_state_id > 0 and core_state_id < len(nahar_core_states):

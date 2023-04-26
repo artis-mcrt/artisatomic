@@ -85,7 +85,7 @@ def reduce_and_reconstruct_phixs_tables(dicttables, optimaltemperature, nphixspo
 def read_recombrate_file(atomicnumber, ionstage):
     filename = f"atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.rrc.ls.txt"
     print(f"Reading {filename}")
-    with open(filename, "r") as filein:
+    with open(filename) as filein:
         temperatures = []
         recomblevels = []
         recombrates = {}
@@ -192,7 +192,7 @@ def get_phixslist(atomicnumber, ionstage, partial=False):
     pt = "pt" if partial else ""
     filename = f"atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.{pt}px.txt"
     print(f"Reading {filename}")
-    with open(filename, "r") as filein:
+    with open(filename) as filein:
         phixslist = {}
         binding_energy_ryd = {}
 
@@ -373,7 +373,7 @@ def main():
     #         extrarecomblevels.append(recomb_level)
 
     # recomblevels.extend(extrarecomblevels)
-    sorted_lowerlevels = list(sorted(recomblevels, key=lambda x: x.energyryd))
+    sorted_lowerlevels = sorted(recomblevels, key=lambda x: x.energyryd)
     for lowerlevel in sorted_lowerlevels[:]:
         # ignore unbound states
         if lowerlevel.energyryd > 0.0:
@@ -390,10 +390,11 @@ def main():
         else:
             corestate = "NOT FOUND"
 
-        if lowerlevel.twosplusone in corestates:
-            uppergroundstate = corestates[lowerlevel.twosplusone][0]
-        else:
-            uppergroundstate = corestates[list(corestates.keys())[0]][0]
+        uppergroundstate = (
+            corestates[lowerlevel.twosplusone][0]
+            if lowerlevel.twosplusone in corestates
+            else corestates[list(corestates.keys())[0]][0]
+        )
         g_upper = uppergroundstate.twosplusone * (uppergroundstate.lval * 2 + 1)
 
         term_index = (lowerlevel.twosplusone, lowerlevel.lval, lowerlevel.parity, lowerlevel.indexinsymmetry)
@@ -419,10 +420,7 @@ def main():
         print(f"  Binding energy (Ry):  {binding_energy_ryd:12.4e}")
         print(f"  Level energy (Ry):    {lowerlevel.energyryd:12.4e}")
 
-        if lowerlevel.strlevelid in recombrates:
-            alpha_nahar = recombrates[lowerlevel.strlevelid][T_index]
-        else:
-            alpha_nahar = -1
+        alpha_nahar = recombrates[lowerlevel.strlevelid][T_index] if lowerlevel.strlevelid in recombrates else -1
         print(f"\n  Nahar alpha:           {alpha_nahar:12.3e}")
 
         # plot_phixs(phixsall[lowerlevel], ptphixsall[lowerlevel])

@@ -13,7 +13,7 @@ import requests
 def main():
     PYDIR = Path(__file__).parent.resolve()
     atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", delim_whitespace=True, comment="#")
-    elsymbols = ["n"] + list(atomicdata["symbol"].values)
+    elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
     outfolder = Path(__file__).parent.absolute() / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
@@ -125,7 +125,7 @@ def main():
 
                 # print(dfout)
                 if len(dfout) > 0:
-                    with open(outpath, "wt") as fout:
+                    with open(outpath, "w") as fout:
                         # fout.write(f'{len(dfout)}  {posbranchfrac:.3f}  {endecay_positrons_mev:.3f}\n')
                         fout.write(f"{len(dfout)}\n")
                         for _, row in dfout.iterrows():

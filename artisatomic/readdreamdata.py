@@ -83,7 +83,7 @@ def read_levels_data(dflines):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None] + energy_levels
+    return [None, *energy_levels]
 
 
 def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):
@@ -132,7 +132,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         leveltuple = energytuplefromrow(row, prefix)
         if leveltuple in energy_levels:
             return energy_levels.index(leveltuple)
-        assert False
+        raise AssertionError
         return -1
 
     dfiondata.insert(

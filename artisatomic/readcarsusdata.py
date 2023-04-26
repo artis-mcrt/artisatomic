@@ -88,7 +88,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None] + energy_levels
+    return [None, *energy_levels]
 
 
 def read_lines_data(energy_levels, dflines):

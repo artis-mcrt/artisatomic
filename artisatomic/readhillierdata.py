@@ -211,7 +211,7 @@ h_in_ev_seconds = const.h.to("eV s").value
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 PYDIR = Path(__file__).parent.absolute()
 atomicdata = pd.read_csv(os.path.join(PYDIR, "atomic_properties.txt"), delim_whitespace=True, comment="#")
-elsymbols = ["n"] + list(atomicdata["symbol"].values)
+elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
 # hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
@@ -277,7 +277,7 @@ def read_levels_and_transitions(
     )
 
     prev_line = ""
-    with open(filename, "r") as fhillierosc:
+    with open(filename) as fhillierosc:
         expected_energy_levels = -1
         expected_transitions = -1
         row_format_energy_level = None
@@ -391,10 +391,7 @@ def read_levels_and_transitions(
                 except ValueError:
                     lambda_value = -1
 
-                if len(row) == 8:
-                    hilliertransitionid = int(row[7])
-                else:
-                    hilliertransitionid = len(transitions) + 1
+                hilliertransitionid = int(row[7]) if len(row) == 8 else len(transitions) + 1
                 # print(row)
                 transition = hillier_transition_row(
                     namefrom=row[0],
@@ -469,7 +466,7 @@ phixs_type_labels = {
 def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
-    photoionization_thresholds_ev = np.zeros((len(energy_levels)))
+    photoionization_thresholds_ev = np.zeros(len(energy_levels))
     photoionization_targetconfig_fractions = [[] for _ in energy_levels]
     # return np.zeros((len(energy_levels), args.nphixspoints)),
     # photoionization_targetfractions  # TODO: replace with real data
@@ -492,7 +489,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
         )
         artisatomic.log_and_print(flog, "Reading " + filename)
-        with open(filename, "r") as fhillierphot:
+        with open(filename) as fhillierphot:
             lowerlevelid = -1
             lowerlevelname = ""
             # upperlevelname = ''
@@ -592,7 +589,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             n, l_start, l_end = fitcoefficients
                             if l_end > n - 1:
                                 artisatomic.log_and_print(
-                                    flog, "ERROR: can't have l_end = {0} > n - 1 = {1}".format(l_end, n - 1)
+                                    flog, "ERROR: can't have l_end = {} > n - 1 = {}".format(l_end, n - 1)
                                 )
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
@@ -849,10 +846,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # now the non-J-split cross sections are mapped onto J-split levels
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
         for levelid, energy_level in enumerate(energy_levels[1:], 1):
-            if j_splitting_on:
-                levelname_b = energy_level.levelname
-            else:
-                levelname_b = energy_level.levelname.split("[")[0]
+            levelname_b = energy_level.levelname if j_splitting_on else energy_level.levelname.split("[")[0]
 
             if levelname_b == lowerlevelname_a:  # due to J splitting, we may match multiple levels here
                 photoionization_crosssections[levelid] = phixstable
@@ -888,12 +882,11 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
                 1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
             )
 
-            if offset_threshold_div_energy < 1.0:
-                crosssection = (
-                    sigmat * (beta + (1 - beta) * (offset_threshold_div_energy)) * (offset_threshold_div_energy**s)
-                )
-            else:
-                crosssection = 0.0
+            crosssection = (
+                sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s
+                if offset_threshold_div_energy < 1.0
+                else 0.0
+            )
 
         phixstable[index] = energy_div_threshold * thresholdenergyryd, crosssection
     return phixstable
@@ -951,10 +944,9 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     for index, energy_ryd in enumerate(energygrid):
         energydivthreshold = energy_ryd / energygrid[0]
 
-        if energydivthreshold > 0:
-            crosssection = scale_factor * hyd_gaunt_factor[n][index] / (energydivthreshold) ** 3
-        else:
-            crosssection = 0.0
+        crosssection = (
+            scale_factor * hyd_gaunt_factor[n][index] / energydivthreshold**3 if energydivthreshold > 0 else 0.0
+        )
 
         phixstable[index][0] = energydivthreshold * thresholdenergyryd  # / ryd_to_ev
         phixstable[index][1] = crosssection
@@ -998,10 +990,7 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):
 
         x = math.log10(energydivthreshold)
 
-        if x < e:
-            crosssection = 10 ** (((d * x + c) * x + b) * x + a)
-        else:
-            crosssection = 10 ** (f + g * x)
+        crosssection = 10 ** (((d * x + c) * x + b) * x + a) if x < e else 10 ** (f + g * x)
 
         phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
 
@@ -1062,7 +1051,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     )
     artisatomic.log_and_print(flog, "Reading " + filename)
     coll_lines_in = 0
-    with open(filename, "r") as fcoldata:
+    with open(filename) as fcoldata:
         header_row = []
         temperature_index = -1
         num_expected_t_values = -1
@@ -1071,9 +1060,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(line.strip()) == 0:
                 continue  # skip blank lines
 
-            if line.startswith("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2") or line.startswith(  # found in he2col.dat
-                "Johnson values"
-            ):  # found in col_ariii
+            if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
                 break
 
             if line.lstrip().startswith(r"Transition\T"):  # found the header row
@@ -1253,7 +1240,7 @@ def read_hyd_phixsdata():
     print(f"Reading hydrogen photoionization cross sections from {hyd_filename}")
     max_n = -1
     l_start_u = 0.0
-    with open(hyd_filename, "r") as fhyd:
+    with open(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1272,7 +1259,7 @@ def read_hyd_phixsdata():
             if line.strip() == "":
                 continue
 
-            n, l, num_points = [int(x) for x in line.split()]
+            n, l, num_points = (int(x) for x in line.split())
             e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n].lambdaangstrom)
 
             xs_values = []
@@ -1298,7 +1285,7 @@ def read_hyd_phixsdata():
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")
     max_n = -1
     l_start_u = 0.0
-    with open(hyd_filename, "r") as fhyd:
+    with open(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1317,7 +1304,7 @@ def read_hyd_phixsdata():
             if line.strip() == "":
                 continue
 
-            n, num_points = [int(x) for x in line.split()]
+            n, num_points = (int(x) for x in line.split())
             e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n].lambdaangstrom)
 
             gaunt_values = []
@@ -1339,7 +1326,7 @@ def read_hyd_phixsdata():
 def extend_ion_list(
     listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], maxionstage: Optional[int] = None
 ):
-    for atomic_number, ion_stage in ions_data.keys():
+    for atomic_number, ion_stage in ions_data:
         if atomic_number == 1 or (maxionstage is not None and ion_stage > maxionstage):
             continue  # skip
         found_element = False

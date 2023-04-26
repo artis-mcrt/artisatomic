@@ -46,8 +46,8 @@ phixslist = []
 phixsintegral = 0.0
 lastpoint = []
 
-print("Z={0:d},fromionstage={1:d},fromlevel={2:d}".format(atomicnumber, ionstage, levelnumber))
-with open("example_run/phixsdata.txt", "r") as filein:
+print("Z={:d},fromionstage={:d},fromlevel={:d}".format(atomicnumber, ionstage, levelnumber))
+with open("example_run/phixsdata.txt") as filein:
     while True:
         line = filein.readline()
         if not line:
@@ -92,4 +92,4 @@ for i in range(1, len(phixslist)):
     # x = sigma_bf/H/nu * 2*H*pow(nu,3)/pow(CLIGHT,2) * exp(-H*nu/KB/T);
     phixsintegral += x * dnu
 
-print("Integral: {0:14.6e}".format(phixsintegral))
+print("Integral: {:14.6e}".format(phixsintegral))

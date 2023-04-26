@@ -51,7 +51,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         artisatomic.log_and_print(flog, fin.readline().strip())
         artisatomic.log_and_print(flog, fin.readline().strip())
         assert fin.readline().strip() == f"# {atomic_number} {ion_stage}"
-        levelcount, transitioncount = [int(x) for x in fin.readline().removeprefix("# ").split()]
+        levelcount, transitioncount = (int(x) for x in fin.readline().removeprefix("# ").split())
         artisatomic.log_and_print(flog, f"levels: {levelcount}")
         artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
 
