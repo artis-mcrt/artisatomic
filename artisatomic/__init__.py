@@ -13,7 +13,6 @@ from collections import namedtuple
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from typing import Optional
 from typing import Union
 
 import numpy as np
@@ -87,7 +86,7 @@ listelements = [
 # listelements = readcarsusdata.extend_ion_list(listelements)
 # listelements = readdreamdata.extend_ion_list(listelements)
 # listelements = readfacdata.extend_ion_list(listelements)
-# listelements = readtanakajpltdata.extend_ion_list(listelements)
+listelements = readtanakajpltdata.extend_ion_list(listelements)
 
 USE_QUB_COBALT = False
 
@@ -549,8 +548,8 @@ def combine_hillier_nahar(
         def energy_if_available(state_tuple):
             if state_tuple in nahar_level_index_of_state:
                 return hc_in_ev_cm * nahar_energy_levels[nahar_level_index_of_state[state_tuple]].energyabovegsinpercm
-            else:
-                return 999999.0
+
+            return 999999.0
 
         phixs_state_tuples_sorted = sorted(nahar_phixs_tables.keys(), key=energy_if_available)
         for state_tuple in phixs_state_tuples_sorted:
@@ -776,9 +775,10 @@ def log_and_print(flog, strout):
 def isfloat(value: Any) -> bool:
     try:
         float(value.replace("D", "E"))
-        return True
     except ValueError:
         return False
+
+    return True
 
 
 # split a list into evenly sized chunks
@@ -789,7 +789,7 @@ def chunks(listin: list, chunk_size: int) -> list:
 @lru_cache(maxsize=1)
 def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     """Get a dictionary where dictioniz[(atomic_number, ion_sage)] = ionization_energy_ev."""
-    dfnist = pd.read_table(
+    dfnist = pd.read_csv(
         PYDIR / "nist_ionization.txt",
         sep="\t",
         usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
@@ -1026,11 +1026,12 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     if "{" in config and "}" in config:  # JJ coupling, no L and S
         if config[-1] == "e":
             return (-1, -1, 0)
-        elif config[-1] == "o":
+
+        if config[-1] == "o":
             return (-1, -1, 1)
-        else:
-            print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
-            return (-1, -1, -1)
+
+        print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
+        return (-1, -1, -1)
 
     lposition = -1
     for charpos, char in reversed(list(enumerate(config))):
@@ -1041,7 +1042,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     if lposition < 0:
         if config[-1] == "e":
             return (-1, -1, 0)
-        elif config[-1] == "o":
+        if config[-1] == "o":
             return (-1, -1, 1)
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
@@ -1120,7 +1121,7 @@ def remove_bracketed_part(instr: str) -> str:
     for char in instr[:-4]:
         if char == " " or char == "_":
             continue
-        elif char == "(":
+        if char == "(":
             in_brackets = True
         elif char == ")":
             in_brackets = False
@@ -1149,7 +1150,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
             term_l = lchars.index(instr[-1])
             instr = instr[:-1]
             break
-        elif not str.isdigit(instr[-1]):
+        if not str.isdigit(instr[-1]):
             term_parity = (
                 term_parity + 2
             )  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
@@ -1229,18 +1230,20 @@ def score_config_match(config_a, config_b):
 
     if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_b or term_parity_a != term_parity_b:
         return 0
-    elif (
+    if (
         indexinsymmetry_a != -1
         and indexinsymmetry_b != -1
         and ("0s" not in electron_config_a and "0s" not in electron_config_b)
     ):
         if indexinsymmetry_a == indexinsymmetry_b:
             return 100  # exact match between Hillier and Nahar
-        else:
-            return 0  # both correspond to Nahar states but do not match
-    elif electron_config_a == electron_config_b:
+
+        return 0  # both correspond to Nahar states but do not match
+
+    if electron_config_a == electron_config_b:
         return 99
-    elif len(electron_config_a) > 0 and len(electron_config_b) > 0:
+
+    if len(electron_config_a) > 0 and len(electron_config_b) > 0:
         parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is consistent, 1 is definite match
         parent_term_index_a, parent_term_index_b = -1, -1
         matched_pieces = 0
@@ -1319,8 +1322,8 @@ def score_config_match(config_a, config_b):
                     return 0
         score = int(98 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
         return score
-    else:
-        return 5  # term matches but no electron config available or it's an Eqv state...0s type
+
+    return 5  # term matches but no electron config available or it's an Eqv state...0s type
 
     print("WHAT?")
     sys.exit()
