@@ -120,7 +120,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # path_gfall = (Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz" / "gfall.dat").resolve()
     path_gfall = find_gfall(atomic_number, ion_charge)
     artisatomic.log_and_print(flog, f"Reading {path_gfall}")
-    gfall_reader = GFALLReader(ions=f"{artisatomic.elsymbols[atomic_number]} {ion_charge}", fname=str(path_gfall))
+    gfall_reader = GFALLReader(
+        ions=f"{artisatomic.elsymbols[atomic_number]} {ion_charge}",
+        fname=str(path_gfall),
+        unique_level_identifier=["energy", "j"],
+    )
 
     dflevels = gfall_reader.extract_levels().loc[atomic_number, ion_charge]
 
