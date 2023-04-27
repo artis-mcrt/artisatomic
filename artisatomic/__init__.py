@@ -2,6 +2,7 @@
 import argparse
 import glob
 import itertools
+import json
 import math
 import multiprocessing as mp
 import os
@@ -158,6 +159,9 @@ def main(args=None, argsraw=None, **kwargs):
     readhillierdata.read_hyd_phixsdata()
 
     os.makedirs(args.output_folder, exist_ok=True)
+
+    json.dump(obj=listelements, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
+
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
     if os.path.exists(log_folder):
         # delete any existing log files
