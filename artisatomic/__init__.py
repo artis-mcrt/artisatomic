@@ -588,11 +588,12 @@ def combine_hillier_nahar(
                             else levelname
                         )
 
-                        if hillier_energy_levels[levelids_of_levelnamenoJ[levelname][0]].indexinsymmetry >= 0:
-                            # already matched this level to something
-                            match_score = 0
-                        else:
-                            match_score = score_config_match(altlevelname, nahar_configuration_this_state)
+                        # set zero if already matched this level to something
+                        match_score = (
+                            0
+                            if hillier_energy_levels[levelids_of_levelnamenoJ[levelname][0]].indexinsymmetry >= 0
+                            else score_config_match(altlevelname, nahar_configuration_this_state)
+                        )
 
                         avghillierenergyabovegsinev = weightedavgenergyinev(
                             hillier_energy_levels, levelids_of_levelnamenoJ[levelname]
