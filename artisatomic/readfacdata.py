@@ -1,10 +1,8 @@
-import os
 import re
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 import artisatomic
@@ -29,11 +27,11 @@ echarge = 4.8e-10  # statC
 hc = 4.1357e-15 * cspeed
 
 
-def Convert_ev_cm(energyev):
+def Convert_ev_cm(energyev: float) -> float:
     return energyev / hc
 
 
-def GetLevels_FAC(filename):
+def GetLevels_FAC(filename: Path) -> pd.DataFrame:
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
 
@@ -53,7 +51,7 @@ def GetLevels_FAC(filename):
     return levels_FAC
 
 
-def GetLevels_cFAC(filename):
+def GetLevels_cFAC(filename: Path) -> pd.DataFrame:
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
 
@@ -72,7 +70,7 @@ def GetLevels_cFAC(filename):
     return levels_cFAC
 
 
-def GetLevels(filename, Z):
+def GetLevels(filename: Path, Z: int) -> pd.DataFrame:
     """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
 
     Parameters
@@ -103,7 +101,7 @@ def GetLevels(filename, Z):
     return levels
 
 
-def GetLines_FAC(filename):
+def GetLines_FAC(filename: Path) -> pd.DataFrame:
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
@@ -115,7 +113,7 @@ def GetLines_FAC(filename):
     return trans_FAC
 
 
-def GetLines_cFAC(filename):
+def GetLines_cFAC(filename: Path) -> pd.DataFrame:
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
 
     widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
@@ -127,7 +125,7 @@ def GetLines_cFAC(filename):
     return trans_cFAC
 
 
-def GetLines(filename, Z):
+def GetLines(filename: Path, Z: int) -> pd.DataFrame:
     """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
 
     Parameters
