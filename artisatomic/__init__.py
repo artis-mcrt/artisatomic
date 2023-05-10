@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 from typing import Union
 
+import argcomplete
 import numpy as np
 import pandas as pd
 from astropy import constants as const
@@ -153,6 +154,7 @@ def main(args=None, argsraw=None, **kwargs):
         parser.add_argument("--plotphixs", action="store_true", help="Generate cross section plots")
 
         parser.set_defaults(**kwargs)
+        argcomplete.autocomplete(parser)
         args = parser.parse_args(argsraw)
 
     assert len(listelements) > 0
