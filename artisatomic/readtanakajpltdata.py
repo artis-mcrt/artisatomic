@@ -4,6 +4,7 @@ from pathlib import Path
 
 import h5py
 import pandas as pd
+from artistools import zopen
 from astropy import constants as const
 
 import artisatomic
@@ -17,7 +18,7 @@ hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 def extend_ion_list(listelements):
     tanakaions = sorted(
-        [tuple([int(x) for x in f.parts[-1].removesuffix(".txt").split("_")]) for f in jpltpath.glob("*_*.txt")]
+        [tuple([int(x) for x in f.parts[-1].split(".")[0].split("_")]) for f in jpltpath.glob("*_*.txt*")]
     )
 
     for atomic_number, ion_stage in tanakaions:
@@ -46,7 +47,7 @@ def extend_ion_list(listelements):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    with open(jpltpath / filename) as fin:
+    with zopen(jpltpath / filename) as fin:
         artisatomic.log_and_print(flog, fin.readline().strip())
         artisatomic.log_and_print(flog, fin.readline().strip())
         artisatomic.log_and_print(flog, fin.readline().strip())
