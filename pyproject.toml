@@ -73,10 +73,13 @@ fixable = [
     "RUF", "SIM", "SLF", "TCH", "TID", "UP", "YTT"
 ]
 unfixable = [
-    "ERA001",  # commented out code (will just delete it!)
-    "F841",
+    "COM812",  # missing-trailing-comma
+    "ERA001",  # commented-out-code (will just delete it!)
+    "F841",  # unused-variable
+    "RUF100", # unused-noqa
+    "SIM222", # expr-or-true
+    "SIM223", # expr-and-false
     "F401",
-    "PD002"
 ]
 line-length = 120
 target-version = "py310"
