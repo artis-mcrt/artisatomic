@@ -2,17 +2,16 @@ from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-import h5py
 import pandas as pd
-from artistools import zopen
 from astropy import constants as const
+from xopen import xopen
 
 import artisatomic
 
 # from astropy import units as u
 
 # the h5 file comes from Andreas Floers's DREAM parser
-jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data").resolve()
+jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 
@@ -47,7 +46,7 @@ def extend_ion_list(listelements):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    with zopen(jpltpath / filename) as fin:
+    with xopen(jpltpath / filename) as fin:
         artisatomic.log_and_print(flog, fin.readline().strip())
         artisatomic.log_and_print(flog, fin.readline().strip())
         artisatomic.log_and_print(flog, fin.readline().strip())
