@@ -162,7 +162,7 @@ jobs:
                   cat compositiondata.txt
                   cat *.json
                   md5sum *.txt
-                  md5sum -c checksums.txt
+                  md5sum -c ../checksums.txt
 
             - name: tar and zip output files
               if: always()
