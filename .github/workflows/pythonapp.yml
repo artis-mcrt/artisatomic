@@ -148,7 +148,6 @@ jobs:
 
 
             - name: Cache CMFGEN atomic data
-              if: matrix.testname == 'cmfgen'
               uses: actions/cache@v3
               id: cache-cmfgendata
               with:
@@ -156,7 +155,6 @@ jobs:
                   key: atomic-data-hillier/atomic_data_15nov16.tar.xz
 
             - name: Download/extract CMFGEN atomic data
-              if: matrix.testname == 'cmfgen'
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
@@ -178,11 +176,12 @@ jobs:
                   makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
+              working-directory: tests/${{ matrix.testname }}/output
               run: |
                   cat tests/${{ matrix.testname }}/output/compositiondata.txt
                   cat tests/${{ matrix.testname }}/output/*.json
-                  md5sum tests/${{ matrix.testname }}/output/*.txt
-                  md5sum -c tests/${{ matrix.testname }}/checksums.txt
+                  md5sum *.txt
+                  md5sum -c checksums.txt
 
             - name: tar and zip output files
               if: always()

@@ -1,4 +1,4 @@
-b8f6bc739894a563cb55ee83a9a81f8c  test_output/adata.txt
-2e3bd7a2e27ee823afa9977e1b4dc2a5  test_output/compositiondata.txt
-1c9b987f4eebc22003050a168d0c091d  test_output/phixsdata_v2.txt
-77c382be3756cf6bd7475daffbe2060a  test_output/transitiondata.txt
+b8f6bc739894a563cb55ee83a9a81f8c  adata.txt
+2e3bd7a2e27ee823afa9977e1b4dc2a5  compositiondata.txt
+1c9b987f4eebc22003050a168d0c091d  phixsdata_v2.txt
+77c382be3756cf6bd7475daffbe2060a  transitiondata.txt
