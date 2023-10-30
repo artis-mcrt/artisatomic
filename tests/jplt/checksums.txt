@@ -1,4 +1,4 @@
-1305990e95d64971cad693ecaf27305f  tests/jplt/output/adata.txt
-e19eb2c4a80a6dd70b7be8bdc045d030  tests/jplt/output/compositiondata.txt
-a673d82823ddddbb9b26ef8c8e6aed28  tests/jplt/output/phixsdata_v2.txt
-1f22937fa04c26bae7c170674ccc2513  tests/jplt/output/transitiondata.txt
+1305990e95d64971cad693ecaf27305f  adata.txt
+e19eb2c4a80a6dd70b7be8bdc045d030  compositiondata.txt
+a673d82823ddddbb9b26ef8c8e6aed28  phixsdata_v2.txt
+1f22937fa04c26bae7c170674ccc2513  transitiondata.txt
