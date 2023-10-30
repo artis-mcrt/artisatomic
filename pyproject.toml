@@ -17,7 +17,6 @@ requires-python = ">=3.10"
 
 [tool.black]
 line-length = 120
-preview = true
 
 [tool.mypy]
 python_version = '3.11'
