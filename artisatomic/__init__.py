@@ -859,7 +859,11 @@ def reduce_phixs_tables(
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
 def reduce_phixs_tables_worker(
-    dicttables: dict, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, out_q: queue.Queue
+    dicttables: itertools.islice,
+    optimaltemperature: float,
+    nphixspoints: int,
+    phixsnuincrement: float,
+    out_q: queue.Queue,
 ) -> None:
     dictout = {}
 
@@ -883,7 +887,7 @@ def reduce_phixs_tables_worker(
 
     # for key in keylist:
     #   tablein = dicttables[key]
-    for key, tablein in dicttables.items():
+    for key, tablein in dicttables:
         # # filter zero points out of the table
         # firstnonzeroindex = 0
         # for i, point in enumerate(tablein):
