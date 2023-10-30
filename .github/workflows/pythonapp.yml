@@ -1,7 +1,11 @@
 ---
 name: Build and test
 
-on: [push]
+on:
+    push:
+    merge_group:
+    schedule:
+        - cron: 0 13 * * 1
 
 jobs:
     flake8:
@@ -143,8 +147,7 @@ jobs:
               id: cache-jpltdata
               with:
                   path: |
-                      atomic-data-tanaka-jplt/data_v1.1.tar.gz
-                      atomic-data-tanaka-jplt/data_v1.1/**
+                      atomic-data-tanaka-jplt/data_v1.1
                   key: atomic-data-tanaka-jplt/data_v1.1
 
             - name: Download/extract JPLT atomic data
