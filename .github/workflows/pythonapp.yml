@@ -65,7 +65,7 @@ jobs:
               run: |
                   pytest
 
-            - name: Generate artis atomic data files
+            - name: Generate artis atomic data files (CMFGEN)
               run: |
                   makeartisatomicfiles -output_folder test_output
 
@@ -90,3 +90,30 @@ jobs:
               with:
                   name: artis_files.tar.gz
                   path: artis_files.tar.gz
+
+            - name: Generate artis atomic data files (JPLT)
+              run: |
+                  cp tests/jplt/artisatomicionhandlers.json .
+                  makeartisatomicfiles -output_folder tests/jplt/output
+
+            - name: Checksum output files
+              run: |
+                  cat tests/jplt/output/compositiondata.txt
+                  cat tests/jplt/output/*.json
+                  md5sum tests/jplt/output/*.txt
+                  md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c tests/jplt/output/adata.txt)
+                  md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 tests/jplt/output/compositiondata.txt)
+                  md5sum -c <(echo 1c9b987f4eebc22003050a168d0c091d tests/jplt/output/phixsdata_v2.txt)
+                  md5sum -c <(echo 77c382be3756cf6bd7475daffbe2060a tests/jplt/output/transitiondata.txt)
+
+            - name: tar and zip output files
+              if: always()
+              run: |
+                  tar -cvzf artis_files_jplt.tar.gz tests/jplt/output/*
+
+            - name: Upload output files (JPLT)
+              if: always()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: artis_files_jplt.tar.gz
+                  path: artis_files_jplt.tar.gz
