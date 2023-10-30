@@ -14,7 +14,6 @@ from collections import namedtuple
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-from typing import Union
 
 import argcomplete
 import numpy as np
@@ -67,28 +66,37 @@ roman_numerals = (
     "XX",
 )
 
-listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]]
 
-listelements = [
-    (26, [1, 2, 3, 4, 5]),
-    (27, [2, 3, 4]),
-    (28, [2, 3, 4, 5]),
-]
+def get_listelements() -> list[tuple[int, list[int | tuple[int, str]]]]:
+    inputhandlersfile = Path("artisatomicionhandlers.json")
 
-# listelements = [
-#     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
-#     (39, [(1, "carsus"), (2, "carsus")]),
-#     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
-#     (92, [(2, "fac"), (3, "fac")]),
-#     (94, [(2, "fac"), (3, "fac")]),
-# ]
+    if inputhandlersfile.exists():
+        print(f"Reading {inputhandlersfile}")
+        return json.load(inputhandlersfile.open(encoding="utf-8"))
 
-# include everything we have data for
-# listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5)
-# listelements = readcarsusdata.extend_ion_list(listelements)
-# listelements = readdreamdata.extend_ion_list(listelements)
-# listelements = readfacdata.extend_ion_list(listelements)
-listelements = readtanakajpltdata.extend_ion_list(listelements)
+    listelements: list[tuple[int, list[int | tuple[int, str]]]] = [
+        (26, [1, 2, 3, 4, 5]),
+        (27, [2, 3, 4]),
+        (28, [2, 3, 4, 5]),
+    ]
+
+    # listelements = [
+    #     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
+    #     (39, [(1, "carsus"), (2, "carsus")]),
+    #     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
+    #     (92, [(2, "fac"), (3, "fac")]),
+    #     (94, [(2, "fac"), (3, "fac")]),
+    # ]
+
+    # include everything we have data for
+    # listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5)
+    # listelements = readcarsusdata.extend_ion_list(listelements)
+    # listelements = readdreamdata.extend_ion_list(listelements)
+    # listelements = readfacdata.extend_ion_list(listelements)
+    # listelements = readtanakajpltdata.extend_ion_list(listelements)
+
+    return listelements
+
 
 USE_QUB_COBALT = False
 
@@ -98,7 +106,7 @@ hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
 h_in_ev_seconds = const.h.to("eV s").value
 
 
-def drop_handlers(list_ions: list[Union[int, tuple[int, str]]]) -> list[int]:
+def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
     """Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]."""
     list_out = []
     for ion_stage in list_ions:
@@ -157,12 +165,12 @@ def main(args=None, argsraw=None, **kwargs):
         argcomplete.autocomplete(parser)
         args = parser.parse_args(argsraw)
 
+    listelements = get_listelements()
+
     assert len(listelements) > 0
     readhillierdata.read_hyd_phixsdata()
 
     os.makedirs(args.output_folder, exist_ok=True)
-
-    json.dump(obj=listelements, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
 
     log_folder = os.path.join(args.output_folder, args.output_folder_logs)
     if os.path.exists(log_folder):
@@ -173,6 +181,8 @@ def main(args=None, argsraw=None, **kwargs):
             print("deleting", logfile)
     else:
         os.makedirs(log_folder, exist_ok=True)
+
+    json.dump(obj=listelements, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
     write_compositionfile(listelements, args)
     clear_files(args)
     process_files(listelements, args)
@@ -189,7 +199,7 @@ def clear_files(args: argparse.Namespace) -> None:
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
-def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace) -> None:
+def process_files(listelements: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
     for elementindex, (atomic_number, listions) in enumerate(listelements):
         if not listions:
             continue
@@ -485,6 +495,7 @@ def process_files(listelements: list[tuple[int, list[Union[int, tuple[int, str]]
             photoionization_thresholds_ev,
             photoionization_targetfractions,
             photoionization_crosssections,
+            listelements,
             args,
         )
 
@@ -872,7 +883,7 @@ def reduce_phixs_tables_worker(
 
     # for key in keylist:
     #   tablein = dicttables[key]
-    for key, tablein in dicttables:
+    for key, tablein in dicttables.items():
         # # filter zero points out of the table
         # firstnonzeroindex = 0
         # for i, point in enumerate(tablein):
@@ -908,7 +919,7 @@ def reduce_phixs_tables_worker(
             if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
                 if i == 0 and len(samples_in_interval) != 0:
                     print(
-                        "adding first point {:.4e} {:w.4e} {:.4e}".format(
+                        "adding first point {:.4e} {:.4e} {:.4e}".format(
                             enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow) / enlow)
                         )
                     )
@@ -958,7 +969,8 @@ def reduce_phixs_tables_worker(
             integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
             if np.any(integrand_vals):
                 sigma_integrand_vals = [
-                    sigma * integrand_val for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals)
+                    sigma * integrand_val
+                    for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals, strict=True)
                 ]
 
                 integralnosigma = integrate.trapz(integrand_vals, arr_energyryd)
@@ -1103,10 +1115,7 @@ def reduce_configuration(instr: str) -> str:
     outstr = remove_bracketed_part(instr)
     outstr += "_"
     outstr += instr[-3:-1]
-    if instr[-1] == "o":
-        outstr += "o"
-    else:
-        outstr += "e"
+    outstr += "o" if instr[-1] == "o" else "e"
     return outstr
 
 
@@ -1117,7 +1126,7 @@ def remove_bracketed_part(instr: str) -> str:
     outstr = ""
     in_brackets = False
     for char in instr[:-4]:
-        if char == " " or char == "_":
+        if char in (" ", "_"):
             continue
         if char == "(":
             in_brackets = True
@@ -1341,6 +1350,7 @@ def write_output_files(
     photoionization_thresholds_ev,
     photoionization_targetfractions,
     photoionization_crosssections,
+    listelements,
     args,
 ):
     atomic_number, listions = listelements[elementindex]
@@ -1610,7 +1620,7 @@ def write_phixs_data(
 
 
 def write_compositionfile(
-    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], args: argparse.Namespace
+    listelements: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace
 ) -> None:
     print("Writing compositiondata.txt")
     with open(os.path.join(args.output_folder, "compositiondata.txt"), "w") as fcomp:
