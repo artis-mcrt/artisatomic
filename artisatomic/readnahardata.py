@@ -26,10 +26,8 @@ term_index_tuple = namedtuple("term_index_tuple", "twosplusone lval parity index
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
     nahar_energy_level_row = namedtuple(
         "energylevel",
-        (
-            "indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity"
-            " energyabovegsinpercm g naharconfiguration"
-        ),
+        "indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity"
+        " energyabovegsinpercm g naharconfiguration",
     )
     nahar_configurations = {}
     nahar_energy_levels = [None]
@@ -339,10 +337,8 @@ def get_naharphotoion_upperlevelids(
                 upper_level_ids_of_core_state_id[core_state_id] = [1]
                 artisatomic.log_and_print(
                     flog,
-                    (
-                        "No upper levels matched. Defaulting to level 1 (reduced string:"
-                        f" '{nahar_core_state_reduced_configuration}')"
-                    ),
+                    "No upper levels matched. Defaulting to level 1 (reduced string:"
+                    f" '{nahar_core_state_reduced_configuration}')",
                 )
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]

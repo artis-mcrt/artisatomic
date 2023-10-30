@@ -13,7 +13,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
 ]
 dynamic = ["version", "dependencies", "entry-points"]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 
 [tool.black]
 line-length = 120
@@ -52,6 +52,7 @@ ignore = [
     "EM101","EM102",
     "ERA001",
     "F841", # ignored because variables in df.eval() are not detected
+    "ISC001",
     "N802", "N803", "N806", "N999",
     "PD901",
     "PGH001",
@@ -78,11 +79,8 @@ unfixable = [
     "F401",
     "PD002"
 ]
-
-# larger than black's limit. Let black handle this
-line-length = 200
-
-target-version = "py39"
+line-length = 120
+target-version = "py310"
 
 [tool.setuptools_scm]
 write_to = "_version.py"

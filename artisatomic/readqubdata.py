@@ -84,10 +84,8 @@ def read_adf04(filepath, flog):
             else:
                 artisatomic.log_and_print(
                     flog,
-                    (
-                        f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
-                        f" {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}"
-                    ),
+                    f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
+                    f" {upsilondict[(lower, upper)],:5.2e} instead of using {upsilon:5.2e}",
                 )
 
     artisatomic.log_and_print(flog, f"Read {len(energylevels[1:]):d} levels")

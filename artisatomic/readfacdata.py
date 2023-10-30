@@ -253,10 +253,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     artisatomic.log_and_print(
         flog,
-        (
-            f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-            f" {ion_folder}"
-        ),
+        f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
+        f" {ion_folder}",
     )
 
     assert Path(levels_file).exists()
