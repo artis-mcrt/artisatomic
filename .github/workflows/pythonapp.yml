@@ -4,12 +4,8 @@ name: Build and test
 on: [push]
 
 jobs:
-    build:
-        strategy:
-            matrix:
-                os: [ubuntu-22.04]
-
-        runs-on: ${{ matrix.os }}
+    flake8:
+        runs-on: ubuntu-22.04
         steps:
             - name: Checkout Code
               uses: actions/checkout@v3
@@ -39,6 +35,51 @@ jobs:
                   # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
                   flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
 
+    ruff:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  cache: pip
+                  python-version-file: .python-version
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip
+                  pip install ruff
+
+            # - name: Run Ruff
+            #   run: ruff check --output-format=github .
+
+            - name: Run Ruff Format
+              run: ruff format --check .
+
+    pytest:
+        runs-on: ubuntu-22.04
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  cache: pip
+                  python-version: '3.11'
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip wheel setuptools
+                  python -m pip install -r requirements.txt
+
+            - name: Install artisatomic
+              run: |
+                  python -m pip install -e .
+
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v3
               id: cache-cmfgendata
@@ -62,58 +103,7 @@ jobs:
               run: source ./setup_jplt_data.sh
 
             - name: Test with pytest
-              run: |
-                  pytest
-
-            - name: Generate artis atomic data files (CMFGEN)
-              run: |
-                  makeartisatomicfiles -output_folder test_output
-
-            - name: Checksum output files
-              run: |
-                  cat test_output/compositiondata.txt
-                  cat test_output/*.json
-                  md5sum test_output/*.txt
-                  md5sum -c <(echo b8f6bc739894a563cb55ee83a9a81f8c test_output/adata.txt)
-                  md5sum -c <(echo 2e3bd7a2e27ee823afa9977e1b4dc2a5 test_output/compositiondata.txt)
-                  md5sum -c <(echo 1c9b987f4eebc22003050a168d0c091d test_output/phixsdata_v2.txt)
-                  md5sum -c <(echo 77c382be3756cf6bd7475daffbe2060a test_output/transitiondata.txt)
-
-            - name: tar and zip output files
-              if: always()
-              run: |
-                  tar -cvzf artis_files.tar.gz test_output/*
-
-            - name: Upload output files
-              if: always()
-              uses: actions/upload-artifact@v3
-              with:
-                  name: artis_files.tar.gz
-                  path: artis_files.tar.gz
-
-            - name: Generate artis atomic data files (JPLT)
-              run: |
-                  cp tests/jplt/artisatomicionhandlers.json .
-                  makeartisatomicfiles -output_folder tests/jplt/output
-
-            - name: Checksum output files
-              run: |
-                  cat tests/jplt/output/compositiondata.txt
-                  cat tests/jplt/output/*.json
-                  md5sum tests/jplt/output/*.txt
-                  md5sum -c tests/jplt/checksums.txt
-
-            - name: tar and zip output files
-              if: always()
-              run: |
-                  tar -cvzf artis_files_jplt.tar.gz tests/jplt/output/*
-
-            - name: Upload output files (JPLT)
-              if: always()
-              uses: actions/upload-artifact@v3
-              with:
-                  name: artis_files_jplt.tar.gz
-                  path: artis_files_jplt.tar.gz
+              run: pytest
 
     tests:
         strategy:
@@ -178,8 +168,8 @@ jobs:
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
               run: |
-                  cat tests/${{ matrix.testname }}/output/compositiondata.txt
-                  cat tests/${{ matrix.testname }}/output/*.json
+                  cat compositiondata.txt
+                  cat *.json
                   md5sum *.txt
                   md5sum -c checksums.txt
 
