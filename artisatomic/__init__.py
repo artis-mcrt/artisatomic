@@ -13,7 +13,7 @@ from collections import defaultdict
 from collections import namedtuple
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+import typing as t
 
 import argcomplete
 import numpy as np
@@ -781,7 +781,7 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
-def isfloat(value: Any) -> bool:
+def isfloat(value: t.Any) -> bool:
     try:
         float(value.replace("D", "E"))
     except ValueError:
@@ -825,7 +825,7 @@ def reduce_phixs_tables(
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
-    out_q: queue.Queue = mp.Queue()
+    out_q: t.Any = mp.Queue()
     procs = []
 
     if not hideoutput:
