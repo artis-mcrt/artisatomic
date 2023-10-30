@@ -89,7 +89,7 @@ def get_listelements() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ]
 
     # include everything we have data for
-    # listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5)
+    # listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5, include_hydrogen=False)
     # listelements = readcarsusdata.extend_ion_list(listelements)
     # listelements = readdreamdata.extend_ion_list(listelements)
     # listelements = readfacdata.extend_ion_list(listelements)

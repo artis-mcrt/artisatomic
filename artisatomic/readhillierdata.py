@@ -1306,11 +1306,13 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], maxionstage: Optional[int] = None
+    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]], maxionstage: Optional[int] = None, include_hydrogen: Optional[bool] = False
 ):
     for atomic_number, ion_stage in ions_data:
-        if atomic_number == 1 or (maxionstage is not None and ion_stage > maxionstage):
+        if (maxionstage is not None and ion_stage > maxionstage):
             continue  # skip
+        if not include_hydrogen and atomic_number == 1:
+            continue # skip
         found_element = False
         for tmp_atomic_number, list_ions_handlers in listelements:
             if tmp_atomic_number == atomic_number:
