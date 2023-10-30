@@ -101,6 +101,7 @@ jobs:
                   cat tests/jplt/output/compositiondata.txt
                   cat tests/jplt/output/*.json
                   md5sum tests/jplt/output/*.txt
+                  md5sum -c tests/jplt/checksums.txt
 
             - name: tar and zip output files
               if: always()
@@ -113,3 +114,84 @@ jobs:
               with:
                   name: artis_files_jplt.tar.gz
                   path: artis_files_jplt.tar.gz
+
+    tests:
+        strategy:
+            matrix:
+                testname: [cmfgen, jplt]
+            fail-fast: false
+
+        runs-on: ubuntu-22.04
+        timeout-minutes: 45
+        name: ${{ matrix.testname }}
+
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v3
+              with:
+                  fetch-depth: 0
+
+            - name: Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  cache: pip
+                  python-version: '3.11'
+
+            - name: Install dependencies
+              run: |
+                  python -m pip install --upgrade pip wheel setuptools
+                  python -m pip install -r requirements.txt
+
+            - name: Install artisatomic
+              run: |
+                  python -m pip install -e .
+
+
+            - name: Cache CMFGEN atomic data
+              if: matrix.testname == 'cmfgen'
+              uses: actions/cache@v3
+              id: cache-cmfgendata
+              with:
+                  path: atomic-data-hillier/atomic_data_15nov16.tar.xz
+                  key: atomic-data-hillier/atomic_data_15nov16.tar.xz
+
+            - name: Download/extract CMFGEN atomic data
+              if: matrix.testname == 'cmfgen'
+              working-directory: atomic-data-hillier/
+              run: source ./setup_cmfgen_data.sh
+
+            - name: Cache JPLT atomic data
+              if: matrix.testname == 'jplt'
+              uses: actions/cache@v3
+              id: cache-jpltdata
+              with:
+                  path: atomic-data-tanaka-jplt/data_v1.1.tar.gz
+                  key: atomic-data-tanaka-jplt/data_v1.1.tar.gz
+
+            - name: Download/extract JPLT atomic data
+              if: matrix.testname == 'jplt'
+              working-directory: atomic-data-tanaka-jplt/
+              run: source ./setup_jplt_data.sh
+            - name: Generate artis atomic data files
+              run: |
+                  cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
+                  makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+
+            - name: Checksum output files
+              run: |
+                  cat tests/${{ matrix.testname }}/output/compositiondata.txt
+                  cat tests/${{ matrix.testname }}/output/*.json
+                  md5sum tests/${{ matrix.testname }}/output/*.txt
+                  md5sum -c tests/${{ matrix.testname }}/checksums.txt
+
+            - name: tar and zip output files
+              if: always()
+              run: |
+                  tar -cvzf artis_files_${{ matrix.testname }}.tar.gz tests/${{ matrix.testname }}/output/*
+
+            - name: Upload output files
+              if: always()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: artis_files_${{ matrix.testname }}.tar.gz
+                  path: artis_files_${{ matrix.testname }}.tar.gz
