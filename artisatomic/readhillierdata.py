@@ -1306,9 +1306,9 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    listelements: list[tuple[int, list[Union[int, tuple[int, str]]]]],
-    maxionstage: Optional[int] = None,
-    include_hydrogen: Optional[bool] = False,
+    listelements: list[tuple[int, list[int | tuple[int, str]]]],
+    maxionstage: int | None = None,
+    include_hydrogen: bool | None = False,
 ):
     for atomic_number, ion_stage in ions_data:
         if maxionstage is not None and ion_stage > maxionstage:
