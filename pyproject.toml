@@ -65,13 +65,7 @@ ignore = [
     "TRY301",
     "UP032",
 ]
-
-# Allow autofix for all enabled rules (when `--fix`) is provided.
-fixable = [
-    "A", "B", "C", "D", "E", "G", "N", "Q", "W", "ARG", "BLE", "DJ", "DTZ", "EM", "ERA", "EXE",
-    "FBT", "ICN", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PLR", "PT", "PTH", "PYI", "RET", "RSE",
-    "RUF", "SIM", "SLF", "TCH", "TID", "UP", "YTT"
-]
+fixable = ["ALL"]
 unfixable = [
     "COM812",  # missing-trailing-comma
     "ERA001",  # commented-out-code (will just delete it!)
