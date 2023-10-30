@@ -1,14 +1,9 @@
 #!/usr/bin/env python3
 # mypy: ignore-errors
 """Atomic data tools for the ARTIS 3D supernova radiative transfer code."""
-import datetime
-import os
-import sys
 from pathlib import Path
 
-from setuptools import find_packages
-from setuptools import setup
-from setuptools.command.test import test as TestCommand
+from setuptools import find_packages, setup
 from setuptools_scm import get_version
 
 setup(
