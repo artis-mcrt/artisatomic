@@ -1,7 +1,5 @@
-import os.path
 from collections import defaultdict
 from collections import namedtuple
-from pathlib import Path
 
 import pandas as pd
 from astropy import constants as const
