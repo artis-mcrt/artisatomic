@@ -15,14 +15,14 @@ jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" /
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 
-def extend_ion_list(listelements):
+def extend_ion_list(ion_handlers):
     tanakaions = sorted(
-        [tuple([int(x) for x in f.parts[-1].split(".")[0].split("_")]) for f in jpltpath.glob("*_*.txt*")]
+        [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
 
     for atomic_number, ion_stage in tanakaions:
         found_element = False
-        for tmp_atomic_number, list_ions_handlers in listelements:
+        for tmp_atomic_number, list_ions_handlers in ion_handlers:
             if tmp_atomic_number == atomic_number:
                 # add an ion that is not present in the element's list
                 if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
@@ -31,16 +31,16 @@ def extend_ion_list(listelements):
                 found_element = True
 
         if not found_element:
-            listelements.append(
+            ion_handlers.append(
                 (
                     atomic_number,
                     [(ion_stage, "tanakajplt")],
                 )
             )
 
-    listelements.sort(key=lambda x: x[0])
+    ion_handlers.sort(key=lambda x: x[0])
 
-    return listelements
+    return ion_handlers
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):

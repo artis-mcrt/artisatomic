@@ -6,7 +6,6 @@ from astropy import constants as const
 
 import artisatomic
 
-
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 gfall_reader = None
@@ -45,14 +44,14 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     return path_gfall
 
 
-# def extend_ion_list(listelements):
+# def extend_ion_list(ion_handlers):
 #     selected_ions = [(38, 1)]
 #     for atomic_number, charge in selected_ions:
 #         assert (atomic_number, charge) in gfall_reader.ions
 #         ion_stage = charge + 1
 #
 #         found_element = False
-#         for (tmp_atomic_number, list_ions) in listelements:
+#         for (tmp_atomic_number, list_ions) in ion_handlers:
 #             if tmp_atomic_number == atomic_number:
 #                 if ion_stage not in list_ions:
 #                     list_ions.append((ion_stage, 'carsus'))
@@ -60,11 +59,11 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 #                 found_element = True
 #
 #         if not found_element:
-#             listelements.append((atomic_number, [(ion_stage, 'carsus')],))
+#             ion_handlers.append((atomic_number, [(ion_stage, 'carsus')],))
 #
-#     listelements.sort(key=lambda x: x[0])
+#     ion_handlers.sort(key=lambda x: x[0])
 #
-#     return listelements
+#     return ion_handlers
 
 
 def get_levelname(row) -> str:

@@ -1306,7 +1306,7 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    listelements: list[tuple[int, list[int | tuple[int, str]]]],
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
     maxionstage: int | None = None,
     include_hydrogen: bool | None = False,
 ):
@@ -1316,26 +1316,27 @@ def extend_ion_list(
         if not include_hydrogen and atomic_number == 1:
             continue  # skip
         found_element = False
-        for tmp_atomic_number, list_ions_handlers in listelements:
+        for tmp_atomic_number, list_ions_handlers in ion_handlers:
             if tmp_atomic_number == atomic_number:
                 if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
                     list_ions_handlers.append((ion_stage, "hillier"))
                     list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
                 found_element = True
         if not found_element:
-            listelements.append(
+            ion_handlers.append(
                 (
                     atomic_number,
                     [(ion_stage, "hillier")],
                 )
             )
-    listelements.sort(key=lambda x: x[0])
-    return listelements
+    ion_handlers.sort(key=lambda x: x[0])
+    return ion_handlers
 
 
 def plot_phixs(atomic_number, ion_stage, energy_levels, phixstables, reduced_phixstables, args):
-    import matplotlib.pyplot as plt
     from pathlib import Path
+
+    import matplotlib.pyplot as plt
 
     print("STARTING PHIXS PLOT")
 

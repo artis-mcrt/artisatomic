@@ -9,11 +9,11 @@ import multiprocessing as mp
 import os
 import queue
 import sys
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from functools import lru_cache
 from pathlib import Path
-import typing as t
 
 import argcomplete
 import numpy as np
@@ -67,20 +67,20 @@ roman_numerals = (
 )
 
 
-def get_listelements() -> list[tuple[int, list[int | tuple[int, str]]]]:
+def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     inputhandlersfile = Path("artisatomicionhandlers.json")
 
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
         return json.load(inputhandlersfile.open(encoding="utf-8"))
 
-    listelements: list[tuple[int, list[int | tuple[int, str]]]] = [
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [
         (26, [1, 2, 3, 4, 5]),
         (27, [2, 3, 4]),
         (28, [2, 3, 4, 5]),
     ]
 
-    # listelements = [
+    # ion_handlers = [
     #     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
     #     (39, [(1, "carsus"), (2, "carsus")]),
     #     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
@@ -89,13 +89,13 @@ def get_listelements() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ]
 
     # include everything we have data for
-    # listelements = readhillierdata.extend_ion_list(listelements, maxionstage=5, include_hydrogen=False)
-    # listelements = readcarsusdata.extend_ion_list(listelements)
-    # listelements = readdreamdata.extend_ion_list(listelements)
-    # listelements = readfacdata.extend_ion_list(listelements)
-    # listelements = readtanakajpltdata.extend_ion_list(listelements)
+    # ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
+    # ion_handlers = readcarsusdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
 
-    return listelements
+    return ion_handlers
 
 
 USE_QUB_COBALT = False
@@ -165,9 +165,9 @@ def main(args=None, argsraw=None, **kwargs):
         argcomplete.autocomplete(parser)
         args = parser.parse_args(argsraw)
 
-    listelements = get_listelements()
+    ion_handlers = get_ion_handlers()
 
-    assert len(listelements) > 0
+    assert len(ion_handlers) > 0
     readhillierdata.read_hyd_phixsdata()
 
     os.makedirs(args.output_folder, exist_ok=True)
@@ -182,10 +182,10 @@ def main(args=None, argsraw=None, **kwargs):
     else:
         os.makedirs(log_folder, exist_ok=True)
 
-    json.dump(obj=listelements, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
-    write_compositionfile(listelements, args)
+    json.dump(obj=ion_handlers, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
+    write_compositionfile(ion_handlers, args)
     clear_files(args)
-    process_files(listelements, args)
+    process_files(ion_handlers, args)
 
 
 def clear_files(args: argparse.Namespace) -> None:
@@ -199,8 +199,8 @@ def clear_files(args: argparse.Namespace) -> None:
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
-def process_files(listelements: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
-    for elementindex, (atomic_number, listions) in enumerate(listelements):
+def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
+    for elementindex, (atomic_number, listions) in enumerate(ion_handlers):
         if not listions:
             continue
 
@@ -495,7 +495,7 @@ def process_files(listelements: list[tuple[int, list[int | tuple[int, str]]]], a
             photoionization_thresholds_ev,
             photoionization_targetfractions,
             photoionization_crosssections,
-            listelements,
+            ion_handlers,
             args,
         )
 
@@ -1354,10 +1354,10 @@ def write_output_files(
     photoionization_thresholds_ev,
     photoionization_targetfractions,
     photoionization_crosssections,
-    listelements,
+    ion_handlers,
     args,
 ):
-    atomic_number, listions = listelements[elementindex]
+    atomic_number, listions = ion_handlers[elementindex]
     upsilon_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     for i, ion_stage in enumerate(listions):
@@ -1624,13 +1624,13 @@ def write_phixs_data(
 
 
 def write_compositionfile(
-    listelements: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace
 ) -> None:
     print("Writing compositiondata.txt")
     with open(os.path.join(args.output_folder, "compositiondata.txt"), "w") as fcomp:
-        fcomp.write(f"{len(listelements):d}\n")
+        fcomp.write(f"{len(ion_handlers):d}\n")
         fcomp.write("0\n0\n")
-        for atomic_number, listions in listelements:
+        for atomic_number, listions in ion_handlers:
             listions_nohandlers: list[int] = drop_handlers(listions)
             ion_stage_min: int = 0
             ion_stage_max: int = 0
