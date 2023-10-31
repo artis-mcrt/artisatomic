@@ -28,14 +28,14 @@ def init_dreamdata():
         dreamdata = pd.read_hdf(dreamdatapath) if dreamdatapath.exists() else None
 
 
-def extend_ion_list(listelements):
+def extend_ion_list(ion_handlers):
     init_dreamdata()
 
     for atomic_number, charge in dreamdata.index.unique():
         ion_stage = charge + 1
 
         found_element = False
-        for tmp_atomic_number, list_ions_handlers in listelements:
+        for tmp_atomic_number, list_ions_handlers in ion_handlers:
             if tmp_atomic_number == atomic_number:
                 if ion_stage not in [x if isinstance(x, int) else x[0] for x in list_ions_handlers]:
                     list_ions_handlers.append((ion_stage, "dream"))
@@ -43,16 +43,16 @@ def extend_ion_list(listelements):
                 found_element = True
 
         if not found_element:
-            listelements.append(
+            ion_handlers.append(
                 (
                     atomic_number,
                     [(ion_stage, "dream")],
                 )
             )
 
-    listelements.sort(key=lambda x: x[0])
+    ion_handlers.sort(key=lambda x: x[0])
 
-    return listelements
+    return ion_handlers
 
 
 def energytuplefromrow(row, prefix):

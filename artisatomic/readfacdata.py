@@ -157,7 +157,7 @@ def GetLines(filename: Path, Z: int) -> pd.DataFrame:
     return lines
 
 
-def extend_ion_list(listelements):
+def extend_ion_list(ion_handlers):
     for s in Path(BASEPATH).glob("**/*.lev.asc"):
         ionstr = s.parts[-1].removesuffix(".lev.asc")
         elsym = s.parts[-3]
@@ -170,23 +170,23 @@ def extend_ion_list(listelements):
             continue
 
         found_element = False
-        for tmp_atomic_number, list_ions in listelements:
+        for tmp_atomic_number, list_ions in ion_handlers:
             if tmp_atomic_number == atomic_number:
                 if ion_stage not in [x[0] if len(x) > 0 else x for x in list_ions]:
                     list_ions.append((ion_stage, "fac"))
                     list_ions.sort()
                 found_element = True
         if not found_element:
-            listelements.append(
+            ion_handlers.append(
                 (
                     atomic_number,
                     [(ion_stage, "fac")],
                 )
             )
 
-    listelements.sort(key=lambda x: x[0])
-    # print(listelements)
-    return listelements
+    ion_handlers.sort(key=lambda x: x[0])
+    # print(ion_handlers)
+    return ion_handlers
 
 
 def read_levels_data(dflevels):
@@ -195,7 +195,7 @@ def read_levels_data(dflevels):
     energy_levels = []
     ilev_enlevelindex_map = {}
 
-    dflevels.sort_values(by="energypercm", inplace=True, ignore_index=True)
+    dflevels = dflevels.sort_values(by="energypercm", ignore_index=True)
     for index, row in dflevels.iterrows():
         ilev_enlevelindex_map[int(row["Ilev"])] = index
         parity = row["P"]
