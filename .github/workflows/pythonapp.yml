@@ -167,8 +167,7 @@ jobs:
               uses: actions/cache@v3
               id: cache-jpltdata
               with:
-                  path: |
-                      atomic-data-tanaka-jplt/data_v1.1
+                  path: atomic-data-tanaka-jplt/data_v1.1/**
                   key: atomic-data-tanaka-jplt/data_v1.1
 
             - name: Download/extract JPLT atomic data
