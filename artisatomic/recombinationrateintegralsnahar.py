@@ -77,7 +77,7 @@ def reduce_and_reconstruct_phixs_tables(dicttables, optimaltemperature, nphixspo
 
     for key, phixstable_reduced in dicttables_reduced.items():
         e_threshold_ryd = dicttables[key][0][0]
-        dictout[key] = np.array(list(zip(xgrid[:-1] * e_threshold_ryd, phixstable_reduced)))
+        dictout[key] = np.array(list(zip(xgrid[:-1] * e_threshold_ryd, phixstable_reduced, strict=True)))
 
     return dictout
 
@@ -99,7 +99,7 @@ def read_recombrate_file(atomicnumber, ionstage):
             if corestates and line.startswith("------------------------------------------------------------------"):
                 break
 
-            elif line.rstrip().rstrip(":").endswith("target information"):
+            if line.rstrip().rstrip(":").endswith("target information"):
                 lower_twosplusone = number_of_multiplicity.get(
                     row[1].lower(), -1
                 )  # -1 means these are not split into different multiplicities
@@ -175,7 +175,7 @@ def read_recombrate_file(atomicnumber, ionstage):
             line = filein.readline()
             if not line:
                 break
-            elif line.strip() == "":
+            if line.strip() == "":
                 continue
             row = line.split()
 
@@ -263,7 +263,7 @@ def plot_phixs(phixstable, ptphixstable):
 
 def recomb_integral_euler(phixslist, T):
     integral = 0.0
-    for i in range(0, len(phixslist) - 1):
+    for i in range(len(phixslist) - 1):
         nu = phixslist[i][0] * RYD / H
         dnu = (phixslist[i + 1][0] - phixslist[i][0]) * RYD / H
         sigma_bf = phixslist[i][1] * 1e-18  # from Megabarn to cm^2
@@ -334,7 +334,7 @@ def main():
     ionstage = 2
     do_reduced_list = True
 
-    ionstr = artisatomic.elsymbols[atomicnumber] + " " + artisatomic.roman_numerals[ionstage]
+    ionstr = f"{artisatomic.elsymbols[atomicnumber]} {artisatomic.roman_numerals[ionstage]}"
     temperatures, recombrates, corestates, recomblevels = read_recombrate_file(atomicnumber, ionstage)
     T_index = (np.abs(temperatures - T_goal)).argmin()
 
@@ -380,7 +380,7 @@ def main():
             continue
 
         # some energy levels have no recombination rates listed in rrc file
-        if lowerlevel.strlevelid not in recombrates.keys():
+        if lowerlevel.strlevelid not in recombrates:
             continue
 
         if lowerlevel.twosplusone in corestates and lowerlevel.icx <= len(corestates[lowerlevel.twosplusone]):
@@ -393,7 +393,7 @@ def main():
         uppergroundstate = (
             corestates[lowerlevel.twosplusone][0]
             if lowerlevel.twosplusone in corestates
-            else corestates[list(corestates.keys())[0]][0]
+            else corestates[next(iter(corestates.keys()))][0]
         )
         g_upper = uppergroundstate.twosplusone * (uppergroundstate.lval * 2 + 1)
 
@@ -443,14 +443,11 @@ def main():
                 else:
                     print()
 
-    nahar_recomb_total = 0
-    for _, recombrates_thislevel in recombrates.items():
-        nahar_recomb_total += recombrates_thislevel[T_index]
-
+    nahar_recomb_total = sum(recombrates_thislevel[T_index] for _, recombrates_thislevel in recombrates.items())
     print("\nSummed alphas (ion Alpha low-n):")
     print(f"  Nahar:                    {nahar_recomb_total:11.3e}")
     for tag, alpha in calculated_alpha_sum.items():
-        print(f'  Calculated {tag + ":":14} {alpha:11.3e} = {alpha / nahar_recomb_total:7.4f} * Nahar')
+        print(f'  Calculated {f"{tag}:":14} {alpha:11.3e} = {alpha / nahar_recomb_total:7.4f} * Nahar')
 
 
 if __name__ == "__main__":
