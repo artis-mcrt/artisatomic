@@ -10,7 +10,11 @@ authors = [
 description="Tools to create an atomic database for use with ARTIS."
 readme = "README.md"
 classifiers = [
+    "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dynamic = ["version", "dependencies", "entry-points"]
 requires-python = ">=3.10"
@@ -73,10 +77,15 @@ unfixable = [
     "RUF100", # unused-noqa
     "SIM222", # expr-or-true
     "SIM223", # expr-and-false
+    "TCH005", # empty-type-checking-block
     "F401",
 ]
 line-length = 120
 target-version = "py310"
+
+[tool.ruff.isort]
+force-single-line = true
+order-by-type = false
 
 [tool.setuptools_scm]
 write_to = "_version.py"

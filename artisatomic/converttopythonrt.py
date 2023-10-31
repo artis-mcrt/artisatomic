@@ -1,20 +1,9 @@
 #!/usr/bin/env python3
 # import itertools
-import glob
-import os
-import sys
-from collections import namedtuple
 from pathlib import Path
 
 import artistools as at
-import numpy as np
-import pandas as pd
 from astropy import constants as const
-
-# import math
-# import numexpr as ne
-# import artisatomic
-# from astropy import units as u
 
 # selectedelements = [27]
 selectedelements = None  # select all
@@ -79,17 +68,16 @@ def main():
             dftransitions = ion.transitions.copy()
             if not dftransitions.empty:
                 with open(f"Z{atomic_number:.0f}_lines.py.txt", "a") as linefile:
-                    dftransitions.eval("upper_g = @ion.levels.loc[upper].g.values", inplace=True)
-                    dftransitions.eval("lower_g = @ion.levels.loc[lower].g.values", inplace=True)
+                    dftransitions = dftransitions.eval("upper_g = @ion.levels.loc[upper].g.values")
+                    dftransitions = dftransitions.eval("lower_g = @ion.levels.loc[lower].g.values")
 
-                    dftransitions.eval("upper_energy_ev = @ion.levels.loc[upper].energy_ev.values", inplace=True)
-                    dftransitions.eval("lower_energy_ev = @ion.levels.loc[lower].energy_ev.values", inplace=True)
-                    dftransitions.eval("lambda_angstroms = @hc / (upper_energy_ev - lower_energy_ev)", inplace=True)
+                    dftransitions = dftransitions.eval("upper_energy_ev = @ion.levels.loc[upper].energy_ev.values")
+                    dftransitions = dftransitions.eval("lower_energy_ev = @ion.levels.loc[lower].energy_ev.values")
+                    dftransitions = dftransitions.eval("lambda_angstroms = @hc / (upper_energy_ev - lower_energy_ev)")
 
                     c_angps = 2.99792458e18  # speed of light in angstroms per second
-                    dftransitions.eval(
+                    dftransitions = dftransitions.eval(
                         "fosc = upper_g / lower_g * @OSCSTRENGTHCONVERSION / (@c_angps / lambda_angstroms) ** 2 * A",
-                        inplace=True,
                     )
 
                     for _, transition in dftransitions.iterrows():

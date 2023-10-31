@@ -48,12 +48,7 @@ def read_levels_data(atomic_number, ion_stage):
     )
 
     for rowtuple in levels_data:
-        atomic_num, ion_number, level_number, energy, g, metastable = rowtuple
-        if energy == 0.0:
-            energyabovegsinpercm = 0.0
-        else:
-            # energyabovegsinpercm = hc_in_ev_cm / energy
-            energyabovegsinpercm = energy
+        atomic_num, ion_number, level_number, energyabovegsinpercm, g, metastable = rowtuple
         energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")
 
         if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
