@@ -32,6 +32,11 @@ repos:
     - repo: https://github.com/astral-sh/ruff-pre-commit
       rev: v0.1.3
       hooks:
+          - id: ruff
+            args: [--fix, --fix-only, --exit-non-zero-on-fix]
+    - repo: https://github.com/astral-sh/ruff-pre-commit
+      rev: v0.1.3
+      hooks:
           - id: ruff-format
     - repo: https://github.com/pycqa/flake8
       rev: 6.1.0
