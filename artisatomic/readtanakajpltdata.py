@@ -1,5 +1,5 @@
+import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
 import pandas as pd
@@ -13,6 +13,20 @@ import artisatomic
 # the h5 file comes from Andreas Floers's DREAM parser
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+
+
+class EnergyLevel(t.NamedTuple):
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: float
+
+
+class TransitionTuple(t.NamedTuple):
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    coll_str: float
 
 
 def extend_ion_list(ion_handlers):
@@ -76,7 +90,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             dflevels = reader.get_chunk(levelcount)
             # print(dflevels)
 
-            energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
             energy_levels = [None]
             for row in dflevels.itertuples(index=False):
                 parity = 1 if row.parity.strip() == "odd" else 0
@@ -85,15 +98,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
                 levelname = f"{row.num},{row.parity},{row.configuration.strip()}"
                 energy_levels.append(
-                    energy_level_tuple(
-                        levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
-                    )
+                    EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
                 )
                 # print(energy_levels[-1])
         assert len(energy_levels[1:]) == levelcount
 
         line = fin.readline().strip()
-        assert line == "# Transitions" or line == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
+        assert line in ("# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)")
         if line == "# Transitions":
             assert fin.readline().strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
         dftransitions = pd.read_fwf(
@@ -104,14 +115,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         # dftransitions = reader.get_chunk(transitioncount)
 
         # print(dftransitions)
-        transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
         transitions = []
         transition_count_of_level_name = defaultdict(int)
 
         for row in dftransitions.itertuples(index=False):
             A = float(row.g_u_times_A) / energy_levels[row.num_u].g
             coll_str = -1 if (energy_levels[row.num_u].parity != energy_levels[row.num_l].parity) else -2
-            transitions.append(transitiontuple(lowerlevel=row.num_l, upperlevel=row.num_u, A=A, coll_str=coll_str))
+            transitions.append(TransitionTuple(lowerlevel=row.num_l, upperlevel=row.num_u, A=A, coll_str=coll_str))
 
             transition_count_of_level_name[energy_levels[row.num_u].levelname] += 1
             transition_count_of_level_name[energy_levels[row.num_l].levelname] += 1
