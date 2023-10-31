@@ -1,13 +1,9 @@
-#!/usr/bin/env python3
 import math
 import os
 import sys
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
-from typing import Any
-from typing import Optional
-from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -253,11 +249,11 @@ def read_levels_and_transitions(
 
     if atomic_number == 1 and ion_stage == 2:
         ionization_energy_ev = 0.0
-        qub_energy_level_row = namedtuple(  # type: ignore
-            "energylevel", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
+        energy_level_row = namedtuple(
+            "energy_level_row", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
         )
 
-        hillier_energy_levels.append(qub_energy_level_row("I", 1, 0, 0, 0, 0.0, 10, 0))
+        hillier_energy_levels.append(energy_level_row("I", 1, 0, 0, 0, 0.0, 10, 0))
         return (
             hillier_ionization_energy_ev,
             hillier_energy_levels,
@@ -272,8 +268,9 @@ def read_levels_and_transitions(
         ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
     )
     artisatomic.log_and_print(flog, "Reading " + filename)
-    hillier_transition_row = namedtuple(  # type: ignore
-        "transition", "namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str"
+    hillier_transition_row = namedtuple(
+        "hillier_transition_row",
+        "namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str",
     )
 
     prev_line = ""
