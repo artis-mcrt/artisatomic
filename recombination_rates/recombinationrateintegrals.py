@@ -23,9 +23,7 @@ THOMSON_LIMIT = 1e-2  # /* Limit below which e-scattering is Thomson.*/
 PARSEC = 3.086e18  # /* 1 pc */
 EV = 1.6021772e-12  # /// eV to ergs
 KB = 1.38065e-16  # /// Boltzmann constant
-STEBO = (
-    5.670400e-5
-)  # /// Stefan-Boltzmann constant (data taken from NIST http://physics.nist.gov/cgi-bin/cuu/Value?eqsigma)
+STEBO = 5.670400e-5  # /// Stefan-Boltzmann constant (data taken from NIST http://physics.nist.gov/cgi-bin/cuu/Value?eqsigma)
 SAHACONST = 2.0706659e-16  # /// Saha constant
 
 CLIGHTSQUARED = 8.9875518e20

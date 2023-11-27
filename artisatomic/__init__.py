@@ -1189,8 +1189,8 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                     startpos = -3 if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n else -2
                 except ValueError:
                     startpos = (
-                        -3
-                    )  # this tripped on '4sp(3P)_7Po[2]'. just pretend 4sp is an orbital and occupation number
+                        -3  # this tripped on '4sp(3P)_7Po[2]'. just pretend 4sp is an orbital and occupation number
+                    )
 
                 electron_config.insert(0, instr[startpos:])
                 instr = instr[:startpos]
