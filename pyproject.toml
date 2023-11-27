@@ -19,6 +19,10 @@ classifiers = [
 dynamic = ["version", "dependencies", "entry-points"]
 requires-python = ">=3.10"
 
+[project.scripts]
+makeartisatomicfiles = "artisatomic:main"
+makerecombratefile = "artisatomic.makerecombratefile:main"
+
 [tool.black]
 line-length = 120
 
