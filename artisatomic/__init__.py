@@ -366,7 +366,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         useallnaharlevels=True,
                     )
 
-                    print(energy_levels[i][0:3])
+                    print(energy_levels[i][:3])
 
                 elif handler == "hillier_nahar":  # Hillier/Nahar hybrid
                     (
@@ -517,14 +517,13 @@ def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
             if found_tablestart:
                 row = line.split()
 
-                if len(row) > 5:
-                    lower = int(row[0])
-                    upper = int(row[1])
-                    upsilon = float(row[11])
-                    upsilondict[(lower, upper)] = upsilon
-                else:
+                if len(row) <= 5:
                     break
 
+                lower = int(row[0])
+                upper = int(row[1])
+                upsilon = float(row[11])
+                upsilondict[(lower, upper)] = upsilon
             if line.startswith(
                 "--	--	------	------	------	------	------	------	------	------	------	------	------	------	------"
             ):
