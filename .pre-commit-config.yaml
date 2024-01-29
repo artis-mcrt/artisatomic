@@ -30,21 +30,21 @@ repos:
     #     - id: ruff
     #       args: [--fix, --exit-non-zero-on-fix]
     - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.1.6
+      rev: v0.1.14
       hooks:
           - id: ruff
             args: [--fix, --fix-only, --exit-non-zero-on-fix]
     - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.1.6
+      rev: v0.1.14
       hooks:
           - id: ruff-format
     - repo: https://github.com/pycqa/flake8
-      rev: 6.1.0
+      rev: 7.0.0
       hooks:
           - id: flake8
             types: [python]
     - repo: https://github.com/pre-commit/mirrors-mypy
-      rev: v1.7.1
+      rev: v1.8.0
       hooks:
           - id: mypy
             # language: system
