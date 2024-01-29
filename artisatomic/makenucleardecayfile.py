@@ -12,7 +12,7 @@ import requests
 
 def main():
     PYDIR = Path(__file__).parent.resolve()
-    atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", delim_whitespace=True, comment="#")
+    atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
     elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
     outfolder = Path(__file__).parent.absolute() / "artis_files" / "data"
