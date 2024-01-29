@@ -1373,10 +1373,11 @@ def write_output_files(
 
         log_and_print(flog, "\n===========> " + ionstr + " output:")
 
-        level_id_of_level_name = {}
-        for levelid in range(1, len(energy_levels[i])):
-            if hasattr(energy_levels[i][levelid], "levelname"):
-                level_id_of_level_name[energy_levels[i][levelid].levelname] = levelid
+        level_id_of_level_name = {
+            energy_levels[i][levelid].levelname: levelid
+            for levelid in range(1, len(energy_levels[i]))
+            if hasattr(energy_levels[i][levelid], "levelname")
+        }
 
         unused_upsilon_transitions = set(upsilondicts[i].keys())  # start with the full set and remove used ones
         for transitionid, transition in enumerate(transitions[i]):
