@@ -60,7 +60,7 @@ ignore = [
     "ERA001",
     "F841", # ignored because variables in df.eval() are not detected
     "ISC001",
-    "N802", "N803", "N806", "N999",
+    "N802", "N803", "N806", "N999","N816",
     "PD901",
     "PGH001",
     "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
