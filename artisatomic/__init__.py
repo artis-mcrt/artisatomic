@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
 import argparse
+import contextlib
 import glob
 import itertools
 import json
@@ -808,12 +809,9 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     for atomic_number, ion_charge, ioniz_ev in dfnist[
         ["At. num", "Ion Charge", "Ionization Energy (a) (eV)"]
     ].itertuples(index=False):
-        try:
+        with contextlib.suppress(ValueError):
             ion_stage = int(ion_charge) + 1
             dictioniz[(int(atomic_number), ion_stage)] = ioniz_ev
-        except ValueError:
-            pass
-
     return dictioniz
 
 
@@ -1361,11 +1359,9 @@ def write_output_files(
     upsilon_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     for i, ion_stage in enumerate(listions):
-        try:
+        with contextlib.suppress(TypeError):
             if len(ion_stage) == 2:
                 ion_stage, handler = ion_stage
-        except TypeError:
-            pass
         upsilondict = upsilondicts[i]
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
