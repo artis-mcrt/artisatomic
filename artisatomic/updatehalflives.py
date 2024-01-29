@@ -18,7 +18,7 @@ def main():
 
     dfbetaminus = pd.read_csv(
         outfolder / "betaminusdecays.txt",
-        delim_whitespace=True,
+        sep=r"\s+",
         comment="#",
         names=["A", "Z", "Q[MeV]", "Egamma[MeV]", "Eelec[MeV]", "Eneutrino[MeV]", "tau[s]"],
     )

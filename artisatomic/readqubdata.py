@@ -66,7 +66,7 @@ def read_adf04(filepath, flog):
         qubupsilondf_alltemps = pd.read_csv(
             fleveltrans,
             index_col=False,
-            delim_whitespace=True,
+            sep=r"\s+",
             comment="C",
             names=list_headers,
             dtype={"lower": int, "upper": int}.update({z: float for z in list_headers[2:]}),
@@ -150,7 +150,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
             filename = f"atomic-data-qub/co_tyndall/{lowerlevelid:d}.gz"
             artisatomic.log_and_print(flog, "Reading " + filename)
-            photdata = pd.read_csv(filename, delim_whitespace=True, header=None)
+            photdata = pd.read_csv(filename, sep=r"\s+", header=None)
             phixstables = {}
             # ntargets = 40
             ntargets = 4  # just the 4Fe ground quartet
@@ -299,7 +299,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
         if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
             phixsvalues = np.array(phixsvalues_const)
         else:
-            dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues_const)))}
+            dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues_const, strict=True)))}
             phixsvalues = artisatomic.reduce_phixs_tables(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]

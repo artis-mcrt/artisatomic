@@ -19,7 +19,7 @@ import artisatomic
 # from scipy import interpolate
 
 # PYDIR = os.path.dirname(os.path.abspath(__file__))
-# atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), delim_whitespace=True, comment='#')
+# atomicdata = pd.read_csv(os.path.join(PYDIR, 'atomic_properties.txt'), sep='\s+', comment='#')
 # elsymbols = ['n'] + list(atomicdata['symbol'].values)
 
 corestatetuple = namedtuple("corestatetuple", "twosplusone lval parity energyryd config")

@@ -37,7 +37,7 @@ from artisatomic.manual_matches import nahar_configuration_replacements
 # import artisatomic.readlisbondata as readlisbondata
 
 PYDIR = Path(__file__).parent.resolve()
-atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", delim_whitespace=True, comment="#")
+atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
 atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
 elsymbols = ["n", *list(atomicdata["symbol"].values)]
 atomic_weights = ["n", *list(atomicdata["mass"].values)]
