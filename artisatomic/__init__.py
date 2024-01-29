@@ -843,11 +843,11 @@ def reduce_phixs_tables(
         )
         procs[-1].start()
 
-    dictout = {}
-    for procnum in range(len(procs)):
+    dictout: dict = {}
+    for _ in procs:
         subdict = out_q.get()
         # print("a process returned {:d} items".format(len(subdict.keys())))
-        dictout.update(subdict)
+        dictout |= subdict
 
     for proc in procs:
         proc.join()
