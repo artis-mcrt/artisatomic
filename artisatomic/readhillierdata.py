@@ -1247,7 +1247,7 @@ def read_hyd_phixsdata():
                 xs_values = xs_values + values_thisline
                 if len(xs_values) == num_points:
                     break
-                elif len(xs_values) > num_points:
+                if len(xs_values) > num_points:
                     print(
                         f"ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found"
                         f" {len(xs_values)}"
@@ -1292,7 +1292,7 @@ def read_hyd_phixsdata():
                 gaunt_values = gaunt_values + values_thisline
                 if len(gaunt_values) == num_points:
                     break
-                elif len(gaunt_values) > num_points:
+                if len(gaunt_values) > num_points:
                     print(f"ERROR: too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}")
                     sys.exit()
 
