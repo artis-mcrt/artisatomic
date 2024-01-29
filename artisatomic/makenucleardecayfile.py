@@ -117,7 +117,7 @@ def main():
                 # dfrad_e = dfnuclide.query("Radiation == 'BP' or Radiation == 'E'")
                 # endecay_positrons_mev = (dfrad_e.radiationenergy_kev * dfrad_e.intensity).sum() / 100.
 
-                dfout.sort_values(by="energy_mev", ascending=True, inplace=True, ignore_index=True)
+                dfout = dfout.sort_values(by="energy_mev", ascending=True, ignore_index=True)
 
                 # combine identical energy gamma ray intensities
                 # aggregation_functions = {'energy_mev': 'first', 'intensity': 'sum'}
