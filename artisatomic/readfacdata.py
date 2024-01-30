@@ -1,4 +1,5 @@
 import re
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
@@ -183,9 +184,14 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
-def read_levels_data(dflevels):
-    energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
+class FACEnergyLevel(t.NamedTuple):
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: int
 
+
+def read_levels_data(dflevels):
     energy_levels = []
     ilev_enlevelindex_map = {}
 
@@ -193,7 +199,7 @@ def read_levels_data(dflevels):
     for index, row in dflevels.iterrows():
         ilev_enlevelindex_map[int(row["Ilev"])] = index
 
-        newlevel = energy_level_tuple(
+        newlevel = FACEnergyLevel(
             levelname=row["Config rel"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
         )
         energy_levels.append(newlevel)
@@ -203,10 +209,16 @@ def read_levels_data(dflevels):
     return [None, *energy_levels], ilev_enlevelindex_map
 
 
+class FACTransition(t.NamedTuple):
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    coll_str: float
+
+
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
 
     for index, row in dflines.iterrows():
         try:
@@ -216,7 +228,7 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
             continue
         assert lowerlevel < upperlevel
 
-        transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
+        transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
 
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
