@@ -257,7 +257,10 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
             )
             with open(logfilepath, "w") as flog:
-                log_and_print(flog, f"\n===========> {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:")
+                log_and_print(
+                    flog,
+                    f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
+                )
                 log_and_print(flog, f"Source handler: {handler}")
 
                 path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
@@ -1371,7 +1374,7 @@ def write_output_files(
             "a",
         )
 
-        log_and_print(flog, "\n===========> " + ionstr + " output:")
+        log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
 
         level_id_of_level_name = {
             energy_levels[i][levelid].levelname: levelid

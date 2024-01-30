@@ -46,6 +46,7 @@ class LisbonReader:
         data : dict
             Dictionary containing one dictionary per species with
             keys `levels` and `lines`.
+
         """
         from carsus.util import parse_selected_species
 
