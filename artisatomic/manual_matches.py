@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # make sure there is no leading or trailing whitespace in the keys
 nahar_configuration_replacements = {
     # O I groundstate

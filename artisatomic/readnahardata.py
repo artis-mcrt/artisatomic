@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import os
 import sys
 from collections import defaultdict
@@ -35,9 +34,9 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     nahar_core_states = []
 
     if not os.path.isfile(path_nahar_energy_file):
-        artisatomic.log_and_print(flog, path_nahar_energy_file + " does not exist")
+        artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
     else:
-        artisatomic.log_and_print(flog, "Reading " + path_nahar_energy_file)
+        artisatomic.log_and_print(flog, f"Reading {path_nahar_energy_file}")
         with open(path_nahar_energy_file) as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 
@@ -94,7 +93,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                     nahar_core_state_id = int(row[2])
                     if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
                         flog.write(
-                            "Core state id of {0:d}{1}{2} index {3:d} is invalid (={4:d}, Ncorestates={5:d}). Setting"
+                            "Core state id of {:d}{}{} index {:d} is invalid (={:d}, Ncorestates={:d}). Setting"
                             " core state to 1 instead.\n".format(
                                 twosplusone,
                                 lchars[l_val],
@@ -185,7 +184,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
                 break
 
         line = ""
-        while len(line.strip()) == 0:
+        while not line.strip():
             line = fenlist.readline()
         row = line.split()
         if atomic_number != int(row[0]) or ion_stage != int(row[0]) - int(row[1]):
@@ -212,7 +211,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
             thresholds_ev_dict[(twosplusone, l, parity, indexinsymmetry)] = binding_energy_ryd * 13.605698065
 
             if not args.nophixs:
-                phixsarray = np.array([list(map(float, fenlist.readline().split())) for p in range(number_of_points)])
+                phixsarray = np.array([list(map(float, fenlist.readline().split())) for _ in range(number_of_points)])
             else:
                 for _ in range(number_of_points):
                     fenlist.readline()
@@ -263,9 +262,8 @@ def read_nahar_configurations(fenlist, flog):
 
             # print(state,energy,twosplusone,l,parity,indexinsymmetry)
             nahar_configurations[(twosplusone, l_val, parity, indexinsymmetry)] = state
-        else:
-            if found_table:
-                break
+        elif found_table:
+            break
 
     return nahar_configurations, nahar_ionization_potential_rydberg
 
@@ -364,7 +362,7 @@ def get_photoiontargetfractions(
             flog,
         )
 
-        summed_statistical_weights = sum([float(energy_levels_upperion[id].g) for id in upperionlevelids])
+        summed_statistical_weights = sum(float(energy_levels_upperion[levelid].g) for levelid in upperionlevelids)
         for upperionlevelid in sorted(upperionlevelids):
             phixsprobability = energy_levels_upperion[upperionlevelid].g / summed_statistical_weights
             targetlist[lowerlevelid].append((upperionlevelid, phixsprobability))
