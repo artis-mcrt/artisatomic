@@ -1,7 +1,6 @@
 import re
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
 import pandas as pd
@@ -121,8 +120,7 @@ def GetLines_cFAC(filename: Path) -> pd.DataFrame:
     trans_cFAC["Wavelength[Ang]"] = trans_cFAC["DeltaE[eV]"].apply(lambda en_ev: (hc / en_ev) * 1e8)
     trans_cFAC["DeltaE[cm^-1]"] = trans_cFAC["DeltaE[eV]"] / hc
     trans_cFAC = trans_cFAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
-    trans_cFAC = trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
-    return trans_cFAC
+    return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
 
 def GetLines(filename: Path, Z: int) -> pd.DataFrame:

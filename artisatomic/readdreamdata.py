@@ -3,7 +3,6 @@ from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-import h5py
 import pandas as pd
 from astropy import constants as const
 
@@ -133,7 +132,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         if leveltuple in energy_levels:
             return energy_levels.index(leveltuple)
         raise AssertionError
-        return -1
 
     dfiondata.insert(
         2,
@@ -154,6 +152,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
     ionization_energy_in_ev = -1
 
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

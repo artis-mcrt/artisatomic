@@ -74,14 +74,14 @@ class LisbonReader:
             lines["level_index_upper"] = lines_data["Upper"]
             lines["atomic_number"] = atomic_number
             lines["ion_charge"] = ion_charge
-            lines["energy_lower"] = levels.iloc[lines["level_index_lower"]]["energy"].values
+            lines["energy_lower"] = levels.iloc[lines["level_index_lower"]]["energy"].to_numpy()
             # for r in lines.iterrows():
             #     print(r)
             #     print(levels.iloc[r['level_index_upper']]['energy'])
-            lines["energy_upper"] = levels.iloc[lines["level_index_upper"]]["energy"].values
+            lines["energy_upper"] = levels.iloc[lines["level_index_upper"]]["energy"].to_numpy()
             lines["gf"] = lines_data["gf"]
-            lines["j_lower"] = levels.iloc[lines["level_index_lower"]]["j"].values
-            lines["j_upper"] = levels.iloc[lines["level_index_upper"]]["j"].values
+            lines["j_lower"] = levels.iloc[lines["level_index_lower"]]["j"].to_numpy()
+            lines["j_upper"] = levels.iloc[lines["level_index_upper"]]["j"].to_numpy()
             lines["wavelength"] = lines_data["Wavelength[Ang]"] / 10.0
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
@@ -177,8 +177,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     lisbon_data = {
         f"{elsym} {ion_charge}": {
-            "levels": LISPATH + f"/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Levels.csv",
-            "lines": LISPATH + f"/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Transitions.csv",
+            "levels": f"{LISPATH}/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Levels.csv",
+            "lines": f"{LISPATH}/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Transitions.csv",
         }
     }
 
@@ -190,7 +190,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # for x in energy_levels:
     #     print(x)
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
-    dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)", inplace=True)
+    dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
 
     # print(dflines)
 
