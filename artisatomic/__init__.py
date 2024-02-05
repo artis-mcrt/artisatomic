@@ -599,11 +599,7 @@ def combine_hillier_nahar(
                 if nahar_configuration_this_state != "_CONFIG NOT FOUND_":
                     level_match_scores = []
                     for levelname in hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
-                        altlevelname = (
-                            hillier_name_replacements[levelname]
-                            if levelname in hillier_name_replacements
-                            else levelname
-                        )
+                        altlevelname = hillier_name_replacements.get(levelname, levelname)
 
                         # set zero if already matched this level to something
                         match_score = (
