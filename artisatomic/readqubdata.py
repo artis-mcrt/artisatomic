@@ -158,7 +158,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             # photoionization_thresholds_ev[lowerlevelid] = photdata.loc[0][0]
 
             for targetlevel in range(1, ntargets + 1):
-                phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.0][[0, targetlevel]].values
+                phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.0][[0, targetlevel]].to_numpy()
 
             reduced_phixs_dict = artisatomic.reduce_phixs_tables(
                 phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement

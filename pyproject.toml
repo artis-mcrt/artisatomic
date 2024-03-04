@@ -1,14 +1,14 @@
 [build-system]
-requires = ["psutil>=5.9.0", "setuptools>=45", "setuptools_scm[toml]>=6.3", "wheel"]
+requires = ["psutil>=5.9.0", "setuptools>=68", "setuptools_scm[toml]>=8.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "artisatomic"
 authors = [
+    {name = "Luke J. Shingles", email = "luke.shingles@gmail.com"},
     {name = "ARTIS Collaboration", email = "luke.shingles@gmail.com"},
 ]
 description="Tools to create an atomic database for use with ARTIS."
-readme = "README.md"
 classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
@@ -16,8 +16,13 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dynamic = ["version", "dependencies", "entry-points"]
+license = {text = "MIT"}
+dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
+readme = {file = "README.md", content-type='text/markdown'}
+
+[project.urls]
+Repository ="https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
@@ -41,6 +46,10 @@ errors-only = true
 ignored-modules = ["astropy", "extinction"]
 
 [tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
 select = [
     #"ALL",
     "A", "B", "C", "D", "E", "F", "G", "N", "Q", "W", "ARG", "BLE", "DJ", "DTZ", "EM", "ERA", "EXE",
@@ -48,6 +57,7 @@ select = [
     "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"
 ]
 ignore = [
+    "A001",
     "ARG001", # ignored because variables in df.eval() are not detected
     "B005",
     "B007", # variable not used in loop body (but sometimes it is with eval)
@@ -58,18 +68,24 @@ ignore = [
     "E501", "E741",
     "EM101","EM102",
     "ERA001",
+    "F401",
     "F841", # ignored because variables in df.eval() are not detected
     "ISC001",
     "N802", "N803", "N806", "N999","N816",
+    "PD002",
     "PD901",
-    "PGH001",
+    "PGH003",
     "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
+    "PLR5501",
+    "PLW0603",
     "PLW2901",
     "PT011",
     "PYI024",
     "RET504",
+    "S307",
     "SIM115",
     "SLF001",
+    "TCH005",
     "TRY003",
     "TRY301",
     "UP032",
@@ -85,12 +101,23 @@ unfixable = [
     "TCH005", # empty-type-checking-block
     "F401",
 ]
-line-length = 120
-target-version = "py310"
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 force-single-line = true
 order-by-type = false
+
+[tool.setuptools]
+include-package-data = true
+license-files = ["LICENSE.txt"]
+
+[tool.setuptools.packages.find]
+namespaces = true
+where = ["."]
+include = ["*", "**/matplotlibrc", "**/data"]
+exclude = ["tests", "**/dist", "**/lib", "**/build", "*.egg-info", "**/.*"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools_scm]
 write_to = "_version.py"

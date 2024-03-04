@@ -76,7 +76,7 @@ def main():
             # dfnuclide = pd.read_fwf(io.StringIO(strtable))
             dfnuclide = pd.read_csv(io.StringIO(strtable), delimiter="\t", dtype={"Par. Elevel": str})
             newcols = []
-            for index, colname in enumerate(dfnuclide.columns):
+            for colname in dfnuclide.columns:
                 colname = colname.strip()
                 if colname.startswith("Unc"):
                     colname = newcols[-1] + " (Unc)"
@@ -98,8 +98,7 @@ def main():
                 print(f"  parent_Elevel: {parelevel} is_groundlevel: {is_groundlevel}")
                 if not is_groundlevel:
                     continue
-                else:
-                    found_groundlevel = True
+                found_groundlevel = True
                 dfgammadecays = dfnuclide.query(
                     "Radiation == 'G' and (radsubtype == '' or radsubtype == 'Annihil.') and intensity >= 0.15",
                     inplace=False,
@@ -107,8 +106,8 @@ def main():
                 # print(dfgammadecays)
 
                 dfout = pd.DataFrame()
-                dfout["energy_mev"] = dfgammadecays.radiationenergy_kev.values / 1000.0
-                dfout["intensity"] = dfgammadecays.intensity.values / 100.0
+                dfout["energy_mev"] = dfgammadecays.radiationenergy_kev.to_numpy() / 1000.0
+                dfout["intensity"] = dfgammadecays.intensity.to_numpy() / 100.0
 
                 # if positrons are emitted, there are two 511 keV gamma rays per positron decay
                 # dfannihil = dfnuclide.query("Radiation == 'G' and radsubtype == 'Annihil.'", inplace=False)
