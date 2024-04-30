@@ -154,6 +154,7 @@ def GetLines(filename: Path, Z: int) -> pd.DataFrame:
 
 
 def extend_ion_list(ion_handlers):
+    assert Path(BASEPATH).is_dir()
     for s in Path(BASEPATH).glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip("0123456789").removesuffix(".lev.asc").removesuffix("_calib")
         elsym = ionstr.rstrip("IVX")
