@@ -24,7 +24,7 @@ hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 
 def read_ionization_data(atomic_number, ion_stage):
-    ionization_data = filename_aoife_dataset["/ionization_data"].value
+    ionization_data = filename_aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
     for atomic_num, ion_number, ionization_energy in ionization_data:
@@ -39,7 +39,7 @@ def read_ionization_data(atomic_number, ion_stage):
 
 
 def read_levels_data(atomic_number, ion_stage):
-    levels_data = filename_aoife_dataset["/levels_data"].value
+    levels_data = filename_aoife_dataset["/levels_data"]
 
     energy_levels = [None]
     # TODO energyinRydbergs change back to energyabovegsinpercm
@@ -59,7 +59,7 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
-    lines_data = filename_aoife_dataset["/lines_data"].value
+    lines_data = filename_aoife_dataset["/lines_data"]
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
