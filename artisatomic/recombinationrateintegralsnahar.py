@@ -298,7 +298,7 @@ def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
         if kind == "simps":
             integral = integrate.simps(arr_integrand, arr_nu)
         elif kind == "trapz":
-            integral = integrate.trapz(arr_integrand, arr_nu)
+            integral = integrate.trapezoid(arr_integrand, arr_nu)
         else:
             print(f"UNKNOWN INTEGRAL KIND: {kind}")
             sys.exit()
@@ -315,7 +315,7 @@ def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
     # arr_epsilon = [en - E_threshold for en in arr_en]
     # arr_sigmamb = [sigma_megabarns for _, sigma_megabarns in phixslist]
     # arr_integrand = [integrand_nahar(en, sigma_megabarns) for en, sigma_megabarns in zip(arr_en, arr_sigmamb)]
-    # integral_trapz = integrate.trapz(arr_integrand, arr_epsilon)
+    # integral_trapz = integrate.trapezoid(arr_integrand, arr_epsilon)
     #
     # factor = g_lower / g_upper * 2 / (KB * T * math.sqrt(2 * math.pi * (ME ** 3) * KB * CLIGHT2 * T))
     #
