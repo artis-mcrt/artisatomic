@@ -974,8 +974,8 @@ def reduce_phixs_tables_worker(
                     for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals, strict=True)
                 ]
 
-                integralnosigma = integrate.trapz(integrand_vals, arr_energyryd)
-                integralwithsigma = integrate.trapz(sigma_integrand_vals, arr_energyryd)
+                integralnosigma = integrate.trapezoid(integrand_vals, arr_energyryd)
+                integralwithsigma = integrate.trapezoid(sigma_integrand_vals, arr_energyryd)
 
             else:
                 integralnosigma = 1.0
