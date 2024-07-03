@@ -87,7 +87,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     #     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
     #     (39, [(1, "carsus"), (2, "carsus")]),
     #     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
-        # (70, [(5, "gsnist")]),
+    #     (70, [(5, "gsnist")]),
     #     (92, [(2, "fac"), (3, "fac")]),
     #     (94, [(2, "fac"), (3, "fac")]),
     # ]
