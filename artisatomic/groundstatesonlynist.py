@@ -9,7 +9,7 @@ import artisatomic
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
-class energylevel(t.NamedTuple):
+class EnergyLevel(t.NamedTuple):
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -23,12 +23,12 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
-    this_ion = groundstatesdata.loc[(groundstatesdata['Z'] == atomic_number) & (groundstatesdata['ion'] == ion_stage)]
+    this_ion = groundstatesdata.loc[(groundstatesdata["Z"] == atomic_number) & (groundstatesdata["ion"] == ion_stage)]
 
-    ionization_energy_in_ev = this_ion["IonizationEnergy"].values[0]
+    ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [None]
-    energy_levels.append(energylevel(levelname=this_ion["config"].values[0], parity=0, g=this_ion["g"].values[0],
+    energy_levels.append(EnergyLevel(levelname=this_ion["config"].to_numpy()[0], parity=0, g=this_ion["g"].to_numpy()[0],
                                  energyabovegsinpercm=0.0))
 
     transitions = []
