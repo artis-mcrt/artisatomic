@@ -487,7 +487,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         transition_count_of_level_name[i],
                     ) = readtanakajpltdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
-                elif handler == "gsnist": #ground states taken from NIST
+                elif handler == "gsnist":  # ground states taken from NIST
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
