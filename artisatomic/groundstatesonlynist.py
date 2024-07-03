@@ -9,6 +9,7 @@ import artisatomic
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
+
 class EnergyLevel(t.NamedTuple):
     levelname: str
     energyabovegsinpercm: float
@@ -16,7 +17,9 @@ class EnergyLevel(t.NamedTuple):
     parity: float
 
 
-datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-groundstatesonlynist", "groundstates.dat")
+datafilepath = Path(
+    os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-groundstatesonlynist", "groundstates.dat"
+)
 
 
 def read_ground_levels(atomic_number, ion_stage, flog):
@@ -28,8 +31,14 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [None]
-    energy_levels.append(EnergyLevel(levelname=this_ion["config"].to_numpy()[0], parity=0, g=this_ion["g"].to_numpy()[0],
-                                 energyabovegsinpercm=0.0))
+    energy_levels.append(
+        EnergyLevel(
+            levelname=this_ion["config"].to_numpy()[0],
+            parity=0,
+            g=this_ion["g"].to_numpy()[0],
+            energyabovegsinpercm=0.0,
+        )
+    )
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
@@ -54,8 +63,10 @@ def extend_ion_list(ion_handlers):
 
         if not found_element:
             ion_handlers.append(
-                (atomic_number,
-                [(ion_stage, "gsnist")],)
+                (
+                    atomic_number,
+                    [(ion_stage, "gsnist")],
+                )
             )
     ion_handlers.sort(key=lambda x: x[0])
     return ion_handlers
