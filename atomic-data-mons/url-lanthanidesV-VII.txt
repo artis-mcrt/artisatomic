@@ -1,0 +1,4 @@
+https://doi.org/10.5281/zenodo.10635803
+
+# No need to unzip files - artisatomic reads the zip archives
+

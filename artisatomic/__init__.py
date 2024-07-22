@@ -32,6 +32,7 @@ from artisatomic import readhillierdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
+from artisatomic import readmonsdata
 from artisatomic import groundstatesonlynist
 from artisatomic.manual_matches import hillier_name_replacements
 from artisatomic.manual_matches import nahar_configuration_replacements
@@ -88,6 +89,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     #     (39, [(1, "carsus"), (2, "carsus")]),
     #     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
     #     (70, [(5, "gsnist")]),
+    #     (57, [(5, "mons")]),
     #     (92, [(2, "fac"), (3, "fac")]),
     #     (94, [(2, "fac"), (3, "fac")]),
     # ]
@@ -98,6 +100,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
     # ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readmonsdata.extend_ion_list(ion_handlers)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
     return ion_handlers
@@ -486,6 +489,14 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         transitions[i],
                         transition_count_of_level_name[i],
                     ) = readtanakajpltdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+
+                elif handler == "mons":  # Lanthanide data ions V-VII from MONS
+                    (
+                        ionization_energy_ev[i],
+                        energy_levels[i],
+                        transitions[i],
+                        transition_count_of_level_name[i],
+                    ) = readmonsdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "gsnist":  # ground states taken from NIST
                     (
@@ -1012,6 +1023,8 @@ def reduce_phixs_tables_worker(
 
 
 def check_forbidden(levela, levelb) -> bool:
+    if levela is None or levela.parity is None or levelb.parity is None:
+        return False
     return levela.parity == levelb.parity
 
 
@@ -1545,7 +1558,7 @@ def write_transition_data(
     for transition in transitions:
         levelid_lower = transition.lowerlevel
         levelid_upper = transition.upperlevel
-        forbidden = energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity
+        forbidden = check_forbidden(energy_levels[levelid_lower], energy_levels[levelid_upper])
 
         if not forbidden:
             level_ids_with_permitted_down_transitions.add(levelid_upper)
@@ -1559,7 +1572,7 @@ def write_transition_data(
         if coll_str > 0:
             num_collision_strengths_applied += 1
 
-        forbidden = energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity
+        forbidden = check_forbidden(energy_levels[levelid_lower], energy_levels[levelid_upper])
 
         if forbidden:
             num_forbidden_transitions += 1
