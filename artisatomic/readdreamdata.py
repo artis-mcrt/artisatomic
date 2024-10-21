@@ -14,7 +14,7 @@ import artisatomic
 dreamdatapath = Path(
     os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5"
 )
-dreamdata = None
+dreamdata: pd.DataFrame | None = None
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
 

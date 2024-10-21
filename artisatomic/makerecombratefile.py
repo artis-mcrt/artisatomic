@@ -5,7 +5,6 @@ import os
 import sys
 from collections import namedtuple
 
-import ChiantiPy
 import ChiantiPy.core as ch
 import numpy as np
 import pandas as pd

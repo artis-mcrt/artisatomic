@@ -1,3 +1,4 @@
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
@@ -8,7 +9,7 @@ import artisatomic
 
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 
-gfall_reader = None
+gfall_reader: t.Any = None
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:

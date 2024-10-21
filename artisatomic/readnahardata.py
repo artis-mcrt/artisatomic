@@ -320,7 +320,7 @@ def get_naharphotoion_upperlevelids(
 
             best_ediff = float("inf")
             best_match_upperlevelids = []
-            for _, (ediffs, upperlevelids) in candidate_upper_levels.items():
+            for ediffs, upperlevelids in candidate_upper_levels.values():
                 avg_ediff = abs(sum(ediffs) / len(ediffs))
                 if avg_ediff < best_ediff:
                     best_ediff = avg_ediff

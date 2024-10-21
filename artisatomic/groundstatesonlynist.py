@@ -1,9 +1,10 @@
 import os.path
-from pathlib import Path
 import typing as t
+from collections import defaultdict
+from pathlib import Path
+
 import pandas as pd
 from astropy import constants as const
-from collections import defaultdict
 
 import artisatomic
 
