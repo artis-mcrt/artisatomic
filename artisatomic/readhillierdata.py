@@ -451,7 +451,7 @@ phixs_type_labels = {
     8: "Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]",
     9: "Verner & Yakolev 1995 ground state fits (multiple shells)",
     20: "Opacity Project: smoothed [number of data points]",
-    21: "Opacity Project: scaled, smoothed [number of data poits]",
+    21: "Opacity Project: scaled, smoothed [number of data points]",
     22: "energy is in units of threshold, cross section in Megabarns? [number of data points]",
 }
 
@@ -471,7 +471,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     reduced_phixs_dict = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
 
-    j_splitting_on = False  # hopefully this is either on or off for all photoion files asssociated with a given ion
+    j_splitting_on = False  # hopefully this is either on or off for all photoion files associated with a given ion
 
     phixs_type_levels = defaultdict(list)
     unknown_phixs_types = []
@@ -809,7 +809,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
     for lowerlevelname, reduced_phixstable in reduced_phixs_dict.items():
         target_configfactors_nofilter = phixs_targetconfigfactors_of_levelname[lowerlevelname]
-        # the factors are arbitary and need to be normalised into fractions
+        # the factors are arbitrary and need to be normalised into fractions
 
         # filter out low fraction targets
         factor_sum_nofilter = sum([x[1] for x in target_configfactors_nofilter])
@@ -863,7 +863,7 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
             # type 7
             # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
             # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
-            #                       Offset was beeing added to the current frequency instead
+            #                       Offset was being added to the current frequency instead
             #                       of the ionization edge.
 
             threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
