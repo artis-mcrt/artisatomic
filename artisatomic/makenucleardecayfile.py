@@ -7,15 +7,13 @@ import artistools as at
 import pandas as pd
 import requests
 
-# import numpy as np
-
 
 def main():
     PYDIR = Path(__file__).parent.resolve()
     atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
     elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
-    outfolder = Path(__file__).parent.absolute() / "artis_files" / "data"
+    outfolder = Path(__file__).parent.parent.absolute() / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
     pd.options.display.max_rows = 999
     pd.options.display.max_columns = 999
