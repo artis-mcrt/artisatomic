@@ -5,6 +5,7 @@ from pathlib import Path
 import artistools as at
 from astropy import constants as const
 
+selectedelements: None | list[int]
 # selectedelements = [27]
 selectedelements = None  # select all
 

@@ -24,6 +24,7 @@ from astropy import units as u
 from scipy import integrate
 from scipy import interpolate
 
+from artisatomic import groundstatesonlynist
 from artisatomic import readboyledata
 from artisatomic import readcarsusdata
 from artisatomic import readdreamdata
@@ -32,7 +33,6 @@ from artisatomic import readhillierdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic import groundstatesonlynist
 from artisatomic.manual_matches import hillier_name_replacements
 from artisatomic.manual_matches import nahar_configuration_replacements
 
