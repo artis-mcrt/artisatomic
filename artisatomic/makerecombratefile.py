@@ -12,12 +12,6 @@ from artistools import get_composition_data
 
 import artisatomic
 
-# import math
-# import numexpr as ne
-
-# from astropy import constants as const
-# from astropy import units as u
-
 
 def read_nahar_rrcfile(filename, noprint=False):
     if not noprint:
@@ -56,12 +50,6 @@ def read_nahar_rrcfile(filename, noprint=False):
 
 
 def main():
-    # dir(pidly.IDL)
-    # idl = pidly.IDL("/Applications/GNU Data Language.app/Contents/MacOS/gdl", idl_prompt="GDL> ")
-    # idl = pidly.IDL("/usr/local/ssw/gen/setup/ssw_idl")
-    # dir(idl)
-    # idl.setecho("False")
-
     # Shull & Steenberg 1982
     A_rad, X_rad = {}, {}
     A_rad[26, 1], X_rad[26, 1] = 1.42e-13, 0.891
