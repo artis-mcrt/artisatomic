@@ -162,7 +162,13 @@ def main(args=None, argsraw=None, **kwargs):
             help="Temperature for choosing effective collision strengths",
         )
         parser.add_argument(
-            "--nophixs", action="store_true", help="Dont generate cross sections and write to phixsdata_v2.txt file"
+            "--nophixs", action="store_true", help="Don't generate cross sections and write to phixsdata_v2.txt file"
+        )
+
+        parser.add_argument(
+            "--use_hydrogenic_for_unknown_phixs",
+            action="store_true",
+            help="Use hydrogenic cross sections for ions with unknown cross sections",
         )
         parser.add_argument("--plotphixs", action="store_true", help="Generate cross section plots")
 
@@ -498,6 +504,20 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 else:
                     raise ValueError(f"Unknown handler: {handler}")
 
+            if (
+                i < len(listions) - 1
+                and not args.nophixs
+                and not photoionization_crosssections[i]
+                and args.use_hydrogenic_for_unknown_phixs
+            ):  # don't get cross sections for top ion
+                (
+                    photoionization_crosssections[i],
+                    photoionization_targetfractions[i],
+                    photoionization_thresholds_ev[i],
+                ) = match_hydrogenic_phixs(
+                    atomic_number, ion_stage, energy_levels[i], ionization_energy_ev[i], handler, args, flog
+                )
+
         write_output_files(
             elementindex,
             energy_levels,
@@ -822,6 +842,47 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
             ion_stage = int(ion_charge) + 1
             dictioniz[(int(atomic_number), ion_stage)] = ioniz_ev
     return dictioniz
+
+
+def match_hydrogenic_phixs(
+    atomic_number: int, ion_stage: int, energy_levels, ionization_energy_ev: float, ion_handler: str, args, flog
+):
+    dict_get_n_func = {
+        "tanakajplt": readtanakajpltdata.get_level_valence_n,
+        "carsus": readcarsusdata.get_level_valence_n,
+        "fac": readfacdata.get_level_valence_n,
+    }
+    if ion_handler not in dict_get_n_func:
+        print(
+            f"WARNING: Can't assign hydrogenic photoionization cross sections because I don't know how to find principle quantum numbers for {ion_handler} levels"
+        )
+        return [], [], []
+
+    get_n = dict_get_n_func[ion_handler]
+    print(f"Matching hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
+
+    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
+    photoionization_targetfractions = [[(1, 1.0)] for _ in energy_levels]
+    photoionization_thresholds_ev = np.zeros(len(energy_levels))
+    phixstables = {}
+    for lowerlevelid, level in enumerate(energy_levels[1:], 1):
+        n = get_n(level.levelname)
+        en_ev = hc_in_ev_cm * level.energyabovegsinpercm
+        threshold_ev = ionization_energy_ev - en_ev
+        photoionization_thresholds_ev[lowerlevelid] = threshold_ev
+        lambda_angstrom = hc_in_ev_angstrom / threshold_ev
+        assert lambda_angstrom > 0.0
+        phixstables[lowerlevelid] = readhillierdata.get_hydrogenic_n_phixstable(
+            lambda_angstrom=lambda_angstrom, n=n
+        ) / (atomic_number**2)
+
+    reduced_phixs_dict = reduce_phixs_tables(
+        phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+    )
+    for lowerlevelid, enlevel in enumerate(energy_levels[1:], 1):
+        photoionization_crosssections[lowerlevelid] = reduced_phixs_dict[lowerlevelid]
+
+    return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
 def reduce_phixs_tables(
