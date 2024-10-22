@@ -32,7 +32,7 @@ makerecombratefile = "artisatomic.makerecombratefile:main"
 line-length = 120
 
 [tool.mypy]
-python_version = '3.11'
+python_version = '3.13'
 exclude = "(build)|(tests)"
 packages = "artisatomic"
 ignore_missing_imports = true
