@@ -859,7 +859,7 @@ def match_hydrogenic_phixs(
         return [], [], []
 
     get_n = dict_get_n_func[ion_handler]
-    print(f"Matching hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
+    print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
     alpha_squared = 0.0072973525643**2  # fine structure constant squared
     mc_squared = 0.5109989461 * 1e6  # electron mass in eV
