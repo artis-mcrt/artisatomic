@@ -143,3 +143,33 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+
+
+def get_level_valence_n(levelname: str):
+    namesplit = levelname.replace("  ", " ").split(" ")
+    if len(namesplit) < 2 or not (part := namesplit[-2]):
+        print(f"WARNING: Could not find n in {levelname}. Using n=1")
+        return 1
+
+    if part[-1] not in "spdfghijklmnopqr":
+        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
+
+        if not part[-1].isdigit():
+            print(f"WARNING: Could not find n in {levelname}. Using n=1")
+            return 1
+        part = part.rstrip("0123456789")
+    part = part.strip("spdfghijklmnopqr")
+
+    # inefficient way to find the last number in a string
+    for i in range(len(part)):
+        try:
+            n = int(part[i:])
+        except ValueError:
+            continue
+        else:
+            assert n >= 0
+            assert n < 50
+            return n
+
+    print(f"WARNING: Could not find n in {levelname}. Using n=1")
+    return 1

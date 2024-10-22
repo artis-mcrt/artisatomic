@@ -199,7 +199,7 @@ def read_levels_data(dflevels):
         ilev_enlevelindex_map[int(row["Ilev"])] = index
 
         newlevel = FACEnergyLevel(
-            levelname=row["Config rel"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
+            levelname=row["Config"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
         )
         energy_levels.append(newlevel)
 
@@ -280,3 +280,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     artisatomic.log_and_print(flog, f"Read {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+
+
+def get_level_valence_n(levelname: str):
+    part = levelname.split(" ")[-1]
+    if part[-1] not in "spdfg":
+        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
+        assert part[-1].isdigit()
+        part = part.rstrip("0123456789")
+    return int(part.rstrip("spdfg"))
