@@ -209,22 +209,22 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
         if not listions:
             continue
 
-        nahar_core_states = [[None] for x in listions]  # list of named tuples (naharcorestaterow)
-        hillier_photoion_targetconfigs: list = [[] for x in listions]
+        nahar_core_states = [[None] for _ in listions]  # list of named tuples (naharcorestaterow)
+        hillier_photoion_targetconfigs: list = [[] for _ in listions]
 
         # keys are (2S+1, L, parity), values are strings of electron configuration
-        nahar_configurations: list[dict[tuple, str]] = [{} for x in listions]
+        nahar_configurations: list[dict[tuple, str]] = [{} for _ in listions]
 
         # keys are (2S+1, L, parity, indexinsymmetry), values are lists of (energy
         # in Rydberg, cross section in Mb) tuples
-        nahar_phixs_tables: list[dict[tuple, list[tuple]]] = [{} for x in listions]
+        nahar_phixs_tables: list[dict[tuple, list[tuple]]] = [{} for _ in listions]
 
         ionization_energy_ev = [0.0 for x in listions]
-        thresholds_ev_dict: list[dict] = [{} for x in listions]
+        thresholds_ev_dict: list[dict] = [{} for _ in listions]
 
         # list of named tuples (hillier_transition_row)
         transitions: list = [[] for x in listions]
-        transition_count_of_level_name: list[dict] = [{} for x in listions]
+        transition_count_of_level_name: list[dict] = [{} for _ in listions]
         upsilondicts: list[dict] = [{} for x in listions]
 
         energy_levels: list = [[] for x in listions]
@@ -653,9 +653,8 @@ def combine_hillier_nahar(
                                 matchscore=best_match_score,
                             )
                             hillier_level_ids_matching_this_nahar_state.append(levelid)
-                    else:
-                        pass
-                        # print("no match for", nahar_configuration_this_state)
+                    # else:
+                    #     print("no match for", nahar_configuration_this_state)
                 else:
                     log_and_print(
                         flog,

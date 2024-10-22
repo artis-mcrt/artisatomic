@@ -1,0 +1,39 @@
+---
+ignore: # A list of paths or files which Sourcery will ignore.
+    - .git
+    - venv
+    - .venv
+    - env
+    - .env
+    - .tox
+    - node_modules
+    - vendor
+    - .*
+    - build
+    - dist
+    - rd_cmfgen.py
+
+rule_settings:
+    enable:
+        - default
+        - gpsg-standard-import-alias
+    disable:
+        - ensure-file-closed
+        - move-assign
+        - remove-redundant-if
+        - inline-immediately-returned-variable
+        - inline-variable
+        - missing-dict-items
+        - extract-method
+        - extract-duplicate-method
+        - code_clarification
+    rule_types:
+        - refactoring
+        - suggestion
+        - comment
+    python_version: '3.10' # A string specifying the lowest Python version your project supports. Sourcery will not suggest refactorings requiring a higher Python version.
+
+clone_detection:
+    min_lines: 7
+    min_duplicates: 2
+    identical_clones_only: false
