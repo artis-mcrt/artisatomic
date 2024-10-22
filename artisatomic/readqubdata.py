@@ -70,7 +70,7 @@ def read_adf04(filepath, flog):
             comment="C",
             names=list_headers,
             dtype={"lower": int, "upper": int}.update({z: float for z in list_headers[2:]}),
-            error_bad_lines=False,
+            on_bad_lines="skip",
             skip_blank_lines=True,
             keep_default_na=False,
         )
