@@ -133,3 +133,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+
+
+def get_level_valence_n(levelname: str):
+    n = int(levelname.split("  ")[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+    assert n >= 0
+    assert n < 20
+    return n
