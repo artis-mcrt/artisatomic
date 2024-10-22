@@ -76,7 +76,8 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
         print(f"Reading {inputhandlersfile}")
         return json.load(inputhandlersfile.open(encoding="utf-8"))
 
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
+    ion_handlers = [
         (26, [1, 2, 3, 4, 5]),
         (27, [2, 3, 4]),
         (28, [2, 3, 4, 5]),
