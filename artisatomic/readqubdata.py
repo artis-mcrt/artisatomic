@@ -299,7 +299,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
         if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
             phixsvalues = np.array(phixsvalues_const)
         else:
-            dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues_const, strict=True)))}
+            dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.9, 0.1), phixsvalues_const, strict=False)))}
             phixsvalues = artisatomic.reduce_phixs_tables(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
