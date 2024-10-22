@@ -861,6 +861,9 @@ def match_hydrogenic_phixs(
     get_n = dict_get_n_func[ion_handler]
     print(f"Matching hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
+    alpha_squared = 0.0072973525643**2  # fine structure constant squared
+    mc_squared = 0.5109989461 * 1e6  # electron mass in eV
+
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_targetfractions = [[(1, 1.0)] for _ in energy_levels]
     photoionization_thresholds_ev = np.zeros(len(energy_levels))
@@ -872,9 +875,10 @@ def match_hydrogenic_phixs(
         photoionization_thresholds_ev[lowerlevelid] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
         assert lambda_angstrom > 0.0
-        phixstables[lowerlevelid] = readhillierdata.get_hydrogenic_n_phixstable(
-            lambda_angstrom=lambda_angstrom, n=n
-        ) / (atomic_number**2)
+        effective_charge_squared = threshold_ev * 2 * (n**2) / alpha_squared / mc_squared
+        phixstables[lowerlevelid] = (
+            readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n) / effective_charge_squared
+        )
 
     reduced_phixs_dict = reduce_phixs_tables(
         phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
