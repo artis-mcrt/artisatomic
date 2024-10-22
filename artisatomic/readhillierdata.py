@@ -21,7 +21,7 @@ hillier_rowformat_a = (
 hillier_rowformat_b = (
     "levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6"
 )
-hillier_rowformat_c = "levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid"
+hillier_rowformat_c = "levelname g energyabovegsinpercm thresholdenergyev lambdaangstrom hillierlevelid"
 hillier_rowformat_d = (
     "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
 )
