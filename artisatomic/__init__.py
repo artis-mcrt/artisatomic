@@ -507,7 +507,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
             if (
                 i < len(listions) - 1
                 and not args.nophixs
-                and not photoionization_crosssections[i]
+                and len(photoionization_crosssections[i]) == 0
                 and args.use_hydrogenic_for_unknown_phixs
             ):  # don't get cross sections for top ion
                 (
