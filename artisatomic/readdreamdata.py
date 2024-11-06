@@ -12,7 +12,7 @@ import artisatomic
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = Path(
-    os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5"
+    os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
 )
 dreamdata: pd.DataFrame | None = None
 hc_in_ev_cm = (const.h * const.c).to("eV cm").value
@@ -21,10 +21,12 @@ hc_in_ev_cm = (const.h * const.c).to("eV cm").value
 def init_dreamdata():
     global dreamdata
     if dreamdata is None:
-        dreamdatapath = Path(
-            os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20210217-1633.h5"
-        )
-        dreamdata = pd.read_hdf(dreamdatapath) if dreamdatapath.exists() else None
+        if dreamdatapath.exists():
+            dreamdata = pd.read_hdf(dreamdatapath)
+            dreamdata["Lower_g"] = 2 * dreamdata["Lower_J"] + 1
+            dreamdata["Upper_g"] = 2 * dreamdata["Upper_J"] + 1
+        else:
+            dreamdata = None
 
 
 def extend_ion_list(ion_handlers):
