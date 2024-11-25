@@ -25,7 +25,7 @@ jobs:
 
             - name: Install dependencies
               run: |
-                  python -m pip install --upgrade pip wheel setuptools mypy ruff
+                  python -m pip install --upgrade pip wheel setuptools mypy
                   python -m pip install -r requirements.txt
 
             - name: Install artisatomic
@@ -46,11 +46,16 @@ jobs:
 
             - name: Run Ruff
               if: always()
-              run: ruff check --output-format=github  --exit-non-zero-on-fix .
+              uses: astral-sh/ruff-action@v1
+              with:
+                  version: 0.8.0
 
             - name: Run Ruff Format
               if: always()
-              run: ruff format --diff .
+              uses: astral-sh/ruff-action@v1
+              with:
+                  args: format --check
+                  version: 0.8.0
 
     pytest:
         runs-on: macos-15

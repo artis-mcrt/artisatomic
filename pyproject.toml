@@ -1,14 +1,19 @@
 [build-system]
-requires = ["psutil>=5.9.0", "setuptools>=68", "setuptools_scm[toml]>=8.0", "wheel"]
+requires = [
+    "psutil>=5.9.0",
+    "setuptools>=68",
+    "setuptools_scm[toml]>=8.0",
+    "wheel",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "artisatomic"
 authors = [
-    {name = "Luke J. Shingles", email = "luke.shingles@gmail.com"},
-    {name = "ARTIS Collaboration", email = "luke.shingles@gmail.com"},
+    { name = "Luke J. Shingles", email = "luke.shingles@gmail.com" },
+    { name = "ARTIS Collaboration", email = "luke.shingles@gmail.com" },
 ]
-description="Tools to create an atomic database for use with ARTIS."
+description = "Tools to create an atomic database for use with ARTIS."
 classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: MIT License",
@@ -17,13 +22,13 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-license = {text = "MIT"}
+license = { text = "MIT" }
 dynamic = ["version", "dependencies"]
 requires-python = ">=3.10"
-readme = {file = "README.md", content-type='text/markdown'}
+readme = { file = "README.md", content-type = 'text/markdown' }
 
 [project.urls]
-Repository ="https://www.github.com/artis-mcrt/artisatomic"
+Repository = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
@@ -58,27 +63,47 @@ select = ["ALL"]
 ignore = [
     "A001",
     "ANN",
-    "ARG001", # ignored because variables in df.eval() are not detected
+    "ARG001",  # ignored because variables in df.eval() are not detected
     "B005",
-    "B007", # variable not used in loop body (but sometimes it is with eval)
+    "B007",    # variable not used in loop body (but sometimes it is with eval)
     "BLE001",
     "C9",
     "COM812",
-    "D100", "D101", "D102", "D103", "D104", "D107", "D203", "D205", "D213", "D401", "D417",
-    "E501", "E741",
-    "EM101","EM102",
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D107",
+    "D203",
+    "D205",
+    "D213",
+    "D401",
+    "D417",
+    "E501",
+    "E741",
+    "EM101",
+    "EM102",
     "ERA001",
     "F401",
     "FIX002",
     "FBT",
-    "F841", # ignored because variables in df.eval() are not detected
+    "F841",    # ignored because variables in df.eval() are not detected
     "ISC001",
-    "N802", "N803", "N806", "N999","N816",
+    "N802",
+    "N803",
+    "N806",
+    "N999",
+    "N816",
     "PD002",
     "PD901",
     "PERF203",
     "PGH003",
-    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915",
+    "PLR2004",
     "PLR5501",
     "PLW0603",
     "PLW2901",
@@ -93,20 +118,20 @@ ignore = [
     "SLF001",
     "T201",
     "TD",
-    "TCH005",
+    "TC005",
     "TRY003",
     "TRY301",
     "UP032",
 ]
 fixable = ["ALL"]
 unfixable = [
-    "COM812",  # missing-trailing-comma
-    "ERA001",  # commented-out-code (will just delete it!)
-    "F841",  # unused-variable
+    "COM812", # missing-trailing-comma
+    "ERA001", # commented-out-code (will just delete it!)
+    "F841",   # unused-variable
     "RUF100", # unused-noqa
     "SIM222", # expr-or-true
     "SIM223", # expr-and-false
-    "TCH005", # empty-type-checking-block
+    "TC005",  # empty-type-checking-block
     "F401",
 ]
 
@@ -125,7 +150,7 @@ include = ["*", "**/matplotlibrc", "**/data"]
 exclude = ["tests", "**/dist", "**/lib", "**/build", "*.egg-info", "**/.*"]
 
 [tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools_scm]
 write_to = "_version.py"
