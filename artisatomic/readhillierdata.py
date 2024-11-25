@@ -518,11 +518,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit()
 
-                if (
-                    len(row) >= 2
-                    and " ".join(row[-2:]) == "!Configuration name"
-                    or " ".join(row[-3:]) == "!Configuration name [*]"
-                ):
+                if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
+                    row[-3:]
+                ) == "!Configuration name [*]":
                     lowerlevelname = row[0]
                     if "[" in lowerlevelname:
                         lowerlevelname.split("[")[0]
