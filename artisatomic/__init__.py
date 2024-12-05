@@ -743,12 +743,7 @@ def combine_hillier_nahar(
 
                 strhilliermatches = "\n".join(
                     [
-                        "{} ({:.3f} eV, g = {:.1f}, match_score = {:.1f})".format(
-                            hillier_energy_levels[k].levelname,
-                            hc_in_ev_cm * float(hillier_energy_levels[k].energyabovegsinpercm),
-                            hillier_energy_levels[k].g,
-                            hillier_energy_levels[k].matchscore,
-                        )
+                        f"{hillier_energy_levels[k].levelname} ({hc_in_ev_cm * float(hillier_energy_levels[k].energyabovegsinpercm):.3f} eV, g = {hillier_energy_levels[k].g:.1f}, match_score = {hillier_energy_levels[k].matchscore:.1f})"
                         for k in hillier_level_ids_matching_this_nahar_state
                     ]
                 )
@@ -1002,9 +997,7 @@ def reduce_phixs_tables_worker(
             if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
                 if i == 0 and len(samples_in_interval) != 0:
                     print(
-                        "adding first point {:.4e} {:.4e} {:.4e}".format(
-                            enlow, samples_in_interval[0, 0], ((samples_in_interval[0, 0] - enlow) / enlow)
-                        )
+                        f"adding first point {enlow:.4e} {samples_in_interval[0, 0]:.4e} {(samples_in_interval[0, 0] - enlow) / enlow:.4e}"
                     )
                 if enlow <= tablein[-1][0]:
                     new_crosssection = sigma_interp(enlow)

@@ -579,9 +579,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         if len(fitcoefficients) == 3:
                             n, l_start, l_end = fitcoefficients
                             if l_end > n - 1:
-                                artisatomic.log_and_print(
-                                    flog, "ERROR: can't have l_end = {} > n - 1 = {}".format(l_end, n - 1)
-                                )
+                                artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(

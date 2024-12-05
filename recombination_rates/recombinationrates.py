@@ -82,11 +82,9 @@ for ionindex in range(4):
                 ylistartisold.append(float(row[9]) * weightfactor)
 
     axes[ionindex].plot(
-        xlistartisold, ylistartisold, marker="None", lw=2, label="Fe {} ARTIS old".format(romannumerals[ionindex + 1])
+        xlistartisold, ylistartisold, marker="None", lw=2, label=f"Fe {romannumerals[ionindex + 1]} ARTIS old"
     )
-    axes[ionindex].plot(
-        xlist, ylist, marker="None", lw=2, label="Fe {} ARTIS Hillier".format(romannumerals[ionindex + 1])
-    )
+    axes[ionindex].plot(xlist, ylist, marker="None", lw=2, label=f"Fe {romannumerals[ionindex + 1]} ARTIS Hillier")
     axes[ionindex].set_xlim(xmin=3.5, xmax=xlist[-1])
     #    axes[ionindex].set_ylim(ymin=min(ylist+ylistSS82+ylistartisold),ymax=max(ylist+ylistSS82+ylistartisold)*3)
 
@@ -99,16 +97,16 @@ for ionindex in range(4):
     # ('recombinationartisoutput-naharptpx.txt','Fe {0} ARTIS Nahar.ptpx'.format(romannumerals[ionindex+1])),
     #    for (artisoutputfilename,strlabel) in [('recombinationartisoutput-naharpx.txt','Fe {0} ARTIS Nahar.px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpx-togsonly.txt','Fe {0} ARTIS Nahar.(>gs).px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpx_gsoldcode.txt','Fe {0} ARTIS Nahar.oldcode.(>gs).px'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpxnaharlevelsgsonly.txt','Fe {0} ARTIS Nahar.(>gs).px.Nahar.levels'.format(romannumerals[ionindex+1])),('recombinationartisoutput-naharpxnaharlevels.txt','Fe {0} ARTIS Nahar.px.Nahar.levels'.format(romannumerals[ionindex+1]))]:
     for artisoutputfilename, strlabel in [
-        ("recombinationartisoutput-naharpx.txt", "Fe {} ARTIS Nahar.px".format(romannumerals[ionindex + 1])),
+        ("recombinationartisoutput-naharpx.txt", f"Fe {romannumerals[ionindex + 1]} ARTIS Nahar.px"),
         (
             "recombinationartisoutput-naharpxnaharlevels.txt",
-            "Fe {} ARTIS Nahar.px.Nahar.levels".format(romannumerals[ionindex + 1]),
+            f"Fe {romannumerals[ionindex + 1]} ARTIS Nahar.px.Nahar.levels",
         ),
         (
             "recombinationartisoutput_hilliernaharcombined.txt",
-            "Fe {} ARTIS Nahar.px.NaharHillier.levels".format(romannumerals[ionindex + 1]),
+            f"Fe {romannumerals[ionindex + 1]} ARTIS Nahar.px.NaharHillier.levels",
         ),
-        ("recombinationartisoutput-Oct2016.txt", "Fe {} ARTIS Oct 2016".format(romannumerals[ionindex + 1])),
+        ("recombinationartisoutput-Oct2016.txt", f"Fe {romannumerals[ionindex + 1]} ARTIS Oct 2016"),
     ]:
         xlist = []
         ylist = []

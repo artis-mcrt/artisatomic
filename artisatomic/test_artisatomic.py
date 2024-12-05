@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 import numpy as np
-from astropy import units as u
 
-import artisatomic
-import artisatomic.readhillierdata as rhd
 from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
 from artisatomic import interpret_parent_term
@@ -62,6 +59,7 @@ def get_maxabs_elratio(a1, a2):
 # tests below are disabled because the atomic data needs to be downloaded and extracted somehow
 
 # def test_hydrogenic_phixs():
+#     import artisatomic.readhillierdata as rhd
 #     rhd.read_hyd_phixsdata()
 #
 #     lambda_angstrom = rhd.hc_in_ev_angstrom / (1.0 * u.rydberg.to('eV'))

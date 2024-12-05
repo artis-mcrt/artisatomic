@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import io
-import sys
 from pathlib import Path
 
 import artistools as at
@@ -122,7 +121,7 @@ def main():
 
                 # print(dfout)
                 if len(dfout) > 0:
-                    with open(outpath, "w") as fout:
+                    with outpath.open("w", encoding="utf-8") as fout:
                         # fout.write(f'{len(dfout)}  {posbranchfrac:.3f}  {endecay_positrons_mev:.3f}\n')
                         fout.write(f"{len(dfout)}\n")
                         for _, row in dfout.iterrows():

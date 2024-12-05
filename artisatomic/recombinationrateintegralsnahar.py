@@ -4,6 +4,7 @@ import math
 import sys
 from collections import defaultdict
 from collections import namedtuple
+from itertools import starmap
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -85,7 +86,7 @@ def reduce_and_reconstruct_phixs_tables(dicttables, optimaltemperature, nphixspo
 def read_recombrate_file(atomicnumber, ionstage):
     filename = f"atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.rrc.ls.txt"
     print(f"Reading {filename}")
-    with open(filename) as filein:
+    with open(filename, encoding="utf-8") as filein:
         temperatures = []
         recomblevels = []
         recombrates = {}
@@ -142,8 +143,8 @@ def read_recombrate_file(atomicnumber, ionstage):
                         print("Error: stat weight inconsistent with (2S + 1)(2L + 1)")
                         sys.exit()
 
-                    symmetrymatches[(twosplusone, lval, parity)] += 1
-                    indexinsymmetryoflevel[strlevelid] = symmetrymatches[(twosplusone, lval, parity)]
+                    symmetrymatches[twosplusone, lval, parity] += 1
+                    indexinsymmetryoflevel[strlevelid] = symmetrymatches[twosplusone, lval, parity]
                     recomb_level = nahar_recomb_level(
                         strlevelid=strlevelid,
                         twosplusone=twosplusone,
@@ -192,7 +193,7 @@ def get_phixslist(atomicnumber, ionstage, partial=False):
     pt = "pt" if partial else ""
     filename = f"atomic-data-nahar/{artisatomic.elsymbols[atomicnumber].lower()}{ionstage}.{pt}px.txt"
     print(f"Reading {filename}")
-    with open(filename) as filein:
+    with open(filename, encoding="utf-8") as filein:
         phixslist = {}
         binding_energy_ryd = {}
 
@@ -293,7 +294,7 @@ def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
             return TWOOVERCLIGHTSQUARED * sigmabf * pow(nu, 2) * math.exp(-HOVERKB * nu / T)
 
         arr_nu = [en_ryd * RYD / H for en_ryd in phixslist[:, 0]]
-        arr_integrand = [integrand(en_ryd, sigma_megabarns) for en_ryd, sigma_megabarns in phixslist]
+        arr_integrand = list(starmap(integrand, phixslist))
 
         if kind == "simps":
             integral = integrate.simps(arr_integrand, arr_nu)
@@ -447,7 +448,7 @@ def main():
     print("\nSummed alphas (ion Alpha low-n):")
     print(f"  Nahar:                    {nahar_recomb_total:11.3e}")
     for tag, alpha in calculated_alpha_sum.items():
-        print(f'  Calculated {f"{tag}:":14} {alpha:11.3e} = {alpha / nahar_recomb_total:7.4f} * Nahar')
+        print(f"  Calculated {f'{tag}:':14} {alpha:11.3e} = {alpha / nahar_recomb_total:7.4f} * Nahar")
 
 
 if __name__ == "__main__":
