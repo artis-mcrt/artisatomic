@@ -61,67 +61,78 @@ extend-exclude = ["_version.py"]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "A001",
-    "ANN",
     "ARG001",  # ignored because variables in df.eval() are not detected
-    "B005",
-    "B007",    # variable not used in loop body (but sometimes it is with eval)
-    "BLE001",
-    "C9",
-    "COM812",
-    "D100",
-    "D101",
-    "D102",
-    "D103",
-    "D104",
-    "D107",
-    "D203",
-    "D205",
-    "D213",
-    "D401",
-    "D417",
-    "E501",
-    "E741",
+    "ANN001",  # missing-type-function-argument
+    "ANN201",  # missing-return-type-undocumented-public-function
+    "ANN204",
+    "ANN003",  # missing-type-kwargs
+    "ANN202",  # missing-return-type-private-function
+    "ANN401",  # any-type
+    "B005",    # strip-with-multi-characters
+    "B007",    # loop-variable-not-used
+    "C901",    # complex-structure
+    "COM812",  # missing-trailing-comma
+    "CPY001",  # missing-copyright-notice
+    "D",
+    "DOC201",  # docstring-missing-returns
+    "DOC402",  # docstring-missing-yields
+    "DOC501",  # docstring-missing-exception
+    "E501",    # Line too long
+    "E741",    # ambiguous-variable-name
     "EM101",
     "EM102",
-    "ERA001",
-    "F401",
-    "FIX002",
+    "ERA001",  # commented-out-code
+    "F841",    # unused-variable
     "FBT",
-    "F841",    # ignored because variables in df.eval() are not detected
-    "ISC001",
-    "N802",
-    "N803",
-    "N806",
-    "N999",
-    "N816",
+    "FIX002",  # line contains TODO
+    "ISC001",  # single-line-implicit-string-concatenation
+    "N802",    # Function name should be lowercase
+    "N803",    # Argument name should be lowercase
+    "N806",    # non-lowercase-variable-in-function
+    "N815",    # mixed-case-variable-in-class-scope
+    "N816",    # mixed-case-variable-in-module-scope
     "PD002",
-    "PD901",
-    "PERF203",
+    "PERF203", # try-except-in-loop
     "PGH003",
-    "PLR0911",
-    "PLR0912",
-    "PLR0913",
-    "PLR0915",
-    "PLR2004",
-    "PLR5501",
+    "PGH004",  # blanket-noqa
+    "PLC0414", # useless-import-alias
+    "PLC0415", # import-outside-toplevel
+    "PLR0914", # too-many-locals
+    "PLR0917", # too-many-positional
+    "PLR1702", # too-many-nested-blocks
+    "PLR0911", # too-many-return-statements
+    "PLR0912", # too-many-branches
+    "PLR0913", # too-many-arguments
+    "PLR0915", # too-many-statements
+    "PLR2004", # magic-value-comparison
     "PLW0603",
-    "PLW2901",
-    "PT011",
-    "PTH",
-    "PYI024",
+    "PLW2901", # redefined-loop-name
+    "PTH100",
+    "PTH103",
+    "PTH110",
+    "PTH113",
+    "PTH118",
+    "PTH119",
+    "PTH120",
+    "PTH123",
+    "PTH107",
+    "PTH207",
+    "PYI024",  # Use `typing.NamedTuple` instead of `collections.namedtuple`
     "RET504",
-    "S101",
+    "S101",    # Use of assert detected
     "S105",
-    "S307",
+    "S310",    # suspicious-url-open-usage
+    "S311",    # suspicious-non-cryptographic-random-usage
+    "S404",    # suspicious-subprocess-import
+    "S603",    # subprocess-without-shell-equals-true
+    "S607",    # start-process-with-partial-path
     "SIM115",
-    "SLF001",
-    "T201",
-    "TD",
-    "TC005",
+    "T201",    # print found
+    "TD002",   # missing-todo-author
+    "TD003",   # missing-todo-link
+    "TD004",
+    "TD005",
     "TRY003",
-    "TRY301",
-    "UP032",
 ]
 fixable = ["ALL"]
 unfixable = [

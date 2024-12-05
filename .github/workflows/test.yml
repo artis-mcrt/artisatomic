@@ -46,16 +46,17 @@ jobs:
 
             - name: Run Ruff
               if: always()
-              uses: astral-sh/ruff-action@v1
+              uses: astral-sh/ruff-action@v2
               with:
-                  version: 0.8.0
+                  version: 0.8.1
+                  args: check --exit-non-zero-on-fix --no-fix
 
             - name: Run Ruff Format
               if: always()
-              uses: astral-sh/ruff-action@v1
+              uses: astral-sh/ruff-action@v2
               with:
+                  version: 0.8.1
                   args: format --check
-                  version: 0.8.0
 
     pytest:
         runs-on: macos-15

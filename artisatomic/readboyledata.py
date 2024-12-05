@@ -5,8 +5,6 @@ from pathlib import Path
 
 from astropy import constants as const
 
-import artisatomic
-
 # from astropy import units as u
 
 

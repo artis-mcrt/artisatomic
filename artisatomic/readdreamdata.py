@@ -1,3 +1,4 @@
+import operator
 import os.path
 from collections import defaultdict
 from collections import namedtuple
@@ -51,16 +52,16 @@ def extend_ion_list(ion_handlers):
                 )
             )
 
-    ion_handlers.sort(key=lambda x: x[0])
+    ion_handlers.sort(key=operator.itemgetter(0))
 
     return ion_handlers
 
 
 def energytuplefromrow(row, prefix):
-    energy, type, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
+    energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
     dream_energy_level_row = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
 
-    parity = 1 if type == "(o)" else 0
+    parity = 1 if leveltype == "(o)" else 0
     paritystr = "odd" if parity == 1 else "even"
     energyabovegsinpercm = float(energy)
 
@@ -111,7 +112,7 @@ def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     init_dreamdata()
     charge = ion_stage - 1
-    dfiondata = dreamdata.loc[(atomic_number, charge)]
+    dfiondata = dreamdata.loc[atomic_number, charge]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
     print(dfiondata)
 

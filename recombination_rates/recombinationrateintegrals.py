@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 import math
-import os
-import struct
 import sys
 
 import numpy as np
@@ -15,7 +13,7 @@ H = 6.6260755e-27  # /* Planck constant */
 MH = 1.67352e-24  # /* Mass of hydrogen atom. */
 ME = 9.1093897e-28  # /* Mass of free electron. */
 QE = 4.80325e-10  # /* //MK: Elementary charge in cgs units*/
-PI = 3.141592654  # /* PI - obviously. */
+PI = math.pi  # /* PI - obviously. */
 MEV = 1.6021772e-6  # /* MeV to ergs */
 DAY = 86400.0  # /* day to seconds */
 SIGMA_T = 6.6524e-25  # /* Thomson cross-section */
@@ -46,8 +44,8 @@ phixslist = []
 phixsintegral = 0.0
 lastpoint = []
 
-print("Z={:d},fromionstage={:d},fromlevel={:d}".format(atomicnumber, ionstage, levelnumber))
-with open("example_run/phixsdata.txt") as filein:
+print(f"Z={atomicnumber:d},fromionstage={ionstage:d},fromlevel={levelnumber:d}")
+with open("example_run/phixsdata.txt", encoding="utf-8") as filein:
     while True:
         line = filein.readline()
         if not line:
@@ -66,10 +64,9 @@ with open("example_run/phixsdata.txt") as filein:
 
                 if energyabovegsinev < 9.0 * E_thresholdinev:
                     phixslist.append([energyabovegsinev, sigma_bf])
-        else:
-            if len(headerrow) == 6:
-                for i in range(int(headerrow[5])):
-                    filein.readline()
+        elif len(headerrow) == 6:
+            for i in range(int(headerrow[5])):
+                filein.readline()
 print(len(phixslist), " points")
 if len(phixslist) == 0:
     sys.exit()
@@ -92,4 +89,4 @@ for i in range(1, len(phixslist)):
     # x = sigma_bf/H/nu * 2*H*pow(nu,3)/pow(CLIGHT,2) * exp(-H*nu/KB/T);
     phixsintegral += x * dnu
 
-print("Integral: {:14.6e}".format(phixsintegral))
+print(f"Integral: {phixsintegral:14.6e}")
