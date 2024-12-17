@@ -29,6 +29,7 @@ from artisatomic import readboyledata
 from artisatomic import readcarsusdata
 from artisatomic import readdreamdata
 from artisatomic import readfacdata
+from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
@@ -98,6 +99,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ion_handlers = readcarsusdata.extend_ion_list(ion_handlers)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
     # ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
@@ -226,7 +228,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
         # in Rydberg, cross section in Mb) tuples
         nahar_phixs_tables: list[dict[tuple, list[tuple]]] = [{} for _ in listions]
 
-        ionization_energy_ev = [0.0 for x in listions]
+        ionization_energy_ev = [0.0 for _ in listions]
         thresholds_ev_dict: list[dict] = [{} for _ in listions]
 
         # list of named tuples (hillier_transition_row)
@@ -264,10 +266,10 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 else:
                     handler = "carsus"
 
-            logfilepath = os.path.join(
+            logfilepath = Path(
                 args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
             )
-            with open(logfilepath, "w") as flog:
+            with logfilepath.open("w") as flog:
                 log_and_print(
                     flog,
                     f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
@@ -478,7 +480,18 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 #         transition_count_of_level_name[i],
                 #     ) = readlisbondata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
+                elif handler in {"floers25calib", "floers25uncalib"}:
+                    (
+                        ionization_energy_ev[i],
+                        energy_levels[i],
+                        transitions[i],
+                        transition_count_of_level_name[i],
+                    ) = readfloers25data.read_levels_and_transitions(
+                        atomic_number, ion_stage, flog, calibrated=(handler == "floers25calib")
+                    )
+
                 elif handler == "fac":
+                    # early version of floers25 calib data
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
@@ -735,7 +748,7 @@ def combine_hillier_nahar(
                         hillier_energy_levels, hillier_level_ids_matching_this_nahar_state
                     )
                     sumhillierstatweights = sum(
-                        [hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state]
+                        hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state
                     )
                     flog.write(f"<E> = {avghillierenergyabovegsinev:.3f} eV, g_sum = {sumhillierstatweights:.1f}: \n")
                     if abs(nahar_energyabovegsinev / avghillierenergyabovegsinev - 1) > 0.5:
