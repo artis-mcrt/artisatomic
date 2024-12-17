@@ -860,6 +860,8 @@ def match_hydrogenic_phixs(
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
         "carsus": readcarsusdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
+        "floers25calib": readfloers25data.get_level_valence_n,
+        "floers25uncalib": readfloers25data.get_level_valence_n,
     }
     if ion_handler not in dict_get_n_func:
         print(
