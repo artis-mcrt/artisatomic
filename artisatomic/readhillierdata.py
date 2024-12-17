@@ -1121,7 +1121,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
 
                     for id_lower in level_ids_of_level_name[namefrom]:
                         id_upper_list = [levelid for levelid in level_ids_of_level_name[nameto] if levelid > id_lower]
-                        upper_g_sum = sum([energy_levels[id_upper].g for id_upper in id_upper_list])
+                        upper_g_sum = sum(energy_levels[id_upper].g for id_upper in id_upper_list)
 
                         for id_upper in id_upper_list:
                             # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
@@ -1137,7 +1137,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             else:
                                 upsilondict[(id_lower, id_upper)] = upsilonscaled
 
-                    # print(namefrom, nameto, upsilon)
+                                # print(namefrom, nameto, upsilon)
                 except KeyError:
                     unlisted_from_message = " (unlisted)" if namefrom not in level_ids_of_level_name else ""
                     unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
@@ -1188,7 +1188,7 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
                     upperionlevelids = [1]
                 targetlist_of_targetconfig[targetconfig] = []
 
-                summed_statistical_weights = sum([float(energy_levels_upperion[index].g) for index in upperionlevelids])
+                summed_statistical_weights = sum(float(energy_levels_upperion[index].g) for index in upperionlevelids)
                 for upperionlevelid in sorted(upperionlevelids):
                     statweight_fraction = energy_levels_upperion[upperionlevelid].g / summed_statistical_weights
                     targetlist_of_targetconfig[targetconfig].append((upperionlevelid, statweight_fraction))
