@@ -2,3 +2,7 @@
 e19eb2c4a80a6dd70b7be8bdc045d030  compositiondata.txt
 a673d82823ddddbb9b26ef8c8e6aed28  phixsdata_v2.txt
 1f22937fa04c26bae7c170674ccc2513  transitiondata.txt
+3d06afd65a9a13e7d4625a2acea4056c  atomic_data_logs/nb1.txt
+f7604aad70f7bac38cc09dde0ca8fb8a  atomic_data_logs/nb2.txt
+5f3908e882c37667c9289baec12debe4  atomic_data_logs/nb3.txt
+2a3fe60dad3bb2e26a80440b12904404  atomic_data_logs/nb4.txt
