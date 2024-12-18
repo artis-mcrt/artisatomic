@@ -15,8 +15,6 @@ import artisatomic
 # import os
 # import numexpr as ne
 # import pandas as pd
-# from astropy import constants as const
-# from astropy import units as u
 # from scipy import interpolate
 
 # PYDIR = os.path.dirname(os.path.abspath(__file__))

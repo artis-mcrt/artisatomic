@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import artistools as at
-from astropy import constants as const
 
 selectedelements: None | list[int]
 # selectedelements = [27]
@@ -15,7 +14,7 @@ OSCSTRENGTHCONVERSION = 1.3473837e21
 
 def main():
     modelpath = Path()
-    hc = (const.h * const.c).to("eV Angstrom").value
+    hc_in_ev_angstrom = 12398.419843320025
 
     ionlist = []
     compositiondata = at.get_composition_data(modelpath)

@@ -20,35 +20,29 @@ jobs:
 
             - name: Set up Python
               uses: actions/setup-python@v5
-              with:
-                  cache: pip
-
-            - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip wheel setuptools mypy
-                  python -m pip install -r requirements.txt
 
             - name: Install artisatomic
               run: |
-                  python -m pip install -e .
-
-            - name: Lint with mypy
-              run: |
-                  mypy --install-types --non-interactive
+                  python3 -m pip install uv
+                  python3 -m uv pip install --editable .
 
             - name: Run Ruff
               if: always()
               uses: astral-sh/ruff-action@v2
               with:
-                  version: 0.8.1
+                  version: 0.8.3
                   args: check --exit-non-zero-on-fix --no-fix
 
             - name: Run Ruff Format
               if: always()
               uses: astral-sh/ruff-action@v2
               with:
-                  version: 0.8.1
+                  version: 0.8.3
                   args: format --check
+
+            - name: Lint with mypy
+              run: |
+                  mypy --install-types --non-interactive
 
     pytest:
         runs-on: macos-15
@@ -60,17 +54,11 @@ jobs:
 
             - name: Set up Python
               uses: actions/setup-python@v5
-              with:
-                  cache: pip
-
-            - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip wheel setuptools
-                  python -m pip install -r requirements.txt
 
             - name: Install artisatomic
               run: |
-                  python -m pip install -e .
+                  python3 -m pip install uv
+                  python3 -m uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -104,17 +92,11 @@ jobs:
 
             - name: Set up Python
               uses: actions/setup-python@v5
-              with:
-                  cache: pip
-
-            - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip wheel setuptools
-                  python -m pip install -r requirements.txt
 
             - name: Install artisatomic
               run: |
-                  python -m pip install -e .
+                  python3 -m pip install uv
+                  python3 -m uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4

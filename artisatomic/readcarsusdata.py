@@ -3,11 +3,9 @@ from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-from astropy import constants as const
-
 import artisatomic
 
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+hc_in_ev_cm = 0.0001239841984332003
 
 gfall_reader: t.Any = None
 

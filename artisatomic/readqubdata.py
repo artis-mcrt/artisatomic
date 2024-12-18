@@ -5,16 +5,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from astropy import constants as const
-from astropy import units as u
 
 import artisatomic
 
-ryd_to_ev = u.rydberg.to("eV")
+ryd_to_ev = 13.605693122994232
 
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
-h_in_ev_seconds = const.h.to("eV s").value
+hc_in_ev_cm = 0.0001239841984332003
+hc_in_ev_angstrom = 12398.419843320025
+h_in_ev_seconds = 4.135667696923859e-15
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 qub_energy_level_row = namedtuple(
@@ -74,7 +72,7 @@ def read_adf04(filepath, flog):
             skip_blank_lines=True,
             keep_default_na=False,
         )
-        qubupsilondf_alltemps.query("upper!=-1", inplace=True)
+        qubupsilondf_alltemps = qubupsilondf_alltemps.query("upper!=-1")
         for _, row in qubupsilondf_alltemps.iterrows():
             lower = int(row["lower"])
             upper = int(row["upper"])
@@ -112,7 +110,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 if A > 2e-30:
                     namefrom = qub_energylevels[id_upper].levelname
                     nameto = qub_energylevels[id_lower].levelname
-                    forbidden = artisatomic.check_forbidden(qub_energylevels[id_upper], qub_energylevels[id_lower])
+                    # WARNING replace with correct selection rules!
+                    forbidden = qub_energylevels[id_upper].parity == qub_energylevels[id_lower].parity
                     transition_count_of_level_name[namefrom] += 1
                     transition_count_of_level_name[nameto] += 1
                     lamdaangstrom = 1.0e8 / (

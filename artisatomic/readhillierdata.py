@@ -7,8 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from astropy import constants as const
-from astropy import units as u
 
 import artisatomic
 from artisatomic.manual_matches import hillier_name_replacements
@@ -200,10 +198,10 @@ elsymboltohilliercode = {
     "Ba": "BAR",
 }
 
-ryd_to_ev = u.rydberg.to("eV")
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
-h_in_ev_seconds = const.h.to("eV s").value
+ryd_to_ev = 13.605693122994232
+hc_in_ev_cm = 0.0001239841984332003
+hc_in_ev_angstrom = 12398.419843320025
+h_in_ev_seconds = 4.135667696923859e-15
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 PYDIR = Path(__file__).parent.absolute()
 atomicdata = pd.read_csv(os.path.join(PYDIR, "atomic_properties.txt"), sep=r"\s+", comment="#")
@@ -270,7 +268,7 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, "Reading " + filename)
     hillier_transition_row = namedtuple(
         "hillier_transition_row",
-        "namefrom nameto f A lambdaangstrom i j hilliertransitionid lowerlevel upperlevel coll_str",
+        "namefrom nameto f A lambdaangstrom i j hilliertransitionid",
     )
 
     prev_line = ""
@@ -397,9 +395,6 @@ def read_levels_and_transitions(
                     i=int(row[5].rstrip("-")),
                     j=int(row[6]),
                     hilliertransitionid=hilliertransitionid,
-                    lowerlevel=-1,
-                    upperlevel=-1,
-                    coll_str=-99,
                 )
 
                 if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
@@ -964,7 +959,7 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 # only applies to helium
 # the threshold cross sections seems ok, but energy dependence could be slightly wrong
 # what is the h parameter that is not used??
-def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):
+def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # noqa: ARG001
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1164,11 +1159,12 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     return upsilondict
 
 
-def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_photoion_targetconfigs, flog):
-    targetlist = [[] for _ in energy_levels]
+def get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, hillier_photoion_targetconfigs):
+    targetlist = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig = defaultdict(list)
 
-    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+    for energy_level in dfenergy_levels[1:].iter_rows(named=True):
+        lowerlevelid = energy_level["levelid"]
         if hillier_photoion_targetconfigs is None:
             continue
         if lowerlevelid in hillier_photoion_targetconfigs and hillier_photoion_targetconfigs[lowerlevelid] is None:
@@ -1180,17 +1176,19 @@ def get_photoiontargetfractions(energy_levels, energy_levels_upperion, hillier_p
                 # so split on the slash and match all parts
                 targetconfiglist = targetconfig.split("/")
                 upperionlevelids = []
-                for upperlevelid, upper_energy_level in enumerate(energy_levels_upperion[1:], 1):
-                    upperlevelnamenoj = upper_energy_level.levelname.split("[")[0]
+                for upperlevelid, levelname in dfenergy_levels_upperion[["levelid", "levelname"]][1:].iter_rows():
+                    upperlevelnamenoj = levelname.split("[")[0]
                     if upperlevelnamenoj in targetconfiglist:
                         upperionlevelids.append(upperlevelid)
                 if not upperionlevelids:
                     upperionlevelids = [1]
                 targetlist_of_targetconfig[targetconfig] = []
 
-                summed_statistical_weights = sum(float(energy_levels_upperion[index].g) for index in upperionlevelids)
+                summed_statistical_weights = sum(
+                    float(dfenergy_levels_upperion["g"][index]) for index in upperionlevelids
+                )
                 for upperionlevelid in sorted(upperionlevelids):
-                    statweight_fraction = energy_levels_upperion[upperionlevelid].g / summed_statistical_weights
+                    statweight_fraction = dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights
                     targetlist_of_targetconfig[targetconfig].append((upperionlevelid, statweight_fraction))
 
             for upperlevelid, statweight_fraction in targetlist_of_targetconfig[targetconfig]:

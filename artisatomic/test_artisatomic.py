@@ -7,8 +7,6 @@ from artisatomic import interpret_parent_term
 from artisatomic import reduce_configuration
 from artisatomic import score_config_match
 
-# from astropy import constants as const
-
 
 def test_reduce_configuration():
     assert reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
