@@ -887,16 +887,15 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None):
         else:
             E_o = nu_o * 1e15 * h_in_ev_seconds
             U = thresholdenergyev * energydivthreshold / (E_o + thresholdenergyev)  # energy / (E_0 + E_threshold)
+        crosssection = 0.0
         if U > 0:
-            crosssection = 0.0
             for l in range(l_start, l_end + 1):
                 if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], energygrid):
                     print("TABLE MISMATCH")
                     sys.exit()
                 crosssection += (2 * l + 1) * hyd_phixs[(n, l)][index]
             crosssection = crosssection * scale_factor
-        else:
-            crosssection = 0.0
+
         phixstable[index][0] = energydivthreshold * thresholdenergyryd  # / ryd_to_ev
         phixstable[index][1] = crosssection
 
