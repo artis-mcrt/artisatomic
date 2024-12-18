@@ -199,7 +199,6 @@ def main(args=None, argsraw=None, **kwargs):
             action="store_true",
             help="Use hydrogenic cross sections for ions with unknown cross sections",
         )
-        parser.add_argument("--plotphixs", action="store_true", help="Generate cross section plots")
 
         parser.set_defaults(**kwargs)
         argcomplete.autocomplete(parser)

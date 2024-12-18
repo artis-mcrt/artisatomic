@@ -770,12 +770,6 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         )
         # print(reduced_phixstables_onetarget['3d8(3F)4s_4Fe'])
 
-        # if atomic_number == 26 and ion_stage == 1:
-        if args.plotphixs:
-            plot_phixs(
-                atomic_number, ion_stage, energy_levels, phixstables[filenum], reduced_phixstables_onetarget, args
-            )
-
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
@@ -1322,48 +1316,3 @@ def extend_ion_list(
             )
     ion_handlers.sort(key=lambda x: x[0])
     return ion_handlers
-
-
-def plot_phixs(atomic_number, ion_stage, energy_levels, phixstables, reduced_phixstables, args):
-    from pathlib import Path
-
-    import matplotlib.pyplot as plt
-
-    print("STARTING PHIXS PLOT")
-
-    xgrid = np.linspace(
-        1.0, 1.0 + args.phixsnuincrement * (args.nphixspoints + 1), num=args.nphixspoints + 1, endpoint=False
-    )
-
-    nrows = 25
-    fig, axes = plt.subplots(
-        nrows=nrows,
-        ncols=1,
-        sharey=False,
-        figsize=(8, 6 * (0.25 + nrows * 0.4)),
-        tight_layout={"pad": 0.2, "w_pad": 0.0, "h_pad": 0.0},
-    )
-
-    ionstr = f"{artisatomic.elsymbols[atomic_number]} {artisatomic.roman_numerals[ion_stage]}"
-
-    for levelnum, ax in enumerate(axes, 1):
-        levelname = energy_levels[levelnum].levelname
-        levelnamenoj = levelname.split("[")[0]
-        if levelnamenoj not in phixstables:
-            continue
-        threshold = phixstables[levelnamenoj][0][0]
-
-        levellabel = ionstr + " " + f"{levelnum} {levelnamenoj}"
-
-        ax.plot(phixstables[levelnamenoj][:, 0], phixstables[levelnamenoj][:, 1], label=f"Hillier {levellabel}")
-
-        ax.step(xgrid[:-1] * threshold, reduced_phixstables[levelnamenoj], where="mid", label=f"ARTIS {levellabel}")
-
-        ax.legend(loc="best", handlelength=1, frameon=False, numpoints=1)
-        ax.set_xlim(xmin=threshold * 0.97, xmax=threshold * 5)
-
-    filenameout = f"phixs {ionstr}.pdf"
-    fig.savefig(Path(filenameout).open("wb"), format="pdf")
-    # plt.show()
-    print(f"Saved {filenameout}")
-    plt.close()
