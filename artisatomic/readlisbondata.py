@@ -2,14 +2,10 @@ from collections import defaultdict
 from collections import namedtuple
 
 import pandas as pd
-from astropy import constants as const
 
 import artisatomic
 
-# from astropy import units as u
-
-
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+hc_in_ev_cm = 0.0001239841984332003
 
 
 class LisbonReader:

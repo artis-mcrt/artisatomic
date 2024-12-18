@@ -4,16 +4,14 @@ from collections import defaultdict
 from collections import namedtuple
 
 import numpy as np
-from astropy import constants as const
-from astropy import units as u
 
 import artisatomic
 
-ryd_to_ev = u.rydberg.to("eV")
+ryd_to_ev = 13.605693122994232
 
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
-h_in_ev_seconds = const.h.to("eV s").value
+hc_in_ev_cm = 0.0001239841984332003
+hc_in_ev_angstrom = 12398.419843320025
+h_in_ev_seconds = 4.135667696923859e-15
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
@@ -269,8 +267,7 @@ def read_nahar_configurations(fenlist, flog):
 
 
 def get_naharphotoion_upperlevelids(
-    energy_level,
-    energy_levels_upperion,
+    dfenergy_levels_upperion,
     nahar_core_states,
     nahar_configurations_upperion,
     upper_level_ids_of_core_state_id,
@@ -293,18 +290,19 @@ def get_naharphotoion_upperlevelids(
             )
 
             candidate_upper_levels = {}
-            for upperlevelid, upperlevel in enumerate(energy_levels_upperion[1:], 1):
-                if hasattr(upperlevel, "levelname"):
-                    upperlevelconfig = upperlevel.levelname
+            for upperlevel in dfenergy_levels_upperion[1:].iter_rows(named=True):
+                upperlevelid = upperlevel["levelid"]
+                if "levelname" in upperlevel:
+                    upperlevelconfig = upperlevel["levelname"]
                 else:
                     state_tuple = (
-                        int(upperlevel.twosplusone),
-                        int(upperlevel.l),
-                        int(upperlevel.parity),
-                        int(upperlevel.indexinsymmetry),
+                        int(upperlevel["twosplusone"]),
+                        int(upperlevel["l"]),
+                        int(upperlevel["parity"]),
+                        int(upperlevel["indexinsymmetry"]),
                     )
                     upperlevelconfig = nahar_configurations_upperion.get(state_tuple, "-1")
-                energyev = upperlevel.energyabovegsinpercm * hc_in_ev_cm
+                energyev = upperlevel["energyabovegsinpercm"] * hc_in_ev_cm
 
                 # this ignores parent term
                 if artisatomic.reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
@@ -347,24 +345,24 @@ def get_naharphotoion_upperlevelids(
 
 
 def get_photoiontargetfractions(
-    energy_levels, energy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog
+    dfenergy_levels, dfenergy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog
 ):
-    targetlist = [[] for _ in energy_levels]
+    targetlist = [() for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)
-    for lowerlevelid, energy_level in enumerate(energy_levels[1:], 1):
+    for energy_level in dfenergy_levels[1:].iter_rows(named=True):
+        lowerlevelid = energy_level["levelid"]
         # find the upper level ids from the Nahar core state
         upperionlevelids = get_naharphotoion_upperlevelids(
-            energy_level,
-            energy_levels_upperion,
+            dfenergy_levels_upperion,
             nahar_core_states,
             nahar_configurations_upperion,
             upper_level_ids_of_core_state_id,
             flog,
         )
 
-        summed_statistical_weights = sum(float(energy_levels_upperion[levelid].g) for levelid in upperionlevelids)
+        summed_statistical_weights = sum(float(dfenergy_levels_upperion["g"][levelid]) for levelid in upperionlevelids)
         for upperionlevelid in sorted(upperionlevelids):
-            phixsprobability = energy_levels_upperion[upperionlevelid].g / summed_statistical_weights
+            phixsprobability = dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights
             targetlist[lowerlevelid].append((upperionlevelid, phixsprobability))
 
     return targetlist

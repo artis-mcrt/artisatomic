@@ -49,7 +49,7 @@ max-line-length = 120
 errors-only = true
 
 [tool.pylint.typecheck]
-ignored-modules = ["astropy", "extinction"]
+ignored-modules = ["extinction"]
 
 [tool.ruff]
 line-length = 120
@@ -61,7 +61,6 @@ extend-exclude = ["_version.py"]
 [tool.ruff.lint]
 select = ["ALL"]
 ignore = [
-    "ARG001",  # ignored because variables in df.eval() are not detected
     "ANN001",  # missing-type-function-argument
     "ANN201",  # missing-return-type-undocumented-public-function
     "ANN204",

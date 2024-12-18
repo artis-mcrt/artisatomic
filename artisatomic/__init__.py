@@ -12,15 +12,13 @@ import queue
 import sys
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from functools import lru_cache
 from pathlib import Path
 
 import argcomplete
 import numpy as np
 import pandas as pd
-from astropy import constants as const
-from astropy import units as u
+import polars as pl
 from scipy import integrate
 from scipy import interpolate
 
@@ -108,10 +106,10 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
 USE_QUB_COBALT = False
 
-ryd_to_ev = u.rydberg.to("eV")
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-hc_in_ev_angstrom = (const.h * const.c).to("eV angstrom").value
-h_in_ev_seconds = const.h.to("eV s").value
+ryd_to_ev = 13.605693122994232
+hc_in_ev_cm = 0.0001239841984332003
+hc_in_ev_angstrom = 12398.419843320025
+h_in_ev_seconds = 4.135667696923859e-15
 
 
 def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
@@ -124,6 +122,34 @@ def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
             list_out.append(ion_stage[0])
 
     return list_out
+
+
+def add_dummy_zero_level(dflevels: pl.DataFrame) -> pl.DataFrame:
+    # keep the zero index as null since we use 1-index level indicies
+    anycolname = dflevels.columns[0]
+    return pl.concat(
+        [
+            pl.DataFrame({anycolname: [None]}, schema={anycolname: dflevels.schema[anycolname]}),
+            dflevels,
+        ],
+        how="diagonal",
+    )
+
+
+def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
+    if isinstance(energy_levels, pl.DataFrame):
+        dflevels = energy_levels
+        assert energy_levels["energyabovegsinpercm"].item(0) is None
+
+    else:
+        dflevels = add_dummy_zero_level(
+            pl.DataFrame(energy_levels[1:]),
+        )
+
+    if "levelid" not in dflevels.columns:
+        dflevels = dflevels.with_row_index(name="levelid")
+
+    return dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
 
 
 def main(args=None, argsraw=None, **kwargs):
@@ -232,11 +258,12 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
         thresholds_ev_dict: list[dict] = [{} for _ in listions]
 
         # list of named tuples (hillier_transition_row)
-        transitions: list = [[] for x in listions]
+        transitions: list = [[] for _ in listions]
         transition_count_of_level_name: list[dict] = [{} for _ in listions]
-        upsilondicts: list[dict] = [{} for x in listions]
+        upsilondicts: list[dict] = [{} for _ in listions]
 
-        energy_levels: list = [[] for x in listions]
+        energy_levels: list = [[] for _ in listions]
+        dfenergylevels_allions: list = [pl.DataFrame() for _ in listions]
         # index matches level id
         photoionization_thresholds_ev: list = [[] for _ in listions]
         photoionization_crosssections: list = [[] for _ in listions]  # list of cross section in Mb
@@ -312,7 +339,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         energy_levels[i],
                         transitions[i],
                         transition_count_of_level_name[i],
-                    ) = readboyledata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+                    ) = readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
 
                 elif handler == "qub_cobalt":
                     if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
@@ -518,6 +545,8 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 else:
                     raise ValueError(f"Unknown handler: {handler}")
 
+            dfenergylevels_allions[i] = leveltuples_to_pldataframe(energy_levels[i])
+
             if (
                 i < len(listions) - 1
                 and not args.nophixs
@@ -529,13 +558,15 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                     photoionization_targetfractions[i],
                     photoionization_thresholds_ev[i],
                 ) = match_hydrogenic_phixs(
-                    atomic_number, ion_stage, energy_levels[i], ionization_energy_ev[i], handler, args, flog
+                    atomic_number, dfenergylevels_allions[i], ionization_energy_ev[i], handler, args
                 )
+
+        dftransitions_allions = [t if isinstance(t, pl.DataFrame) else pl.DataFrame(t) for t in transitions]
 
         write_output_files(
             elementindex,
-            energy_levels,
-            transitions,
+            dfenergylevels_allions,
+            dftransitions_allions,
             upsilondicts,
             ionization_energy_ev,
             transition_count_of_level_name,
@@ -853,9 +884,7 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return dictioniz
 
 
-def match_hydrogenic_phixs(
-    atomic_number: int, ion_stage: int, energy_levels, ionization_energy_ev: float, ion_handler: str, args, flog
-):
+def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_ev: float, ion_handler: str, args):
     dict_get_n_func = {
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
         "carsus": readcarsusdata.get_level_valence_n,
@@ -875,22 +904,23 @@ def match_hydrogenic_phixs(
     alpha_squared = 0.0072973525643**2  # fine structure constant squared
     mc_squared = 0.5109989461 * 1e6  # electron mass in eV
 
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
-    photoionization_targetfractions: list = [[] for _ in energy_levels]
-    photoionization_thresholds_ev = np.zeros(len(energy_levels))
+    photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
+    photoionization_targetfractions: list = [[] for _ in range(energy_levels.height)]
+    photoionization_thresholds_ev = np.zeros(energy_levels.height)
     phixstables = {}
-    for lowerlevelid, level in enumerate(energy_levels[1:], 1):
+    for level in energy_levels[1:].iter_rows(named=True):
+        lowerlevelid = level["levelid"]
         if lowerlevelid > 100:
             # limit levels with hydrogenic photoionization cross sections
             break
-        en_ev = hc_in_ev_cm * level.energyabovegsinpercm
+        en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
         photoionization_thresholds_ev[lowerlevelid] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
         if lambda_angstrom <= 0.0:
             continue
 
-        n = get_n(level.levelname)
+        n = get_n(level["levelname"])
         effective_charge_squared = threshold_ev * 2 * (n**2) / alpha_squared / mc_squared
         phixstables[lowerlevelid] = (
             readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n) / effective_charge_squared
@@ -956,8 +986,8 @@ def reduce_phixs_tables_worker(
 ) -> None:
     dictout = {}
 
-    ryd_to_hz = (u.rydberg / const.h).to("Hz").value
-    h_over_kb_in_K_sec = (const.h / const.k_B).to("K s").value
+    ryd_to_hz = 3289841960250880.5
+    h_over_kb_in_K_sec = 4.799243073366221e-11
 
     # proportional to recombination rate
     # nu0 = 1e16
@@ -1423,15 +1453,43 @@ def score_config_match(config_a, config_b):
 
     return 5  # term matches but no electron config available or it's an Eqv state...0s type
 
-    print("WHAT?")
-    sys.exit()
-    return -1
+
+def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
+    if "upperlevel" not in dftransitions_ion.columns:
+        dftransitions_ion = dftransitions_ion.join(
+            dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), pl.col("levelname").alias("nameto")),
+            on="nameto",
+        )
+
+    if "lowerlevel" not in dftransitions_ion.columns:
+        dftransitions_ion = dftransitions_ion.join(
+            dfenergylevels_ion.select(pl.col("levelid").alias("lowerlevel"), pl.col("levelname").alias("namefrom")),
+            on="namefrom",
+        )
+
+    if "forbidden" not in dftransitions_ion.columns:
+        dftransitions_ion = (
+            dftransitions_ion.join(
+                dfenergylevels_ion.select(
+                    pl.col("levelid").alias("lowerlevel"), pl.col("parity").alias("lower_parity")
+                ),
+                on="lowerlevel",
+            )
+            .join(
+                dfenergylevels_ion.select(
+                    pl.col("levelid").alias("upperlevel"), pl.col("parity").alias("upper_parity")
+                ),
+                on="upperlevel",
+            )
+            .with_columns(forbidden=pl.col("lower_parity") == pl.col("upper_parity"))
+        )
+    return dftransitions_ion
 
 
 def write_output_files(
     elementindex,
-    energy_levels,
-    transitions,
+    dfenergylevels_allions,
+    dftransitions_allions: list[pl.DataFrame],
     upsilondicts,
     ionization_energies,
     transition_count_of_level_name,
@@ -1445,7 +1503,6 @@ def write_output_files(
     args,
 ):
     atomic_number, listions = ion_handlers[elementindex]
-    upsilon_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     for i, ion_stage in enumerate(listions):
         with contextlib.suppress(TypeError):
@@ -1463,90 +1520,79 @@ def write_output_files(
 
         log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
 
-        level_id_of_level_name = {
-            energy_levels[i][levelid].levelname: levelid
-            for levelid in range(1, len(energy_levels[i]))
-            if hasattr(energy_levels[i][levelid], "levelname")
-        }
+        dfenergylevels_ion = dfenergylevels_allions[i]
+        dftransitions_ion = dftransitions_allions[i]
 
-        unused_upsilon_transitions = set(upsilondicts[i].keys())  # start with the full set and remove used ones
-        for transitionid, transition in enumerate(transitions[i]):
-            updaterequired = False
-            if hasattr(transition, "upperlevel") and transition.upperlevel >= 0:
-                id_lower = transition.lowerlevel
-                id_upper = transition.upperlevel
-            else:
-                id_upper = level_id_of_level_name[transition.nameto]
-                id_lower = level_id_of_level_name[transition.namefrom]
-                updaterequired = True
-            unused_upsilon_transitions.discard((id_lower, id_upper))
+        dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
 
-            coll_str = transition.coll_str
-            if coll_str < 5:
-                if (id_lower, id_upper) in upsilondict:
-                    coll_str = upsilondict[(id_lower, id_upper)]
-                else:
-                    forbidden = (
-                        transition.Forbidden
-                        if hasattr(transition, "forbidden")
-                        else check_forbidden(energy_levels[i][id_lower], energy_levels[i][id_upper])
-                    )
-
-                    coll_str = -2.0 if forbidden else -1.0
-                updaterequired = True
-
-            if updaterequired:
-                transitions[i][transitionid] = transition._replace(
-                    lowerlevel=id_lower, upperlevel=id_upper, coll_str=coll_str
-                )
+        unused_upsilon_transitions = set(upsilondicts[i].keys()).difference(
+            dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
+        )
 
         log_and_print(flog, f"Adding in {len(unused_upsilon_transitions):d} extra transitions with only upsilon values")
-        for id_lower, id_upper in unused_upsilon_transitions:
-            namefrom = energy_levels[i][id_upper].levelname
-            nameto = energy_levels[i][id_lower].levelname
-            A = 0.0
-            try:
-                lamdaangstrom = 1.0e8 / (
-                    energy_levels[i][id_upper].energyabovegsinpercm - energy_levels[i][id_lower].energyabovegsinpercm
-                )
-            except ZeroDivisionError:
-                lamdaangstrom = -1
-            # upsilon = upsilondict[(id_lower, id_upper)]
-            transition_count_of_level_name[i][namefrom] += 1
-            transition_count_of_level_name[i][nameto] += 1
-            coll_str = upsilondict[(id_lower, id_upper)]
 
-            transition = upsilon_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
-            transitions[i].append(transition)
+        if unused_upsilon_transitions:
+            dfupsilon_only_transitions = pl.DataFrame(
+                list(unused_upsilon_transitions),
+                schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
+                orient="row",
+            ).with_columns(A=0.0)
+            for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(named=False):
+                namefrom = dfenergylevels_ion["levelname"][id_upper]
+                nameto = dfenergylevels_ion["levelname"][id_lower]
 
-        transitions[i].sort(key=lambda x: (getattr(x, "lowerlevel", -99), getattr(x, "upperlevel", -99)))
+                transition_count_of_level_name[i][namefrom] += 1
+                transition_count_of_level_name[i][nameto] += 1
+
+            dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
+            dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
+
+        dftransitions_ion = dftransitions_ion.with_columns(
+            pl.struct(["lowerlevel", "upperlevel", "forbidden"])
+            .map_elements(
+                lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
+                    (row["lowerlevel"], row["upperlevel"]),
+                    -2.0 if row["forbidden"] else -1.0,
+                ),
+                return_dtype=pl.Float64,
+            )
+            .alias("coll_str")
+        )
 
         with open(os.path.join(args.output_folder, "adata.txt"), "a") as fatommodels:
             write_adata(
                 fatommodels,
                 atomic_number,
                 ion_stage,
-                energy_levels[i],
+                dfenergylevels_allions[i],
                 ionization_energies[i],
                 transition_count_of_level_name[i],
-                args,
                 flog,
             )
 
+        dftransitions_ion = dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
         with open(os.path.join(args.output_folder, "transitiondata.txt"), "a") as ftransitiondata:
             write_transition_data(
-                ftransitiondata, atomic_number, ion_stage, energy_levels[i], transitions[i], upsilondicts[i], args, flog
+                ftransitiondata,
+                atomic_number,
+                ion_stage,
+                dftransitions_ion,
+                flog,
             )
 
         if i < len(listions) - 1 and not args.nophixs:  # ignore the top ion
             if len(photoionization_targetfractions[i]) < 1:
                 if len(nahar_core_states[i]) > 1:
                     photoionization_targetfractions[i] = readnahardata.get_photoiontargetfractions(
-                        energy_levels[i], energy_levels[i + 1], nahar_core_states[i], nahar_configurations[i + 1], flog
+                        dfenergylevels_allions[i],
+                        dfenergylevels_allions[i + 1],
+                        nahar_core_states[i],
+                        nahar_configurations[i + 1],
+                        flog,
                     )
                 else:
                     photoionization_targetfractions[i] = readhillierdata.get_photoiontargetfractions(
-                        energy_levels[i], energy_levels[i + 1], hillier_photoion_targetconfigs[i], flog
+                        dfenergylevels_allions[i], dfenergylevels_allions[i + 1], hillier_photoion_targetconfigs[i]
                     )
 
             with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a") as fphixs:
@@ -1554,7 +1600,6 @@ def write_output_files(
                     fphixs,
                     atomic_number,
                     ion_stage,
-                    energy_levels[i],
                     photoionization_crosssections[i],
                     photoionization_targetfractions[i],
                     photoionization_thresholds_ev[i],
@@ -1566,110 +1611,96 @@ def write_output_files(
 
 
 def write_adata(
-    fatommodels, atomic_number, ion_stage, energy_levels, ionization_energy, transition_count_of_level_name, args, flog
-):
-    log_and_print(flog, f"Writing {len(energy_levels[1:])} levels to 'adata.txt'")
-    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{len(energy_levels) - 1:12d}{ionization_energy:15.7f}\n")
+    fatommodels,
+    atomic_number: int,
+    ion_stage: int,
+    dfenergylevels: pl.DataFrame,
+    ionization_energy: float,
+    transition_count_of_level_name,
+    flog,
+) -> None:
+    log_and_print(flog, f"Writing {dfenergylevels.height-1} levels to 'adata.txt'")
+    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height-1:12d}{ionization_energy:15.7f}\n")
 
-    for levelid, energylevel in enumerate(energy_levels[1:], 1):
+    for energylevel in dfenergylevels[1:].iter_rows(named=True):
         transitioncount = (
-            transition_count_of_level_name.get(energylevel.levelname, 0) if hasattr(energylevel, "levelname") else 0
+            transition_count_of_level_name.get(energylevel["levelname"], 0) if "levelname" in energylevel else 0
         )
 
         level_comment = ""
-        try:
-            hlevelname = energylevel.levelname
+        if "levelname" in energylevel:
+            hlevelname = energylevel["levelname"]
             if hlevelname in hillier_name_replacements:
                 # hlevelname += ' replaced by {0}'.format(hillier_name_replacements[hlevelname])
                 hlevelname = hillier_name_replacements[hlevelname]
             level_comment = hlevelname.ljust(27)
-        except AttributeError:
+        else:
             level_comment = " " * 27
 
-        try:
-            if energylevel.indexinsymmetry >= 0:
+        if "indexinsymmetry" in energylevel:
+            if energylevel["indexinsymmetry"] >= 0:
                 level_comment += (
-                    f'Nahar: {energylevel.twosplusone:d}{lchars[energylevel.l]:}{["e", "o"][energylevel.parity]:} index'
-                    f" {energylevel.indexinsymmetry:}"
+                    f'Nahar: {energylevel["twosplusone"]:d}{lchars[energylevel["l"]]:}{["e", "o"][energylevel["parity"]]:} index'
+                    f" {energylevel["indexinsymmetry"]:}"
                 )
-                try:
-                    config = energylevel.naharconfiguration
-                    if energylevel.naharconfiguration.strip() in nahar_configuration_replacements:
-                        config += (
-                            f" replaced by {nahar_configuration_replacements[energylevel.naharconfiguration.strip()]}"
-                        )
+                if "naharconfiguration" in energylevel:
+                    config = energylevel["naharconfiguration"]
+                    if energylevel["naharconfiguration"].strip() in nahar_configuration_replacements:
+                        config += f" replaced by {nahar_configuration_replacements[energylevel["naharconfiguration"].strip()]}"
                     level_comment += f" '{config}'"
-                except AttributeError:
+                else:
                     level_comment += " (no config)"
-        except AttributeError:
+        else:
             level_comment = level_comment.rstrip()
 
         fatommodels.write(
-            f"{levelid:5d} {hc_in_ev_cm * float(energylevel.energyabovegsinpercm):19.16f} {float(energylevel.g):8.3f} {transitioncount:4d} {level_comment:}\n"
+            f"{energylevel["levelid"]:5d} {hc_in_ev_cm * float(energylevel["energyabovegsinpercm"]):19.16f} {float(energylevel["g"]):8.3f} {transitioncount:4d} {level_comment:}\n"
         )
 
     fatommodels.write("\n")
 
 
 def write_transition_data(
-    ftransitiondata, atomic_number, ion_stage, energy_levels, transitions, upsilondict, args, flog
-):
-    log_and_print(flog, f"Writing {len(transitions)} transitions to 'transitiondata.txt'")
+    ftransitiondata,
+    atomic_number: int,
+    ion_stage: int,
+    dftransitions_ion: pl.DataFrame,
+    flog,
+) -> None:
+    log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
-    num_forbidden_transitions = 0
-    num_collision_strengths_applied = 0
-    ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{len(transitions):12d}\n")
+    ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
-    level_ids_with_permitted_down_transitions = set()
-    for transition in transitions:
-        levelid_lower = transition.lowerlevel
-        levelid_upper = transition.upperlevel
-        forbidden = energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity
-
-        if not forbidden:
-            level_ids_with_permitted_down_transitions.add(levelid_upper)
-
-    for transition in transitions:
-        levelid_lower = transition.lowerlevel
-        levelid_upper = transition.upperlevel
+    for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
+        ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
+    ].iter_rows():
         assert levelid_lower < levelid_upper
-        coll_str = transition.coll_str
 
-        if coll_str > 0:
-            num_collision_strengths_applied += 1
-
-        forbidden = energy_levels[levelid_lower].parity == energy_levels[levelid_upper].parity
-
-        if forbidden:
-            num_forbidden_transitions += 1
-            # flog.write(f'Forbidden transition: lambda_angstrom= {float(transition.lambdaangstrom):7.1f}, {transition.namefrom:25s} to {transition.nameto:25s}\n')
-
-        # ftransitiondata.write('{0:4d} {1:4d} {2:16.10E} {3:9.2e} {4:d}\n'.format(
-        #     levelid_lower, levelid_upper, float(transition.A), coll_str, forbidden))
-        ftransitiondata.write(
-            f"{levelid_lower:4d} {levelid_upper:4d} {float(transition.A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
-        )
+        ftransitiondata.write(f"{levelid_lower:4d} {levelid_upper:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n")
 
     ftransitiondata.write("\n")
 
+    num_forbidden_transitions = dftransitions_ion.filter(pl.col("forbidden")).height
+
+    num_collision_strengths_applied = dftransitions_ion.filter(pl.col("coll_str") > 0).height
+
     log_and_print(
         flog,
-        f"  output {len(transitions):d} transitions of which {num_forbidden_transitions:d} are forbidden and"
+        f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
         f" {num_collision_strengths_applied:d} have collision strengths",
     )
 
 
 def write_phixs_data(
     fphixs,
-    atomic_number,
-    ion_stage,
-    energy_levels,
+    atomic_number: int,
+    ion_stage: int,
     photoionization_crosssections,
     photoionization_targetfractions,
     photoionization_thresholds_ev,
     args,
     flog,
-):
+) -> None:
     log_and_print(flog, f"Writing {len(photoionization_crosssections)} phixs tables to 'phixsdata2.txt'")
     flog.write(
         f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
@@ -1702,7 +1733,7 @@ def write_phixs_data(
             if abs(probability_sum - 1.0) > 0.00001:
                 print(f"STOP! phixs fractions sum to {probability_sum:.5f} != 1.0")
                 print(targetlist)
-                print(f"level id {lowerlevelid} {energy_levels[lowerlevelid].levelname}")
+                print(f"level id {lowerlevelid}")
                 sys.exit()
 
         for crosssection in photoionization_crosssections[lowerlevelid]:

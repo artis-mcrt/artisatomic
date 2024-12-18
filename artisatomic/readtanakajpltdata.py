@@ -1,32 +1,13 @@
-import typing as t
-from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
-from astropy import constants as const
+import polars as pl
 from xopen import xopen
 
 import artisatomic
 
-# from astropy import units as u
-
 # the h5 file comes from Andreas Floers's DREAM parser
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
-
-
-class EnergyLevel(t.NamedTuple):
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: float
-
-
-class TransitionTuple(t.NamedTuple):
-    lowerlevel: int
-    upperlevel: int
-    A: float
-    coll_str: float
 
 
 def extend_ion_list(ion_handlers):
@@ -83,56 +64,56 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             chunksize=levelcount,
             nrows=levelcount,
             colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, None)],
-            names=["num", "weight", "parity", "energy_ev", "configuration"],
+            names=["levelid", "g", "parity", "energy_ev", "configuration"],
         ) as reader:
-            # dflevels = pd.concat(reader, ignore_index=True)
+            hc_in_ev_cm = 0.0001239841984332003
 
-            dflevels = reader.get_chunk(levelcount)
-            # print(dflevels)
-
-            energy_levels = [None]
-            for row in dflevels.itertuples(index=False):
-                parity = 1 if row.parity.strip() == "odd" else 0
-                energyabovegsinpercm = float(row.energy_ev / hc_in_ev_cm)
-                g = float(row.weight)
-
-                levelname = f"{row.num},{row.parity},{row.configuration.strip()}"
-                energy_levels.append(
-                    EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
+            dflevels = artisatomic.add_dummy_zero_level(
+                pl.from_pandas(reader.get_chunk(levelcount)).select(
+                    energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
+                    parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
+                    g=pl.col("g").cast(pl.Float64),
+                    levelname=pl.format(
+                        "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
+                    ),
+                    levelid=pl.col("levelid").cast(pl.Int64),
                 )
-                # print(energy_levels[-1])
-        assert len(energy_levels[1:]) == levelcount
+            )
+
+        assert (dflevels.height - 1) == levelcount
 
         line = fin.readline().strip()
         assert line in ("# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)")
         if line == "# Transitions":
             assert fin.readline().strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
-        dftransitions = pd.read_fwf(
-            fin,
-            colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, None)],
-            names=["num_u", "num_l", "wavelength", "g_u_times_A", "log(g_l*f)"],
+        dftransitions = pl.from_pandas(
+            pd.read_fwf(
+                fin,
+                colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, None)],
+                names=["upperlevel", "lowerlevel", "wavelength", "g_u_times_A", "log(g_l*f)"],
+                dtype_backend="pyarrow",
+            )
+        ).select(
+            pl.col("lowerlevel").cast(pl.Int64),
+            pl.col("upperlevel").cast(pl.Int64),
+            pl.col("g_u_times_A").cast(pl.Float64),
         )
-        # dftransitions = reader.get_chunk(transitioncount)
 
-        # print(dftransitions)
-        transitions = []
-        transition_count_of_level_name = defaultdict(int)
+    transition_count_of_level_name = {
+        dflevels["levelname"][levelid]: (
+            dftransitions.filter(pl.col("lowerlevel") == levelid).height
+            + dftransitions.filter(pl.col("upperlevel") == levelid).height
+        )
+        for levelid in dflevels["levelid"][1:]
+    }
+    assert dftransitions.height == transitioncount
 
-        for row in dftransitions.itertuples(index=False):
-            A = float(row.g_u_times_A) / energy_levels[row.num_u].g
-            coll_str = -1 if (energy_levels[row.num_u].parity != energy_levels[row.num_l].parity) else -2
-            transitions.append(TransitionTuple(lowerlevel=row.num_l, upperlevel=row.num_u, A=A, coll_str=coll_str))
+    dftransitions = dftransitions.with_columns(
+        g_u=pl.col("upperlevel").map_elements(lambda upperlevel: dflevels["g"][upperlevel], return_dtype=pl.Float64)
+    ).with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
+    dftransitions = dftransitions.select(["lowerlevel", "upperlevel", "A"])
 
-            transition_count_of_level_name[energy_levels[row.num_u].levelname] += 1
-            transition_count_of_level_name[energy_levels[row.num_l].levelname] += 1
-
-            # print(transitions[-1])
-
-        assert len(transitions) == transitioncount
-
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
-
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
 
 def get_level_valence_n(levelname: str):

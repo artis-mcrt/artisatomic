@@ -5,18 +5,15 @@ from collections import namedtuple
 from pathlib import Path
 
 import pandas as pd
-from astropy import constants as const
 
 import artisatomic
-
-# from astropy import units as u
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = Path(
     os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
 )
 dreamdata: pd.DataFrame | None = None
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+hc_in_ev_cm = 0.0001239841984332003
 
 
 def init_dreamdata():
@@ -88,17 +85,16 @@ def read_levels_data(dflines):
     return [None, *energy_levels]
 
 
-def read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels):
+def read_lines_data(dfiondata, energy_levels):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
 
     for index, row in dfiondata.iterrows():
-        coll_str = -1  # TODO
         lowerindex = row["Lower_index"]
         upperindex = row["Upper_index"]
         A = row["gA"] / row["Upper_g"]  # TODO: is this correct?
-        transtuple = transitiontuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=coll_str)
+        transtuple = transitiontuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=-1)
 
         # print(line)
         transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1
@@ -150,7 +146,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         allow_duplicates=True,
     )
 
-    transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage, dfiondata, energy_levels)
+    transitions, transition_count_of_level_name = read_lines_data(dfiondata, energy_levels)
 
     # ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
     ionization_energy_in_ev = -1

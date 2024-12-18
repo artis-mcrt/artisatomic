@@ -3,11 +3,6 @@ from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
 
-from astropy import constants as const
-
-# from astropy import units as u
-
-
 datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
 try:
@@ -18,7 +13,7 @@ except ModuleNotFoundError:
     filename_aoife_dataset = None
 
 
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+hc_in_ev_cm = 0.0001239841984332003
 
 
 def read_ionization_data(atomic_number, ion_stage):
@@ -94,7 +89,7 @@ def read_lines_data(atomic_number, ion_stage):
     return transitions, transition_count_of_level_name
 
 
-def read_levels_and_transitions(atomic_number, ion_stage, flog):
+def read_levels_and_transitions(atomic_number, ion_stage):
     assert atomic_number == 2
     # energy_levels = ['IGNORE']
     # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
