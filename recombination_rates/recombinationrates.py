@@ -48,7 +48,7 @@ for ionindex in range(4):
     ylistartisold = []
     ylistSS82 = []  # radiative recombination
     ylistSS82withDI = []  # radiative and dielectric recombination
-    with open(folderprefix + "recombinationartisoutput.txt") as filein:
+    with open(f"{folderprefix}recombinationartisoutput.txt") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "0" and int(row[5]) == ionindex:
@@ -71,7 +71,7 @@ for ionindex in range(4):
                 # print('DER Correction',alphadSS82/ylistSS82[-1])
     #    print(Arad[ionindex],Bdi[ionindex],T0[ionindex],T1[ionindex])
 
-    with open(folderprefix + "recombinationartisoutputold.txt") as filein:
+    with open(f"{folderprefix}recombinationartisoutputold.txt") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "21" and int(row[5]) == ionindex:
@@ -128,7 +128,7 @@ def naharfeiitonumber(strin):
 
 xlist = []
 ylist = []
-with open(folderprefix + "recombinationdatanahar97fei.txt") as filein:
+with open(f"{folderprefix}recombinationdatanahar97fei.txt") as filein:
     for line in filein:
         row = line.split()
         xlist.append(float(row[0]))
