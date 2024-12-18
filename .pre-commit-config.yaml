@@ -30,15 +30,13 @@ repos:
           - id: ruff
             args: [--fix]
           - id: ruff-format
-    - repo: https://github.com/pre-commit/mirrors-mypy
-      rev: v1.13.0
+    - repo: local
       hooks:
           - id: mypy
-            # language: system
-            additional_dependencies: [numpy, types-PyYAML, types-requests, types-tabulate]
+            name: mypy
+            entry: mypy
             types: [python]
-            require_serial: true
-            # verbose: true
+            language: python
     # - repo: local
     #   hooks:
     #       - id: pylint
