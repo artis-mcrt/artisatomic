@@ -1,7 +1,6 @@
 argcomplete>=3.5.1
 ChiantiPy>=0.15.1
 h5py>=3.10.0
-matplotlib>=3.9.2
 mypy>=1.13.0
 numpy>=1.26.1
 pandas>=2.2.3
@@ -11,5 +10,4 @@ pyarrow>=18.1.0
 pytest>=8.3.3
 ruff>=0.8.3
 scipy>=1.11.3
-types-PyYAML>=6.0.12.12
 xopen[zstd]>=2.0.2
