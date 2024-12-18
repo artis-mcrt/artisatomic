@@ -176,5 +176,5 @@ for ax in axes:
     ax.set_yscale("log")
     ax.set_ylabel(r"Alpha [cm$^3$ s$^{-1}$]", fontsize=fs)
 axes[-1].set_xlabel(r"Log$_{10}$ T", fontsize=fs)
-fig.savefig(__file__ + ".pdf", format="pdf")
+fig.savefig(f"{__file__}.pdf", format="pdf")
 plt.close()
