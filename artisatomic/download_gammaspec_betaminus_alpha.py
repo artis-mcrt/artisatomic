@@ -41,7 +41,7 @@ def process_table(z: int, a: int, outpath: Path, textdata, dfbetaminus: pl.DataF
     for colname in dfnuclide.columns:
         colname = colname.strip()
         if colname.startswith("Unc"):
-            colname = newcols[-1] + " (Unc)"
+            colname = f"{newcols[-1]} (Unc)"
         if colname in colreplacements:
             colname = colreplacements[colname]
         newcols.append(colname)
