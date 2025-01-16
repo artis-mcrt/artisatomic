@@ -21,10 +21,14 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v5
 
+            - name: Install the latest version of uv
+              uses: astral-sh/setup-uv@v5
+
             - name: Install artisatomic
               run: |
-                  python3 -m pip install uv
-                  python3 -m uv pip install --editable .
+                  uv sync --frozen
+                  source .venv/bin/activate
+                  uv pip install --compile-bytecode --editable .[dev]
 
             - name: Run Ruff
               if: always()
@@ -42,7 +46,18 @@ jobs:
 
             - name: Lint with mypy
               run: |
-                  mypy --install-types --non-interactive
+                  uv run --frozen mypy --install-types --non-interactive
+
+            - name: Cache pre-commit
+              uses: actions/cache@v4
+              with:
+                  path: ~/.cache/pre-commit
+                  key: pre-commit-3|${{ hashFiles('.pre-commit-config.yaml') }}
+
+            - name: Run pre-commit
+              run: |
+                  source .venv/bin/activate
+                  uv run --frozen -- pre-commit run --all-files --show-diff-on-failure --color=always
 
     pytest:
         runs-on: macos-15
@@ -55,10 +70,13 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v5
 
+            - name: Install the latest version of uv
+              uses: astral-sh/setup-uv@v5
+
             - name: Install artisatomic
               run: |
-                  python3 -m pip install uv
-                  python3 -m uv pip install --compile-bytecode --editable .
+                  uv sync --frozen
+                  uv pip install --compile-bytecode --editable .[dev]
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -72,7 +90,7 @@ jobs:
               run: source ./setup_cmfgen_data.sh
 
             - name: Test with pytest
-              run: pytest
+              run: uv run --frozen python3 -m pytest
 
     tests:
         strategy:
@@ -93,10 +111,13 @@ jobs:
             - name: Set up Python
               uses: actions/setup-python@v5
 
+            - name: Install the latest version of uv
+              uses: astral-sh/setup-uv@v5
+
             - name: Install artisatomic
               run: |
-                  python3 -m pip install uv
-                  python3 -m uv pip install --compile-bytecode --editable .
+                  uv sync --frozen
+                  uv pip install --compile-bytecode --editable .[dev]
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -130,7 +151,7 @@ jobs:
             - name: Generate artis atomic data files
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+                  uv run --frozen makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
