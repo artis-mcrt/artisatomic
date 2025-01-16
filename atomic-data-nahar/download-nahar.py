@@ -62,7 +62,7 @@ def main():
         if Path(file).exists():
             print(f"{file} already exists. Skipping.")
         else:
-            url = f'https://norad.astronomy.osu.edu/{file.split(".")[0]}/{file}'
+            url = f"https://norad.astronomy.osu.edu/{file.split('.')[0]}/{file}"
 
             c = urllib3.PoolManager()
 

@@ -1618,8 +1618,8 @@ def write_adata(
     transition_count_of_level_name,
     flog,
 ) -> None:
-    log_and_print(flog, f"Writing {dfenergylevels.height-1} levels to 'adata.txt'")
-    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height-1:12d}{ionization_energy:15.7f}\n")
+    log_and_print(flog, f"Writing {dfenergylevels.height - 1} levels to 'adata.txt'")
+    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height - 1:12d}{ionization_energy:15.7f}\n")
 
     for energylevel in dfenergylevels[1:].iter_rows(named=True):
         transitioncount = (
@@ -1639,13 +1639,13 @@ def write_adata(
         if "indexinsymmetry" in energylevel:
             if energylevel["indexinsymmetry"] >= 0:
                 level_comment += (
-                    f'Nahar: {energylevel["twosplusone"]:d}{lchars[energylevel["l"]]:}{["e", "o"][energylevel["parity"]]:} index'
-                    f" {energylevel["indexinsymmetry"]:}"
+                    f"Nahar: {energylevel['twosplusone']:d}{lchars[energylevel['l']]:}{['e', 'o'][energylevel['parity']]:} index"
+                    f" {energylevel['indexinsymmetry']:}"
                 )
                 if "naharconfiguration" in energylevel:
                     config = energylevel["naharconfiguration"]
                     if energylevel["naharconfiguration"].strip() in nahar_configuration_replacements:
-                        config += f" replaced by {nahar_configuration_replacements[energylevel["naharconfiguration"].strip()]}"
+                        config += f" replaced by {nahar_configuration_replacements[energylevel['naharconfiguration'].strip()]}"
                     level_comment += f" '{config}'"
                 else:
                     level_comment += " (no config)"
@@ -1653,7 +1653,7 @@ def write_adata(
             level_comment = level_comment.rstrip()
 
         fatommodels.write(
-            f"{energylevel["levelid"]:5d} {hc_in_ev_cm * float(energylevel["energyabovegsinpercm"]):19.16f} {float(energylevel["g"]):8.3f} {transitioncount:4d} {level_comment:}\n"
+            f"{energylevel['levelid']:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {level_comment:}\n"
         )
 
     fatommodels.write("\n")
