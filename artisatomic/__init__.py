@@ -1378,8 +1378,8 @@ def score_config_match(config_a, config_b):
             matched_pieces += 0.5  # make sure 0s states gets matched to something
         index_a, index_b = 0, 0
 
-        non_term_pieces_a = sum([1 for a in electron_config_a if not a.startswith("(")])
-        non_term_pieces_b = sum([1 for b in electron_config_b if not b.startswith("(")])
+        non_term_pieces_a = sum(not a.startswith("(") for a in electron_config_a)
+        non_term_pieces_b = sum(not b.startswith("(") for b in electron_config_b)
         # go through the configuration piece by piece
         while index_a < len(electron_config_a) and index_b < len(electron_config_b):
             piece_a = electron_config_a[index_a]  # an orbital electron count or a parent term
@@ -1435,10 +1435,7 @@ def score_config_match(config_a, config_b):
                         if char in lchars.lower():
                             maxldiff += lchars.lower().index(char)
                             occupation = orbital[pos + 1 :]
-                            if len(occupation) > 0:
-                                maxspindiff += int(occupation)
-                            else:
-                                maxspindiff += 1
+                            maxspindiff += int(occupation) if len(occupation) > 0 else 1
                             break
 
                 spindiff = abs(parent_term_a[0] - parent_term_b[0])
@@ -1644,7 +1641,7 @@ def write_adata(
                 )
                 if "naharconfiguration" in energylevel:
                     config = energylevel["naharconfiguration"]
-                    if energylevel["naharconfiguration"].strip() in nahar_configuration_replacements:
+                    if config.strip() in nahar_configuration_replacements:
                         config += f" replaced by {nahar_configuration_replacements[energylevel['naharconfiguration'].strip()]}"
                     level_comment += f" '{config}'"
                 else:
