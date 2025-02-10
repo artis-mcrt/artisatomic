@@ -132,7 +132,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dflines = gfall_reader.extract_lines().loc[atomic_number, ion_charge]
 
-    dflines["A"] = dflines["gf"] / (1.49919e-16 * (2 * dflines["j_upper"] + 1) * dflines["wavelength"] ** 2)
+    # wavelengths are in nanometers, so multiply by 10 to get Angstroms
+    dflines["A"] = dflines["gf"] / (1.49919e-16 * (2 * dflines["j_upper"] + 1) * (dflines["wavelength"] * 10.0) ** 2)
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
     artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
