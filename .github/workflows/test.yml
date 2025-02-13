@@ -157,7 +157,7 @@ jobs:
               working-directory: tests/${{ matrix.testname }}/output
               run: |
                   cat compositiondata.txt
-                  cat *.json
+                  cat atomic_data_logs/*.json
                   echo
                   md5sum *.txt atomic_data_logs/*.txt
                   md5sum -c ../checksums.txt
