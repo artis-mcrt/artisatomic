@@ -221,7 +221,7 @@ def main(args=None, argsraw=None, **kwargs):
     else:
         os.makedirs(log_folder, exist_ok=True)
 
-    json.dump(obj=ion_handlers, fp=Path(args.output_folder, "artisatomicionhandlers.json").open("w"))
+    json.dump(obj=ion_handlers, fp=Path(log_folder, "artisatomicionhandlers.json").open("w"))
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
