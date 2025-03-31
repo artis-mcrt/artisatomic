@@ -1146,8 +1146,8 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             f"WARNING: file specified {number_expected_transitions:d} transitions, but {coll_lines_in:d} were found",
         )
     else:
-        artisatomic.log_and_print(flog, f"Read {coll_lines_in} effective collision strengths ")
-        artisatomic.log_and_print(flog, f"Output {len(upsilondict)} effective collision strengths ")
+        artisatomic.log_and_print(flog, f"Read {coll_lines_in} effective collision strengths")
+        artisatomic.log_and_print(flog, f"Output {len(upsilondict)} effective collision strengths")
 
     return upsilondict
 
