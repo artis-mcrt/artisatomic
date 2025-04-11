@@ -289,6 +289,15 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                     handler = "cmfgen"
                 elif atomic_number >= 57:  # DREAM database of Z > 57
                     handler = "dream"
+                elif (atomic_number == 38 and ion_stage in [1, 2, 3, 4, 5]
+                    or atomic_number == 39 and ion_stage in [2, 3]
+                    or atomic_number == 40 and ion_stage in [1, 2, 3]
+                    or atomic_number == 74 and ion_stage in [1, 2, 3]
+                    or atomic_number == 52 and ion_stage in [1, 2, 3, 4, 5]
+                    or atomic_number == 78 and ion_stage in [1, 2, 3]
+                    or atomic_number == 79 and ion_stage in [1, 2, 3]
+                ):
+                    handler = "qub_data"
                 else:
                     handler = "carsus"
 
@@ -540,6 +549,15 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         transitions[i],
                         transition_count_of_level_name[i],
                     ) = groundstatesonlynist.read_ground_levels(atomic_number, ion_stage, flog)
+
+                elif handler == "qub_data":
+                    (
+                        ionization_energy_ev[i],
+                        energy_levels[i],
+                        transitions[i],
+                        transition_count_of_level_name[i],
+                        upsilondicts[i],
+                    ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 else:
                     raise ValueError(f"Unknown handler: {handler}")
@@ -890,6 +908,7 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
         "fac": readfacdata.get_level_valence_n,
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,
+        "qub_data": readqubdata.get_level_valence_n
     }
     if ion_handler not in dict_get_n_func:
         print(
@@ -1266,7 +1285,13 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         term_parity = 0  # even
     else:
         term_parity = [0, 1][(instr[-1] == "o")]
-        instr = instr[:-1]
+        if not any(char in lchars for char in instr):
+            # This will be an incorrectly formatted QUB file with no term
+            print("Warning: Check QUB file formatting")
+            instr = instr
+        else:
+            # Preserve previous behaviour
+            instr = instr[:-1]
 
     term_twosplusone = -1
     term_l = -1
@@ -1281,7 +1306,11 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
             term_parity = (
                 term_parity + 2
             )  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
-        instr = instr[:-1]
+            instr = instr[:-1]
+        if not any(char in lchars for char in instr):
+            print("Warning: Check QUB file formatting")
+            instr = instr
+            break
 
     if str.isdigit(instr[-1]):
         term_twosplusone = int(instr[-1])
