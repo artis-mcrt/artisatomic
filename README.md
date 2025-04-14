@@ -24,4 +24,4 @@ python3 -m pip install -e .[dev]
 ## Usage
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. This code is not user friendly and requires manual editing of the Python scripts to change ions and data sources.
 
-[![Build and test](https://github.com/artis-mcrt/artisatomic/actions/workflows/pythonapp.yml/badge.svg)](https://github.com/artis-mcrt/artisatomic/actions/workflows/pythonapp.yml)
+[![Build and test](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml/badge.svg)](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml)
