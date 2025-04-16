@@ -5,8 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import polars as pl
+from xopen import xopen
 
 import artisatomic
+
+tyndall_co3_path = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub" / "co_tyndall").resolve()
 
 ryd_to_ev = 13.605693122994232
 
@@ -21,16 +25,18 @@ qub_energy_level_row = namedtuple(
 
 
 def read_adf04(filepath, atomic_number, ion_stage, flog):
+    if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
+        filepath = f"{filepath}.gz"
     energylevels = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
-    with open(filepath) as fleveltrans:
+    with xopen(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
         # Formatting of the calculation details section at the bottom of each file is not standardised
-        # This ignores it, provided it's put in the correct place. Needs made more robust later.
+        # This ignores it, provided it's put in the correct place. Needs made more robust later.
         # Currently if it's somewhere random/random formatting: ¯\_(ツ)_/¯, delete manually.
         atomic_group_note = False
         while True:
@@ -42,16 +48,13 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
                 continue
             if atomic_group_note:
                 continue
-            
+
             config_full = line[5:27].strip()
             # Accounting for files which have multiple sets of brackets in this string
             # Some files include parent terms
             config_parts = config_full.split(")")
 
-            if len(config_parts) > 1:
-                relevant_config = config_parts[-2].strip() + ")"
-            else:
-                relevant_config = config_full
+            relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
 
             config = relevant_config
             energylevel = qub_energy_level_row(
@@ -91,7 +94,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
             sep=r"\s+",
             comment="C",
             names=list_headers,
-            dtype={"lower": int, "upper": int}.update({z: float for z in list_headers[2:]}),
+            dtype={"lower": int, "upper": int}.update(dict.fromkeys(list_headers[2:], float)),
             on_bad_lines="skip",
             skip_blank_lines=True,
             keep_default_na=False,
@@ -126,23 +129,43 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     qub_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     new_qub_calculations = {
-    (38, 1), (38, 2), (38, 3), (38, 4), (38, 5),
-    (39, 2), (39, 3),
-    (40, 1), (40, 2), (40, 3),
-    (52, 1), (52, 2), (52, 3), (52, 4), (52, 5),
-    (74, 1), (74, 2), (74, 3),
-    (78, 1), (78, 2), (78, 3),
-    (79, 1), (79, 2), (79, 3)
+        (38, 1),
+        (38, 2),
+        (38, 3),
+        (38, 4),
+        (38, 5),
+        (39, 2),
+        (39, 3),
+        (40, 1),
+        (40, 2),
+        (40, 3),
+        (52, 1),
+        (52, 2),
+        (52, 3),
+        (52, 4),
+        (52, 5),
+        (74, 1),
+        (74, 2),
+        (74, 3),
+        (78, 1),
+        (78, 2),
+        (78, 3),
+        (79, 1),
+        (79, 2),
+        (79, 3),
     }
 
     if (atomic_number == 27) and (ion_stage == 3):
         ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
-            Path("atomic-data-qub", "co_tyndall", "adf04_v1"), flog
+            tyndall_co3_path / "adf04_v1", atomic_number, ion_stage, flog
         )
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
-        with open(Path("atomic-data-qub", "co_tyndall", "adf04rad_v1")) as ftrans:
+        transitionfile = tyndall_co3_path / "adf04rad_v1"
+        if not Path(transitionfile).is_file() and Path(f"{transitionfile}.gz").is_file():
+            transitionfile = f"{transitionfile}.gz"
+        with xopen(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
@@ -171,13 +194,12 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels = [None]
-        qub_transitions = []
+        qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
         upsilondict = {}
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
-        
         atom_file = f"{atomic_number}_{ion_stage}.adf04"
         ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
             Path("atomic-data-qub", atom_file), atomic_number, ion_stage, flog
@@ -239,9 +261,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                             coll_str = -2.0
                         else:
                             coll_str = -1.0
-                        transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                        transition = qub_transition_row(
+                            id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str
+                        )
                         qub_transitions.append(transition)
-
 
     artisatomic.log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
@@ -255,8 +278,8 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
-            filename = f"atomic-data-qub/co_tyndall/{lowerlevelid:d}.gz"
-            artisatomic.log_and_print(flog, "Reading " + filename)
+            filename = tyndall_co3_path / f"{lowerlevelid:d}.gz"
+            artisatomic.log_and_print(flog, f"Reading {filename}")
             photdata = pd.read_csv(filename, sep=r"\s+", header=None)
             phixstables = {}
             # ntargets = 40
@@ -419,16 +442,16 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
-def get_level_valence_n(levelname :str):
+
+def get_level_valence_n(levelname: str):
     namesplit = levelname.split("_")
     part = namesplit[0].strip()
     if len(namesplit) < 2:
         print(f"WARNING: Could not find valence n in {levelname}. Using n=1")
         return 1
-    
-    if part[-1] == ')':
-        if '(' in part:
-            part = part[:part.rfind('(')]
+
+    if part[-1] == ")" and "(" in part:
+        part = part[: part.rfind("(")]
 
     if part[-1] not in lchars.lower():
         # Last character must be mumber of electrons in the orbital: remove it
@@ -447,15 +470,13 @@ def get_level_valence_n(levelname :str):
         except ValueError:
             continue
         else:
-            assert n >= 0 
+            assert n >= 0
             valance_n = n
             n_start_index = i  # Track where the number starts
             if n_start_index > 0 and part[n_start_index - 1] in lchars.lower():
-                valance_n = str(valance_n)
-                if len(valance_n) > 1:
-                    valance_n = int(valance_n[1:])
-                else:
-                    valance_n = int(valance_n)  # Strip the first digit of n
+                str_valance_n = str(valance_n)
+                # Strip the first digit of n
+                valance_n = int(str_valance_n[1:] if len(str_valance_n) > 1 else str_valance_n)
             assert valance_n < 50
         return valance_n
     if valance_n is None:
