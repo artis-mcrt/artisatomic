@@ -30,7 +30,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
         # Formatting of the calculation details section at the bottom of each file is not standardised
-        # This ignores it, provided it's put in the correct place. Needs made more robust later.
+        # This ignores it, provided it's put in the correct place. Needs made more robust later.
         # Currently if it's somewhere random/random formatting: ¯\_(ツ)_/¯, delete manually.
         atomic_group_note = False
         while True:
@@ -42,16 +42,13 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
                 continue
             if atomic_group_note:
                 continue
-            
+
             config_full = line[5:27].strip()
             # Accounting for files which have multiple sets of brackets in this string
             # Some files include parent terms
             config_parts = config_full.split(")")
 
-            if len(config_parts) > 1:
-                relevant_config = config_parts[-2].strip() + ")"
-            else:
-                relevant_config = config_full
+            relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
 
             config = relevant_config
             energylevel = qub_energy_level_row(
@@ -126,13 +123,30 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     qub_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     new_qub_calculations = {
-    (38, 1), (38, 2), (38, 3), (38, 4), (38, 5),
-    (39, 2), (39, 3),
-    (40, 1), (40, 2), (40, 3),
-    (52, 1), (52, 2), (52, 3), (52, 4), (52, 5),
-    (74, 1), (74, 2), (74, 3),
-    (78, 1), (78, 2), (78, 3),
-    (79, 1), (79, 2), (79, 3)
+        (38, 1),
+        (38, 2),
+        (38, 3),
+        (38, 4),
+        (38, 5),
+        (39, 2),
+        (39, 3),
+        (40, 1),
+        (40, 2),
+        (40, 3),
+        (52, 1),
+        (52, 2),
+        (52, 3),
+        (52, 4),
+        (52, 5),
+        (74, 1),
+        (74, 2),
+        (74, 3),
+        (78, 1),
+        (78, 2),
+        (78, 3),
+        (79, 1),
+        (79, 2),
+        (79, 3),
     }
 
     if (atomic_number == 27) and (ion_stage == 3):
@@ -177,7 +191,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         qub_energylevels.append(qub_energy_level_row("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
-        
         atom_file = f"{atomic_number}_{ion_stage}.adf04"
         ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
             Path("atomic-data-qub", atom_file), atomic_number, ion_stage, flog
@@ -239,9 +252,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                             coll_str = -2.0
                         else:
                             coll_str = -1.0
-                        transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                        transition = qub_transition_row(
+                            id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str
+                        )
                         qub_transitions.append(transition)
-
 
     artisatomic.log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
@@ -419,16 +433,16 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
-def get_level_valence_n(levelname :str):
+
+def get_level_valence_n(levelname: str):
     namesplit = levelname.split("_")
     part = namesplit[0].strip()
     if len(namesplit) < 2:
         print(f"WARNING: Could not find valence n in {levelname}. Using n=1")
         return 1
-    
-    if part[-1] == ')':
-        if '(' in part:
-            part = part[:part.rfind('(')]
+
+    if part[-1] == ")" and "(" in part:
+        part = part[: part.rfind("(")]
 
     if part[-1] not in lchars.lower():
         # Last character must be mumber of electrons in the orbital: remove it
@@ -447,15 +461,13 @@ def get_level_valence_n(levelname :str):
         except ValueError:
             continue
         else:
-            assert n >= 0 
+            assert n >= 0
             valance_n = n
             n_start_index = i  # Track where the number starts
             if n_start_index > 0 and part[n_start_index - 1] in lchars.lower():
-                valance_n = str(valance_n)
-                if len(valance_n) > 1:
-                    valance_n = int(valance_n[1:])
-                else:
-                    valance_n = int(valance_n)  # Strip the first digit of n
+                str_valance_n = str(valance_n)
+                # Strip the first digit of n
+                valance_n = int(str_valance_n[1:] if len(str_valance_n) > 1 else str_valance_n)
             assert valance_n < 50
         return valance_n
     if valance_n is None:
