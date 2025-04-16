@@ -1,0 +1,7 @@
+baa11971cda6ee7dbffe6c39b02d485a  adata.txt
+a20943827eba942629179bed717ac222  compositiondata.txt
+da933d3d5ae5eedfd3b6d2cdd7c3b44e  phixsdata_v2.txt
+c10e310384b34f7909c3f5ea9a25dbe4  transitiondata.txt
+67c0963308fbabf6ace5f778e4145a08  atomic_data_logs/co2.txt
+267a54b079616fad5f16406d33ce1c91  atomic_data_logs/co3.txt
+2e33e346b527f8e0256ba4fcfeafcd84  atomic_data_logs/co4.txt
