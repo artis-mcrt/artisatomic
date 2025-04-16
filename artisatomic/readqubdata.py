@@ -5,8 +5,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import polars as pl
+from xopen import xopen
 
 import artisatomic
+
+tyndall_co3_path = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub" / "co_tyndall").resolve()
 
 ryd_to_ev = 13.605693122994232
 
@@ -21,11 +25,13 @@ qub_energy_level_row = namedtuple(
 
 
 def read_adf04(filepath, flog):
+    if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
+        filepath = f"{filepath}.gz"
     energylevels = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
-    with open(filepath) as fleveltrans:
+    with xopen(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
@@ -95,13 +101,14 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     qub_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
     if (atomic_number == 27) and (ion_stage == 3):
-        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
-            Path("atomic-data-qub", "co_tyndall", "adf04_v1"), flog
-        )
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(tyndall_co3_path / "adf04_v1", flog)
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
-        with open(Path("atomic-data-qub", "co_tyndall", "adf04rad_v1")) as ftrans:
+        transitionfile = tyndall_co3_path / "adf04rad_v1"
+        if not Path(transitionfile).is_file() and Path(f"{transitionfile}.gz").is_file():
+            transitionfile = f"{transitionfile}.gz"
+        with xopen(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
@@ -130,7 +137,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels = [None]
-        qub_transitions = []
+        qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
         upsilondict = {}
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
@@ -147,8 +154,8 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
-            filename = f"atomic-data-qub/co_tyndall/{lowerlevelid:d}.gz"
-            artisatomic.log_and_print(flog, "Reading " + filename)
+            filename = tyndall_co3_path / f"{lowerlevelid:d}.gz"
+            artisatomic.log_and_print(flog, f"Reading {filename}")
             photdata = pd.read_csv(filename, sep=r"\s+", header=None)
             phixstables = {}
             # ntargets = 40
