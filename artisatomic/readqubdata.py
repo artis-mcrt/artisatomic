@@ -67,7 +67,7 @@ def read_adf04(filepath, flog):
             sep=r"\s+",
             comment="C",
             names=list_headers,
-            dtype={"lower": int, "upper": int}.update({z: float for z in list_headers[2:]}),
+            dtype={"lower": int, "upper": int}.update(dict.fromkeys(list_headers[2:], float)),
             on_bad_lines="skip",
             skip_blank_lines=True,
             keep_default_na=False,
