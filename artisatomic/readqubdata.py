@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-from collections import defaultdict, namedtuple
+from collections import defaultdict
+from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
@@ -155,7 +156,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     }
 
     if (atomic_number == 27) and (ion_stage == 3):
-        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(tyndall_co3_path / "adf04_v1", flog)
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
+            tyndall_co3_path / "adf04_v1", atomic_number, ion_stage, flog
+        )
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
