@@ -23,6 +23,33 @@ qub_energy_level_row = namedtuple(
     "qub_energy_level_row", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
 )
 
+qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
+
+
+def extend_ion_list(ion_handlers):
+    qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
+    for atomic_number, ion_stage in qubions:
+        found_element = False
+        for tmp_atomic_number, list_ions_handlers in ion_handlers:
+            if tmp_atomic_number == atomic_number:
+                # add an ion that is not present in the element's list
+                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
+                    list_ions_handlers.append((ion_stage, "qub_data"))
+                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
+                found_element = True
+
+        if not found_element:
+            ion_handlers.append(
+                (
+                    atomic_number,
+                    [(ion_stage, "qub_data")],
+                )
+            )
+
+    ion_handlers.sort(key=lambda x: x[0])
+
+    return ion_handlers
+
 
 def read_adf04(filepath, atomic_number, ion_stage, flog):
     if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
@@ -37,7 +64,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
         # Formatting of the calculation details section at the bottom of each file is not standardised
         # This ignores it, provided it's put in the correct place. Needs made more robust later.
-        # Currently if it's somewhere random/random formatting: ¯\_(ツ)_/¯, delete manually.
+        # Currently if it's somewhere random: ¯\_(ツ)_/¯
         atomic_group_note = False
         while True:
             line = fleveltrans.readline()
@@ -49,24 +76,36 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
             if atomic_group_note:
                 continue
 
-            config_full = line[5:27].strip()
-            # Accounting for files which have multiple sets of brackets in this string
-            # Some files include parent terms
-            config_parts = config_full.split(")")
+            if atomic_number == 27:
+                config = line[5:21].strip()
+                energylevel = qub_energy_level_row(
+                    config,
+                    int(line[:5]),
+                    int(line[25:26]),
+                    int(line[27:28]),
+                    float(line[29:33]),
+                    float(line[34:55]),
+                    0.0,
+                    0,
+                )
 
-            relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
-
-            config = relevant_config
-            energylevel = qub_energy_level_row(
-                config,
-                int(line[:5]),
-                int(line[29:30]),
-                int(line[31:32]),
-                float(line[33:37]),
-                float(line[38:59]),
-                0.0,
-                0,
-            )
+            else:
+                config_full = line[5:27].strip()
+                # Accounting for files which have multiple sets of brackets in this string
+                # Some files include parent terms
+                config_parts = config_full.split(")")
+                relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
+                config = relevant_config
+                energylevel = qub_energy_level_row(
+                    config,
+                    int(line[:5]),
+                    int(line[29:30]),
+                    int(line[31:32]),
+                    float(line[33:37]),
+                    float(line[38:59]),
+                    0.0,
+                    0,
+                )
             parity = artisatomic.get_parity_from_config(config)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
@@ -83,11 +122,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
 
         upsilonheader = fleveltrans.readline().split()
         list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
-        # WII has upper and lower column order switched:
-        if atomic_number == 74 and ion_stage == 2:
-            list_headers = ["lower", "upper", "ignore", *list_tempheaders]
-        else:
-            list_headers = ["upper", "lower", "ignore", *list_tempheaders]
+        list_headers = ["upper", "lower", "ignore", *list_tempheaders]
         qubupsilondf_alltemps = pd.read_csv(
             fleveltrans,
             index_col=False,
@@ -103,9 +138,14 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
         for _, row in qubupsilondf_alltemps.iterrows():
             lower = int(row["lower"])
             upper = int(row["upper"])
-            # W I and II rates are calculated at different temperatures
+            lower, upper = min(lower, upper), max(lower, upper)
+            assert upper > lower
+
+            # Co, W I and II rates are calculated at different temperatures
             # Should be handled in a less approximate way in the future
-            if atomic_number == 74 and ion_stage == 1:
+            if atomic_number == 27:
+                upsilon = float(row["upsT=5.01+03"].replace("-", "E-").replace("+", "E+"))
+            elif atomic_number == 74 and ion_stage == 1:
                 upsilon = float(row["upsT=5.80+03"].replace("-", "E-").replace("+", "E+"))
             elif atomic_number == 74 and ion_stage == 2:
                 upsilon = float(row["upsT=4.00+03"].replace("-", "E-").replace("+", "E+"))
@@ -211,7 +251,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             ftrans.seek(0)
             atom_group_note = False
             longest_line_length = 0
-            longest_line = ""
             # Use the length of lines to locate collision strengths
             # Ignoring notes section between C- markers
             for line in ftrans:
@@ -220,10 +259,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     continue
                 if atom_group_note:
                     continue
-                if len(line) > longest_line_length:
-                    longest_line_length = len(line)
-                    longest_line = line
-
+                longest_line_length = max(longest_line_length, len(line))
             ftrans.seek(0)
             for line in ftrans:
                 if line.startswith("C-"):
