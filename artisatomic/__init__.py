@@ -76,12 +76,12 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
         return json.load(inputhandlersfile.open(encoding="utf-8"))
 
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
-    '''
+
     ion_handlers = [
         (26, [1, 2, 3, 4, 5]),
         (27, [2, 3, 4]),
         (28, [2, 3, 4, 5]),
-    ]'''
+    ]
 
     # ion_handlers = [
     #     (2, [(3, "boyle")]),
@@ -94,7 +94,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ]
 
     # include everything we have data for
-    ion_handlers = readqubdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readqubdata.extend_ion_list(ion_handlers)
     # ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
     # ion_handlers = readcarsusdata.extend_ion_list(ion_handlers)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
@@ -1308,7 +1308,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
             term_parity = (
                 term_parity + 2
             )  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
-            instr = instr[:-1]
+        instr = instr[:-1]
         if not any(char in lchars for char in instr):
             print("Warning: Check QUB file formatting")
             break
