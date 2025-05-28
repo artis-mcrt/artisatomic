@@ -23,8 +23,35 @@ qub_energy_level_row = namedtuple(
     "qub_energy_level_row", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
 )
 
+qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
-def read_adf04(filepath, flog):
+
+def extend_ion_list(ion_handlers):
+    qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
+    for atomic_number, ion_stage in qubions:
+        found_element = False
+        for tmp_atomic_number, list_ions_handlers in ion_handlers:
+            if tmp_atomic_number == atomic_number:
+                # add an ion that is not present in the element's list
+                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
+                    list_ions_handlers.append((ion_stage, "qub_data"))
+                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
+                found_element = True
+
+        if not found_element:
+            ion_handlers.append(
+                (
+                    atomic_number,
+                    [(ion_stage, "qub_data")],
+                )
+            )
+
+    ion_handlers.sort(key=lambda x: x[0])
+
+    return ion_handlers
+
+
+def read_adf04(filepath, atomic_number, ion_stage, flog):
     if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
         filepath = f"{filepath}.gz"
     energylevels = [None]
@@ -35,21 +62,50 @@ def read_adf04(filepath, flog):
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
+        # Formatting of the calculation details section at the bottom of each file is not standardised
+        # This ignores it, provided it's put in the correct place. Needs made more robust later.
+        # Currently if it's somewhere random: ¯\_(ツ)_/¯
+        atomic_group_note = False
         while True:
             line = fleveltrans.readline()
             if not line or line.startswith("   -1"):
                 break
-            config = line[5:21].strip()
-            energylevel = qub_energy_level_row(
-                config,
-                int(line[:5]),
-                int(line[25:26]),
-                int(line[27:28]),
-                float(line[29:33]),
-                float(line[34:55]),
-                0.0,
-                0,
-            )
+            if line.startswith("C-"):
+                atomic_group_note = not atomic_group_note
+                continue
+            if atomic_group_note:
+                continue
+
+            if atomic_number == 27:
+                config = line[5:21].strip()
+                energylevel = qub_energy_level_row(
+                    config,
+                    int(line[:5]),
+                    int(line[25:26]),
+                    int(line[27:28]),
+                    float(line[29:33]),
+                    float(line[34:55]),
+                    0.0,
+                    0,
+                )
+
+            else:
+                config_full = line[5:27].strip()
+                # Accounting for files which have multiple sets of brackets in this string
+                # Some files include parent terms
+                config_parts = config_full.split(")")
+                relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
+                config = relevant_config
+                energylevel = qub_energy_level_row(
+                    config,
+                    int(line[:5]),
+                    int(line[29:30]),
+                    int(line[31:32]),
+                    float(line[33:37]),
+                    float(line[38:59]),
+                    0.0,
+                    0,
+                )
             parity = artisatomic.get_parity_from_config(config)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
@@ -82,7 +138,19 @@ def read_adf04(filepath, flog):
         for _, row in qubupsilondf_alltemps.iterrows():
             lower = int(row["lower"])
             upper = int(row["upper"])
-            upsilon = float(row["upsT=5.01+03"].replace("-", "E-").replace("+", "E+"))
+            lower, upper = min(lower, upper), max(lower, upper)
+            assert upper > lower
+
+            # Co, W I and II rates are calculated at different temperatures
+            # Should be handled in a less approximate way in the future
+            if atomic_number == 27:
+                upsilon = float(row["upsT=5.01+03"].replace("-", "E-").replace("+", "E+"))
+            elif atomic_number == 74 and ion_stage == 1:
+                upsilon = float(row["upsT=5.80+03"].replace("-", "E-").replace("+", "E+"))
+            elif atomic_number == 74 and ion_stage == 2:
+                upsilon = float(row["upsT=4.00+03"].replace("-", "E-").replace("+", "E+"))
+            else:
+                upsilon = float(row["upsT=5.00+03"].replace("-", "E-").replace("+", "E+"))
             if (lower, upper) not in upsilondict:
                 upsilondict[(lower, upper)] = upsilon
             else:
@@ -100,8 +168,37 @@ def read_adf04(filepath, flog):
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     qub_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
 
+    new_qub_calculations = {
+        (38, 1),
+        (38, 2),
+        (38, 3),
+        (38, 4),
+        (38, 5),
+        (39, 2),
+        (39, 3),
+        (40, 1),
+        (40, 2),
+        (40, 3),
+        (52, 1),
+        (52, 2),
+        (52, 3),
+        (52, 4),
+        (52, 5),
+        (74, 1),
+        (74, 2),
+        (74, 3),
+        (78, 1),
+        (78, 2),
+        (78, 3),
+        (79, 1),
+        (79, 2),
+        (79, 3),
+    }
+
     if (atomic_number == 27) and (ion_stage == 3):
-        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(tyndall_co3_path / "adf04_v1", flog)
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
+            tyndall_co3_path / "adf04_v1", atomic_number, ion_stage, flog
+        )
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
@@ -141,6 +238,69 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         upsilondict = {}
         ionization_energy_ev = 54.9000015
         qub_energylevels.append(qub_energy_level_row("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
+
+    elif (atomic_number, ion_stage) in new_qub_calculations:
+        atom_file = f"{atomic_number}_{ion_stage}.adf04"
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
+            Path("atomic-data-qub", atom_file), atomic_number, ion_stage, flog
+        )
+
+        qub_transitions = []
+        transition_count_of_level_name = defaultdict(int)
+        with open(Path("atomic-data-qub", atom_file)) as ftrans:
+            ftrans.seek(0)
+            atom_group_note = False
+            longest_line_length = 0
+            # Use the length of lines to locate collision strengths
+            # Ignoring notes section between C- markers
+            for line in ftrans:
+                if line.startswith("C-"):
+                    atom_group_note = not atom_group_note
+                    continue
+                if atom_group_note:
+                    continue
+                longest_line_length = max(longest_line_length, len(line))
+            ftrans.seek(0)
+            for line in ftrans:
+                if line.startswith("C-"):
+                    atom_group_note = not atom_group_note
+                    continue
+                if atom_group_note:
+                    continue
+
+                rowlen = line
+                row = line.split()
+
+                if len(rowlen) == longest_line_length:
+                    # W II file has the first two columns swapped around from the standard order
+                    if atomic_number == 74 and ion_stage == 2:
+                        id_upper = int(row[1])
+                        id_lower = int(row[0])
+                    else:
+                        id_upper = int(row[0])
+                        id_lower = int(row[1])
+                    A = float(row[2].replace("-", "E-").replace("+", "E+"))
+
+                    if A > 2e-30:
+                        namefrom = qub_energylevels[id_upper].levelname
+                        nameto = qub_energylevels[id_lower].levelname
+                        forbidden = artisatomic.check_forbidden(qub_energylevels[id_upper], qub_energylevels[id_lower])
+                        transition_count_of_level_name[namefrom] += 1
+                        transition_count_of_level_name[nameto] += 1
+                        lamdaangstrom = 1.0e8 / (
+                            qub_energylevels[id_upper].energyabovegsinpercm
+                            - qub_energylevels[id_lower].energyabovegsinpercm
+                        )
+                        if (id_lower, id_upper) in upsilondict:
+                            coll_str = upsilondict[(id_lower, id_upper)]
+                        elif forbidden:
+                            coll_str = -2.0
+                        else:
+                            coll_str = -1.0
+                        transition = qub_transition_row(
+                            id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str
+                        )
+                        qub_transitions.append(transition)
 
     artisatomic.log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
@@ -317,3 +477,44 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                 photoionization_crosssections[lowerlevelid] = phixsvalues
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
+
+
+def get_level_valence_n(levelname: str):
+    namesplit = levelname.split("_")
+    part = namesplit[0].strip()
+    if len(namesplit) < 2:
+        print(f"WARNING: Could not find valence n in {levelname}. Using n=1")
+        return 1
+
+    if part[-1] == ")" and "(" in part:
+        part = part[: part.rfind("(")]
+
+    if part[-1] not in lchars.lower():
+        # Last character must be mumber of electrons in the orbital: remove it
+        if not part[-1].isdigit():
+            print(f"WARNING: Could not find n in {levelname}. Using n=1")
+            return 1
+        part = part.rstrip("0123456789")
+    part = part.strip(lchars.lower())
+
+    valance_n = None
+
+    # Inefficient way to find the last number in a string
+    for i in range(len(part)):
+        try:
+            n = int(part[i:])
+        except ValueError:
+            continue
+        else:
+            assert n >= 0
+            valance_n = n
+            n_start_index = i  # Track where the number starts
+            if n_start_index > 0 and part[n_start_index - 1] in lchars.lower():
+                str_valance_n = str(valance_n)
+                # Strip the first digit of n
+                valance_n = int(str_valance_n[1:] if len(str_valance_n) > 1 else str_valance_n)
+            assert valance_n < 50
+        return valance_n
+    if valance_n is None:
+        print(f"WARNING: Could not find n in {levelname}. Using n=1")
+    return 1
