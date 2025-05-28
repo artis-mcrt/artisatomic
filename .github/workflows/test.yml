@@ -22,13 +22,13 @@ jobs:
               uses: actions/setup-python@v5
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v6
 
             - name: Install artisatomic
               run: |
                   uv sync --frozen
                   source .venv/bin/activate
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv pip install --compile-bytecode --editable .
 
             - name: Run Ruff
               if: always()
@@ -56,7 +56,7 @@ jobs:
                   uv run --frozen -- pre-commit run --all-files --show-diff-on-failure --color=always
 
     pytest:
-        runs-on: ubuntu-22.04
+        runs-on: ubuntu-24.04
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -67,12 +67,12 @@ jobs:
               uses: actions/setup-python@v5
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v6
 
             - name: Install artisatomic
               run: |
                   uv sync --frozen
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -94,7 +94,7 @@ jobs:
                 testname: [cmfgen, floers25, jplt, qub]
             fail-fast: false
 
-        runs-on: ubuntu-22.04
+        runs-on: ubuntu-24.04
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
@@ -108,12 +108,12 @@ jobs:
               uses: actions/setup-python@v5
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v5
+              uses: astral-sh/setup-uv@v6
 
             - name: Install artisatomic
               run: |
                   uv sync --frozen
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
