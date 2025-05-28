@@ -38,7 +38,7 @@ dependencies = [
     "xopen[zstd]>=2.0.2",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "mypy>=1.13.0",
     "pre-commit>=4.0.1",
