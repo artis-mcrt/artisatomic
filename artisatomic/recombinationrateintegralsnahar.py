@@ -295,7 +295,7 @@ def calculate_level_alpha(phixslist, g_lower, g_upper, T, kind="trapz"):
         arr_integrand = list(starmap(integrand, phixslist))
 
         if kind == "simps":
-            integral = integrate.simps(arr_integrand, arr_nu)
+            integral = integrate.simpson(arr_integrand, arr_nu)
         elif kind == "trapz":
             integral = integrate.trapezoid(arr_integrand, arr_nu)
         else:
