@@ -21,7 +21,7 @@ class LisbonReader:
 
     """
 
-    def __init__(self, data, priority=10):
+    def __init__(self, data, priority=10) -> None:
         """Parameters
         ----------
         data : dict

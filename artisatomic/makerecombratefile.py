@@ -4,6 +4,7 @@ import glob
 import os
 import sys
 from collections import namedtuple
+from pathlib import Path
 
 import ChiantiPy.core as ch
 import numpy as np
@@ -87,7 +88,7 @@ def main():
                     f"atomic-data-nahar/{artisatomic.elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"
                 ):  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
-                    ionstr = os.path.basename(naharfilename).split(".")[0]  # should be something like 'fe2'
+                    ionstr = Path(naharfilename).name.split(".")[0]  # should be something like 'fe2'
                     elsymbol = ionstr.rstrip("0123456789")
                     lowerionstage = int(ionstr[len(elsymbol) :])
                     upperionstage = lowerionstage + 1
