@@ -12,6 +12,7 @@ import queue
 import sys
 import typing as t
 from collections import defaultdict
+from collections.abc import Sequence
 from functools import lru_cache
 from pathlib import Path
 
@@ -154,7 +155,7 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     return dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
 
 
-def main(args=None, argsraw=None, **kwargs):
+def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
     if args is None:
         parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -213,12 +214,12 @@ def main(args=None, argsraw=None, **kwargs):
 
     os.makedirs(args.output_folder, exist_ok=True)
 
-    log_folder = os.path.join(args.output_folder, args.output_folder_logs)
-    if os.path.exists(log_folder):
+    log_folder = Path(args.output_folder) / args.output_folder_logs
+    if log_folder.exists():
         # delete any existing log files
         logfiles = glob.glob(os.path.join(log_folder, "*.txt"))
         for logfile in logfiles:
-            os.remove(logfile)
+            Path(logfile).unlink(missing_ok=True)
             print("deleting", logfile)
     else:
         os.makedirs(log_folder, exist_ok=True)
