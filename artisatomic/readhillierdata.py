@@ -215,12 +215,12 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 vy95_phixsfitrow = namedtuple("vy95_phixsfitrow", ["n", "l", "E_th_eV", "E_0", "sigma_0", "y_a", "P", "y_w"])
 
 # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
-hyd_phixs_energygrid_ryd: dict[tuple[int, int], float] = {}
-hyd_phixs: dict[tuple[int, int], float] = {}
+hyd_phixs_energygrid_ryd: dict[tuple[int, int], list[float]] = {}
+hyd_phixs: dict[tuple[int, int], list[float]] = {}
 
 # keys are n quantum number
-hyd_gaunt_energygrid_ryd: dict[int, float] = {}
-hyd_gaunt_factor: dict[int, float] = {}
+hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
+hyd_gaunt_factor: dict[int, list[float]] = {}
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
