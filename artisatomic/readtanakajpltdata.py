@@ -57,7 +57,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
         artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
         assert fin.readline().strip() == "# Energy levels"
-        assert fin.readline().strip() == "# num  weight parity      E(eV)      configuration"
+        assert fin.readline().strip().split() == ['#', 'num', 'weight', 'parity', 'E(eV)', 'configuration'] #line: "# num  weight parity      E(eV)      configuration"
 
         with pd.read_fwf(
             fin,
