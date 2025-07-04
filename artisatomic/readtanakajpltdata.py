@@ -123,6 +123,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         g_u=pl.col("upperlevel").map_elements(lambda upperlevel: dflevels["g"][upperlevel], return_dtype=pl.Float64)
     ).with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
     dftransitions = dftransitions.select(["lowerlevel", "upperlevel", "A"])
+    dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
+    if dftransitions.height != dftransitions_filtered.height:
+        artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
