@@ -50,9 +50,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             artisatomic.log_and_print(flog, readlinein)
             counter += 1
             if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
-                artisatomic.log_and_print(flog,
-                        f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number}"
-                        f" ion_stage {ion_stage} from {filename}")
+                # artisatomic.log_and_print(flog,
+                        # f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number}"
+                        # f" ion_stage {ion_stage} from {filename}")
                 break
             if counter > 6:
                 break
