@@ -44,10 +44,19 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         filename = f"{filename}.zst"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     with xopen(jpltpath / filename) as fin:
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        assert fin.readline().strip() == f"# {atomic_number} {ion_stage}"
+        counter = 0
+        while True:
+            readlinein = fin.readline().strip()
+            artisatomic.log_and_print(flog, readlinein)
+            counter += 1
+            if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
+                artisatomic.log_and_print(flog,
+                        f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number}"
+                        f" ion_stage {ion_stage} from {filename}")
+                break
+            if counter > 6:
+                break
+        assert readlinein == f"# {atomic_number} {ion_stage}"
         levelcount, transitioncount = (int(x) for x in fin.readline().removeprefix("# ").split())
         artisatomic.log_and_print(flog, f"levels: {levelcount}")
         artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
@@ -57,7 +66,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
         artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
         assert fin.readline().strip() == "# Energy levels"
-        assert fin.readline().strip().split() == ['#', 'num', 'weight', 'parity', 'E(eV)', 'configuration'] #line: "# num  weight parity      E(eV)      configuration"
+        expected_column_headers = ['#', 'num', 'weight', 'parity', 'E(eV)', 'configuration']
+        read_column_headers = fin.readline().strip().split() # v2.1 has extra column
+        assert all(item in read_column_headers for item in expected_column_headers)
 
         with pd.read_fwf(
             fin,
