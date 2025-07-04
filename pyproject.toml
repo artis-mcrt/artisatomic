@@ -16,15 +16,15 @@ authors = [
 description = "Tools to create an atomic database for use with ARTIS."
 classifiers = [
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-license = { text = "MIT" }
-dynamic = ["version"]
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+dynamic = ["version"]
 readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
@@ -38,7 +38,7 @@ dependencies = [
     "xopen[zstd]>=2.0.2",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "mypy>=1.13.0",
     "pre-commit>=4.0.1",
@@ -49,6 +49,7 @@ dev = [
 
 [project.urls]
 Repository = "https://www.github.com/artis-mcrt/artisatomic"
+Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
@@ -68,9 +69,6 @@ warn_unused_configs = true
 max-line-length = 120
 errors-only = true
 
-[tool.pylint.typecheck]
-ignored-modules = ["extinction"]
-
 [tool.ruff]
 line-length = 120
 target-version = "py310"
@@ -83,8 +81,6 @@ select = ["ALL"]
 ignore = [
     "ANN001",  # missing-type-function-argument
     "ANN201",  # missing-return-type-undocumented-public-function
-    "ANN204",
-    "ANN003",  # missing-type-kwargs
     "ANN202",  # missing-return-type-private-function
     "ANN401",  # any-type
     "B005",    # strip-with-multi-characters
@@ -104,16 +100,12 @@ ignore = [
     "F841",    # unused-variable
     "FBT",
     "FIX002",  # line contains TODO
-    "ISC001",  # single-line-implicit-string-concatenation
     "N802",    # Function name should be lowercase
     "N803",    # Argument name should be lowercase
     "N806",    # non-lowercase-variable-in-function
-    "N815",    # mixed-case-variable-in-class-scope
     "N816",    # mixed-case-variable-in-module-scope
-    "PD002",
     "PERF203", # try-except-in-loop
     "PGH003",
-    "PGH004",  # blanket-noqa
     "PLC0414", # useless-import-alias
     "PLC0415", # import-outside-toplevel
     "PLR0914", # too-many-locals
@@ -128,23 +120,15 @@ ignore = [
     "PLW2901", # redefined-loop-name
     "PTH100",
     "PTH103",
-    "PTH110",
     "PTH113",
     "PTH118",
-    "PTH119",
     "PTH120",
     "PTH123",
-    "PTH107",
     "PTH207",
     "PYI024",  # Use `typing.NamedTuple` instead of `collections.namedtuple`
     "RET504",
     "S101",    # Use of assert detected
     "S105",
-    "S310",    # suspicious-url-open-usage
-    "S311",    # suspicious-non-cryptographic-random-usage
-    "S404",    # suspicious-subprocess-import
-    "S603",    # subprocess-without-shell-equals-true
-    "S607",    # start-process-with-partial-path
     "SIM115",
     "T201",    # print found
     "TD002",   # missing-todo-author
@@ -171,7 +155,6 @@ order-by-type = false
 
 [tool.setuptools]
 include-package-data = true
-license-files = ["LICENSE.txt"]
 
 [tool.setuptools.packages.find]
 namespaces = true
