@@ -783,7 +783,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
                 #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
                 if lowerlevelname not in reduced_phixs_dict:
-                    reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                    reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 else:
                     print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
                     # sys.exit()
@@ -797,7 +797,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         # the factors are arbitrary and need to be normalised into fractions
 
         # filter out low fraction targets
-        factor_sum_nofilter = sum([x[1] for x in target_configfactors_nofilter])
+        factor_sum_nofilter = sum(x[1] for x in target_configfactors_nofilter)
 
         if factor_sum_nofilter > 0.0:
             # if these are false, it's probably all zeros, so leave it and "send" it to the ground state

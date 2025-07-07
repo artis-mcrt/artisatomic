@@ -2,11 +2,12 @@
 
 >The python package converts atomic data into ARTIS format from several sources (e.g., CMFGEN, NORAD)
 
-## Installation
+## Installation and Development
 First clone the repository, for example:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
 cd artistatomic
+pre-commit install
 ```
 
 To use a uv project virtual environment with locked dependency versions run:
@@ -18,7 +19,7 @@ uv pip install -e .[dev]
 
 Or to install into the system environment with pip:
 ```sh
-python3 -m pip install -e .[dev]
+python3 -m pip install --group dev -e .
 ```
 
 ## Usage
