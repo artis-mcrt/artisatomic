@@ -1289,7 +1289,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         term_parity = 0  # even
     else:
         term_parity = [0, 1][(instr[-1] == "o")]
-        if not any(char in lchars for char in instr):
+        if all(char not in lchars for char in instr):
             # This will be an incorrectly formatted QUB file with no term
             print("Warning: Check QUB file formatting")
         else:
@@ -1310,7 +1310,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 term_parity + 2
             )  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
         instr = instr[:-1]
-        if not any(char in lchars for char in instr):
+        if all(char not in lchars for char in instr):
             print("Warning: Check QUB file formatting")
             break
 

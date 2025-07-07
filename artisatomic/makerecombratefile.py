@@ -124,8 +124,9 @@ def main():
                     arr_rrc = ion.RrRate["rate"]
                     ion.drRate()
                     arr_drc = ion.DrRate["rate"]
-                    for i, logT_e in enumerate(arr_logT_e):
-                        frecombrates.write(f"{logT_e:.1f} {-1.0} {arr_rrc[i]}\n")
+                    frecombrates.writelines(
+                        f"{logT_e:.1f} {-1.0} {arr_rrc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
+                    )
 
 
 if __name__ == "__main__":
