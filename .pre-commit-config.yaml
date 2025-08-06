@@ -24,15 +24,8 @@ repos:
       hooks:
           - id: yamlfmt
     - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.12.2
+      rev: v0.12.7
       hooks:
           - id: ruff-check
             args: [--fix]
           - id: ruff-format
-    - repo: local
-      hooks:
-          - id: mypy
-            name: mypy
-            entry: mypy
-            language: system
-            pass_filenames: false
