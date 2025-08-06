@@ -62,8 +62,12 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     BASEPATH = get_basepath()
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
-    levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
-    lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
+    levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt.zst"
+    if not levels_file.is_file():
+        levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
+    lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt.zst"
+    if not lines_file.is_file():
+        lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
 
     artisatomic.log_and_print(
         flog,
