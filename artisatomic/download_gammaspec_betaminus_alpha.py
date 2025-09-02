@@ -183,17 +183,18 @@ def main():
         print(f"\n(Z={z}) {strnuclide}")
 
         url = f"https://www.nndc.bnl.gov/nudat3/decaysearchdirect.jsp?nuc={strnuclide}&unc=standard&out=file"
-
-        with requests.Session() as s:
-            textdata = s.get(url).text
-            if "<pre>" not in textdata:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+        }
+        with requests.Session().get(url, headers=headers) as response:
+            if "<pre>" not in response.text:
                 print(f"  no table data returned from {url}")
             else:
                 process_table(
                     z=z,
                     a=a,
                     outpath=outpath,
-                    textdata=textdata,
+                    textdata=response.text,
                     dfbetaminus=dfbetaminus,
                     dfalpha=dfalpha,
                 )
