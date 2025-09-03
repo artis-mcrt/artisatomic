@@ -3,17 +3,16 @@
 import argparse
 import contextlib
 import glob
-import itertools
 import json
 import math
 import multiprocessing as mp
 import os
-import queue
 import sys
 import typing as t
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import lru_cache
+from functools import partial
 from pathlib import Path
 
 import argcomplete
@@ -966,32 +965,25 @@ def reduce_phixs_tables(
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
-    out_q: t.Any = mp.Queue()
-    procs = []
-
     if not hideoutput:
         print(f"Processing {len(dicttables.keys()):d} phixs tables")
-    nprocs = os.cpu_count()
-    assert nprocs is not None
-    keylist = dicttables.keys()
-    for procnum in range(nprocs):
-        dicttablesslice = itertools.islice(dicttables.items(), procnum, len(keylist), nprocs)
-        procs.append(
-            mp.Process(
-                target=reduce_phixs_tables_worker,
-                args=(dicttablesslice, optimaltemperature, nphixspoints, phixsnuincrement, out_q),
+
+    with mp.get_context("spawn").Pool() as pool:
+        dictout = dict(
+            zip(
+                dicttables.keys(),
+                pool.map(
+                    partial(
+                        reduce_phixs_tables_worker,
+                        optimaltemperature,
+                        nphixspoints,
+                        phixsnuincrement,
+                    ),
+                    dicttables.values(),
+                ),
+                strict=False,
             )
         )
-        procs[-1].start()
-
-    dictout: dict = {}
-    for _ in procs:
-        subdict = out_q.get()
-        # print("a process returned {:d} items".format(len(subdict.keys())))
-        dictout |= subdict
-
-    for proc in procs:
-        proc.join()
 
     return dictout
 
@@ -1000,14 +992,11 @@ def reduce_phixs_tables(
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
 def reduce_phixs_tables_worker(
-    dicttables: itertools.islice,
     optimaltemperature: float,
     nphixspoints: int,
     phixsnuincrement: float,
-    out_q: queue.Queue,
-) -> None:
-    dictout = {}
-
+    tablein: np.ndarray,
+) -> np.ndarray:
     ryd_to_hz = 3289841960250880.5
     h_over_kb_in_K_sec = 4.799243073366221e-11
 
@@ -1028,118 +1017,112 @@ def reduce_phixs_tables_worker(
 
     # for key in keylist:
     #   tablein = dicttables[key]
-    for key, tablein in dicttables:
-        # # filter zero points out of the table
-        # firstnonzeroindex = 0
-        # for i, point in enumerate(tablein):
-        #     if point[1] != 0.:
-        #         firstnonzeroindex = i
-        #         break
-        # if firstnonzeroindex != 0:
-        #     tablein = tablein[firstnonzeroindex:]
+    # # filter zero points out of the table
+    # firstnonzeroindex = 0
+    # for i, point in enumerate(tablein):
+    #     if point[1] != 0.:
+    #         firstnonzeroindex = i
+    #         break
+    # if firstnonzeroindex != 0:
+    #     tablein = tablein[firstnonzeroindex:]
 
-        # table says zero threshold, so avoid divide by zero
-        if tablein[0][0] == 0.0:
-            dictout[key] = np.zeros(nphixspoints)
-            continue
+    # table says zero threshold, so avoid divide by zero
+    if tablein[0][0] == 0.0:
+        return np.zeros(nphixspoints)
 
-        threshold_old_ryd = tablein[0][0]
-        # tablein is an array of pairs (energy, phixs cross section)
+    threshold_old_ryd = tablein[0][0]
+    # tablein is an array of pairs (energy, phixs cross section)
 
-        # nu0 = tablein[0][0] * ryd_to_hz
+    # nu0 = tablein[0][0] * ryd_to_hz
 
-        arr_sigma_out = np.empty(nphixspoints)
-        # x is nu/nu_edge
+    arr_sigma_out = np.empty(nphixspoints)
+    # x is nu/nu_edge
 
-        sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind="linear", assume_sorted=True)
+    sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind="linear", assume_sorted=True)
 
-        for i, _ in enumerate(xgrid[:-1]):
-            iprevious = max(i - 1, 0)
-            enlow = 0.5 * (xgrid[iprevious] + xgrid[i]) * threshold_old_ryd
-            enhigh = 0.5 * (xgrid[i] + xgrid[i + 1]) * threshold_old_ryd
+    for i, _ in enumerate(xgrid[:-1]):
+        iprevious = max(i - 1, 0)
+        enlow = 0.5 * (xgrid[iprevious] + xgrid[i]) * threshold_old_ryd
+        enhigh = 0.5 * (xgrid[i] + xgrid[i + 1]) * threshold_old_ryd
 
-            # start of interval interpolated point, Nahar points, and end of interval interpolated point
-            samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
+        # start of interval interpolated point, Nahar points, and end of interval interpolated point
+        samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
 
-            if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
-                if i == 0 and len(samples_in_interval) != 0:
-                    print(
-                        f"adding first point {enlow:.4e} {samples_in_interval[0, 0]:.4e} {(samples_in_interval[0, 0] - enlow) / enlow:.4e}"
-                    )
-                if enlow <= tablein[-1][0]:
-                    new_crosssection = sigma_interp(enlow)
-                    if new_crosssection < 0:
-                        print("negative extrap")
-                else:
-                    # assume power law decay after last point
-                    new_crosssection = tablein[-1][1] * (tablein[-1][0] / enlow) ** 3
-                samples_in_interval = np.vstack([[enlow, new_crosssection], samples_in_interval])
-
-            if (
-                len(samples_in_interval) == 0
-                or ((enhigh - samples_in_interval[-1, 0]) / samples_in_interval[-1, 0]) > 1e-20
-            ):
-                if enhigh <= tablein[-1][0]:
-                    new_crosssection = sigma_interp(enhigh)
-                    if new_crosssection < 0:
-                        print("negative extrap")
-                else:
-                    new_crosssection = (
-                        tablein[-1][1] * (tablein[-1][0] / enhigh) ** 3
-                    )  # assume power law decay after last point
-
-                samples_in_interval = np.vstack([samples_in_interval, [enhigh, new_crosssection]])
-
-            nsamples = len(samples_in_interval)
-
-            # integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
-            # integralwithsigma, err = integrate.fixed_quad(
-            #    lambda x: sigma_interp(x) * integrand_vec(x), enlow, enhigh, n=250)
-
-            # this is incredibly fast, but maybe not accurate
-            # integralnosigma, err = integrate.quad(integrand, enlow, enhigh, epsrel=1e-2)
-            # integralwithsigma, err = integrate.quad(
-            #    lambda x: sigma_interp(x) * integrand(x), enlow, enhigh, epsrel=1e-2)
-
-            if nsamples >= 50 or enlow > tablein[-1][0]:
-                arr_energyryd = samples_in_interval[:, 0]
-                arr_sigma_megabarns = samples_in_interval[:, 1]
+        if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
+            if i == 0 and len(samples_in_interval) != 0:
+                print(
+                    f"adding first point {enlow:.4e} {samples_in_interval[0, 0]:.4e} {(samples_in_interval[0, 0] - enlow) / enlow:.4e}"
+                )
+            if enlow <= tablein[-1][0]:
+                new_crosssection = sigma_interp(enlow)
+                if new_crosssection < 0:
+                    print("negative extrap")
             else:
-                nsteps = 50  # was 500
-                arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
-                arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
+                # assume power law decay after last point
+                new_crosssection = tablein[-1][1] * (tablein[-1][0] / enlow) ** 3
+            samples_in_interval = np.vstack([[enlow, new_crosssection], samples_in_interval])
 
-            integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
-            if np.any(integrand_vals):
-                sigma_integrand_vals = [
-                    sigma * integrand_val
-                    for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals, strict=True)
-                ]
-
-                integralnosigma = integrate.trapezoid(integrand_vals, arr_energyryd)
-                integralwithsigma = integrate.trapezoid(sigma_integrand_vals, arr_energyryd)
-
+        if (
+            len(samples_in_interval) == 0
+            or ((enhigh - samples_in_interval[-1, 0]) / samples_in_interval[-1, 0]) > 1e-20
+        ):
+            if enhigh <= tablein[-1][0]:
+                new_crosssection = sigma_interp(enhigh)
+                if new_crosssection < 0:
+                    print("negative extrap")
             else:
-                integralnosigma = 1.0
-                integralwithsigma = np.average(arr_sigma_megabarns)
+                new_crosssection = (
+                    tablein[-1][1] * (tablein[-1][0] / enhigh) ** 3
+                )  # assume power law decay after last point
 
-            if integralwithsigma > 0 and integralnosigma > 0:
-                arr_sigma_out[i] = integralwithsigma / integralnosigma
-            elif integralwithsigma == 0:
-                arr_sigma_out[i] = 0.0
-            else:
-                print("Math error: ", i, nsamples, arr_sigma_megabarns[i], integralwithsigma, integralnosigma)
-                print(samples_in_interval)
-                print(arr_sigma_out[i - 1])
-                print(arr_sigma_out[i])
-                print(arr_sigma_out[i + 1])
-                arr_sigma_out[i] = 0.0
-                # sys.exit()
+            samples_in_interval = np.vstack([samples_in_interval, [enhigh, new_crosssection]])
 
-        dictout[key] = arr_sigma_out  # output a 1D list of cross sections
+        nsamples = len(samples_in_interval)
 
-    # return dictout
-    out_q.put(dictout)
+        # integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
+        # integralwithsigma, err = integrate.fixed_quad(
+        #    lambda x: sigma_interp(x) * integrand_vec(x), enlow, enhigh, n=250)
+
+        # this is incredibly fast, but maybe not accurate
+        # integralnosigma, err = integrate.quad(integrand, enlow, enhigh, epsrel=1e-2)
+        # integralwithsigma, err = integrate.quad(
+        #    lambda x: sigma_interp(x) * integrand(x), enlow, enhigh, epsrel=1e-2)
+
+        if nsamples >= 50 or enlow > tablein[-1][0]:
+            arr_energyryd = samples_in_interval[:, 0]
+            arr_sigma_megabarns = samples_in_interval[:, 1]
+        else:
+            nsteps = 50  # was 500
+            arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
+            arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
+
+        integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
+        if np.any(integrand_vals):
+            sigma_integrand_vals = [
+                sigma * integrand_val for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals, strict=True)
+            ]
+
+            integralnosigma = integrate.trapezoid(integrand_vals, arr_energyryd)
+            integralwithsigma = integrate.trapezoid(sigma_integrand_vals, arr_energyryd)
+
+        else:
+            integralnosigma = 1.0
+            integralwithsigma = np.average(arr_sigma_megabarns)
+
+        if integralwithsigma > 0 and integralnosigma > 0:
+            arr_sigma_out[i] = integralwithsigma / integralnosigma
+        elif integralwithsigma == 0:
+            arr_sigma_out[i] = 0.0
+        else:
+            print("Math error: ", i, nsamples, arr_sigma_megabarns[i], integralwithsigma, integralnosigma)
+            print(samples_in_interval)
+            print(arr_sigma_out[i - 1])
+            print(arr_sigma_out[i])
+            print(arr_sigma_out[i + 1])
+            arr_sigma_out[i] = 0.0
+            # sys.exit()
+
+    return arr_sigma_out
 
 
 def check_forbidden(levela, levelb) -> bool:
