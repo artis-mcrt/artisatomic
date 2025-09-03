@@ -6,7 +6,6 @@ from xopen import xopen
 
 import artisatomic
 
-# the h5 file comes from Andreas Floers's DREAM parser
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
 
 
@@ -44,10 +43,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         filename = f"{filename}.zst"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     with xopen(jpltpath / filename) as fin:
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        assert fin.readline().strip() == f"# {atomic_number} {ion_stage}"
+        for linenumber in range(7):
+            readlinein = fin.readline().strip()
+            if linenumber < 3:
+                artisatomic.log_and_print(flog, readlinein)
+
+            if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
+                break
+        assert readlinein == f"# {atomic_number} {ion_stage}"
         levelcount, transitioncount = (int(x) for x in fin.readline().removeprefix("# ").split())
         artisatomic.log_and_print(flog, f"levels: {levelcount}")
         artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
@@ -57,7 +60,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
         artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
         assert fin.readline().strip() == "# Energy levels"
-        assert fin.readline().strip() == "# num  weight parity      E(eV)      configuration"
+        expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
+        read_column_headers = fin.readline().strip().split()  # v2.1 has extra column
+        assert all(item in read_column_headers for item in expected_column_headers)
 
         with pd.read_fwf(
             fin,
@@ -112,6 +117,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         g_u=pl.col("upperlevel").map_elements(lambda upperlevel: dflevels["g"][upperlevel], return_dtype=pl.Float64)
     ).with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
     dftransitions = dftransitions.select(["lowerlevel", "upperlevel", "A"])
+    dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
+    if dftransitions.height != dftransitions_filtered.height:
+        artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 

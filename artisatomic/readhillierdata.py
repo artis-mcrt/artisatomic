@@ -215,12 +215,12 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 vy95_phixsfitrow = namedtuple("vy95_phixsfitrow", ["n", "l", "E_th_eV", "E_0", "sigma_0", "y_a", "P", "y_w"])
 
 # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
-hyd_phixs_energygrid_ryd: dict[tuple[int, int], float] = {}
-hyd_phixs: dict[tuple[int, int], float] = {}
+hyd_phixs_energygrid_ryd: dict[tuple[int, int], list[float]] = {}
+hyd_phixs: dict[tuple[int, int], list[float]] = {}
 
 # keys are n quantum number
-hyd_gaunt_energygrid_ryd: dict[int, float] = {}
-hyd_gaunt_factor: dict[int, float] = {}
+hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
+hyd_gaunt_factor: dict[int, list[float]] = {}
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -265,7 +265,7 @@ def read_levels_and_transitions(
         ions_data[(atomic_number, ion_stage)].folder,
         ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
     )
-    artisatomic.log_and_print(flog, "Reading " + filename)
+    artisatomic.log_and_print(flog, f"Reading {filename}")
     hillier_transition_row = namedtuple(
         "hillier_transition_row",
         "namefrom nameto f A lambdaangstrom i j hilliertransitionid",
@@ -476,7 +476,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         filename = os.path.join(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
         )
-        artisatomic.log_and_print(flog, "Reading " + filename)
+        artisatomic.log_and_print(flog, f"Reading {filename}")
         with open(filename) as fhillierphot:
             lowerlevelid = -1
             lowerlevelname = ""
@@ -783,7 +783,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
                 #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
                 if lowerlevelname not in reduced_phixs_dict:
-                    reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                    reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 else:
                     print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
                     # sys.exit()
@@ -797,7 +797,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         # the factors are arbitrary and need to be normalised into fractions
 
         # filter out low fraction targets
-        factor_sum_nofilter = sum([x[1] for x in target_configfactors_nofilter])
+        factor_sum_nofilter = sum(x[1] for x in target_configfactors_nofilter)
 
         if factor_sum_nofilter > 0.0:
             # if these are false, it's probably all zeros, so leave it and "send" it to the ground state
@@ -1022,7 +1022,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     filename = os.path.join(
         hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, coldatafilename
     )
-    artisatomic.log_and_print(flog, "Reading " + filename)
+    artisatomic.log_and_print(flog, f"Reading {filename}")
     coll_lines_in = 0
     with open(filename) as fcoldata:
         header_row = []
