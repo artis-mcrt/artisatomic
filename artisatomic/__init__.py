@@ -126,6 +126,32 @@ def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
     return list_out
 
 
+def add_handler_if_not_set(
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], atomic_number: int, ion_stage: int, handler: str
+) -> list[tuple[int, list[int | tuple[int, str]]]]:
+    ion_handlers_out = ion_handlers.copy()
+    found_element = False
+    for tmp_atomic_number, list_ions_handlers in ion_handlers:
+        if tmp_atomic_number == atomic_number:
+            found_element = True
+            if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
+                # add an ion that is not present in the element's list
+                list_ions_handlers.append((ion_stage, handler))
+                list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
+
+    if not found_element:
+        ion_handlers_out.append(
+            (
+                atomic_number,
+                [(ion_stage, handler)],
+            )
+        )
+
+    ion_handlers_out.sort(key=lambda x: x[0])
+
+    return ion_handlers_out
+
+
 def add_dummy_zero_level(dflevels: pl.DataFrame) -> pl.DataFrame:
     # keep the zero index as null since we use 1-index level indicies
     anycolname = dflevels.columns[0]

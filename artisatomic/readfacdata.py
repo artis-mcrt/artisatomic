@@ -157,21 +157,7 @@ def extend_ion_list(ion_handlers):
         atomic_number = artisatomic.elsymbols.index(elsym)
 
         ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
-
-        found_element = False
-        for tmp_atomic_number, list_ions in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                if ion_stage not in [x[0] if len(x) > 0 else x for x in list_ions]:
-                    list_ions.append((ion_stage, "fac"))
-                    list_ions.sort()
-                found_element = True
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "fac")],
-                )
-            )
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
     ion_handlers.sort(key=lambda x: x[0])
     # print(ion_handlers)
