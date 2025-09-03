@@ -43,28 +43,6 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     return path_gfall
 
 
-# def extend_ion_list(ion_handlers):
-#     selected_ions = [(38, 1)]
-#     for atomic_number, charge in selected_ions:
-#         assert (atomic_number, charge) in gfall_reader.ions
-#         ion_stage = charge + 1
-#
-#         found_element = False
-#         for (tmp_atomic_number, list_ions) in ion_handlers:
-#             if tmp_atomic_number == atomic_number:
-#                 if ion_stage not in list_ions:
-#                     list_ions.append((ion_stage, 'carsus'))
-#                     list_ions.sort()
-#                 found_element = True
-#
-#         if not found_element:
-#             ion_handlers.append((atomic_number, [(ion_stage, 'carsus')],))
-#
-#     ion_handlers.sort(key=lambda x: x[0])
-#
-#     return ion_handlers
-
-
 def get_levelname(row) -> str:
     return f"{row.label},enpercm={row.energy},j={row.j}"
 

@@ -1,4 +1,3 @@
-import operator
 import os.path
 from collections import defaultdict
 from collections import namedtuple
@@ -32,24 +31,7 @@ def extend_ion_list(ion_handlers):
 
     for atomic_number, charge in dreamdata.index.unique():
         ion_stage = charge + 1
-
-        found_element = False
-        for tmp_atomic_number, list_ions_handlers in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                if ion_stage not in [x if isinstance(x, int) else x[0] for x in list_ions_handlers]:
-                    list_ions_handlers.append((ion_stage, "dream"))
-                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
-                found_element = True
-
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "dream")],
-                )
-            )
-
-    ion_handlers.sort(key=operator.itemgetter(0))
+        artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
 
     return ion_handlers
 
