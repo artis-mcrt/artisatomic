@@ -981,7 +981,7 @@ def reduce_phixs_tables(
                     ),
                     dicttables.values(),
                 ),
-                strict=False,
+                strict=True,
             )
         )
 
