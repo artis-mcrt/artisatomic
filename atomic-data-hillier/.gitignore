@@ -1,3 +1,4 @@
-atomic
+atomic*
+!atomic_diff
 *.tar.gz
 *.tar.xz
