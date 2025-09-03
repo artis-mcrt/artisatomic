@@ -11,72 +11,73 @@ on:
 jobs:
     lint:
         name: Format, lint, and type check
-        runs-on: macos-15
+        runs-on: ubuntu-24.04
+        env:
+            RUFF_OUTPUT_FORMAT: github
+            UV_FROZEN: 1
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v5
-
-            - name: Install the latest version of uv
-              uses: astral-sh/setup-uv@v5
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v6
+              with:
+                  activate-environment: true
 
             - name: Install artisatomic
               run: |
-                  uv sync --frozen
+                  uv sync
                   source .venv/bin/activate
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv pip install --compile-bytecode --editable .
 
             - name: Run Ruff
               if: always()
-              uses: astral-sh/ruff-action@v2
-              with:
-                  version: 0.8.3
-                  args: check --exit-non-zero-on-fix --no-fix
+              run: |
+                  uv run -- ruff --version
+                  uv run -- ruff check --exit-non-zero-on-fix --no-fix
 
             - name: Run Ruff Format
               if: always()
-              uses: astral-sh/ruff-action@v2
-              with:
-                  version: 0.8.3
-                  args: format --check
+              run: uv run -- ruff format --check --exit-non-zero-on-format
 
             - name: Lint with mypy
               run: |
-                  uv run --frozen mypy --install-types --non-interactive
+                  uv run mypy --install-types --non-interactive
 
             - name: Cache pre-commit
               uses: actions/cache@v4
               with:
                   path: ~/.cache/pre-commit
-                  key: pre-commit-3|${{ hashFiles('.pre-commit-config.yaml') }}
+                  key: pre-commit-3-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-${{ github.run_id }}
+                  restore-keys: |
+                      pre-commit-3-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-
 
             - name: Run pre-commit
               run: |
-                  source .venv/bin/activate
-                  uv run --frozen -- pre-commit run --all-files --show-diff-on-failure --color=always
+                  pre-commit install
+                  pre-commit run --all-files --show-diff-on-failure --color=always
 
     pytest:
-        runs-on: macos-15
+        runs-on: ubuntu-24.04
+        env:
+            UV_FROZEN: 1
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v5
-
-            - name: Install the latest version of uv
-              uses: astral-sh/setup-uv@v5
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v6
+              with:
+                  activate-environment: true
 
             - name: Install artisatomic
               run: |
-                  uv sync --frozen
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv sync
+                  uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -90,15 +91,16 @@ jobs:
               run: source ./setup_cmfgen_data.sh
 
             - name: Test with pytest
-              run: uv run --frozen python3 -m pytest
+              run: uv run python3 -m pytest
 
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, jplt, floers25]
+                testname: [cmfgen, floers25, jplt, qub]
             fail-fast: false
-
-        runs-on: macos-15
+        runs-on: ubuntu-24.04
+        env:
+            UV_FROZEN: 1
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
@@ -108,16 +110,15 @@ jobs:
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v5
-
-            - name: Install the latest version of uv
-              uses: astral-sh/setup-uv@v5
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v6
+              with:
+                  activate-environment: true
 
             - name: Install artisatomic
               run: |
-                  uv sync --frozen
-                  uv pip install --compile-bytecode --editable .[dev]
+                  uv sync
+                  uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v4
@@ -146,12 +147,17 @@ jobs:
             - name: Extract Floers25 atomic data
               if: matrix.testname == 'floers25'
               working-directory: atomic-data-floers25/
-              run: tar -zxvf testdata.tar.xz
+              run: tar -xJvf testdata.tar.xz
+
+            - name: Extract QUB test data
+              if: matrix.testname == 'qub'
+              working-directory: atomic-data-qub/
+              run: rsync -av co_tyndall_test_sample/ co_tyndall/
 
             - name: Generate artis atomic data files
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  uv run --frozen makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+                  uv run makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output

@@ -12,8 +12,6 @@ Icon?
 .pytest_cache
 output.txt
 
-atomic-data-qub/1
-
 *.nosync
 
 recombination_rates/phixs.pdf
@@ -23,3 +21,4 @@ recombination_rates/phixs.pdf
 testoutput
 testoutput/*
 _version.py
+build

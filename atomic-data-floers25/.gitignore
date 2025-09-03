@@ -1,1 +1,3 @@
-OutputFiles
+OutputFiles*
+GSI_lanthanides_*
+!*.md5

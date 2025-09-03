@@ -95,10 +95,10 @@ def main():
                             "PhotMacS      "
                             f" {atomic_number:.0f} {ionstage:7.0f} {levelindex + 1:7.0f} {upperlevelindex + 1:7.0f} {ion.ion_pot:15.6f} {len(level.phixstable):7.0f}\n"
                         )
-                        for x, xs in level.phixstable:
-                            # the photoionisation cross-sections in the database are given in Mbarn = 1e6 * 1e-28m^2
-                            # to convert to cgs units multiply by 1e-18
-                            photfile.write(f"PhotMac {x * ion.ion_pot:15.6f} {xs * targetfrac * 1e-18:15.7e}\n")
+                        photfile.writelines(
+                            f"PhotMac {x * ion.ion_pot:15.6f} {xs * targetfrac * 1e-18:15.7e}\n"
+                            for x, xs in level.phixstable
+                        )
 
 
 if __name__ == "__main__":
