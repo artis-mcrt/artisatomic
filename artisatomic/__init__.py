@@ -1491,6 +1491,9 @@ def score_config_match(config_a, config_b):
 
 
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
+    if dftransitions_ion.is_empty():
+        return dftransitions_ion
+
     if "upperlevel" not in dftransitions_ion.columns:
         dftransitions_ion = dftransitions_ion.join(
             dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), pl.col("levelname").alias("nameto")),
@@ -1559,11 +1562,13 @@ def write_output_files(
         dfenergylevels_ion = dfenergylevels_allions[i]
         dftransitions_ion = dftransitions_allions[i]
 
-        dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
-
-        unused_upsilon_transitions = set(upsilondicts[i].keys()).difference(
-            dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
-        )
+        if dftransitions_ion.is_empty():
+            unused_upsilon_transitions = set()
+        else:
+            dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
+            unused_upsilon_transitions = set(upsilondicts[i].keys()).difference(
+                dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
+            )
 
         log_and_print(flog, f"Adding in {len(unused_upsilon_transitions):d} extra transitions with only upsilon values")
 
@@ -1583,17 +1588,18 @@ def write_output_files(
             dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
             dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
-        dftransitions_ion = dftransitions_ion.with_columns(
-            pl.struct(["lowerlevel", "upperlevel", "forbidden"])
-            .map_elements(
-                lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
-                    (row["lowerlevel"], row["upperlevel"]),
-                    -2.0 if row["forbidden"] else -1.0,
-                ),
-                return_dtype=pl.Float64,
+        if not dftransitions_ion.is_empty():
+            dftransitions_ion = dftransitions_ion.with_columns(
+                pl.struct(["lowerlevel", "upperlevel", "forbidden"])
+                .map_elements(
+                    lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
+                        (row["lowerlevel"], row["upperlevel"]),
+                        -2.0 if row["forbidden"] else -1.0,
+                    ),
+                    return_dtype=pl.Float64,
+                )
+                .alias("coll_str")
             )
-            .alias("coll_str")
-        )
 
         with open(os.path.join(args.output_folder, "adata.txt"), "a") as fatommodels:
             write_adata(
@@ -1606,7 +1612,11 @@ def write_output_files(
                 flog,
             )
 
-        dftransitions_ion = dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
+        dftransitions_ion = (
+            dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
+            if not dftransitions_ion.is_empty()
+            else dftransitions_ion
+        )
         with open(os.path.join(args.output_folder, "transitiondata.txt"), "a") as ftransitiondata:
             write_transition_data(
                 ftransitiondata,
@@ -1707,18 +1717,25 @@ def write_transition_data(
 
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
-    for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
-        ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
-    ].iter_rows():
-        assert levelid_lower < levelid_upper
+    if not dftransitions_ion.is_empty():
+        for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
+            ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
+        ].iter_rows():
+            assert levelid_lower < levelid_upper
 
-        ftransitiondata.write(f"{levelid_lower:4d} {levelid_upper:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n")
+            ftransitiondata.write(
+                f"{levelid_lower:4d} {levelid_upper:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
+            )
 
     ftransitiondata.write("\n")
 
-    num_forbidden_transitions = dftransitions_ion.filter(pl.col("forbidden")).height
+    num_forbidden_transitions = (
+        dftransitions_ion.filter(pl.col("forbidden")).height if not dftransitions_ion.is_empty() else 0
+    )
 
-    num_collision_strengths_applied = dftransitions_ion.filter(pl.col("coll_str") > 0).height
+    num_collision_strengths_applied = (
+        dftransitions_ion.filter(pl.col("coll_str") > 0).height if not dftransitions_ion.is_empty() else 0
+    )
 
     log_and_print(
         flog,
