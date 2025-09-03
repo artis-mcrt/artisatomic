@@ -2,10 +2,14 @@
 
 set -x
 
-if [ ! -f atomic_data_15nov16.tar.xz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.xz; fi
+#version="15nov16"
+version="21jun23"
 
-md5sum -c atomic_data_15nov16.tar.xz.md5
-tar -xJf atomic_data_15nov16.tar.xz
-rsync -a atomic_diff/ atomic/
+if [ ! -f atomic_data_$version.tar.xz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/atomic_data_$version.tar.xz; fi
+
+md5sum -c atomic_data_$version.tar.xz.md5
+tar -xJf atomic_data_$version.tar.xz
+mv atomic/ atomic_$version/
+rsync -a atomic_diff/ atomic_$version/
 
 set +x
