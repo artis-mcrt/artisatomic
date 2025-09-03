@@ -100,9 +100,9 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
                     config,
                     int(line[:5]),
                     int(line[29:30]),
-                    int(line[31:32]),
+                    int(line[31:32], 16),
                     float(line[33:37]),
-                    float(line[38:59]),
+                    float(line[39:59]),
                     0.0,
                     0,
                 )
@@ -145,6 +145,8 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
             # Should be handled in a less approximate way in the future
             if atomic_number == 27:
                 upsilon = float(row["upsT=5.01+03"].replace("-", "E-").replace("+", "E+"))
+            elif atomic_number == 60 and ion_stage == 2:
+                upsilon = float(row["upsT=4.50+03"].replace("-", "E-").replace("+", "E+"))
             elif atomic_number == 74 and ion_stage == 1:
                 upsilon = float(row["upsT=5.80+03"].replace("-", "E-").replace("+", "E+"))
             elif atomic_number == 74 and ion_stage == 2:
@@ -184,6 +186,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         (52, 3),
         (52, 4),
         (52, 5),
+        (60, 2),
         (74, 1),
         (74, 2),
         (74, 3),
@@ -280,7 +283,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         id_upper = int(row[0])
                         id_lower = int(row[1])
                     A = float(row[2].replace("-", "E-").replace("+", "E+"))
-
                     if A > 2e-30:
                         namefrom = qub_energylevels[id_upper].levelname
                         nameto = qub_energylevels[id_lower].levelname
