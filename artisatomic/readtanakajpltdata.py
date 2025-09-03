@@ -15,24 +15,7 @@ def extend_ion_list(ion_handlers):
     )
 
     for atomic_number, ion_stage in tanakaions:
-        found_element = False
-        for tmp_atomic_number, list_ions_handlers in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                # add an ion that is not present in the element's list
-                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
-                    list_ions_handlers.append((ion_stage, "tanakajplt"))
-                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
-                found_element = True
-
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "tanakajplt")],
-                )
-            )
-
-    ion_handlers.sort(key=lambda x: x[0])
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
 
     return ion_handlers
 
