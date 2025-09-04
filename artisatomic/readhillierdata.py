@@ -229,7 +229,7 @@ def hillier_ion_folder(atomic_number, ion_stage):
             artisatomic.PYDIR
             / ".."
             / "atomic-data-hillier"
-            / "atomic_15nov16"
+            / "atomic_21jun23"
             / atomic_number_to_hillier_code[atomic_number]
             / artisatomic.roman_numerals[ion_stage]
         ).resolve()

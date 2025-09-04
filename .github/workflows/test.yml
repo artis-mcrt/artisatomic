@@ -83,8 +83,8 @@ jobs:
               uses: actions/cache@v4
               id: cache-cmfgendata
               with:
-                  path: atomic-data-hillier/atomic_data_15nov16.tar.xz
-                  key: atomic-data-hillier/atomic_data_15nov16.tar.xz
+                  path: atomic-data-hillier/atomic_data_21jun23.tar.xz
+                  key: atomic-data-hillier/atomic_data_21jun23.tar.xz
 
             - name: Download/extract CMFGEN atomic data
               working-directory: atomic-data-hillier/
