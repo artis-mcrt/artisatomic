@@ -29,6 +29,6 @@ if [ ! -f data_v2.1/33_2.txt.zst ]; then
   tar -xvf grasp_v2.1.tar.gz -C data_v2.1 --strip-components=1
 
 fi
-zstd --rm -f -T0 -v data_v2.1/*.txt || true
+zstd --rm -f -T0 -v -5 data_v2.1/*.txt || true
 
 set +x
