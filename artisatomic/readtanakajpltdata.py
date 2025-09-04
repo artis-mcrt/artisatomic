@@ -6,7 +6,7 @@ from xopen import xopen
 
 import artisatomic
 
-jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
+jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
 
 def extend_ion_list(ion_handlers):
