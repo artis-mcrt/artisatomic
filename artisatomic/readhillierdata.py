@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from xopen import xopen
 
 import artisatomic
 from artisatomic.manual_matches import hillier_name_replacements
@@ -260,19 +261,24 @@ def read_levels_and_transitions(
             hillier_levelnamesnoJ_matching_term,
         )
 
-    filename = os.path.join(
+    filename = Path(
         hillier_ion_folder(atomic_number, ion_stage),
         ions_data[(atomic_number, ion_stage)].folder,
         ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
     )
+
     artisatomic.log_and_print(flog, f"Reading {filename}")
+
+    if not filename.exists() and (filename_compressed := filename.with_suffix(f"{filename.suffix}.zst")).exists():
+        filename = filename_compressed
+
     hillier_transition_row = namedtuple(
         "hillier_transition_row",
         "namefrom nameto f A lambdaangstrom i j hilliertransitionid",
     )
 
     prev_line = ""
-    with open(filename) as fhillierosc:
+    with xopen(filename) as fhillierosc:
         expected_energy_levels = -1
         expected_transitions = -1
         row_format_energy_level = None
@@ -473,11 +479,16 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     for filenum, photfilename in enumerate(photfilenames):
         if photfilename == "":
             continue
-        filename = os.path.join(
+        filename = Path(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
         )
+
         artisatomic.log_and_print(flog, f"Reading {filename}")
-        with open(filename) as fhillierphot:
+
+        if not filename.exists() and (filename_compressed := filename.with_suffix(f"{filename.suffix}.zst")).exists():
+            filename = filename_compressed
+
+        with xopen(filename) as fhillierphot:
             lowerlevelid = -1
             lowerlevelname = ""
             # upperlevelname = ''

@@ -12,4 +12,6 @@ tar -xJf atomic_data_$version.tar.xz
 mv atomic/ atomic_$version/
 rsync -a atomic_diff/ atomic_$version/
 
+find atomic_$version ! -name "*.zst" -size +10M -exec zstd -12 -v -T0 --rm {} \; || true
+
 set +x
