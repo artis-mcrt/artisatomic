@@ -12,7 +12,7 @@ if [ ! -f data_v1.1/26_1.txt.zst ]; then
 
 fi
 
-if [ ! -f data_v2.1/26_1.txt.zst ]; then
+if [ ! -f data_v2.0/26_1.txt.zst ]; then
 
   if [ ! -f data_v2.0.tar.gz ]; then curl -O https://dpc.nifs.ac.jp/DB/Opacity-Database/data/data_v2.0.tar.gz; fi
 
@@ -20,6 +20,16 @@ if [ ! -f data_v2.1/26_1.txt.zst ]; then
   md5sum -c data_v2.0.tar.gz.md5
   tar -xf data_v2.0.tar.gz -C data_v2.0
   zstd --rm -f -T0 -15 -v data_v2.0/*.txt
+
+fi
+
+# v2.1 is not complete, so should be overlaid on v2.0 files
+
+if [ ! -f data_v2.1/26_1.txt.zst ]; then
+
+    rm -rf data_v2.1
+    mkdir -p data_v2.1
+    rsync -av data_v2.0/ data_v2.1/
 
 fi
 
