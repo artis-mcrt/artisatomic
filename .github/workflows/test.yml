@@ -136,8 +136,8 @@ jobs:
               uses: actions/cache@v4
               id: cache-jpltdata
               with:
-                  path: atomic-data-tanaka-jplt/data_v*/**
-                  key: atomic-data-tanaka-jplt-v2.1
+                  path: atomic-data-tanaka-jplt/data_v2.1/**
+                  key: atomic-data-tanaka-jplt-files-v2.1
 
             - name: Download/extract JPLT atomic data
               if: matrix.testname == 'jplt'
