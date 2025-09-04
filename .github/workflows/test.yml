@@ -137,7 +137,7 @@ jobs:
               id: cache-jpltdata
               with:
                   path: atomic-data-tanaka-jplt/data_v*/**
-                  key: atomic-data-tanaka-jplt-${{ hashFiles('atomic-data-tanaka-jplt/data_v*/**') }}
+                  key: atomic-data-tanaka-jplt-v2.1
 
             - name: Download/extract JPLT atomic data
               if: matrix.testname == 'jplt'
