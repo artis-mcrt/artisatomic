@@ -2,7 +2,7 @@
 
 if [ ! -f data_v1.1/26_1.txt.zst ]; then
 
-  if [ ! -f data_v1.1.tar.gz ]; then curl -O http://dpc.nifs.ac.jp/DB/Opacity-Database/data/data_v1.1.tar.gz; fi
+  if [ ! -f data_v1.1.tar.gz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/data_v1.1.tar.gz; fi
 
   mkdir -p data_v1.1
   md5sum -c data_v1.1.tar.gz.md5
@@ -13,7 +13,7 @@ fi
 
 if [ ! -f data_v2.0/26_1.txt.zst ]; then
 
-  if [ ! -f data_v2.0.tar.gz ]; then curl -O https://dpc.nifs.ac.jp/DB/Opacity-Database/data/data_v2.0.tar.gz; fi
+  if [ ! -f data_v2.0.tar.gz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/data_v2.0.tar.gz; fi
 
   mkdir -p data_v2.0
   md5sum -c data_v2.0.tar.gz.md5
@@ -35,7 +35,7 @@ fi
 
 if [ ! -f data_v2.1/33_2.txt.zst ]; then
 
-  if [ ! -f grasp_v2.1.tar.gz ]; then curl -O https://dpc.nifs.ac.jp/DB/Opacity-Database/data/grasp_v2.1.tar.gz; fi
+  if [ ! -f grasp_v2.1.tar.gz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/grasp_v2.1.tar.gz; fi
 
   mkdir -p data_v2.1
   md5sum -c grasp_v2.1.tar.gz.md5
