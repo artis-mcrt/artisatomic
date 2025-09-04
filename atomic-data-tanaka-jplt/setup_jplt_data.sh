@@ -1,5 +1,7 @@
 #!/usr/bin/env zsh
 
+set -x
+
 # if [ ! -f data_v1.1/26_1.txt.zst ]; then
 
 #   if [ ! -f data_v1.1.tar.gz ]; then curl -O http://dpc.nifs.ac.jp/DB/Opacity-Database/data/data_v1.1.tar.gz; fi
@@ -27,3 +29,5 @@ if [ ! -f data_v2.1/33_2.txt.zst ]; then
 
 fi
 zstd --rm -f -T0 -v data_v2.1/*.txt
+
+set +x
