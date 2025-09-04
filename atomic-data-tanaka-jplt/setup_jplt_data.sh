@@ -22,12 +22,13 @@ if [ ! -f data_v2.1/33_2.txt.zst ]; then
   md5sum -c grasp_v2.1.tar.gz.md5
 
   mkdir -p data_v2.1
+
   # v2.1 is not complete, so should be overlaid on v2.0 files
   tar -xvf data_v2.0.tar.gz -C data_v2.1 --strip-components=1
 
   tar -xvf grasp_v2.1.tar.gz -C data_v2.1 --strip-components=1
 
 fi
-zstd --rm -f -T0 -v data_v2.1/*.txt
+zstd --rm -f -T0 -v data_v2.1/*.txt || true
 
 set +x
