@@ -46,18 +46,18 @@ jobs:
               run: |
                   uv run mypy --install-types --non-interactive
 
-            - name: Cache pre-commit
+            - name: Cache prek
               uses: actions/cache@v4
               with:
-                  path: ~/.cache/pre-commit
-                  key: pre-commit-3-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-${{ github.run_id }}
+                  path: ~/.cache/prek
+                  key: prek-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-${{ github.run_id }}
                   restore-keys: |
-                      pre-commit-3-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-
+                      prek-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-
 
-            - name: Run pre-commit
+            - name: Run prek
               run: |
-                  pre-commit install
-                  pre-commit run --all-files --show-diff-on-failure --color=always
+                  prek install
+                  prek run --all-files --show-diff-on-failure --color=always
 
     pytest:
         runs-on: ubuntu-24.04

@@ -7,7 +7,7 @@ First clone the repository, for example:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
 cd artistatomic
-pre-commit install
+prek install
 ```
 
 To use a uv project virtual environment with locked dependency versions run:
