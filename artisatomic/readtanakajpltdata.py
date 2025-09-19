@@ -51,7 +51,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             fin,
             chunksize=levelcount,
             nrows=levelcount,
-            colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, None)],
+            colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, 34 + 5000)],
             names=["levelid", "g", "parity", "energy_ev", "configuration"],
         ) as reader:
             hc_in_ev_cm = 0.0001239841984332003
