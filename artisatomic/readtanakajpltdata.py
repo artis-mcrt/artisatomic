@@ -77,7 +77,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dftransitions = pl.from_pandas(
             pd.read_fwf(
                 fin,
-                colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, None)],
+                colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, 43 + 5000)],
                 names=["upperlevel", "lowerlevel", "wavelength", "g_u_times_A", "log(g_l*f)"],
                 dtype_backend="pyarrow",
             )
