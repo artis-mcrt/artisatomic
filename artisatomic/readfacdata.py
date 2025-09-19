@@ -24,7 +24,7 @@ echarge = 4.8e-10  # statC
 hc = 4.1357e-15 * cspeed
 
 
-def GetLevels_FAC(filename: Path) -> pd.DataFrame:
+def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
 
@@ -41,10 +41,11 @@ def GetLevels_FAC(filename: Path) -> pd.DataFrame:
     levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: s.replace("1", ""))
     levels_FAC["energypercm"] = levels_FAC["Energy_ev"] / hc
 
+    assert isinstance(levels_FAC, pd.DataFrame)
     return levels_FAC
 
 
-def GetLevels_cFAC(filename: Path) -> pd.DataFrame:
+def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
 
@@ -60,10 +61,11 @@ def GetLevels_cFAC(filename: Path) -> pd.DataFrame:
     levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: s.replace("1", ""))
     levels_cFAC["energypercm"] = [en_ev / hc for en_ev in levels_cFAC["Energy_ev"]]
 
+    assert isinstance(levels_cFAC, pd.DataFrame)
     return levels_cFAC
 
 
-def GetLevels(filename: Path, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
+def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
     """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
 
     Parameters
@@ -91,11 +93,12 @@ def GetLevels(filename: Path, Z: int, ionization_energy_in_ev: float) -> pd.Data
         raise ValueError("No FAC-like code detected on output file")
 
     levels = levels[levels["energypercm"] <= (ionization_energy_in_ev / hc)]
+    assert isinstance(levels, pd.DataFrame)
 
     return levels
 
 
-def GetLines_FAC(filename: Path) -> pd.DataFrame:
+def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
@@ -104,10 +107,11 @@ def GetLines_FAC(filename: Path) -> pd.DataFrame:
     trans_FAC["DeltaE[cm^-1]"] = trans_FAC["DeltaE[eV]"] / hc
     trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
     trans_FAC = trans_FAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    assert isinstance(trans_FAC, pd.DataFrame)
     return trans_FAC
 
 
-def GetLines_cFAC(filename: Path) -> pd.DataFrame:
+def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
 
     widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
@@ -115,10 +119,11 @@ def GetLines_cFAC(filename: Path) -> pd.DataFrame:
     trans_cFAC["Wavelength[Ang]"] = trans_cFAC["DeltaE[eV]"].apply(lambda en_ev: (hc / en_ev) * 1e8)
     trans_cFAC["DeltaE[cm^-1]"] = trans_cFAC["DeltaE[eV]"] / hc
     trans_cFAC = trans_cFAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    assert isinstance(trans_cFAC, pd.DataFrame)
     return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
 
-def GetLines(filename: Path, Z: int) -> pd.DataFrame:
+def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
     """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
 
     Parameters
