@@ -100,7 +100,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
-    # ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
+    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
     return ion_handlers
