@@ -9,10 +9,12 @@ import artisatomic
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(ion_handlers, maxionstage=None):
     tanakaions = sorted(
         [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
+    if maxionstage is not None:
+        tanakaions = [ion for ion in tanakaions if ion[1] <= maxionstage]
 
     for atomic_number, ion_stage in tanakaions:
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
