@@ -1206,11 +1206,11 @@ def get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, hilli
 
 def read_hyd_phixsdata():
     (
-        hillier_ionization_energy_ev,
+        _hillier_ionization_energy_ev,
         hillier_energy_levels,
-        transitions,
-        transition_count_of_level_name,
-        hillier_level_ids_matching_term,
+        _transitions,
+        _transition_count_of_level_name,
+        _hillier_level_ids_matching_term,
     ) = read_levels_and_transitions(1, 1, open("/dev/null", "w"))
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
