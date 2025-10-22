@@ -1808,6 +1808,9 @@ def write_compositionfile(
             if listions_nohandlers:
                 ion_stage_min = min(listions_nohandlers)
                 ion_stage_max = max(listions_nohandlers)
+                assert all(ion_stage in listions_nohandlers for ion_stage in range(ion_stage_min, ion_stage_max + 1)), (
+                    f"Missing ion stages for Z={atomic_number} between {ion_stage_min} and {ion_stage_max}"
+                )
                 nions = ion_stage_max - ion_stage_min + 1
 
             fcomp.write(
