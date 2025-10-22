@@ -44,10 +44,12 @@ jobs:
               run: uv run -- ruff format --check --exit-non-zero-on-format
 
             - name: Lint with mypy
+              if: always()
               run: |
                   uv run mypy --install-types --non-interactive
 
             - name: Cache prek
+              if: always()
               uses: actions/cache@v4
               with:
                   path: ~/.cache/prek
@@ -56,6 +58,7 @@ jobs:
                       prek-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-
 
             - name: Run prek
+              if: always()
               run: |
                   prek install
                   prek run --all-files --show-diff-on-failure --color=always

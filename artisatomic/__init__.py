@@ -454,7 +454,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                         nahar_core_states[i],
                         nahar_level_index_of_state,
                         nahar_configurations[i],
-                        nahar_ionization_potential_rydberg,
+                        _nahar_ionization_potential_rydberg,
                     ) = readnahardata.read_nahar_energy_level_file(
                         path_nahar_energy_file, atomic_number, ion_stage, flog
                     )
@@ -1545,8 +1545,8 @@ def write_output_files(
 
     for i, ion_stage in enumerate(listions):
         with contextlib.suppress(TypeError):
-            if len(ion_stage) == 2:
-                ion_stage, handler = ion_stage
+            if len(ion_stage) > 1:
+                ion_stage = ion_stage[0]
         upsilondict = upsilondicts[i]
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
@@ -1613,9 +1613,9 @@ def write_output_files(
             )
 
         dftransitions_ion = (
-            dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
-            if not dftransitions_ion.is_empty()
-            else dftransitions_ion
+            dftransitions_ion
+            if dftransitions_ion.is_empty()
+            else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
         )
         with open(os.path.join(args.output_folder, "transitiondata.txt"), "a") as ftransitiondata:
             write_transition_data(
@@ -1730,11 +1730,11 @@ def write_transition_data(
     ftransitiondata.write("\n")
 
     num_forbidden_transitions = (
-        dftransitions_ion.filter(pl.col("forbidden")).height if not dftransitions_ion.is_empty() else 0
+        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("forbidden")).height
     )
 
     num_collision_strengths_applied = (
-        dftransitions_ion.filter(pl.col("coll_str") > 0).height if not dftransitions_ion.is_empty() else 0
+        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("coll_str") > 0).height
     )
 
     log_and_print(
