@@ -817,8 +817,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             if len(target_configfactors) == 0:
                 print("ERRORHERE", lowerlevelname, target_configfactors_nofilter)
                 print(reduced_phixstable)
-            max_factor = max([x[1] for x in target_configfactors])
-            factor_sum = sum([x[1] for x in target_configfactors])
+            max_factor = max(x[1] for x in target_configfactors)
+            factor_sum = sum(x[1] for x in target_configfactors)
 
             for target_config, target_factor in target_configfactors:
                 target_fraction = target_factor / factor_sum
