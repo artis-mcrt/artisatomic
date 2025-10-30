@@ -581,7 +581,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
                 elif crosssectiontype == 2:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(int(float(row[0])))
+                        fitcoefficients.append(int(float(row[0].replace("D", "E"))))
                         if len(fitcoefficients) == 3:
                             n, l_start, l_end = fitcoefficients
                             if l_end > n - 1:
