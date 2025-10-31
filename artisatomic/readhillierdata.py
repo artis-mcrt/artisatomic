@@ -662,6 +662,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
                         if len(fitcoefficients) == 4:
                             n, l_start, l_end, nu_o = fitcoefficients
+
+                            # Small number of Co II have n == 40, just ignore these.
+                            if atomic_number == 27 and ion_stage == 2 and n == 40:
+                                print(f"WARNING: Encountered n={n} Co II, {lowerlevelname}. Skipping this.")
+                                continue
+
                             if l_end > n - 1:
                                 artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
