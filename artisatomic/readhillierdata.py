@@ -1050,6 +1050,9 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(line.strip()) == 0:
                 continue  # skip blank lines
 
+            if line == "*"*len(line): # At least one file ends with a line of stars (Na VI)
+                continue
+
             if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
                 break
 
