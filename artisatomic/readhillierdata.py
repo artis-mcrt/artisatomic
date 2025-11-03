@@ -1277,6 +1277,7 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
+                max_hyd_n = max_n
 
             if len(row) > 1:
                 if row[1] == "!N_ST_U":
