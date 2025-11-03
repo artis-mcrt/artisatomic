@@ -278,7 +278,8 @@ def read_levels_and_transitions(
     )
 
     prev_line = ""
-    with xopen(filename) as fhillierosc:
+    # TODO: Should probably find a better way of dealing with different encodings, no doubt there will be other files not in utf-8
+    with xopen(filename, encoding = "iso-8859-1" if atomic_number == 12 and ion_stage == 8 else "utf-8") as fhillierosc:
         expected_energy_levels = -1
         expected_transitions = -1
         row_format_energy_level = None
