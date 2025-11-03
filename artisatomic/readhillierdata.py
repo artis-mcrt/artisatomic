@@ -222,7 +222,7 @@ hyd_phixs: dict[tuple[int, int], list[float]] = {}
 # keys are n quantum number
 hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
 hyd_gaunt_factor: dict[int, list[float]] = {}
-
+max_hyd_n = -1
 
 def hillier_ion_folder(atomic_number, ion_stage):
     return str(
