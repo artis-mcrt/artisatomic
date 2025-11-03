@@ -379,7 +379,7 @@ def read_levels_and_transitions(
 
         # defined_transition_ids = []
         for line in fhillierosc:
-            if line.startswith("                        Oscillator strengths"):  # only allow one table
+            if line.startswith("                        Oscillator strengths") or line.startswith("             Oscilator strengths"):  # only allow one table
                 break
             linesplitdash = line.split("-")
             row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
