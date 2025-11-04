@@ -1107,7 +1107,11 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 namefromnameto = "".join(row[:-num_expected_t_values])
                 upsilonvalues = row[-num_expected_t_values:]
 
-                namefrom, nameto = map(str.strip, namefromnameto.split("-"))
+                if "-" in namefromnameto:
+                    namefrom, nameto = map(str.strip, namefromnameto.split("-"))
+                else:
+                    # Assume there is just a space between them
+                    namefrom, nameto = row[:2]
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
