@@ -372,7 +372,7 @@ def read_levels_and_transitions(
                     )
                     sys.exit()
 
-            if (line.lstrip().startswith("Oscillator strengths") or line.lstrip().startswith("Oscilator strengths")) and len(hillier_energy_levels) > 1:
+            if re.match("^ +Osci(l|ll)ator strengths", line) and len(hillier_energy_levels) > 1:
                 break
 
         artisatomic.log_and_print(flog, f"Read {len(hillier_energy_levels[1:]):d} levels")
