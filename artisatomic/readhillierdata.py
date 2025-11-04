@@ -540,9 +540,13 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         if this_levelnamenoj == lowerlevelname:
                             lowerlevelid = levelid
                             break
-                    if targetlevelname == "":
-                        print("ERROR: no upper level name")
-                        sys.exit()
+                    if "targetlevelname" in locals():
+                        if targetlevelname == "":
+                            print("ERROR: no upper level name")
+                            sys.exit()
+                    else:
+                        print("WARNING: targelevelname does not exist, skipping to the next line")
+                        continue # We are probably in Ni X phot_data_A, where there a bunch of lines which end in !Configuration name and confuse things...
                     # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
