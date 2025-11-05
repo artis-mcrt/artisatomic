@@ -1056,8 +1056,9 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(line.strip()) == 0:
                 continue  # skip blank lines
 
-            if line.strip() == "*" * (len(line) - 1): # At least one file ends with a line of stars (Na VI)
-                continue
+            if header_row != [] and temperature_index != -1 and num_expected_t_values != -1 and re.match(r"^\*+", line.strip()):
+                print("WARNING: Found line of *'s after reading header, assuming that's the end of the table")
+                break # Some files have lines of stars at the end, if we see one of these just exit (e.g. Na VI, Ne V)
 
             if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
                 break
