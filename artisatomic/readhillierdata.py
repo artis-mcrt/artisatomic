@@ -420,17 +420,23 @@ def read_levels_and_transitions(
         format_date = "NOT_SPECIFIED"
         for line in fhillierosc:
             row = line.split()
-            if line.startswith("**************************") and prev_line:
-                headerline = prev_line
-                headerline = headerline.replace("ID", "hillierlevelid")
-                headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
-                headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
-                headerline = headerline.replace("eV", "thresholdenergyev")
-                headerline = headerline.replace("Lam(A)", "lambdaangstrom")
-                headerline = headerline.replace("ARAD", "arad")
-                row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
-                print("File contains columns:")
-                print(f"  {row_format_energy_level}")
+            if re.match(r"x*\*+", line) and prev_line:
+                if atomic_number == 26 and ion_stage == 8: # Fe VIII has its own bespoke header...
+                    print("Fe VIII has a bespoke header")
+                    row_format_energy_level = "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
+                    print("File contains columns:")
+                    print(f"  {row_format_energy_level}")
+                else:
+                    headerline = prev_line
+                    headerline = headerline.replace("ID", "hillierlevelid")
+                    headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
+                    headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
+                    headerline = headerline.replace("eV", "thresholdenergyev")
+                    headerline = headerline.replace("Lam(A)", "lambdaangstrom")
+                    headerline = headerline.replace("ARAD", "arad")
+                    row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
+                    print("File contains columns:")
+                    print(f"  {row_format_energy_level}")
             elif line.rstrip().endswith("!Number of energy levels"):
                 expected_energy_levels = int(row[0])
                 artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
@@ -659,9 +665,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit()
 
-                if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
-                    row[-3:]
-                ) == "!Configuration name [*]":
+                if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(row[-3:]) == "!Configuration name [*]":
                     lowerlevelname = row[0]
                     if "[" in lowerlevelname:
                         lowerlevelname.split("[")[0]
@@ -738,6 +742,11 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0]))
                         if len(fitcoefficients) == 2:
                             scale, n = fitcoefficients
+
+                            # As of Nov 2025, max_hyd_n is 30, some files have n's > 50
+                            if n > max_hyd_n:
+                                continue
+
                             n = int(n)
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
                             phixstables[filenum][lowerlevelname] = scale * get_hydrogenic_n_phixstable(
@@ -791,6 +800,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 8:
+                    # if atomic_number == 16 and ion_stage == 3: continue #! PROBLEM WITH LOTS OF 0s (Dec 2025) LU decomp is failing
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         if len(fitcoefficients) <= 2:
                             # first three params should be integers
@@ -1230,11 +1240,11 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(row) >= 2:
                 row_two_to_end = " ".join(row[1:])
 
-                if row_two_to_end == "!Number of transitions":
+                if row_two_to_end.startswith("!Number of transitions"):
                     number_expected_transitions = int(row[0])
                 elif row_two_to_end.startswith("!Number of T values OMEGA tabulated at"):
                     num_expected_t_values = int(row[0])
-                elif row_two_to_end == "!Scaling factor for OMEGA (non-file values)" and float(row[0]) != 1.0:
+                elif row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)") and float(row[0]) != 1.0:
                     artisatomic.log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
                     sys.exit()
 
