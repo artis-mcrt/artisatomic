@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import math
 
+import matplotlib.axes as mplax
 import matplotlib.pyplot as plt
 
 # import matplotlib.ticker as ticker
@@ -160,6 +161,7 @@ for filename, label, ax in [
                 xlist.append(float(row[4]))
                 ylist.append(naharfeiitonumber(row[5]))
     # print(list(zip(xlist,ylist)))
+    assert isinstance(ax, mplax.Axes)
     ax.plot(xlist, ylist, marker="None", lw=2, label=label)
 
 for ax in axes:
