@@ -1,5 +1,6 @@
 import os
 import sys
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 
@@ -17,17 +18,25 @@ alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
-term_index_tuple = namedtuple("term_index_tuple", "twosplusone lval parity indexinsymmetry")
+
+class NaharEnergyLevel(t.NamedTuple):
+    indexinsymmetry: int
+    TC: int
+    corestateid: int
+    elecn: int
+    elecl: int
+    energyreltoionpotrydberg: float
+    twosplusone: int
+    l: int
+    parity: int
+    energyabovegsinpercm: float
+    g: int
+    naharconfiguration: str
 
 
 def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
-    nahar_energy_level_row = namedtuple(
-        "energylevel",
-        "indexinsymmetry TC corestateid elecn elecl energyreltoionpotrydberg twosplusone l parity"
-        " energyabovegsinpercm g naharconfiguration",
-    )
     nahar_configurations = {}
-    nahar_energy_levels = [None]
+    nahar_energy_levels: list[NaharEnergyLevel | None] = [None]
     nahar_level_index_of_state = {}
     nahar_core_states = []
 
@@ -88,7 +97,11 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                 for _ in range(number_of_states_in_symmetry):
                     row = fenlist.readline().split()
                     indexinsymmetry = int(row[0])
+                    TC = int(row[1])
                     nahar_core_state_id = int(row[2])
+                    elecn = int(row[3])
+                    elecl = int(row[4])
+                    energyreltoionpotrydberg = float(row[5])
                     if nahar_core_state_id < 1 or nahar_core_state_id > len(nahar_core_states):
                         flog.write(
                             "Core state id of {:d}{}{} index {:d} is invalid (={:d}, Ncorestates={:d}). Setting"
@@ -103,7 +116,22 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                         )
                         nahar_core_state_id = 1
 
-                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l_val, parity, -1.0, 0, ""))  # ty:ignore[too-many-positional-arguments]
+                    nahar_energy_levels.append(
+                        NaharEnergyLevel(
+                            indexinsymmetry,
+                            TC,
+                            nahar_core_state_id,
+                            elecn,
+                            elecl,
+                            energyreltoionpotrydberg,
+                            twosplusone,
+                            l_val,
+                            parity,
+                            -1.0,
+                            0,
+                            "",
+                        )
+                    )
 
                     energyabovegsinpercm = (
                         (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))  # ty:ignore[possibly-missing-attribute]
