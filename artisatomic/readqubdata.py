@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
@@ -19,9 +20,17 @@ hc_in_ev_angstrom = 12398.419843320025
 h_in_ev_seconds = 4.135667696923859e-15
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
-qub_energy_level_row = namedtuple(
-    "qub_energy_level_row", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
-)
+
+class QUBEnergyLevel(t.NamedTuple):
+    levelname: str
+    qub_id: int
+    twosplusone: int
+    l: int
+    j: float
+    energyabovegsinpercm: float
+    g: float
+    parity: int
+
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
@@ -34,10 +43,12 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
-def read_adf04(filepath, atomic_number, ion_stage, flog):
+def read_adf04(
+    filepath: str | Path, atomic_number: int, ion_stage: int, flog
+) -> tuple[float, list[QUBEnergyLevel | None], dict[tuple[int, int], float]]:
     if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
         filepath = f"{filepath}.gz"
-    energylevels = [None]
+    energylevels: list[QUBEnergyLevel | None] = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
@@ -61,7 +72,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
 
             if atomic_number == 27:
                 config = line[5:21].strip()
-                energylevel = qub_energy_level_row(
+                energylevel = QUBEnergyLevel(
                     config,
                     int(line[:5]),
                     int(line[25:26]),
@@ -79,7 +90,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
                 config_parts = config_full.split(")")
                 relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
                 config = relevant_config
-                energylevel = qub_energy_level_row(
+                energylevel = QUBEnergyLevel(
                     config,
                     int(line[:5]),
                     int(line[29:30]),
@@ -112,7 +123,7 @@ def read_adf04(filepath, atomic_number, ion_stage, flog):
             sep=r"\s+",
             comment="C",
             names=list_headers,
-            dtype={"lower": int, "upper": int}.update(dict.fromkeys(list_headers[2:], float)),
+            dtype={"lower": int, "upper": int}.update(dict.fromkeys(list_headers[2:], float)),  # type: ignore[arg-type]
             on_bad_lines="skip",
             skip_blank_lines=True,
             keep_default_na=False,
@@ -198,16 +209,17 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 id_lower = int(row[1])
                 A = float(row[2])
                 if A > 2e-30:
-                    namefrom = qub_energylevels[id_upper].levelname
-                    nameto = qub_energylevels[id_lower].levelname
+                    level_upper = qub_energylevels[id_upper]
+                    level_lower = qub_energylevels[id_lower]
+                    assert level_upper is not None
+                    assert level_lower is not None
+                    namefrom = level_upper.levelname
+                    nameto = level_lower.levelname
                     # WARNING replace with correct selection rules!
-                    forbidden = qub_energylevels[id_upper].parity == qub_energylevels[id_lower].parity
+                    forbidden = level_upper.parity == level_lower.parity
                     transition_count_of_level_name[namefrom] += 1
                     transition_count_of_level_name[nameto] += 1
-                    lamdaangstrom = 1.0e8 / (
-                        qub_energylevels[id_upper].energyabovegsinpercm
-                        - qub_energylevels[id_lower].energyabovegsinpercm
-                    )
+                    lamdaangstrom = 1.0e8 / (level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm)
                     if (id_lower, id_upper) in upsilondict:
                         coll_str = upsilondict[(id_lower, id_upper)]
                     elif forbidden:
@@ -219,11 +231,11 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
-        qub_energylevels = [None]
+        qub_energylevels: list[QUBEnergyLevel | None] = [None]
         qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
         upsilondict = {}
         ionization_energy_ev = 54.9000015
-        qub_energylevels.append(qub_energy_level_row("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
+        qub_energylevels.append(QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
         atom_file = f"{atomic_number}_{ion_stage}.adf04"
@@ -267,15 +279,16 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         id_lower = int(row[1])
                     A = float(row[2].replace("-", "E-").replace("+", "E+"))
                     if A > 2e-30:
-                        namefrom = qub_energylevels[id_upper].levelname
-                        nameto = qub_energylevels[id_lower].levelname
-                        forbidden = artisatomic.check_forbidden(qub_energylevels[id_upper], qub_energylevels[id_lower])
+                        level_upper = qub_energylevels[id_upper]
+                        level_lower = qub_energylevels[id_lower]
+                        assert level_upper is not None
+                        assert level_lower is not None
+                        namefrom = level_upper.levelname
+                        nameto = level_lower.levelname
+                        forbidden = artisatomic.check_forbidden(level_upper, level_lower)
                         transition_count_of_level_name[namefrom] += 1
                         transition_count_of_level_name[nameto] += 1
-                        lamdaangstrom = 1.0e8 / (
-                            qub_energylevels[id_upper].energyabovegsinpercm
-                            - qub_energylevels[id_lower].energyabovegsinpercm
-                        )
+                        lamdaangstrom = 1.0e8 / (level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm)
                         if (id_lower, id_upper) in upsilondict:
                             coll_str = upsilondict[(id_lower, id_upper)]
                         elif forbidden:
