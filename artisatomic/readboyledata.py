@@ -44,7 +44,7 @@ def read_levels_data(atomic_number, ion_stage):
 
     for rowtuple in levels_data:
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
-        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")
+        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # ty:ignore[too-many-positional-arguments]
 
         if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
             continue

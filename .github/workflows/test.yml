@@ -48,14 +48,18 @@ jobs:
               run: |
                   uv run mypy --install-types --non-interactive
 
-            - name: Cache prek
+            - name: Run ty
               if: always()
-              uses: actions/cache@v4
+              run: uv run -- ty check
+
+            - name: Cache prek
+              uses: actions/cache@v5
               with:
                   path: ~/.cache/prek
-                  key: prek-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-${{ github.run_id }}
+                  key: prek-3-${{ runner.os }}${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}-${{ github.run_id }}
                   restore-keys: |
-                      prek-${{ runner.os }}--${{ hashFiles('.pre-commit-config.yaml') }}-
+                      prek-3-${{ runner.os }}${{ runner.arch }}-${{ hashFiles('.pre-commit-config.yaml') }}-
+                      prek-3-${{ runner.os }}${{ runner.arch }}-
 
             - name: Run prek
               if: always()
