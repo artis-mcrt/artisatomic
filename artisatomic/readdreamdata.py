@@ -19,9 +19,12 @@ def init_dreamdata():
     global dreamdata
     if dreamdata is None:
         if dreamdatapath.exists():
-            dreamdata = pd.read_hdf(dreamdatapath)
-            dreamdata["Lower_g"] = 2 * dreamdata["Lower_J"] + 1
-            dreamdata["Upper_g"] = 2 * dreamdata["Upper_J"] + 1
+            hdfdata = pd.read_hdf(dreamdatapath)
+            assert isinstance(hdfdata, pd.DataFrame)
+            dreamdata = hdfdata
+            dreamdata = dreamdata.assign(
+                Lower_g=lambda row: 2 * row["Lower_J"] + 1, Upper_g=lambda row: 2 * row["Upper_J"] + 1
+            )
         else:
             dreamdata = None
 

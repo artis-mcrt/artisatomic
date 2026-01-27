@@ -8,16 +8,17 @@ datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-da
 try:
     import h5py
 
-    filename_aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
+    aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
 except ModuleNotFoundError:
-    filename_aoife_dataset = None
+    aoife_dataset = None
 
 
 hc_in_ev_cm = 0.0001239841984332003
 
 
 def read_ionization_data(atomic_number, ion_stage):
-    ionization_data = filename_aoife_dataset["/ionization_data"]
+    assert aoife_dataset is not None
+    ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
     for atomic_num, ion_number, ionization_energy in ionization_data:
@@ -32,7 +33,8 @@ def read_ionization_data(atomic_number, ion_stage):
 
 
 def read_levels_data(atomic_number, ion_stage):
-    levels_data = filename_aoife_dataset["/levels_data"]
+    assert aoife_dataset is not None
+    levels_data = aoife_dataset["/levels_data"]
 
     energy_levels = [None]
     # TODO energyinRydbergs change back to energyabovegsinpercm
@@ -52,7 +54,8 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
-    lines_data = filename_aoife_dataset["/lines_data"]
+    assert aoife_dataset is not None
+    lines_data = aoife_dataset["/lines_data"]
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)

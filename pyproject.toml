@@ -43,7 +43,7 @@ dev = [
     "pip>=25.2",                       # for mypy --install-types
     "prek>=0.1.6",
     "pytest>=8.3.3",
-    "ruff>=0.12.2",
+    "ruff>=0.14.14",
     "types-pytz>=2025.2.0.20250809",
     "types-requests>=2.32.0.20241016",
 ]
@@ -70,9 +70,34 @@ warn_unused_configs = true
 max-line-length = 120
 errors-only = true
 
+[tool.pyright]
+deprecateTypingAliases = true
+enableTypeIgnoreComments = false # leave these for mypy to interpret
+exclude = [
+    '**/node_modules',
+    '**/__pycache__',
+    '**/.*',
+    'build',
+    'dist',
+    'target',
+    '**/version.py',
+    '.venv',
+]
+reportAttributeAccessIssue = false
+reportCallIssue = false
+reportDeprecated = false
+reportMissingImports = false
+reportOptionalMemberAccess = false
+reportPossiblyUnboundVariable = false
+reportUnnecessaryTypeIgnoreComment = true
+reportUnknownVariableType = false
+reportUnreachable = false
+typeCheckingMode = "standard"
+useLibraryCodeForTypes = true
+pythonVersion = "3.11"
+
 [tool.ruff]
 line-length = 120
-target-version = "py310"
 fix = true
 show-fixes = true
 extend-exclude = ["_version.py"]
@@ -166,3 +191,6 @@ exclude = ["tests", "**/dist", "**/lib", "**/build", "*.egg-info", "**/.*"]
 [tool.setuptools_scm]
 write_to = "_version.py"
 local_scheme = "no-local-version"
+
+[tool.ty.rules]
+unused-suppression = "ignore"
