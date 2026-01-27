@@ -103,18 +103,18 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                         )
                         nahar_core_state_id = 1
 
-                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l_val, parity, -1.0, 0, ""))
+                    nahar_energy_levels.append(nahar_energy_level_row(*row, twosplusone, l_val, parity, -1.0, 0, ""))  # ty:ignore[too-many-positional-arguments]
 
                     energyabovegsinpercm = (
-                        (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))
+                        (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))  # ty:ignore[possibly-missing-attribute]
                         * ryd_to_ev
                         / hc_in_ev_cm
                     )
 
-                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
+                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(  # ty:ignore[possibly-missing-attribute]
                         indexinsymmetry=indexinsymmetry,
                         corestateid=nahar_core_state_id,
-                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),
+                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),  # ty:ignore[possibly-missing-attribute]
                         energyabovegsinpercm=energyabovegsinpercm,
                         g=twosplusone * (2 * l_val + 1),
                     )
@@ -160,10 +160,10 @@ def read_nahar_core_states(fenlist):
     for c in range(1, numberofcorestates + 1):
         row = fenlist.readline().split()
         nahar_core_states[c] = naharcorestaterow(int(row[0]), row[1], row[2], float(row[3]))
-        if int(nahar_core_states[c].nahar_core_state_id) != c:
+        if int(nahar_core_states[c].nahar_core_state_id) != c:  # ty:ignore[possibly-missing-attribute]
             print(
                 f"Nahar levels mismatch: id {c:d} found at entry"
-                f" number {int(nahar_core_states[c].nahar_core_state_id):d}"
+                f" number {int(nahar_core_states[c].nahar_core_state_id):d}"  # ty:ignore[possibly-missing-attribute]
             )
             sys.exit()
     return nahar_core_states

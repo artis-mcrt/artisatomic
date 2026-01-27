@@ -32,7 +32,7 @@ def init_dreamdata():
 def extend_ion_list(ion_handlers):
     init_dreamdata()
 
-    for atomic_number, charge in dreamdata.index.unique():
+    for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
         ion_stage = charge + 1
         artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
 
@@ -93,7 +93,7 @@ def read_lines_data(dfiondata, energy_levels):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     init_dreamdata()
     charge = ion_stage - 1
-    dfiondata = dreamdata.loc[atomic_number, charge]
+    dfiondata = dreamdata.loc[atomic_number, charge]  # ty:ignore[possibly-missing-attribute]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
     print(dfiondata)
 

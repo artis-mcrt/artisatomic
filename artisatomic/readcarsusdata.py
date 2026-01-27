@@ -91,7 +91,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     artisatomic.log_and_print(flog, f"Using Kurucz via CARSUS for Z={atomic_number} ion_stage {ion_stage}")
 
-    from carsus.io.kurucz import GFALLReader
+    from carsus.io.kurucz import GFALLReader  # ty:ignore[unresolved-import]
 
     # path_gfall = (Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz" / "gfall.dat").resolve()
     path_gfall = find_gfall(atomic_number, ion_charge)

@@ -46,26 +46,26 @@ def main():
                 pass
 
     print(ionlist)
-    adata = at.get_levels(modelpath, ionlist=tuple(ionlist), get_transitions=True, get_photoionisations=True)
+    adata = at.atomic.get_levels(modelpath, ionlist=tuple(ionlist), get_transitions=True, get_photoionisations=True)
 
-    for _, ion in adata.iterrows():
-        atomic_number = int(ion.Z)
+    for ion in adata.iter_rows(named=True):
+        atomic_number = int(ion["Z"])
         if selectedelements is None or atomic_number in selectedelements:
-            ionstage = int(ion.ion_stage)
+            ionstage = int(ion["ion_stage"])
             print(f"Doing Z={atomic_number:2.0f} ionstage {ionstage}")
 
             with open(f"Z{atomic_number:.0f}_levels.py.txt", "a") as levelfile:
-                for levelindex, level in ion.levels.iterrows():
-                    A_down_sum = ion.transitions.query("upper == @levelindex", inplace=False).A.sum()
+                for levelindex, level in ion["levels"].iterrows():
+                    A_down_sum = ion["transitions"].query("upper == @levelindex", inplace=False).A.sum()
                     rad_rate = 1.0 / A_down_sum if A_down_sum > 0.0 else 1e99
                     lineout = (
                         "LevMacro"
-                        f" {atomic_number:2.0f} {ionstage:2.0f} {levelindex + 1:4.0f} {level.energy_ev - ion.ion_pot:9.5f} {level.energy_ev:9.5f} {level.g:3.0f} {rad_rate:9.2e}\n"
+                        f" {atomic_number:2.0f} {ionstage:2.0f} {levelindex + 1:4.0f} {level.energy_ev - ion['ion_pot']:9.5f} {level.energy_ev:9.5f} {level.g:3.0f} {rad_rate:9.2e}\n"
                     )
 
                     levelfile.write(lineout)
 
-            dftransitions = ion.transitions.copy()
+            dftransitions = ion["transitions"].copy()
             if not dftransitions.empty:
                 with open(f"Z{atomic_number:.0f}_lines.py.txt", "a") as linefile:
                     dftransitions = dftransitions.eval("upper_g = @ion.levels.loc[upper].g.values")
@@ -89,14 +89,14 @@ def main():
                         linefile.write(lineout)
 
             with open(f"Z{atomic_number:.0f}_phot.py.txt", "a") as photfile:
-                for levelindex, level in ion.levels.iterrows():
+                for levelindex, level in ion["levels"].iterrows():
                     for upperlevelindex, targetfrac in level.phixstargetlist:
                         photfile.write(
                             "PhotMacS      "
-                            f" {atomic_number:.0f} {ionstage:7.0f} {levelindex + 1:7.0f} {upperlevelindex + 1:7.0f} {ion.ion_pot:15.6f} {len(level.phixstable):7.0f}\n"
+                            f" {atomic_number:.0f} {ionstage:7.0f} {levelindex + 1:7.0f} {upperlevelindex + 1:7.0f} {ion['ion_pot']:15.6f} {len(level.phixstable):7.0f}\n"
                         )
                         photfile.writelines(
-                            f"PhotMac {x * ion.ion_pot:15.6f} {xs * targetfrac * 1e-18:15.7e}\n"
+                            f"PhotMac {x * ion['ion_pot']:15.6f} {xs * targetfrac * 1e-18:15.7e}\n"
                             for x, xs in level.phixstable
                         )
 
