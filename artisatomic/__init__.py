@@ -77,11 +77,11 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
 
-    ion_handlers = [
-        (26, [1, 2, 3, 4, 5]),
-        (27, [2, 3, 4]),
-        (28, [2, 3, 4, 5]),
-    ]
+    # ion_handlers = [
+    #     (26, [1, 2, 3, 4, 5]),
+    #     (27, [2, 3, 4]),
+    #     (28, [2, 3, 4, 5]),
+    # ]
 
     # ion_handlers = [
     #     (2, [(3, "boyle")]),
@@ -95,12 +95,12 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     # include everything we have data for
     # ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    # ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=16, include_hydrogen=False)
     # ion_handlers = readcarsusdata.extend_ion_list(ion_handlers)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
-    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
+    #ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
     return ion_handlers
