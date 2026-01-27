@@ -39,11 +39,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "artistools>=2015.10.13",
+    "matplotlib>=3.10.7",
     "mypy>=1.16.1",
     "pip>=25.2",                       # for mypy --install-types
     "prek>=0.1.6",
     "pytest>=8.3.3",
     "ruff>=0.14.14",
+    "ty>=0.0.14",
     "types-pytz>=2025.2.0.20250809",
     "types-requests>=2.32.0.20241016",
 ]
@@ -193,4 +196,4 @@ write_to = "_version.py"
 local_scheme = "no-local-version"
 
 [tool.ty.rules]
-unused-suppression = "ignore"
+unused-ignore-comment = "ignore"

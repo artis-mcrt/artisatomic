@@ -44,7 +44,7 @@ class LisbonReader:
             keys `levels` and `lines`.
 
         """
-        from carsus.util import parse_selected_species
+        from carsus.util import parse_selected_species  # ty:ignore[unresolved-import]
 
         lvl_list = []
         lns_list = []
