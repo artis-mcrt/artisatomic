@@ -46,128 +46,261 @@ ions_data = {
     # H
     (1, 1): ion_files("5dec96", "hi_osc.dat", hillier_rowformat_c, ["hiphot.dat"], "hicol.dat"),
     (1, 2): ion_files("", "", hillier_rowformat_c, [""], ""),
+
     # He
     # (2, 1): ion_files('15jul15', 'hei_osc', hillier_rowformat_b, ['phot_hei'], 'heicol.dat'),
     # (2, 2): ion_files('5dec96', 'he2_osc.dat', hillier_rowformat_c, ['he2phot.dat'], 'he2col.dat'),
+    #
     # C
     (6, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (6, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (6, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (6, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (6, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (6, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (6, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # N
     (7, 1): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], "col_data"),
     (7, 2): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ["phot_data_A", "phot_data_B"], "col_data"),
     (7, 3): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    # O
+    # (7, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
+    # (7, 5): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (7, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (7, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+
+    # O TODO: O IV, should be able to include phot_data_B, but doing so breaks artis
     (8, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
     (8, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (8, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (8, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A", "phot_data_B"], "col_data"),
+    # (8, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (8, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (8, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (8, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (8, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # F
     # (9, 2): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
     # (9, 3): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
+
     # Ne
     (10, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (10, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (10, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (10, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (10, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (10, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (10, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (10, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (10, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (10, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Na
     (11, 1): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
     (11, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (11, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (11, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (11, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (11, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (11, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (11, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (11, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (11, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Mg
     (12, 1): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
     (12, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (12, 3): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (12, 4): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (12, 3): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (12, 4): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (12, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (12, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (12, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (12, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (12, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (12, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Al
     (13, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (13, 2): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
     (13, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (13, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (13, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (13, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (13, 7): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (13, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (13, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (13, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (13, 11): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Si
     (14, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (14, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
     (14, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (14, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (14, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (14, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (14, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (14, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (14, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (14, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (14, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (14, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+
     # P (I not in CMFGEN)
     (15, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (15, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (15, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (15, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (15, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (15, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (15, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (15, 9): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (15, 10): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (15, 11): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+
     # S
     (16, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (16, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (16, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (16, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (16, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (16, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (16, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (16, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (16, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (16, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+
     # Cl (only ions IV to VII)
     (17, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (17, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (17, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (17, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (17, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Ar
     (18, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (18, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (18, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (18, 4): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (18, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (18, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (18, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (18, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (18, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (18, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+
     # K
     (19, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (19, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (19, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (19, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (19, 5): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (19, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (19, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (19, 8): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (19, 9): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (19, 10): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (19, 11): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+
     # Ca
     (20, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (20, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (20, 3): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (20, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    # Sc (only I-III are in CMFGEN) (I and III col_data are weird, excluding them)
+    # (20, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (20, 5): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (20, 6): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (20, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    # (20, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (20, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (20, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (20, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+
+    # Sc (only I-III are in CMFGEN)
     # (21, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (21, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (21, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     # (21, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
+    # Sc (only I-III are in CMFGEN)
+    # (21, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (21, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (21, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
     (22, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (22, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     # (22, 4): ion_files('18oct00', 'tkiv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+
     # V (only V I is in CMFGEN and it has a single level)
     # (23, 1): ion_files('27may10', 'vi_osc', hillier_rowformat_a, ['vi_phot.dat'], 'col_guess.dat'),
+
     # Cr
     (24, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (24, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (24, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (24, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (24, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (24, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (24, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (24, 7): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 13): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (24, 14): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+
     # Mn (Mn I is not in CMFGEN)
     (25, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (25, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (25, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (25, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (25, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (25, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+
     # Fe
     (26, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["REV_PHOT_DATA"], "col_data"),
     (26, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (26, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (26, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (26, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (26, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (26, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_d, ['phot_data_A'], 'col_data'),
+    # (26, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (26, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (26, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (26, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_d, ['phot_data_A'], 'col_data'),
+    # (26, 9): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (26, 10): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 11): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 12): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 13): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 14): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 15): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (26, 16): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+
     # Co
     (27, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (27, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (27, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (27, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (27, 5): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (27, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (27, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (27, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (27, 5): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (27, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (27, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (27, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (27, 9): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+
     # Ni
     (28, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (28, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
     (28, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
     (28, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (28, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
-    (28, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (28, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    # (28, 6): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (28, 7): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (28, 8): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (28, 9): ion_files('19apr23', 'osc_data', hillier_rowformat_a, ['phot_data_A'], 'col_data'),
+    # (28, 10): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 11): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 12): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 13): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 14): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 15): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+    # (28, 16): ion_files('19apr23', 'osc_data', hillier_rowformat_b, ['phot_data_A'], 'col_data'),
+
     # Cu, Zn and above are not in CMGFEN?
+
     # Ba
     # (56, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ['phot_data_A'], 'col_data'),
 }
