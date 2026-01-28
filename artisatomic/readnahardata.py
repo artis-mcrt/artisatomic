@@ -2,7 +2,6 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 
 import numpy as np
 
@@ -17,6 +16,13 @@ h_in_ev_seconds = 4.135667696923859e-15
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
+
+
+class NaharCoreState(t.NamedTuple):
+    nahar_core_state_id: int
+    configuration: str
+    term: str
+    energyrydberg: float
 
 
 class NaharEnergyLevel(t.NamedTuple):
@@ -38,7 +44,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     nahar_configurations = {}
     nahar_energy_levels: list[NaharEnergyLevel | None] = [None]
     nahar_level_index_of_state = {}
-    nahar_core_states = []
+    nahar_core_states: list[NaharCoreState | None] = []
 
     if not os.path.isfile(path_nahar_energy_file):
         artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
@@ -162,8 +168,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     )
 
 
-def read_nahar_core_states(fenlist):
-    naharcorestaterow = namedtuple("naharcorestate", "nahar_core_state_id configuration term energyrydberg")
+def read_nahar_core_states(fenlist) -> list[NaharCoreState | None]:
     while True:
         line = fenlist.readline()
         if not line:
@@ -184,14 +189,14 @@ def read_nahar_core_states(fenlist):
     fenlist.readline()  # ' target states and energies:'
     fenlist.readline()  # blank line
 
-    nahar_core_states = [()] * (numberofcorestates + 1)
+    nahar_core_states: list[NaharCoreState | None] = [None] * (numberofcorestates + 1)
     for c in range(1, numberofcorestates + 1):
         row = fenlist.readline().split()
-        nahar_core_states[c] = naharcorestaterow(int(row[0]), row[1], row[2], float(row[3]))
-        if int(nahar_core_states[c].nahar_core_state_id) != c:  # ty:ignore[possibly-missing-attribute]
+        state = NaharCoreState(int(row[0]), row[1], row[2], float(row[3]))
+        nahar_core_states[c] = state
+        if int(state.nahar_core_state_id) != c:  # ty:ignore[possibly-missing-attribute]
             print(
-                f"Nahar levels mismatch: id {c:d} found at entry"
-                f" number {int(nahar_core_states[c].nahar_core_state_id):d}"  # ty:ignore[possibly-missing-attribute]
+                f"Nahar levels mismatch: id {c:d} found at entry number {int(state.nahar_core_state_id):d}"  # ty:ignore[possibly-missing-attribute]
             )
             sys.exit()
     return nahar_core_states

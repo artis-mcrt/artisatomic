@@ -275,7 +275,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
         if not listions:
             continue
 
-        nahar_core_states = [[None] for _ in listions]  # list of named tuples (naharcorestaterow)
+        nahar_core_states: list[list[readnahardata.NaharCoreState | None]] = [[None] for _ in listions]
         hillier_photoion_targetconfigs: list = [[] for _ in listions]
 
         # keys are (2S+1, L, parity), values are strings of electron configuration

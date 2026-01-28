@@ -33,6 +33,7 @@ dependencies = [
     "pandas>=2.3.0",
     "polars>=1.31.0",
     "pyarrow>=18.1.0",
+    "requests>=2.32.5",
     "scipy>=1.15.3",
     "xopen[zstd]>=2.0.2",
 ]
@@ -44,6 +45,7 @@ dev = [
     "mypy>=1.16.1",
     "pip>=25.2",                       # for mypy --install-types
     "prek>=0.1.6",
+    "pyright>=1.1.407",
     "pytest>=8.3.3",
     "ruff>=0.14.14",
     "ty>=0.0.14",
@@ -83,13 +85,14 @@ exclude = [
     'build',
     'dist',
     'target',
-    '**/version.py',
+    '**/_version.py',
     '.venv',
 ]
 reportAttributeAccessIssue = false
 reportCallIssue = false
-reportDeprecated = false
+reportDeprecated = true
 reportMissingImports = false
+reportMissingTypeStubs = false
 reportOptionalMemberAccess = false
 reportPossiblyUnboundVariable = false
 reportUnnecessaryTypeIgnoreComment = true
@@ -98,6 +101,7 @@ reportUnreachable = false
 typeCheckingMode = "standard"
 useLibraryCodeForTypes = true
 pythonVersion = "3.11"
+extraPaths = ["../artistools"]
 
 [tool.ruff]
 line-length = 120
