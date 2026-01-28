@@ -24,11 +24,11 @@ from scipy import interpolate
 
 from artisatomic import groundstatesonlynist
 from artisatomic import readboyledata
-from artisatomic import readcarsusdata
 from artisatomic import readdreamdata
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
+from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
@@ -85,9 +85,9 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     # ion_handlers = [
     #     (2, [(3, "boyle")]),
-    #     (38, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
-    #     (39, [(1, "carsus"), (2, "carsus")]),
-    #     (40, [(1, "carsus"), (2, "carsus"), (3, "carsus")]),
+    #     (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
+    #     (39, [(1, "kurucz"), (2, "kurucz")]),
+    #     (40, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
     #     (70, [(5, "gsnist")]),
     #     (92, [(2, "fac"), (3, "fac")]),
     #     (94, [(2, "fac"), (3, "fac")]),
@@ -96,7 +96,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     # include everything we have data for
     # ion_handlers = readqubdata.extend_ion_list(ion_handlers)
     # ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
-    # ion_handlers = readcarsusdata.extend_ion_list(ion_handlers)
+    # ion_handlers = readkuruczdata.extend_ion_list(ion_handlers)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
@@ -332,7 +332,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                 ):
                     handler = "qub_data"
                 else:
-                    handler = "carsus"
+                    handler = "kurucz"
 
             logfilepath = Path(
                 args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
@@ -524,13 +524,13 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
                     else:
                         hillier_photoion_targetconfigs[i] = None
 
-                elif handler == "carsus":  # tardis Carsus
+                elif handler == "kurucz":
                     (
                         ionization_energy_ev[i],
                         energy_levels[i],
                         transitions[i],
                         transition_count_of_level_name[i],
-                    ) = readcarsusdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+                    ) = readkuruczdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
                 elif handler == "dream":  # DREAM database of Z >= 57
                     (
@@ -937,7 +937,7 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
 def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_ev: float, ion_handler: str, args):
     dict_get_n_func = {
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
-        "carsus": readcarsusdata.get_level_valence_n,
+        "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,

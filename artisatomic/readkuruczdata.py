@@ -89,7 +89,7 @@ def read_lines_data(energy_levels, dflines):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_charge = ion_stage - 1
 
-    artisatomic.log_and_print(flog, f"Using Kurucz via CARSUS for Z={atomic_number} ion_stage {ion_stage}")
+    artisatomic.log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     from carsus.io.kurucz import GFALLReader  # ty:ignore[unresolved-import]
 
