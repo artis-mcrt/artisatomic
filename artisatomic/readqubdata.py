@@ -123,30 +123,32 @@ def read_adf04(
             sep=r"\s+",
             comment="C",
             names=list_headers,
-            dtype={"lower": int, "upper": int}.update(dict.fromkeys(list_headers[2:], float)),  # type: ignore[arg-type]
+            dtype={"lower": int, "upper": int},
             on_bad_lines="skip",
             skip_blank_lines=True,
             keep_default_na=False,
         )
         qubupsilondf_alltemps = qubupsilondf_alltemps.query("upper!=-1")
         for _, row in qubupsilondf_alltemps.iterrows():
-            lower = int(row["lower"])
-            upper = int(row["upper"])
+            lower = row["lower"]
+            upper = row["upper"]
             lower, upper = min(lower, upper), max(lower, upper)
             assert upper > lower
 
             # Co, W I and II rates are calculated at different temperatures
             # Should be handled in a less approximate way in the future
             if atomic_number == 27:
-                upsilon = float(row["upsT=5.01+03"].replace("-", "E-").replace("+", "E+"))
+                strtemperature = "5.01+03"
             elif atomic_number == 60 and ion_stage == 2:
-                upsilon = float(row["upsT=4.50+03"].replace("-", "E-").replace("+", "E+"))
+                strtemperature = "4.50+03"
             elif atomic_number == 74 and ion_stage == 1:
-                upsilon = float(row["upsT=5.80+03"].replace("-", "E-").replace("+", "E+"))
+                strtemperature = "5.80+03"
             elif atomic_number == 74 and ion_stage == 2:
-                upsilon = float(row["upsT=4.00+03"].replace("-", "E-").replace("+", "E+"))
+                strtemperature = "4.00+03"
             else:
-                upsilon = float(row["upsT=5.00+03"].replace("-", "E-").replace("+", "E+"))
+                strtemperature = "5.00+03"
+            strupsilon = str(row[f"upsT={strtemperature}"])
+            upsilon = float(strupsilon.replace("-", "E-").replace("+", "E+"))
             if (lower, upper) not in upsilondict:
                 upsilondict[(lower, upper)] = upsilon
             else:

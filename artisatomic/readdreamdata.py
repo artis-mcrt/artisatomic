@@ -120,14 +120,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dfiondata.insert(
         2,
         "Lower_index",
-        dfiondata.apply(lambda row: get_level_index(row, prefix="Lower"), axis=1).values,
+        dfiondata.apply(lambda row: get_level_index(row, prefix="Lower"), axis=1).to_numpy(),
         allow_duplicates=True,
     )
 
     dfiondata.insert(
         2,
         "Upper_index",
-        dfiondata.apply(lambda row: get_level_index(row, prefix="Upper"), axis=1).values,
+        dfiondata.apply(lambda row: get_level_index(row, prefix="Upper"), axis=1).to_numpy(),
         allow_duplicates=True,
     )
 
