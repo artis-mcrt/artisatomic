@@ -21,7 +21,7 @@ def read_ionization_data(atomic_number, ion_stage):
     ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
-    for atomic_num, ion_number, ionization_energy in ionization_data:
+    for atomic_num, ion_number, ionization_energy in ionization_data:  # pyright: ignore[reportGeneralTypeIssues]
         ion_dict = {ion_number: ionization_energy}
         if atomic_num in ionization_dict:
             ionization_dict[atomic_num].update(ion_dict)
@@ -36,13 +36,12 @@ def read_levels_data(atomic_number, ion_stage):
     assert aoife_dataset is not None
     levels_data = aoife_dataset["/levels_data"]
 
-    energy_levels = [None]
-    # TODO energyinRydbergs change back to energyabovegsinpercm
     energy_level_row = namedtuple(
         "energylevel", "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname"
     )
+    energy_levels: list[energy_level_row | None] = [None]
 
-    for rowtuple in levels_data:
+    for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
         energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # ty:ignore[too-many-positional-arguments]
 
@@ -61,7 +60,7 @@ def read_lines_data(atomic_number, ion_stage):
     transition_count_of_level_name = defaultdict(int)
     lines_row = namedtuple("transition", "atomic_number ion_stage lowerlevel upperlevel A lambdaangstrom coll_str")
 
-    for rowtuple in lines_data:
+    for rowtuple in lines_data:  # pyright: ignore[reportGeneralTypeIssues]
         (
             _line_id,
             wavelength,
