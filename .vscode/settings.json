@@ -7,7 +7,5 @@
             "source.organizeImports": "explicit"
         },
         "editor.defaultFormatter": "charliermarsh.ruff"
-    },
-    "python.analysis.extraPaths": ["../artistools/"],
-    "python.analysis.typeCheckingMode": "off"
+    }
 }
