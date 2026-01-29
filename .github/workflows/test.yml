@@ -74,6 +74,7 @@ jobs:
         runs-on: ubuntu-24.04
         env:
             UV_FROZEN: 1
+            ARTISATOMIC_TESTMODE: 1
         steps:
             - name: Checkout Code
               uses: actions/checkout@v4
@@ -108,11 +109,12 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, floers25, jplt, qub]
+                testname: [cmfgen, floers25, jplt, kurucz, qub]
             fail-fast: false
         runs-on: ubuntu-24.04
         env:
             UV_FROZEN: 1
+            ARTISATOMIC_TESTMODE: 1
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
@@ -161,11 +163,6 @@ jobs:
               if: matrix.testname == 'floers25'
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
-
-            - name: Extract QUB test data
-              if: matrix.testname == 'qub'
-              working-directory: atomic-data-qub/
-              run: rsync -av co_tyndall_test_sample/ co_tyndall/
 
             - name: Generate artis atomic data files
               run: |
