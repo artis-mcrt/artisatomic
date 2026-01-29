@@ -175,7 +175,7 @@ def main():
 
     for z, a in nuclist:
         strnuclide = elsymbols[z].lower() + str(a)
-        filename = f"{strnuclide}_lines.txt"
+        filename = f"gamma_{strnuclide}.txt"
         outpath = outfolder / filename
         # if outpath.is_file():
         #     # print(f"  {filename} already exists. skipping...")
