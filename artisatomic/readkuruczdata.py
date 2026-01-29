@@ -1,4 +1,3 @@
-import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from pathlib import Path
@@ -7,11 +6,10 @@ import artisatomic
 
 hc_in_ev_cm = 0.0001239841984332003
 
-gfall_reader: t.Any = None
+kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
-    kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
     path_gfall = (kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}.lines").resolve()
 
     if not path_gfall.is_file():
