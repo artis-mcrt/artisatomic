@@ -11,31 +11,14 @@ gfall_reader: t.Any = None
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
-    path_gfall = (
-        Path(__file__).parent.absolute()
-        / ".."
-        / "atomic-data-kurucz"
-        / "extendedatoms"
-        / f"gf{atomic_number:02d}{ion_charge:02d}.lines"
-    ).resolve()
+    kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
+    path_gfall = (kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}.lines").resolve()
 
     if not path_gfall.is_file():
-        path_gfall = (
-            Path(__file__).parent.absolute()
-            / ".."
-            / "atomic-data-kurucz"
-            / "extendedatoms"
-            / f"gf{atomic_number:02d}{ion_charge:02d}z.lines"
-        ).resolve()
+        path_gfall = (kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}z.lines").resolve()
 
     if not path_gfall.is_file():
-        path_gfall = (
-            Path(__file__).parent.absolute()
-            / ".."
-            / "atomic-data-kurucz"
-            / "zztar"
-            / f"gf{atomic_number:02d}{ion_charge:02d}.all"
-        ).resolve()
+        path_gfall = (kuruczdatapath / "zztar" / f"gf{atomic_number:02d}{ion_charge:02d}.all").resolve()
 
     if not path_gfall.is_file():
         raise FileNotFoundError(f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}")
