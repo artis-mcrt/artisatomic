@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import typing as t
 from collections import defaultdict
 from collections import namedtuple
@@ -11,7 +12,12 @@ from xopen import xopen
 
 import artisatomic
 
-tyndall_co3_path = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub" / "co_tyndall").resolve()
+tyndall_co3_path = (
+    Path(__file__).parent.resolve()
+    / ".."
+    / "atomic-data-qub"
+    / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
+).resolve()
 
 ryd_to_ev = 13.605693122994232
 

@@ -15,12 +15,11 @@ authors = [
 description = "Tools to create an atomic database for use with ARTIS."
 classifiers = [
     "Intended Audience :: Science/Research",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
 dynamic = ["version"]
@@ -30,7 +29,7 @@ dependencies = [
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
-    "pandas>=2.3.0",
+    "pandas>=3.0.0",
     "polars>=1.31.0",
     "pyarrow>=18.1.0",
     "requests>=2.32.5",
@@ -100,7 +99,7 @@ reportUnknownVariableType = false
 reportUnreachable = false
 typeCheckingMode = "standard"
 useLibraryCodeForTypes = true
-pythonVersion = "3.11"
+pythonVersion = "3.12"
 extraPaths = ["../artistools"]
 
 [tool.ruff]
