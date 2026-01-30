@@ -1,4 +1,3 @@
-gfall*
-*.lines
-*.all
-creationdates.dat
+extendedatoms/*.lines*
+zztar/*.all*
+zztar.tar
