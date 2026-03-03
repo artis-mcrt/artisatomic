@@ -111,7 +111,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def get_level_valence_n(levelname: str):
-    n = int(levelname.split("  ")[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+    n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
     assert n >= 0
     assert n < 20
     return n

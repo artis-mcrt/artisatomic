@@ -1187,7 +1187,7 @@ lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 # reads a Hillier level name and returns the term
 # tuple (twosplusone, l, parity)
 def get_term_as_tuple(config: str) -> tuple[int, int, int]:
-    config = config.split("[")[0]
+    config = config.split("[", maxsplit=1)[0]
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
         if config[-1] == "e":
@@ -1261,7 +1261,7 @@ def interpret_parent_term(strin: str) -> tuple[int, int, int]:
 def reduce_configuration(instr: str) -> str:
     if instr == "-1":
         return "-1"
-    instr = instr.split("[")[0]  # remove trailing bracketed J value
+    instr = instr.split("[", maxsplit=1)[0]  # remove trailing bracketed J value
 
     if instr[-1] not in ["o", "e"]:
         instr = instr + "e"  # last character being S,P,D, etc means even
