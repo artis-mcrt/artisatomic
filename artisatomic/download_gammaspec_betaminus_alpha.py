@@ -135,7 +135,7 @@ def main():
 
     dfbetaminus = (
         pl.read_csv(
-            at.get_config()["path_datadir"] / "betaminusdecays.txt",
+            at.get_path("datadir") / "betaminusdecays.txt",
             separator=" ",
             comment_prefix="#",
             has_header=False,
@@ -149,7 +149,7 @@ def main():
 
     dfalpha = (
         pl.read_csv(
-            at.get_config()["path_datadir"] / "alphadecays.txt",
+            at.get_path("datadir") / "alphadecays.txt",
             separator=" ",
             comment_prefix="#",
             has_header=False,
