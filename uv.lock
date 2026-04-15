@@ -66,7 +66,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "artistools", specifier = ">=2015.10.13" },
+    { name = "artistools", specifier = ">=2026.4.14" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "mypy", specifier = ">=1.16.1" },
     { name = "pip", specifier = ">=25.2" },
@@ -81,7 +81,7 @@ dev = [
 
 [[package]]
 name = "artistools"
-version = "2026.3.3"
+version = "2026.4.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "argcomplete" },
@@ -95,23 +95,22 @@ dependencies = [
     { name = "rich" },
     { name = "scipy" },
     { name = "tqdm" },
-    { name = "typing-extensions" },
     { name = "zstandard", marker = "python_full_version < '3.14'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/68/297b71a134275f327b1a6438f829cd801d94b09288db7c11c916055922a3/artistools-2026.3.3.tar.gz", hash = "sha256:062672e84443d22fd32a56572a48c790229d0994a730540bf4e7869bb8712b5a", size = 8304036, upload-time = "2026-03-03T10:37:58.47Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4e/0a/56458dc06a186d1fcd146e5795558847246f69488697b40f17dcf78253fb/artistools-2026.4.14.tar.gz", hash = "sha256:b85df9b8b0861e0b162fab7f1d3f498920d8208014e8ed4ce9a738cab276368b", size = 8178226, upload-time = "2026-04-14T23:12:30.937Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9b/24/cf664a273fae2eda080f8d9508f1823550c07d084209eef8c8a1b3117b17/artistools-2026.3.3-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:1924aa4ad81bd3c6a8e029cefc97b45dad9733d35f17ef46a91a61f521e72c66", size = 13358600, upload-time = "2026-03-03T10:37:29.025Z" },
-    { url = "https://files.pythonhosted.org/packages/b4/0e/22bc16390023177cd802a7efdf68aa482946d9ac37e67ce9a85eb9bdf9d7/artistools-2026.3.3-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:3f412f443d103bc6adff902c2ec3e4179c02931ceb8f522b5c7f64145813c074", size = 13965461, upload-time = "2026-03-03T10:37:31.526Z" },
-    { url = "https://files.pythonhosted.org/packages/ce/a0/a4f2e658a8b78d033619b2709e04f194c72e10ebbb62f0c598f6c32167ec/artistools-2026.3.3-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:dce4c65fea4f1a42ed2a48c72599d93fd0977a378e860037138c63f6a80e2ce2", size = 14371420, upload-time = "2026-03-03T10:37:33.791Z" },
-    { url = "https://files.pythonhosted.org/packages/00/95/6f7b0f19bb356a16da78ed70f2bd450db48bfed833d1cc9bdf5b9f042495/artistools-2026.3.3-cp313-cp313-macosx_13_0_arm64.whl", hash = "sha256:b82a5c06c2f3f875ca006b62aa09e1a631a9d95e7b69d150ae608a497be7d0be", size = 13358691, upload-time = "2026-03-03T10:37:35.886Z" },
-    { url = "https://files.pythonhosted.org/packages/5e/62/f5342244fd0e977b44e69569f7280daa55063c85921dc9d5371c339dda9a/artistools-2026.3.3-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:646abce69669ba2c81ae4322c23c40a7d672070a4a259f628d01369889e65563", size = 13965364, upload-time = "2026-03-03T10:37:38.333Z" },
-    { url = "https://files.pythonhosted.org/packages/17/93/5262d8277bdc53afd9f407793ec262f324737cdb15e6e2736c68ff64c8da/artistools-2026.3.3-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:7abe6217496ac463b8db8185ceb0d6237e2e315fafe3dd944af7f9a1bbfb5c45", size = 14371298, upload-time = "2026-03-03T10:37:40.743Z" },
-    { url = "https://files.pythonhosted.org/packages/47/76/abf8b75b9228d7cee31831914566a3d0d72edbc64dc41f7e3cdbde5d8fba/artistools-2026.3.3-cp314-cp314-macosx_13_0_arm64.whl", hash = "sha256:1f64a46599e0e46c318db060a2164aa390a0b2c23d156f6e8de1e789a16094bf", size = 13360483, upload-time = "2026-03-03T10:37:43.247Z" },
-    { url = "https://files.pythonhosted.org/packages/71/8f/a972f09378398fad12fd5210b36ff2abf85cae617a65fa3b789adbb6b6a1/artistools-2026.3.3-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:35299bf870fedffbeb7f617d7a78bc3ad7a52ff5df188c3c5f72ced6d0466bbe", size = 13966112, upload-time = "2026-03-03T10:37:47.526Z" },
-    { url = "https://files.pythonhosted.org/packages/b0/c4/f22e6ff62e518ade5d3d4d45ba02ae8f1c5ca2af30dd2a3a197c55e5173b/artistools-2026.3.3-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:e83188d5853e75e4b8204d8b3c1b5ae5eb7ed6677831fc575da6ce2860a167a7", size = 14370761, upload-time = "2026-03-03T10:37:49.52Z" },
-    { url = "https://files.pythonhosted.org/packages/c5/1e/caf1cfabf1997d9d5c58d77a34c0fb4a4fb2c12de680c76c6266829e9be3/artistools-2026.3.3-cp314-cp314t-macosx_13_0_arm64.whl", hash = "sha256:ecb10b48a3e298a674c46f6dac802e47af18e8b964706c799bf1c27448c162bf", size = 13369214, upload-time = "2026-03-03T10:37:51.699Z" },
-    { url = "https://files.pythonhosted.org/packages/47/4a/52a7b689a17e7b224aa9f512b4e0d06a2356f359eb9c83deeb893c76c2b8/artistools-2026.3.3-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:53ebb78302681d0c19e9e29b9f9a238f6afdb8989890bc41779d2311edab7378", size = 13970696, upload-time = "2026-03-03T10:37:53.99Z" },
-    { url = "https://files.pythonhosted.org/packages/f9/d6/a63350c347abf4d066db96ba8337d240f31b18a80a9b4bcecab43195ee2f/artistools-2026.3.3-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:e7e83eb6f8b6d9515666e215d548eca1cda61bbf407921b39043f0f5eec79c66", size = 14371801, upload-time = "2026-03-03T10:37:56.329Z" },
+    { url = "https://files.pythonhosted.org/packages/88/9a/5cf6a2e73383f1c549095c4ef05e0687d99da3e519ff754d3f8d8375e2fa/artistools-2026.4.14-cp312-cp312-macosx_13_0_arm64.whl", hash = "sha256:04e3145877db91aebd2a545c75d828f9ed907beb4fb8531c51226ec90b15c2b9", size = 13405149, upload-time = "2026-04-14T23:11:50.427Z" },
+    { url = "https://files.pythonhosted.org/packages/56/6d/19e1dc13687018f177f033b2a9ed7777588898f79ee9c4d3675b771f1fa6/artistools-2026.4.14-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:f9914cb55e9e562e7713b9255b7c53b3abeed79ded1b83d21012ff6ee130588e", size = 14036155, upload-time = "2026-04-14T23:11:53.82Z" },
+    { url = "https://files.pythonhosted.org/packages/0b/4f/324e136c4bb26e791ef9c56789355a54246e0feabb64d40f2db181722585/artistools-2026.4.14-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:000ee9eacd08a82862a185d21ace472da63c595f24446c248129d3758b02e609", size = 14420831, upload-time = "2026-04-14T23:11:57.318Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/76/d74c1b723c83d1410b7c3e3af863a8e97eb4ac905fc62653f28e674e0c57/artistools-2026.4.14-cp313-cp313-macosx_13_0_arm64.whl", hash = "sha256:26498dc65ae3095277bd3c4bae44422d17e45daa41b9140086863574b6e94e08", size = 13405782, upload-time = "2026-04-14T23:12:00.66Z" },
+    { url = "https://files.pythonhosted.org/packages/47/ab/d3de02984acaf620094a38e7e959b476218bdc143215c44cca5b21813b39/artistools-2026.4.14-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:8c9c07c32e50823f314274cb1af772ec6f4020c78e736210496cfd5e80662aa1", size = 14036652, upload-time = "2026-04-14T23:12:03.991Z" },
+    { url = "https://files.pythonhosted.org/packages/d0/df/06a3d85e91fb9cecb1aeddf9dfbabade07e5a59291de1c1a13f4558c3fe8/artistools-2026.4.14-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:2b9cc168b5472df6808a673a3ec9468e53a7a66aa535b1da79c86ed38ea87e53", size = 14420651, upload-time = "2026-04-14T23:12:07.307Z" },
+    { url = "https://files.pythonhosted.org/packages/46/06/93653e3201afb7381e1adf5595c192ce12a8e5757446b4d7b0b911f15115/artistools-2026.4.14-cp314-cp314-macosx_13_0_arm64.whl", hash = "sha256:a2446474839d6273cb2ab716f72cc2cdefc0090a9f1ba35651641d7c790d8636", size = 13406897, upload-time = "2026-04-14T23:12:10.85Z" },
+    { url = "https://files.pythonhosted.org/packages/c6/c1/602eca75ee05a19eefcae26413f71675debb8c98837c875cec91fcb56f2d/artistools-2026.4.14-cp314-cp314-manylinux_2_28_aarch64.whl", hash = "sha256:d07cc8832f3f958bbf8079bc1acd2f1829dd289c88d429c82c1254edacd934ed", size = 14034980, upload-time = "2026-04-14T23:12:14.031Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/88/474dd8918f9068c67150e8460459ddf659da8c7ed122cb8a20a4597e087f/artistools-2026.4.14-cp314-cp314-manylinux_2_28_x86_64.whl", hash = "sha256:22e428dd2d20a26be7bd82dc6b0cf41ea95ef0779dc25c90e3a863098e7b9f46", size = 14421968, upload-time = "2026-04-14T23:12:17.346Z" },
+    { url = "https://files.pythonhosted.org/packages/b9/36/030ebca5ae953e902160ad37e54afaaf5d224d6cc22b43e84258ea6073bd/artistools-2026.4.14-cp314-cp314t-macosx_13_0_arm64.whl", hash = "sha256:fb42cf70da7e4b51d8c07ff702c722c73e6438ff50d9d925a973a926e728e2c2", size = 13404838, upload-time = "2026-04-14T23:12:20.789Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/6c/edd1890f685be87420ed9ef6d71df297924aec9169b676ee893fb7dd9ef3/artistools-2026.4.14-cp314-cp314t-manylinux_2_28_aarch64.whl", hash = "sha256:21685fc4d489de7accf48a143ff9f483098ab3d041716f0a92f9b4b9009ccec4", size = 14031601, upload-time = "2026-04-14T23:12:24.225Z" },
+    { url = "https://files.pythonhosted.org/packages/a6/e6/4f3484d6af384df90d2b48c7cacdca22c202ae938d85c2bc965f0aaa3c49/artistools-2026.4.14-cp314-cp314t-manylinux_2_28_x86_64.whl", hash = "sha256:c6159039d29b32dd662d3dee5422f735fd63889d36df5227415825c3a8472d4f", size = 14424851, upload-time = "2026-04-14T23:12:27.422Z" },
 ]
 
 [[package]]

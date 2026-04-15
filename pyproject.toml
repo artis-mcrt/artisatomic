@@ -39,7 +39,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "artistools>=2015.10.13",
+    "artistools>=2026.4.14",
     "matplotlib>=3.10.7",
     "mypy>=1.16.1",
     "pip>=25.2",                       # for mypy --install-types
