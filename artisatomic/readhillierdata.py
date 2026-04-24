@@ -785,7 +785,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
                 phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
-                    (phixstargets[filenum], phixs_at_threshold)
+                    (
+                        phixstargets[filenum],
+                        phixs_at_threshold,
+                    )
                 )
 
                 # add the new phixs table, or replace the
@@ -1163,9 +1166,11 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     return upsilondict
 
 
-def get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, hillier_photoion_targetconfigs):
-    targetlist = [[] for _ in range(dfenergy_levels.height)]
-    targetlist_of_targetconfig = defaultdict(list)
+def get_photoiontargetfractions(
+    dfenergy_levels, dfenergy_levels_upperion, hillier_photoion_targetconfigs: dict[int, list[tuple[str, float]]]
+) -> list[list[tuple[int, float]]]:
+    targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
+    targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
 
     for energy_level in dfenergy_levels[1:].iter_rows(named=True):
         lowerlevelid = energy_level["levelid"]

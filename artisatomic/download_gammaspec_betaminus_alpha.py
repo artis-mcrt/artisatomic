@@ -4,7 +4,6 @@ import math
 from pathlib import Path
 
 import artistools as at
-import numpy as np
 import polars as pl
 import requests
 
@@ -81,7 +80,7 @@ def process_table(z: int, a: int, outpath: Path, textdata, dfbetaminus: pl.DataF
             halflife = maybedfbetaminusrow["tau[s]"].item() * math.log(2)
             strwarn = (
                 " WARNING!!!!!!"
-                if (nndc_halflife is not None and not np.isclose(nndc_halflife, halflife, rtol=0.1))
+                if (nndc_halflife is not None and not math.isclose(nndc_halflife, halflife, rel_tol=0.1))
                 else ""
             )
             print(f"      betaminusdecays.txt half-life: {halflife:7.1e} s {strwarn}")
@@ -90,7 +89,7 @@ def process_table(z: int, a: int, outpath: Path, textdata, dfbetaminus: pl.DataF
             halflife = maybedfalpharow["halflife_s"].item()
             strwarn = (
                 " WARNING!!!!!!"
-                if (nndc_halflife is not None and not np.isclose(nndc_halflife, halflife, rtol=0.1))
+                if (nndc_halflife is not None and not math.isclose(nndc_halflife, halflife, rel_tol=0.1))
                 else ""
             )
             print(f"          alphadecays.txt half-life: {halflife:7.1e} s {strwarn}")
@@ -100,12 +99,12 @@ def process_table(z: int, a: int, outpath: Path, textdata, dfbetaminus: pl.DataF
 
         if maybedfbetaminusrow.height > 0:
             file_e_gamma = maybedfbetaminusrow["E_gamma[MeV]"].item() * 1000
-            strwarn = "" if np.isclose(e_gamma, file_e_gamma, rtol=0.1) else " WARNING!!!!!!"
+            strwarn = "" if math.isclose(e_gamma, file_e_gamma, rel_tol=0.1) else " WARNING!!!!!!"
             print(f"    betaminusdecays.txt Egamma: {file_e_gamma:7.1f} keV {strwarn}")
 
         elif maybedfalpharow.height > 0:
             file_e_gamma = maybedfalpharow["E_gamma[MeV]"].item() * 1000
-            strwarn = "" if np.isclose(e_gamma, file_e_gamma, rtol=0.1) else " WARNING!!!!!!"
+            strwarn = "" if math.isclose(e_gamma, file_e_gamma, rel_tol=0.1) else " WARNING!!!!!!"
             print(f"        alphadecays.txt Egamma: {file_e_gamma:7.1f} keV {strwarn}")
 
         dfout = pl.DataFrame(

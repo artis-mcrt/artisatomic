@@ -114,7 +114,7 @@ def get_levelname(row):
 
 
 def read_levels_data(dflevels):
-    energy_level_tuple = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
+    energy_level_tuple = namedtuple("energy_level_tuple", "levelname energyabovegsinpercm g parity")
 
     energy_levels = []
 
@@ -135,7 +135,7 @@ def read_levels_data(dflevels):
 def read_lines_data(energy_levels, dflines):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
+    transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
 
     for (lowerindex, upperindex), row in dflines.iterrows():
         lowerlevel = lowerindex + 1

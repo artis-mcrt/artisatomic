@@ -73,7 +73,7 @@ def read_levels_data(dflines):
 def read_lines_data(dfiondata, energy_levels):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple("transition", "lowerlevel upperlevel A coll_str")
+    transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
 
     for index, row in dfiondata.iterrows():
         lowerindex = row["Lower_index"]
