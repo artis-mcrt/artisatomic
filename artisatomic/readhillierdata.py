@@ -320,7 +320,7 @@ def read_levels_and_transitions(
         # assert(row_format_energy_level == hillier_rowformat[format_date])
 
         hillier_energy_level_row = namedtuple(  # type: ignore
-            "energylevel",
+            "hillier_energy_level_row",
             row_format_energy_level + " corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore",
         )
 
