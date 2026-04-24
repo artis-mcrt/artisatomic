@@ -24,18 +24,8 @@ repos:
       hooks:
           - id: yamlfmt
     - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.15.10
+      rev: v0.15.11
       hooks:
           - id: ruff-check
             args: [--fix]
           - id: ruff-format
-
-    - repo: local
-      hooks:
-          - id: ty-check
-            name: ty check
-            language: python
-            entry: uv run --frozen -- ty check
-            pass_filenames: false
-            args: [--python=.venv/]
-            additional_dependencies: [ty]

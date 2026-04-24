@@ -242,7 +242,7 @@ def read_levels_and_transitions(
         .collect()
     )
 
-    transition_count_of_level_name = {
+    transition_count_of_level_name: dict[str, int] = {
         levelname: (
             transitions.select(((pl.col("lowerlevel") == levelid) | (pl.col("upperlevel") == levelid)).sum()).item()
         )

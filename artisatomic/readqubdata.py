@@ -170,7 +170,9 @@ def read_adf04(
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
-    qub_transition_row = namedtuple("transition", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str")
+    qub_transition_row = namedtuple(
+        "qub_transition_row", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str"
+    )
 
     new_qub_calculations = {
         (38, 1),

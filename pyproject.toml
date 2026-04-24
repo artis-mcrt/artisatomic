@@ -26,6 +26,7 @@ dynamic = ["version"]
 readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
+    "basedpyright>=1.39.3",
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
@@ -44,10 +45,8 @@ dev = [
     "mypy>=1.16.1",
     "pip>=25.2",                       # for mypy --install-types
     "prek>=0.1.6",
-    "pyright>=1.1.407",
     "pytest>=8.3.3",
     "ruff>=0.14.14",
-    "ty>=0.0.14",
     "types-pytz>=2025.2.0.20250809",
     "types-requests>=2.32.0.20241016",
 ]
@@ -73,6 +72,24 @@ warn_unused_configs = true
 [tool.pylint]
 max-line-length = 120
 errors-only = true
+
+[tool.pyrefly]
+project-excludes = [
+    '**/node_modules',
+    '**/__pycache__',
+    '**/.*',
+    'build',
+    'dist',
+    'target',
+    '**/version.py',
+    '.venv',
+    '**/rd_cmfgen.py',
+]
+
+[tool.pyrefly.errors]
+missing-import = false
+unbound-name = false
+unsupported-operation = false
 
 [tool.pyright]
 deprecateTypingAliases = true
