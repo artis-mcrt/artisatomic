@@ -37,7 +37,8 @@ def read_levels_data(atomic_number, ion_stage):
     levels_data = aoife_dataset["/levels_data"]
 
     energy_level_row = namedtuple(
-        "energylevel", "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname"
+        "energy_level_row",
+        "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname",
     )
     energy_levels: list[energy_level_row | None] = [None]
 
@@ -58,7 +59,9 @@ def read_lines_data(atomic_number, ion_stage):
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    lines_row = namedtuple("transition", "atomic_number ion_stage lowerlevel upperlevel A lambdaangstrom coll_str")
+    transition_tuple = namedtuple(
+        "transition_tuple", "atomic_number ion_stage lowerlevel upperlevel A lambdaangstrom coll_str"
+    )
 
     for rowtuple in lines_data:  # pyright: ignore[reportGeneralTypeIssues]
         (
@@ -77,7 +80,7 @@ def read_lines_data(atomic_number, ion_stage):
         ) = rowtuple
 
         coll_str = -1  # TODO
-        line = lines_row(
+        line = transition_tuple(
             atomic_num, ion_number, int(level_number_lower + 1), int(level_number_upper + 1), A_ul, wavelength, coll_str
         )
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
