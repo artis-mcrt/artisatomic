@@ -858,7 +858,10 @@ def combine_hillier_nahar(
 
     if len(nahar_phixs_tables.keys()) > 0:
         photoionization_crosssections = np.zeros(
-            (len(energy_levels), args.nphixspoints)
+            (
+                len(energy_levels),
+                args.nphixspoints,
+            )
         )  # this probably gets overwritten anyway
         photoionization_thresholds_ev = np.zeros(len(energy_levels))
 
@@ -1125,6 +1128,7 @@ def reduce_phixs_tables_worker(
             nsteps = 50  # was 500
             arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
             arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
+        assert isinstance(arr_sigma_megabarns, np.ndarray)
 
         integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
         if np.any(integrand_vals):
