@@ -47,7 +47,7 @@ def read_nahar_rrcfile(filename, noprint=False):
                     sys.exit()
                 records.append(recomb_tuple(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
-    return pd.DataFrame.from_records(records, columns=recomb_tuple._fields)
+    return pd.DataFrame(records)
 
 
 def main():
