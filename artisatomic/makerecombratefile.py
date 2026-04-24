@@ -70,9 +70,11 @@ def main():
     dfcomposition = get_composition_data("artis_files/compositiondata.txt")
 
     with open(os.path.join("artis_files", "recombrates.txt"), "w") as frecombrates:
-        for _, comprow in dfcomposition.iterrows():
-            atomic_number = int(comprow.Z)
-            for lowerionstage in range(int(comprow["lowermost_ion_stage"]), int(comprow["uppermost_ion_stage"])):
+        for Z, lowermost_ion_stage, uppermost_ion_stage in dfcomposition.select(
+            "Z", "lowermost_ion_stage", "uppermost_ion_stage"
+        ).iter_rows():
+            atomic_number = int(Z)
+            for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage)):
                 upperionstage = lowerionstage + 1
                 print(f"Z={atomic_number} {artisatomic.elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
 
@@ -95,8 +97,9 @@ def main():
                     atomic_number = artisatomic.elsymbols.index(elsymbol.title())
                     dfrecombrates = read_nahar_rrcfile(naharfilename)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(dfrecombrates)}\n")
-                    for _, row in dfrecombrates.iterrows():
-                        frecombrates.write(f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n")
+                    frecombrates.writelines(
+                        f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n" for _, row in dfrecombrates.iterrows()
+                    )
 
                 # elif atomic_number == 28 and lowerionstage >= 3:
                 #     # Get Nahar's boost factors relative to SS82 for Fe, and apply them to the SS82 rates for Ni
