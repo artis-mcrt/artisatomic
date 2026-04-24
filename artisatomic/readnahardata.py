@@ -138,7 +138,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                             "",
                         )
                     )
-
+                    assert nahar_energy_levels[-1] is not None
                     energyabovegsinpercm = (
                         (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))  # ty:ignore[possibly-missing-attribute]
                         * ryd_to_ev
