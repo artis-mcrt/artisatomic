@@ -17,21 +17,15 @@ hc_in_ev_cm = 0.0001239841984332003
 
 def init_dreamdata():
     global dreamdata
-    if dreamdata is None:
-        if dreamdatapath.exists():
-            hdfdata = pd.read_hdf(dreamdatapath)
-            assert isinstance(hdfdata, pd.DataFrame)
-            dreamdata = hdfdata
-            dreamdata = dreamdata.assign(
-                Lower_g=lambda row: 2 * row["Lower_J"] + 1, Upper_g=lambda row: 2 * row["Upper_J"] + 1
-            )
-        else:
-            dreamdata = None
+    hdfdata = pd.read_hdf(dreamdatapath)
+    assert isinstance(hdfdata, pd.DataFrame)
+    dreamdata = hdfdata
+    dreamdata = dreamdata.assign(Lower_g=lambda row: 2 * row["Lower_J"] + 1, Upper_g=lambda row: 2 * row["Upper_J"] + 1)
 
 
 def extend_ion_list(ion_handlers):
     init_dreamdata()
-
+    assert dreamdata is not None
     for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
         ion_stage = charge + 1
         artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
@@ -41,7 +35,7 @@ def extend_ion_list(ion_handlers):
 
 def energytuplefromrow(row, prefix):
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
-    dream_energy_level_row = namedtuple("energylevel", "levelname energyabovegsinpercm g parity")
+    dream_energy_level_row = namedtuple("dream_energy_level_row", "levelname energyabovegsinpercm g parity")
 
     parity = 1 if leveltype == "(o)" else 0
     paritystr = "odd" if parity == 1 else "even"
@@ -92,6 +86,7 @@ def read_lines_data(dfiondata, energy_levels):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     init_dreamdata()
+    assert dreamdata is not None
     charge = ion_stage - 1
     dfiondata = dreamdata.loc[atomic_number, charge]  # ty:ignore[possibly-missing-attribute]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
