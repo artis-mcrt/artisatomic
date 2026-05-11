@@ -108,7 +108,7 @@ ions_data = {
     # (17, 4): ion_files('15feb01', 'clivosc_fin.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_data.dat'),
     # Ar
     # (18, 1): ion_files('9sep11', 'fin_osc', hillier_rowformat_b, ['phot_nosm'], 'col_guess'),
-    (18, 1): ion_files("9sep11", "fin_osc_ljs", hillier_rowformat_b, ["phot_nosm"], "col_guess"),
+    (18, 1): ion_files("9sep11", "fin_osc", hillier_rowformat_b, ["phot_nosm"], "col_guess"),
     (18, 2): ion_files("9sep11", "fin_osc", hillier_rowformat_b, ["phot_nosm"], "col_data"),
     (18, 3): ion_files("19nov07", "fin_osc", hillier_rowformat_a, ["phot_nosm"], "col_ariii"),
     (18, 4): ion_files("1dec99", "fin_osc.dat", hillier_rowformat_c, ["phot_sm_3000.dat"], "col_data.dat"),
@@ -141,8 +141,8 @@ ions_data = {
     # (25, 4): ion_files('18oct00', 'mniv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
     # (25, 5): ion_files('18oct00', 'mnv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
     # Fe
+    # (26, 1): ion_files("07sep16", "fei_osc", hillier_rowformat_b, ["phot_smooth_3000"], "col_data"),
     (26, 1): ion_files("07sep16", "fei_osc", hillier_rowformat_b, ["phot_smooth_3000"], "col_data"),
-    # (26, 1): ion_files('07sep16', 'fei_osc', hillier_rowformat_b, ['phot_smooth_3000'], 'col_data_ljs'),
     (26, 2): ion_files("10sep16", "fe2_osc", hillier_rowformat_b, ["phot_op.dat"], "fe2_col.dat"),
     (26, 3): ion_files("30oct12", "FeIII_OSC", hillier_rowformat_b, ["phot_sm_3000.dat"], "col_data.dat"),
     (26, 4): ion_files("18oct00", "feiv_osc_rev2.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_data.dat"),

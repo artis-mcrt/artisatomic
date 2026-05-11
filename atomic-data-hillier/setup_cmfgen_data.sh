@@ -10,7 +10,7 @@ if [ ! -f atomic_data_$version.tar.xz ]; then curl -O https://theory.gsi.de/~lsh
 md5sum -c atomic_data_$version.tar.xz.md5
 tar -xJf atomic_data_$version.tar.xz
 mv atomic/ atomic_$version/
-rsync -a atomic_diff/ atomic_$version/
+# rsync -a atomic_diff/ atomic_$version/
 
 find atomic_$version ! -name "*.zst" -size +10M -exec zstd -12 -v -T0 --rm {} \; || true
 
