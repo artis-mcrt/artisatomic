@@ -997,7 +997,7 @@ def parallel_map[ResultType](
     *iterables: Iterable[t.Any],
     **kwargs: t.Any,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar using either multithreading (for free-threading python or allow_multiprocessing=False) or multiprocessing."""
+    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
     use_multiprocessing = True
     if sys.version_info >= (3, 13):
         with contextlib.suppress(AttributeError):
@@ -1019,16 +1019,13 @@ def parallel_map[ResultType](
     return results
 
 
-def reduce_phixs_tables(
-    dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, hideoutput: bool = False
-) -> dict:
+def reduce_phixs_tables(dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float) -> dict:
     """Receives a dictionary, with each item being a 2D array of energy and cross section points
     Returns a dictionary with the items having been downsampled into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
-    if not hideoutput:
-        print(f"Processing {len(dicttables.keys()):d} phixs tables")
+    print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
     dictout = dict(
         zip(
