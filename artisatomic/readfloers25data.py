@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
+from xopen import xopen
 
 import artisatomic
 
@@ -60,9 +61,17 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
-    dflevels = pl.from_pandas(
-        pd.read_csv(levels_file, sep=r"\s+", skiprows=18, dtype_backend="pyarrow", dtype={"J": str})
-    ).with_columns(
+    dashrowcount = 0
+    with xopen(levels_file) as f:
+        for line in f:
+            if line.startswith("--"):
+                dashrowcount += 1
+                if dashrowcount == 3:  # data table starts after the '----' lines
+                    break
+
+        dflevels = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype={"J": str}))
+
+    dflevels = dflevels.with_columns(
         pl.when(pl.col("J").str.ends_with("/2"))
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
