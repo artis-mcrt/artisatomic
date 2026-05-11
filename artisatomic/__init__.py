@@ -10,6 +10,8 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
+from collections.abc import Callable
+from collections.abc import Iterable
 from collections.abc import Sequence
 from functools import lru_cache
 from functools import partial
@@ -990,33 +992,56 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
-def reduce_phixs_tables(
-    dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float, hideoutput: bool = False
-) -> dict:
+def parallel_map[ResultType](
+    fn: Callable[..., ResultType],
+    *iterables: Iterable[t.Any],
+    **kwargs: t.Any,
+) -> list[ResultType]:
+    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
+    use_multiprocessing = True
+    if sys.version_info >= (3, 13):
+        with contextlib.suppress(AttributeError):
+            if not sys._is_gil_enabled():  # noqa: SLF001
+                # return a thread pool if we have no GIL (free threading)
+                use_multiprocessing = False
+
+    if use_multiprocessing:
+        mp.set_start_method("spawn", force=True)
+        from tqdm.contrib.concurrent import process_map
+
+        results = process_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+    else:
+        from tqdm.contrib.concurrent import thread_map
+
+        results = thread_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+
+    assert isinstance(results, list)
+    return results
+
+
+def reduce_phixs_tables(dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float) -> dict:
     """Receives a dictionary, with each item being a 2D array of energy and cross section points
     Returns a dictionary with the items having been downsampled into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
     """
-    if not hideoutput:
-        print(f"Processing {len(dicttables.keys()):d} phixs tables")
+    print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
-    with mp.get_context("spawn").Pool() as pool:
-        dictout = dict(
-            zip(
-                dicttables.keys(),
-                pool.map(
-                    partial(
-                        reduce_phixs_tables_worker,
-                        optimaltemperature,
-                        nphixspoints,
-                        phixsnuincrement,
-                    ),
-                    dicttables.values(),
+    dictout = dict(
+        zip(
+            dicttables.keys(),
+            parallel_map(
+                partial(
+                    reduce_phixs_tables_worker,
+                    optimaltemperature,
+                    nphixspoints,
+                    phixsnuincrement,
                 ),
-                strict=True,
-            )
+                dicttables.values(),
+            ),
+            strict=True,
         )
+    )
 
     return dictout
 
