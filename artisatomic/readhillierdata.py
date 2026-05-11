@@ -1038,7 +1038,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     )
     artisatomic.log_and_print(flog, f"Reading {filename}")
     coll_lines_in = 0
-    with open(filename) as fcoldata:
+    with xopen(filename) as fcoldata:
         header_row = []
         temperature_index = -1
         num_expected_t_values = -1
