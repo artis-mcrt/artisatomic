@@ -70,6 +70,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
                     break
 
         dflevels = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype={"J": str}))
+    if dashrowcount < 3:
+        raise ValueError(f"Did not find expected data table in {levels_file}")
 
     dflevels = dflevels.with_columns(
         pl.when(pl.col("J").str.ends_with("/2"))
