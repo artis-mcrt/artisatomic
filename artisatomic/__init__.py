@@ -992,9 +992,9 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
-def parallel_map[IterableType, ResultType](
-    fn: Callable[[IterableType], ResultType],
-    *iterables: Iterable[IterableType],
+def parallel_map[ResultType](
+    fn: Callable[..., ResultType],
+    *iterables: Iterable[t.Any],
     **kwargs: t.Any,
 ) -> list[ResultType]:
     """Execute a parallel map with a progress bar using either multithreading (for free-threading python or allow_multiprocessing=False) or multiprocessing."""
