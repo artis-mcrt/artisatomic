@@ -155,7 +155,6 @@ ignore = [
     "N816",    # mixed-case-variable-in-module-scope
     "PERF203", # try-except-in-loop
     "PGH003",
-    "PLC0414", # useless-import-alias
     "PLC0415", # import-outside-toplevel
     "PLR0914", # too-many-locals
     "PLR0917", # too-many-positional
