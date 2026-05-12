@@ -1,3 +1,4 @@
 *       @lukeshingles
-uv.lock
-.github/workflows/*
+.github/workflows/**
+**/*.lock
+pyproject.toml
