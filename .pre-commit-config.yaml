@@ -29,7 +29,18 @@ repos:
           - id: ruff-check
             args: [--fix]
           - id: ruff-format
+
     - repo: https://github.com/astral-sh/uv-pre-commit
       rev: 0.11.13
       hooks:
           - id: uv-lock
+          - id: uv-sync
+            args: [--frozen, --all-extras, --no-install-project]
+
+    - repo: local
+      hooks:
+          - id: pyrefly-check
+            name: Pyrefly type check
+            pass_filenames: false
+            language: system
+            entry: uv run pyrefly check
