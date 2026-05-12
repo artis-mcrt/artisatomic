@@ -44,8 +44,10 @@ dev = [
     "artistools>=2026.4.14",
     "matplotlib>=3.10.7",
     "mypy>=2.1.0",
-    "pip>=25.2",                       # for mypy --install-types
+    "pandas-stubs>=3.0.0.260204",
+    "pip>=25.2",
     "prek>=0.1.6",
+    "pyrefly>=1.0.0",
     "pytest>=8.3.3",
     "ruff>=0.14.14",
     "types-pytz>=2025.2.0.20250809",
@@ -64,6 +66,7 @@ makerecombratefile = "artisatomic.makerecombratefile:main"
 line-length = 120
 
 [tool.mypy]
+python_executable = ".venv/bin/python3"
 python_version = '3.13'
 exclude = "(build)|(tests)"
 packages = "artisatomic"
@@ -75,6 +78,7 @@ max-line-length = 120
 errors-only = true
 
 [tool.pyrefly]
+preset = "strict"
 project-excludes = [
     '**/node_modules',
     '**/__pycache__',
@@ -86,11 +90,17 @@ project-excludes = [
     '.venv',
     '**/rd_cmfgen.py',
 ]
+python-interpreter-path = ".venv/bin/python3"
 
 [tool.pyrefly.errors]
 missing-import = false
 unbound-name = false
 unsupported-operation = false
+implicit-any-empty-container = false
+implicit-any-parameter = false
+implicit-any-type-argument = false
+untyped-import = false
+unnecessary-type-conversion = false
 
 [tool.pyright]
 deprecateTypingAliases = true

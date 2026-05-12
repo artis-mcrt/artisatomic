@@ -740,8 +740,8 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 if len(row) == 0:
                     if (
                         lowerlevelname != ""
-                        and lowerlevelname in phixstables
-                        and targetlevelname in phixstables[lowerlevelname]  # ty:ignore[invalid-argument-type]
+                        and lowerlevelname in phixstables[filenum]
+                        and targetlevelname in phixstables[filenum][lowerlevelname]
                         and numpointsexpected != len(phixstables[filenum][lowerlevelname])
                     ):
                         print(
