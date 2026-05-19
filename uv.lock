@@ -27,7 +27,6 @@ name = "artisatomic"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
-    { name = "basedpyright" },
     { name = "chiantipy" },
     { name = "h5py" },
     { name = "numpy" },
@@ -43,6 +42,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "artistools" },
+    { name = "basedpyright" },
     { name = "matplotlib" },
     { name = "mypy" },
     { name = "pandas-stubs" },
@@ -58,7 +58,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5.1" },
-    { name = "basedpyright", specifier = ">=1.39.3" },
     { name = "chiantipy", specifier = ">=0.15.1" },
     { name = "h5py", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.2.6" },
@@ -74,6 +73,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "artistools", specifier = ">=2026.4.14" },
+    { name = "basedpyright", specifier = ">=1.39.3" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "mypy", specifier = ">=2.1.0" },
     { name = "pandas-stubs", specifier = ">=3.0.0.260204" },

@@ -44,3 +44,7 @@ repos:
             pass_filenames: false
             language: system
             entry: uv run pyrefly check
+
+ci:
+    skip: [pyrefly-check]
+    autoupdate_schedule: quarterly

@@ -7,7 +7,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from xopen import xopen
 
 import artisatomic
 from artisatomic.manual_matches import hillier_name_replacements
@@ -267,16 +266,13 @@ def read_levels_and_transitions(
 
     artisatomic.log_and_print(flog, f"Reading {filename}")
 
-    if not filename.exists() and (filename_compressed := filename.with_suffix(f"{filename.suffix}.zst")).exists():
-        filename = filename_compressed
-
     hillier_transition_row = namedtuple(
         "hillier_transition_row",
         "namefrom nameto f A lambdaangstrom i j hilliertransitionid",
     )
 
     prev_line = ""
-    with xopen(filename) as fhillierosc:
+    with artisatomic.xopen_check_extension(filename) as fhillierosc:
         expected_energy_levels = -1
         expected_transitions = -1
         row_format_energy_level = None
@@ -314,7 +310,9 @@ def read_levels_and_transitions(
 
         print("Manually specified columns:")
         print(f"  {ions_data[(atomic_number, ion_stage)].energylevelrowformat}")
-        assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat
+        assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat, (
+            f"Row format in file ({row_format_energy_level}) does not match expected format ({ions_data[(atomic_number, ion_stage)].energylevelrowformat}) for ion {atomic_number:d} stage {ion_stage:d}"
+        )
         # assert(row_format_energy_level == hillier_rowformat[format_date])
 
         hillier_energy_level_row = namedtuple(  # type: ignore
@@ -483,10 +481,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
         artisatomic.log_and_print(flog, f"Reading {filename}")
 
-        if not filename.exists() and (filename_compressed := filename.with_suffix(f"{filename.suffix}.zst")).exists():
-            filename = filename_compressed
-
-        with xopen(filename) as fhillierphot:
+        with artisatomic.xopen_check_extension(filename) as fhillierphot:
             lowerlevelid = -1
             lowerlevelname = ""
             # upperlevelname = ''
@@ -1036,7 +1031,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     )
     artisatomic.log_and_print(flog, f"Reading {filename}")
     coll_lines_in = 0
-    with xopen(filename) as fcoldata:
+    with artisatomic.xopen_check_extension(filename) as fcoldata:
         header_row = []
         temperature_index = -1
         num_expected_t_values = -1

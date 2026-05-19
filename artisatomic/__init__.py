@@ -914,6 +914,20 @@ def isfloat(value: t.Any) -> bool:
     return True
 
 
+def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO:
+    from xopen import xopen
+
+    extensions = ["", ".zst", ".gz", ".xz"]
+    filepaths = [f"{filename}{ext}" for ext in extensions]
+    for filepath in filepaths:
+        try:
+            return xopen(filepath, **kwargs)
+        except FileNotFoundError:
+            continue
+    msg = f"Could not find any of the following files:{'\n  '.join(filepaths)}."
+    raise FileNotFoundError(msg)
+
+
 # split a list into evenly sized chunks
 def chunks(listin: list, chunk_size: int) -> list:
     return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]

@@ -26,7 +26,6 @@ dynamic = ["version"]
 readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
-    "basedpyright>=1.39.3",
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
@@ -42,6 +41,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "artistools>=2026.4.14",
+    "basedpyright>=1.39.3",
     "matplotlib>=3.10.7",
     "mypy>=2.1.0",
     "pandas-stubs>=3.0.0.260204",
