@@ -89,7 +89,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
                 if dashrowcount == 3:  # data table starts after the '----' lines
                     break
 
-    dftransitions = pl.from_pandas(pd.read_csv(lines_file, sep=r"\s+", dtype_backend="pyarrow"))
+    dftransitions = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow"))
     if dashrowcount < 3:
         raise ValueError(f"Did not find expected data table in {lines_file}")
 
