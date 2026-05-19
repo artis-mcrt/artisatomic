@@ -9,13 +9,14 @@ on:
         - cron: 0 13 * * 1
     workflow_dispatch:
 
+env:
+    RUFF_OUTPUT_FORMAT: github
+    UV_FROZEN: 1
+    ARTISATOMIC_TESTMODE: 1
 jobs:
     lint:
         name: Format, lint, and type check
         runs-on: ubuntu-24.04
-        env:
-            RUFF_OUTPUT_FORMAT: github
-            UV_FROZEN: 1
         steps:
             - name: Checkout Code
               uses: actions/checkout@v6
@@ -68,9 +69,6 @@ jobs:
 
     pytest:
         runs-on: ubuntu-24.04
-        env:
-            UV_FROZEN: 1
-            ARTISATOMIC_TESTMODE: 1
         steps:
             - name: Checkout Code
               uses: actions/checkout@v6
@@ -108,9 +106,6 @@ jobs:
                 testname: [cmfgen, floers25, jplt, kurucz, qub]
             fail-fast: false
         runs-on: ubuntu-24.04
-        env:
-            UV_FROZEN: 1
-            ARTISATOMIC_TESTMODE: 1
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
