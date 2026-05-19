@@ -2,7 +2,6 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
-from xopen import xopen
 
 import artisatomic
 
@@ -24,10 +23,8 @@ def extend_ion_list(ion_handlers, maxionstage=None):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
-    if Path(jpltpath / f"{filename}.zst").is_file():
-        filename = f"{filename}.zst"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    with xopen(jpltpath / filename) as fin:
+    with artisatomic.xopen_check_extension(jpltpath / filename) as fin:
         for linenumber in range(7):
             readlinein = fin.readline().strip()
             if linenumber < 3:

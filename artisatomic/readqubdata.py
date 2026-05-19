@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import polars as pl
-from xopen import xopen
 
 import artisatomic
 
@@ -52,13 +51,11 @@ def extend_ion_list(ion_handlers):
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel | None], dict[tuple[int, int], float]]:
-    if not Path(filepath).is_file() and Path(f"{filepath}.gz").is_file():
-        filepath = f"{filepath}.gz"
     energylevels: list[QUBEnergyLevel | None] = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {filepath}")
-    with xopen(filepath) as fleveltrans:
+    with artisatomic.xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
@@ -210,9 +207,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
         transitionfile = tyndall_co3_path / "adf04rad_v1"
-        if not Path(transitionfile).is_file() and Path(f"{transitionfile}.gz").is_file():
-            transitionfile = f"{transitionfile}.gz"
-        with xopen(transitionfile) as ftrans:
+        with artisatomic.xopen_check_extension(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
