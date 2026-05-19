@@ -3,7 +3,6 @@ from pathlib import Path
 
 import pandas as pd
 import polars as pl
-from xopen import xopen
 
 import artisatomic
 
@@ -47,12 +46,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     BASEPATH = get_basepath()
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
-    levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt.zst"
-    if not levels_file.is_file():
-        levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
-    lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt.zst"
-    if not lines_file.is_file():
-        lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
+    levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
+    lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
 
     artisatomic.log_and_print(
         flog,
@@ -62,7 +57,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
     dashrowcount = 0
-    with xopen(levels_file) as f:
+    with artisatomic.xopen_check_extension(levels_file) as f:
         for line in f:
             if line.startswith("--"):
                 dashrowcount += 1
@@ -86,7 +81,17 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    dftransitions = pl.from_pandas(pd.read_csv(lines_file, sep=r"\s+", skiprows=28, dtype_backend="pyarrow"))
+    dashrowcount = 0
+    with artisatomic.xopen_check_extension(lines_file) as f:
+        for line in f:
+            if line.startswith("--"):
+                dashrowcount += 1
+                if dashrowcount == 3:  # data table starts after the '----' lines
+                    break
+
+        dftransitions = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow"))
+    if dashrowcount < 3:
+        raise ValueError(f"Did not find expected data table in {lines_file}")
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
