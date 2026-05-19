@@ -310,7 +310,9 @@ def read_levels_and_transitions(
 
         print("Manually specified columns:")
         print(f"  {ions_data[(atomic_number, ion_stage)].energylevelrowformat}")
-        assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat
+        assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat, (
+            f"Row format in file ({row_format_energy_level}) does not match expected format ({ions_data[(atomic_number, ion_stage)].energylevelrowformat}) for ion {atomic_number:d} stage {ion_stage:d}"
+        )
         # assert(row_format_energy_level == hillier_rowformat[format_date])
 
         hillier_energy_level_row = namedtuple(  # type: ignore
