@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 # import itertools
 import glob
-import os
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -10,8 +9,7 @@ import ChiantiPy.core as ch
 import numpy as np
 import pandas as pd
 from artistools import get_composition_data
-
-import artisatomic
+from artistools import get_elsymbolslist
 
 
 def read_nahar_rrcfile(filename, noprint=False):
@@ -67,16 +65,17 @@ def main():
     A_rad[28, 5], X_rad[28, 5] = 3.85e-12, 0.746
     A_rad[28, 6], X_rad[28, 6] = 9.05e-12, 0.682
 
-    dfcomposition = get_composition_data("artis_files/compositiondata.txt")
+    artis_files_path = Path(__file__).parent.parent.absolute() / "artis_files"
+    dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
-    with open(os.path.join("artis_files", "recombrates.txt"), "w") as frecombrates:
+    with open(artis_files_path / "recombrates.txt", mode="w", encoding="utf-8") as frecombrates:
         for Z, lowermost_ion_stage, uppermost_ion_stage in dfcomposition.select(
             "Z", "lowermost_ion_stage", "uppermost_ion_stage"
         ).iter_rows():
             atomic_number = int(Z)
             for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage)):
                 upperionstage = lowerionstage + 1
-                print(f"Z={atomic_number} {artisatomic.elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
+                print(f"Z={atomic_number} {get_elsymbolslist()[atomic_number]} {upperionstage}->{lowerionstage}")
 
                 # if atomic_number == 28:  # Pure Shull & Steenberg 1982
                 #     arr_logT_e = np.arange(1.0, 9.1, 0.1)
@@ -87,14 +86,14 @@ def main():
                 #         frecombrates.write(f"{logT_e:.1f} {-1.0} {rrc}\n")
 
                 if rrcfiles := glob.glob(
-                    f"atomic-data-nahar/{artisatomic.elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"
+                    f"atomic-data-nahar/{get_elsymbolslist()[atomic_number].lower()}{lowerionstage}.rrc*.txt"
                 ):  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
                     ionstr = Path(naharfilename).name.split(".")[0]  # should be something like 'fe2'
                     elsymbol = ionstr.rstrip("0123456789")
                     lowerionstage = int(ionstr[len(elsymbol) :])
                     upperionstage = lowerionstage + 1
-                    atomic_number = artisatomic.elsymbols.index(elsymbol.title())
+                    atomic_number = get_elsymbolslist().index(elsymbol.title())
                     dfrecombrates = read_nahar_rrcfile(naharfilename)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(dfrecombrates)}\n")
                     frecombrates.writelines(
@@ -121,7 +120,7 @@ def main():
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                     arr_temperature = 10**arr_logT_e
                     ion = ch.ion(
-                        f"{artisatomic.elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature
+                        f"{get_elsymbolslist()[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature
                     )
                     ion.rrRate()
                     arr_rrc = ion.RrRate["rate"]
