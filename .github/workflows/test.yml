@@ -16,7 +16,7 @@ env:
 jobs:
     lint:
         name: Format, lint, and type check
-        runs-on: ubuntu-24.04
+        runs-on: ubuntu-26.04-arm
         steps:
             - name: Checkout Code
               uses: actions/checkout@v6
@@ -31,7 +31,6 @@ jobs:
             - name: Install artisatomic
               run: |
                   uv sync
-                  source .venv/bin/activate
                   uv pip install --compile-bytecode --editable .
 
             - name: Run Ruff
@@ -68,7 +67,7 @@ jobs:
                   prek run --all-files --show-diff-on-failure --color=always
 
     pytest:
-        runs-on: ubuntu-24.04
+        runs-on: ubuntu-26.04-arm
         steps:
             - name: Checkout Code
               uses: actions/checkout@v6
@@ -105,7 +104,7 @@ jobs:
             matrix:
                 testname: [cmfgen, floers25, jplt, kurucz, qub]
             fail-fast: false
-        runs-on: ubuntu-24.04
+        runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
