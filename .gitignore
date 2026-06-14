@@ -22,3 +22,4 @@ testoutput
 testoutput/*
 _version.py
 build
+.venv
