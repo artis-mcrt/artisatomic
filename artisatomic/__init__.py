@@ -924,7 +924,7 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO:
             return xopen(filepath, **kwargs)
         except FileNotFoundError:
             continue
-    msg = f"Could not find any of the following files:{'\n  '.join(filepaths)}."
+    msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
     raise FileNotFoundError(msg)
 
 
