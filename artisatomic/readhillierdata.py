@@ -45,8 +45,8 @@ ions_data = {
     (1, 1): ion_files("5dec96", "hi_osc.dat", hillier_rowformat_c, ["hiphot.dat"], "hicol.dat"),
     (1, 2): ion_files("", "", hillier_rowformat_c, [""], ""),
     # He
-    # (2, 1): ion_files('11may07', 'heioscdat_a7.dat_old', hillier_rowformat_a, ['heiphot_a7.dat'], 'heicol.dat'),
-    # (2, 2): ion_files('5dec96', 'he2_osc.dat', hillier_rowformat_c, ['he2phot.dat'], 'he2col.dat'),
+    (2, 1): ion_files("11may07", "heioscdat_a7.dat_old", hillier_rowformat_a, ["heiphot_a7.dat"], "heicol.dat"),
+    (2, 2): ion_files("5dec96", "he2_osc.dat", hillier_rowformat_c, ["he2phot.dat"], "he2col.dat"),
     # C
     (6, 1): ion_files("12dec04", "ci_split_osc", hillier_rowformat_a, ["phot_smooth_50"], "cicol.dat"),
     (6, 2): ion_files("30oct12", "c2osc_rev.dat", hillier_rowformat_b, ["phot_sm_3000.dat"], "c2col.dat"),
@@ -59,52 +59,66 @@ ions_data = {
     ),
     (6, 4): ion_files("30oct12", "civosc_a12_split.dat", hillier_rowformat_b, ["civphot_a12.dat"], "civcol.dat"),
     # N
-    # (7, 1): ion_files('12sep12', 'ni_osc', hillier_rowformat_b, ['niphot_a.dat', 'niphot_b.dat', 'niphot_c.dat', 'niphot_d.dat'], 'ni_col'),
-    # (7, 2): ion_files('23jan06', 'fin_osc', hillier_rowformat_b, ['phot_sm_3000'], 'n2col.dat'),
-    # (7, 3): ion_files('24mar07', 'niiiosc_rev.dat', hillier_rowformat_a, ['phot_sm_0_A.dat', 'phot_sm_0_B.dat'], 'niiicol.dat'),
+    (7, 1): ion_files(
+        "12sep12",
+        "ni_osc",
+        hillier_rowformat_b,
+        ["niphot_a.dat", "niphot_b.dat", "niphot_c.dat", "niphot_d.dat"],
+        "ni_col",
+    ),
+    (7, 2): ion_files("23jan06", "fin_osc", hillier_rowformat_a, ["phot_sm_3000"], "n2col.dat"),
+    (7, 3): ion_files(
+        "24mar07", "niiiosc_rev.dat", hillier_rowformat_a, ["phot_sm_0_A.dat", "phot_sm_0_B.dat"], "niiicol.dat"
+    ),
     # O
     (8, 1): ion_files("20sep11", "oi_osc_mchf", hillier_rowformat_b, ["phot_nosm_A", "phot_nosm_B"], "oi_col"),
     (8, 2): ion_files("23mar05", "o2osc_fin.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "o2col.dat"),
     (8, 3): ion_files("15mar08", "oiiiosc", hillier_rowformat_a, ["phot_sm_0"], "col_data_oiii_butler_2012.dat"),
     (8, 4): ion_files("19nov07", "fin_osc", hillier_rowformat_a, ["phot_sm_50_A", "phot_sm_50_B"], "col_oiv"),
     # F
-    # (9, 2): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
-    # (9, 3): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
+    (9, 2): ion_files("tst", "fin_osc", hillier_rowformat_a, ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
+    (9, 3): ion_files(
+        "tst", "fin_osc", hillier_rowformat_a, ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""
+    ),
     # Ne
     (10, 1): ion_files("9sep11", "fin_osc", hillier_rowformat_b, ["fin_phot"], "col_guess"),
     (10, 2): ion_files("19nov07", "fin_osc", hillier_rowformat_a, ["phot_nosm"], "col_neii"),
     (10, 3): ion_files("19nov07", "fin_osc", hillier_rowformat_a, ["phot_nosm"], "col_neiii"),
-    # (10, 4): ion_files('1dec99', 'fin_osc.dat', hillier_rowformat_c, ['phot_sm_3000.dat'], 'col_data.dat'),
+    (10, 4): ion_files("1dec99", "fin_osc.dat", hillier_rowformat_c, ["phot_sm_3000.dat"], "col_data.dat"),
     # Na
-    # (11, 1): ion_files('5aug97', 'nai_osc_split.dat', hillier_rowformat_c, ['nai_phot_a.dat'], 'col_guess.dat'),
-    # (11, 2): ion_files('15feb01', 'na2_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (11, 3): ion_files('15feb01', 'naiiiosc_rev.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
-    # (11, 4): ion_files('15feb01', 'naivosc_rev.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_data.dat'),
+    (11, 1): ion_files("5aug97", "nai_osc_split.dat", hillier_rowformat_c, ["nai_phot_a.dat"], "col_guess.dat"),
+    (11, 2): ion_files("15feb01", "na2_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (11, 3): ion_files("15feb01", "naiiiosc_rev.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_guess.dat"),
+    (11, 4): ion_files("15feb01", "naivosc_rev.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_data.dat"),
     # Mg
     (12, 1): ion_files("5aug97", "mgi_osc_split.dat", hillier_rowformat_c, ["mgi_phot_a.dat"], "mgicol.dat"),
     (12, 2): ion_files("30oct12", "mg2_osc_split.dat", hillier_rowformat_b, ["mg2_phot_a.dat"], "mg2col.dat"),
-    # (12, 3): ion_files('20jun01', 'mgiiiosc_rev.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
-    # (12, 4): ion_files('20jun01', 'mgivosc_rev.dat', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess.dat'),
+    (12, 3): ion_files("20jun01", "mgiiiosc_rev.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_guess.dat"),
+    (12, 4): ion_files("20jun01", "mgivosc_rev.dat", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_guess.dat"),
     # Al
-    # (13, 1): ion_files('29jul10', 'fin_osc', hillier_rowformat_a, ['phot_smooth_0'], 'col_data'),
-    # (13, 2): ion_files('5aug97', 'al2_osc_split.dat', hillier_rowformat_c, ['al2_phot_a.dat'], 'al2col.dat'),
-    # (13, 3): ion_files('30oct12', 'aliii_osc_split.dat', hillier_rowformat_b, ['aliii_phot_a.dat'], 'aliii_col_data.dat'),
-    # (13, 4): ion_files('23oct02', 'fin_osc', hillier_rowformat_a, ['phot_sm_3000.dat'], 'col_guess'),
+    (13, 1): ion_files("29jul10", "fin_osc", hillier_rowformat_a, ["phot_smooth_0"], "col_data"),
+    (13, 2): ion_files("5aug97", "al2_osc_split.dat", hillier_rowformat_c, ["al2_phot_a.dat"], "al2col.dat"),
+    (13, 3): ion_files(
+        "30oct12", "aliii_osc_split.dat", hillier_rowformat_b, ["aliii_phot_a.dat"], "aliii_col_data.dat"
+    ),
+    (13, 4): ion_files("23oct02", "fin_osc", hillier_rowformat_a, ["phot_sm_3000.dat"], "col_guess"),
     # Si
     (14, 1): ion_files("23nov11", "SiI_OSC", hillier_rowformat_b, ["SiI_PHOT_DATA"], "col_data"),
     (14, 2): ion_files("30oct12", "si2_osc_nahar", hillier_rowformat_b, ["phot_op.dat"], "si2_col"),
     (14, 3): ion_files("5dec96b", "osc_op_split_rev.dat_1jun12", hillier_rowformat_a, ["phot_op.dat"], "col_data"),
     (14, 4): ion_files("30oct12", "osc_op_split.dat", hillier_rowformat_b, ["phot_op.dat"], "col_data.dat"),
     # P (IV and V are the only ions in CMFGEN)
-    # (15, 4): ion_files('15feb01', 'pivosc_rev.dat', hillier_rowformat_a, ['phot_data_a.dat', 'phot_data_b.dat'], 'col_guess.dat'),
-    # (15, 5): ion_files('15feb01', 'pvosc_rev.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (15, 4): ion_files(
+        "15feb01", "pivosc_rev.dat", hillier_rowformat_a, ["phot_data_a.dat", "phot_data_b.dat"], "col_guess.dat"
+    ),
+    (15, 5): ion_files("15feb01", "pvosc_rev.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
     # S
     (16, 1): ion_files("24nov11", "SI_OSC", hillier_rowformat_b, ["SI_PHOT_DATA"], "col_data"),
     (16, 2): ion_files("30oct12", "s2_osc", hillier_rowformat_b, ["phot_sm_3000"], "s2_col"),
     (16, 3): ion_files("30oct12", "siiiosc_fin", hillier_rowformat_a, ["phot_nosm"], "col_siii"),
     (16, 4): ion_files("19nov07", "sivosc_fin", hillier_rowformat_a, ["phot_nosm"], "col_siv"),
     # Cl (only ions IV to VII)
-    # (17, 4): ion_files('15feb01', 'clivosc_fin.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_data.dat'),
+    # (17, 4): ion_files("15feb01", "clivosc_fin.dat", hillier_rowformat_a, ["phot_data.dat"], "col_data.dat"),
     # Ar
     (18, 1): ion_files("9sep11", "fin_osc", hillier_rowformat_b, ["phot_nosm"], "col_guess"),
     (18, 2): ion_files("9sep11", "fin_osc", hillier_rowformat_b, ["phot_nosm"], "col_data"),
@@ -119,25 +133,25 @@ ions_data = {
     (20, 3): ion_files("10apr99", "osc_op_sp.dat", hillier_rowformat_c, ["phot_smooth.dat"], "col_guess.dat"),
     (20, 4): ion_files("10apr99", "osc_op_sp.dat", hillier_rowformat_c, ["phot_smooth.dat"], "col_guess.dat"),
     # Sc (only II and III are in CMFGEN)
-    # (21, 2): ion_files('01jul13', 'fin_osc', hillier_rowformat_a, ['phot_nosm'], 'col_data'),
-    # (21, 3): ion_files('3dec12', 'fin_osc', hillier_rowformat_a, ['phot_nosm'], ''),
+    (21, 2): ion_files("01jul13", "fin_osc", hillier_rowformat_a, ["phot_nosm"], "col_data"),
+    (21, 3): ion_files("3dec12", "fin_osc", hillier_rowformat_a, ["phot_nosm"], ""),
     # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
-    # (22, 2): ion_files('18oct00', 'tkii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (22, 3): ion_files('18oct00', 'tkiii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (22, 4): ion_files('18oct00', 'tkiv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (22, 2): ion_files("18oct00", "tkii_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (22, 3): ion_files("18oct00", "tkiii_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (22, 4): ion_files("18oct00", "tkiv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
     # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): ion_files('27may10', 'vi_osc', hillier_rowformat_a, ['vi_phot.dat'], 'col_guess.dat'),
+    # (23, 1): ion_files("27may10", "vi_osc", hillier_rowformat_a, ["vi_phot.dat"], "col_guess.dat"),
     # Cr
-    # (24, 1): ion_files('10aug12', 'cri_osc.dat', hillier_rowformat_b, ['phot_data.dat'], 'col_guess.dat'),
-    # (24, 2): ion_files('15aug12', 'crii_osc.dat', hillier_rowformat_b, ['phot_data.dat'], 'col_data.dat'),
-    # (24, 3): ion_files('18oct00', 'criii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (24, 4): ion_files('18oct00', 'criv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (24, 5): ion_files('18oct00', 'crv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (24, 1): ion_files("10aug12", "cri_osc.dat", hillier_rowformat_b, ["phot_data.dat"], "col_guess.dat"),
+    (24, 2): ion_files("15aug12", "crii_osc.dat", hillier_rowformat_b, ["phot_data.dat"], "col_data.dat"),
+    (24, 3): ion_files("18oct00", "criii_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (24, 4): ion_files("18oct00", "criv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (24, 5): ion_files("18oct00", "crv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
     # Mn (Mn I is not in CMFGEN)
-    # (25, 2): ion_files('18oct00', 'mnii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (25, 3): ion_files('18oct00', 'mniii_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (25, 4): ion_files('18oct00', 'mniv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
-    # (25, 5): ion_files('18oct00', 'mnv_osc.dat', hillier_rowformat_a, ['phot_data.dat'], 'col_guess.dat'),
+    (25, 2): ion_files("18oct00", "mnii_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (25, 3): ion_files("18oct00", "mniii_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (25, 4): ion_files("18oct00", "mniv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (25, 5): ion_files("18oct00", "mnv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
     # Fe
     (26, 1): ion_files("07sep16", "fei_osc", hillier_rowformat_b, ["phot_smooth_3000"], "col_data"),
     (26, 2): ion_files("10sep16", "fe2_osc", hillier_rowformat_b, ["phot_op.dat"], "fe2_col.dat"),
@@ -315,7 +329,7 @@ def read_levels_and_transitions(
         )
         # assert(row_format_energy_level == hillier_rowformat[format_date])
 
-        hillier_energy_level_row = namedtuple(  # type: ignore
+        hillier_energy_level_row = namedtuple(  # pyrefly: ignore[bad-class-definition]
             "hillier_energy_level_row",
             row_format_energy_level + " corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore",
         )
@@ -324,19 +338,19 @@ def read_levels_and_transitions(
             row = line.split()
             # check for right number of columns and that are all numbers except first column
             if len(row) == len(row_format_energy_level.split()) and all(map(artisatomic.isfloat, row[1:])):
-                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, "", -1)  # type: ignore
+                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, "", -1)
 
-                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip("-"))  # type: ignore
-                levelname = hillier_energy_level.levelname  # type: ignore
+                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip("-"))
+                levelname = hillier_energy_level.levelname
                 if levelname not in hillier_name_replacements:
                     (twosplusone, l, parity) = artisatomic.get_term_as_tuple(levelname)
                 else:
                     (twosplusone, l, parity) = artisatomic.get_term_as_tuple(hillier_name_replacements[levelname])
 
-                hillier_energy_level = hillier_energy_level._replace(  # type: ignore
+                hillier_energy_level = hillier_energy_level._replace(
                     hillierlevelid=hillierlevelid,
-                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace("D", "E")),  # type: ignore
-                    g=float(hillier_energy_level.g),  # type: ignore
+                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace("D", "E")),
+                    g=float(hillier_energy_level.g),
                     twosplusone=twosplusone,
                     l=l,
                     parity=parity,
@@ -356,8 +370,8 @@ def read_levels_and_transitions(
                         hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)].append(levelnamenoJ)
 
                 # if this is the ground state
-                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:  # type: ignore
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)  # type: ignore
+                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
+                    hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)
 
                 if hillierlevelid != len(hillier_energy_levels) - 1:
                     artisatomic.log_and_print(
@@ -566,7 +580,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 3:
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(  # type: ignore
+                            phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
