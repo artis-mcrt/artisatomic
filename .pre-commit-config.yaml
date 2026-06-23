@@ -24,27 +24,25 @@ repos:
       hooks:
           - id: yamlfmt
     - repo: https://github.com/astral-sh/ruff-pre-commit
-      rev: v0.15.13
+      rev: v0.15.18
       hooks:
           - id: ruff-check
             args: [--fix]
           - id: ruff-format
 
     - repo: https://github.com/astral-sh/uv-pre-commit
-      rev: 0.11.14
+      rev: 0.11.23
       hooks:
           - id: uv-lock
           - id: uv-sync
             args: [--frozen, --all-extras, --no-install-project]
 
-    - repo: local
+    - repo: https://github.com/astral-sh/ty-pre-commit
+      rev: v0.0.52
       hooks:
-          - id: pyrefly-check
-            name: Pyrefly type check
-            pass_filenames: false
-            language: system
-            entry: uv run pyrefly check
+          - id: ty
+            name: ty
 
 ci:
-    skip: [pyrefly-check]
+    skip: [ty]
     autoupdate_schedule: quarterly
