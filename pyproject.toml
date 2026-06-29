@@ -29,13 +29,13 @@ dependencies = [
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
-    "pandas>=3.0.3",
+    "pandas[compression]>=3.0.3",
     "polars>=1.37.1",
     "pyarrow>=18.1.0",
     "requests>=2.34.0",
     "scipy>=1.15.3",
     "tqdm>=4.67.3",
-    "xopen[zstd]>=2.0.2",
+    "xopen>=2.1.0",
 ]
 
 [dependency-groups]
