@@ -19,7 +19,7 @@ jobs:
         runs-on: ubuntu-26.04-arm
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
@@ -58,7 +58,7 @@ jobs:
         runs-on: ubuntu-26.04-arm
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
@@ -73,7 +73,7 @@ jobs:
                   uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
@@ -98,7 +98,7 @@ jobs:
 
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v6
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
@@ -113,7 +113,7 @@ jobs:
                   uv pip install --compile-bytecode --editable .
 
             - name: Cache CMFGEN atomic data
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
@@ -126,7 +126,7 @@ jobs:
 
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
-              uses: actions/cache@v5
+              uses: actions/cache@v6
               id: cache-jpltdata
               with:
                   path: atomic-data-tanaka-jplt/data_v2.1/**
