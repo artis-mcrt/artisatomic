@@ -7,7 +7,7 @@
 First clone the repository, for example:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
-cd artistatomic
+cd artisatomic
 prek install
 ```
 
