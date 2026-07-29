@@ -242,10 +242,11 @@ def read_levels_and_transitions(
         .collect()
     )
 
+    transition_count_of_levelid: dict[int, int] = dict(
+        pl.concat([transitions["lowerlevel"], transitions["upperlevel"]]).value_counts().iter_rows()
+    )
     transition_count_of_level_name: dict[str, int] = {
-        levelname: (
-            transitions.select(((pl.col("lowerlevel") == levelid) | (pl.col("upperlevel") == levelid)).sum()).item()
-        )
+        levelname: transition_count_of_levelid.get(levelid, 0)
         for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
     }
     artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")

@@ -86,19 +86,25 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             pl.col("g_u_times_A").cast(pl.Float64),
         )
 
+    transition_count_of_levelid: dict[int, int] = dict(
+        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
+    )
     transition_count_of_level_name = {
-        dflevels["levelname"][levelid]: (
-            dftransitions.filter(pl.col("lowerlevel") == levelid).height
-            + dftransitions.filter(pl.col("upperlevel") == levelid).height
-        )
+        dflevels["levelname"][levelid]: transition_count_of_levelid.get(levelid, 0)
         for levelid in dflevels["levelid"][1:]
     }
     assert dftransitions.height == transitioncount
 
-    dftransitions = dftransitions.with_columns(
-        g_u=pl.col("upperlevel").map_elements(lambda upperlevel: dflevels["g"][upperlevel], return_dtype=pl.Float64)
-    ).with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
-    dftransitions = dftransitions.select(["lowerlevel", "upperlevel", "A"])
+    dftransitions = (
+        dftransitions.join(
+            dflevels.select(g_u=pl.col("g"), upperlevel=pl.col("levelid")),
+            on="upperlevel",
+            how="left",
+            maintain_order="left",
+        )
+        .with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
+        .select(["lowerlevel", "upperlevel", "A"])
+    )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
         artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")

@@ -305,6 +305,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         )
                         qub_transitions.append(transition)
 
+    else:
+        msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage}"
+        raise ValueError(msg)
+
     artisatomic.log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
     return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict

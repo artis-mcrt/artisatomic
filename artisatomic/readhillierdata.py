@@ -498,7 +498,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
         with artisatomic.xopen_check_extension(filename) as fhillierphot:
             lowerlevelid = -1
             lowerlevelname = ""
-            # upperlevelname = ''
+            targetlevelname = ""
             numpointsexpected = 0
             crosssectiontype = -1
             fitcoefficients = []
@@ -536,7 +536,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 ) == "!Configuration name [*]":
                     lowerlevelname = row[0]
                     if "[" in lowerlevelname:
-                        lowerlevelname.split("[")[0]
+                        lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
                     lowerlevelid = 1
@@ -1045,6 +1045,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     )
     artisatomic.log_and_print(flog, f"Reading {filename}")
     coll_lines_in = 0
+    number_expected_transitions = -1
     with artisatomic.xopen_check_extension(filename) as fcoldata:
         header_row = []
         temperature_index = -1
@@ -1156,7 +1157,9 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                         f" {nameto}{unlisted_to_message}",
                     )
 
-    if coll_lines_in < number_expected_transitions:
+    if number_expected_transitions < 0:
+        artisatomic.log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
+    elif coll_lines_in < number_expected_transitions:
         print(
             f"ERROR: file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
         )
@@ -1174,16 +1177,19 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
 
 
 def get_photoiontargetfractions(
-    dfenergy_levels, dfenergy_levels_upperion, hillier_photoion_targetconfigs: dict[int, list[tuple[str, float]]]
+    dfenergy_levels,
+    dfenergy_levels_upperion,
+    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
 ) -> list[list[tuple[int, float]]]:
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
 
+    if hillier_photoion_targetconfigs is None:
+        return targetlist
+
     for energy_level in dfenergy_levels[1:].iter_rows(named=True):
         lowerlevelid = energy_level["levelid"]
-        if hillier_photoion_targetconfigs is None:
-            continue
-        if lowerlevelid in hillier_photoion_targetconfigs and hillier_photoion_targetconfigs[lowerlevelid] is None:
+        if hillier_photoion_targetconfigs[lowerlevelid] is None:
             continue  # photoionisation flagged as not available
 
         for targetconfig, targetconfig_fraction in hillier_photoion_targetconfigs[lowerlevelid]:
@@ -1223,7 +1229,7 @@ def read_hyd_phixsdata():
         _transitions,
         _transition_count_of_level_name,
         _hillier_level_ids_matching_term,
-    ) = read_levels_and_transitions(1, 1, open("/dev/null", "w"))
+    ) = read_levels_and_transitions(1, 1, open(os.devnull, "w"))
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
     print(f"Reading hydrogen photoionization cross sections from {hyd_filename}")
