@@ -608,9 +608,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             scale, n = fitcoefficients
                             n = int(n)
                             lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
-                            phixstables[filenum][lowerlevelname] = scale * get_hydrogenic_n_phixstable(
-                                lambda_angstrom, n
-                            )
+                            # scale the cross sections but not the energy grid
+                            phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, n)
+                            phixstable[:, 1] *= scale
+                            phixstables[filenum][lowerlevelname] = phixstable
 
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(lowerlevelname))

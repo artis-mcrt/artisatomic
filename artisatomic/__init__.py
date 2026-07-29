@@ -943,9 +943,10 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
 
         n = get_n(level["levelname"])
         effective_charge_squared = threshold_ev * 2 * (n**2) / alpha_squared / mc_squared
-        phixstables[lowerlevelid] = (
-            readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n) / effective_charge_squared
-        )
+        # scale the cross sections but not the energy grid
+        phixstable = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
+        phixstable[:, 1] /= effective_charge_squared
+        phixstables[lowerlevelid] = phixstable
         photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]
 
     reduced_phixs_dict = reduce_phixs_tables(
