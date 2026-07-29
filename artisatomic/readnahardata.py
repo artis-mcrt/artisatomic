@@ -45,6 +45,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     nahar_energy_levels: list[NaharEnergyLevel | None] = [None]
     nahar_level_index_of_state = {}
     nahar_core_states: list[NaharCoreState | None] = []
+    nahar_ionization_potential_rydberg = -1.0
 
     if not os.path.isfile(path_nahar_energy_file):
         artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
@@ -239,7 +240,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
 
             number_of_points = int(fenlist.readline().split()[1])
             binding_energy_ryd = float(fenlist.readline().split()[0])
-            thresholds_ev_dict[(twosplusone, l, parity, indexinsymmetry)] = binding_energy_ryd * 13.605698065
+            thresholds_ev_dict[(twosplusone, l, parity, indexinsymmetry)] = binding_energy_ryd * ryd_to_ev
 
             if not args.nophixs:
                 phixsarray = np.array([list(map(float, fenlist.readline().split())) for _ in range(number_of_points)])
@@ -255,6 +256,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
 
 def read_nahar_configurations(fenlist, flog):
     nahar_configurations = {}
+    nahar_ionization_potential_rydberg = -1.0
     while True:
         line = fenlist.readline()
         if not line:
@@ -380,7 +382,7 @@ def get_naharphotoion_upperlevelids(
 def get_photoiontargetfractions(
     dfenergy_levels, dfenergy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog
 ):
-    targetlist = [() for _ in range(dfenergy_levels.height)]
+    targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)
     for energy_level in dfenergy_levels[1:].iter_rows(named=True):
         lowerlevelid = energy_level["levelid"]

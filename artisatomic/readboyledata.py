@@ -86,8 +86,9 @@ def read_lines_data(atomic_number, ion_stage):
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
         # print(line)
-        transition_count_of_level_name[level_number_lower] += 1
-        transition_count_of_level_name[level_number_upper] += 1
+        # must match the levelname format used in read_levels_data
+        transition_count_of_level_name[f"level{int(level_number_lower):05d}"] += 1
+        transition_count_of_level_name[f"level{int(level_number_upper):05d}"] += 1
 
         transitions.append(line)
 

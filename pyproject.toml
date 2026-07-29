@@ -34,6 +34,7 @@ dependencies = [
     "pyarrow>=18.1.0",
     "requests>=2.34.0",
     "scipy>=1.15.3",
+    "tables>=3.11.1",
     "tqdm>=4.67.3",
     "xopen>=2.1.0",
 ]

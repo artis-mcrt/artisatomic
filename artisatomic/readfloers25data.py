@@ -95,12 +95,10 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
+    counts_lower: dict[str, int] = dict(dftransitions["Config_Lower"].value_counts().iter_rows())
+    counts_upper: dict[str, int] = dict(dftransitions["Config_Upper"].value_counts().iter_rows())
     transition_count_of_level_name = {
-        config: (
-            dftransitions.filter(pl.col("Config_Lower") == config).height
-            + dftransitions.filter(pl.col("Config_Upper") == config).height
-        )
-        for config in dflevels["Configuration"]
+        config: counts_lower.get(config, 0) + counts_upper.get(config, 0) for config in dflevels["Configuration"]
     }
 
     # use standard artisatomic column names and convert to 1-indexed levels

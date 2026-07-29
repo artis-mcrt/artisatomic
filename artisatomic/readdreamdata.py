@@ -17,6 +17,8 @@ hc_in_ev_cm = 0.0001239841984332003
 
 def init_dreamdata():
     global dreamdata
+    if dreamdata is not None:
+        return
     hdfdata = pd.read_hdf(dreamdatapath)
     assert isinstance(hdfdata, pd.DataFrame)
     dreamdata = hdfdata
@@ -28,7 +30,7 @@ def extend_ion_list(ion_handlers):
     assert dreamdata is not None
     for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
         ion_stage = charge + 1
-        artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
 
     return ion_handlers
 
