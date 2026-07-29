@@ -6,6 +6,7 @@ import numpy as np
 import polars as pl
 
 from artisatomic import add_handler_if_not_set
+from artisatomic import get_default_handler
 from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
 from artisatomic import interpret_parent_term
@@ -132,6 +133,20 @@ def test_add_handler_if_not_set():
     ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
+
+
+def test_get_default_handler():
+    assert get_default_handler(2, 3) == "boyle"
+    assert get_default_handler(26, 1) == "cmfgen"
+    assert get_default_handler(56, 2) == "cmfgen"
+    assert get_default_handler(38, 1) == "qub_data"
+    # QUB calculations take precedence over DREAM for W, Pt, and Au ion stages 1-3
+    assert get_default_handler(74, 1) == "qub_data"
+    assert get_default_handler(78, 3) == "qub_data"
+    assert get_default_handler(79, 2) == "qub_data"
+    assert get_default_handler(74, 4) == "dream"
+    assert get_default_handler(60, 2) == "dream"
+    assert get_default_handler(45, 1) == "kurucz"
 
 
 def test_hillier_extend_ion_list():

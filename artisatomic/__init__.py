@@ -311,8 +311,6 @@ def get_default_handler(atomic_number: int, ion_stage: int) -> str:
     #     return "hillier_nahar"  # Hillier/Nahar hybrid
     if atomic_number <= 28 or atomic_number == 56:  # Hillier data only
         return "cmfgen"
-    if atomic_number >= 57:  # DREAM database of Z > 57
-        return "dream"
     if (
         (atomic_number == 38 and ion_stage in [1, 2, 3, 4, 5])
         or (atomic_number == 39 and ion_stage in [2, 3])
@@ -322,7 +320,10 @@ def get_default_handler(atomic_number: int, ion_stage: int) -> str:
         or (atomic_number == 78 and ion_stage in [1, 2, 3])
         or (atomic_number == 79 and ion_stage in [1, 2, 3])
     ):
+        # QUB calculations take precedence over DREAM for W, Pt, and Au
         return "qub_data"
+    if atomic_number >= 57:  # DREAM database of Z > 57
+        return "dream"
     return "kurucz"
 
 
@@ -437,8 +438,9 @@ def read_ion_data(
                 nahar_core_states,
                 nahar_level_index_of_state,
                 nahar_configurations,
-                ionization_energy_ev,
+                nahar_ionization_potential_rydberg,
             ) = readnahardata.read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog)
+            ionization_energy_ev = nahar_ionization_potential_rydberg * ryd_to_ev
 
             # keys are (2S+1, L, parity, indexinsymmetry), values are lists of
             # (energy in Rydberg, cross section in Mb) tuples
@@ -468,8 +470,6 @@ def read_ion_data(
                 flog,
                 useallnaharlevels=True,
             )
-
-            print(energy_levels[:3])
 
         elif handler == "hillier_nahar":  # Hillier/Nahar hybrid
             (
