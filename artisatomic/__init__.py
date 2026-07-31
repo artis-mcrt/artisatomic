@@ -76,7 +76,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
-            return json.load(f)
+            return sort_ion_handlers(json.load(f))
 
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
 
@@ -105,7 +105,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
-    return ion_handlers
+    return sort_ion_handlers(ion_handlers)
 
 
 USE_QUB_COBALT = False
@@ -133,16 +133,29 @@ def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
     raise ValueError(msg)
 
 
+def get_ion_stage(entry: int | tuple[int, str]) -> int:
+    """Ion stage of an ion_handlers entry, which is either a bare ion stage or (ion_stage, handler)."""
+    return entry if isinstance(entry, int) else entry[0]
+
+
+def sort_ion_handlers(
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+) -> list[tuple[int, list[int | tuple[int, str]]]]:
+    """Sort by atomic number, and each element's ions by ion stage.
+
+    process_files() relies on ascending ion stages to identify the top ion and to find each ion's
+    photoionisation target, so normalise the order here, before the handler list is written to
+    artisatomicionhandlers.json and passed to write_compositionfile().
+    """
+    return sorted(
+        ((atomic_number, sorted(listions, key=get_ion_stage)) for atomic_number, listions in ion_handlers),
+        key=lambda x: x[0],
+    )
+
+
 def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
     """Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]."""
-    list_out = []
-    for ion_stage in list_ions:
-        if isinstance(ion_stage, int):
-            list_out.append(ion_stage)
-        else:
-            list_out.append(ion_stage[0])
-
-    return list_out
+    return [get_ion_stage(ion_stage) for ion_stage in list_ions]
 
 
 def add_handler_if_not_set(
@@ -152,9 +165,10 @@ def add_handler_if_not_set(
 
     The input list is not modified, so the return value must be used.
     """
-
-    def get_ion_stage(entry: int | tuple[int, str]) -> int:
-        return entry if isinstance(entry, int) else entry[0]
+    # readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
+    # numpy integers, so normalise here rather than in each caller
+    atomic_number = int(atomic_number)
+    ion_stage = int(ion_stage)
 
     ion_handlers_out: list[tuple[int, list[int | tuple[int, str]]]] = []
     found_element = False
@@ -289,13 +303,9 @@ def clear_files(args: argparse.Namespace) -> None:
 
 
 def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
-    for atomic_number, listions_unsorted in ion_handlers:
-        if not listions_unsorted:
+    for atomic_number, listions in ion_handlers:
+        if not listions:
             continue
-
-        # is_top_ion and the photoionisation target (iondatalist[i + 1]) both assume ascending
-        # ion stages, so don't rely on the caller (or a hand-edited JSON file) having sorted them
-        listions = sorted(listions_unsorted, key=lambda entry: entry if isinstance(entry, int) else entry[0])
 
         iondatalist = [
             read_ion_data(atomic_number, ion_stage_entry, is_top_ion=(i == len(listions) - 1), args=args)
@@ -1224,7 +1234,6 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         return (-1, -1, -1)
 
     lposition = -1
-    l = -1  # stays -1 when no L character is found, so the fall-through below can't hit an unbound name
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
@@ -1369,16 +1378,20 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         indexinsymmetry = reversedalphabets.index(instr[-1]) + 1 if term_parity == 1 else alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
+    def is_two_digit_n(strn: str) -> bool:
+        """Are these two digits a principal quantum number, rather than one digit of something else?
+
+        n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
+        '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.
+        """
+        return strn.isdigit() and 10 <= int(strn) < max_n
+
     electron_config: list[str] = []
     if not instr.startswith("Eqv st"):
         while instr:
             if instr[-1].upper() in lchars:
-                try:
-                    startpos = -3 if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n else -2
-                except ValueError:
-                    startpos = (
-                        -3  # this tripped on '4sp(3P)_7Po[2]'. just pretend 4sp is an orbital and occupation number
-                    )
+                # orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'
+                startpos = -3 if len(instr) >= 3 and is_two_digit_n(instr[-3:-1]) else -2
 
                 electron_config.insert(0, instr[startpos:])
                 instr = instr[:startpos]
@@ -1389,10 +1402,14 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 instr = instr[:left_bracket_pos]
             elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    # startpos is -4 for a two-digit principal quantum number, e.g. '10d2'
-                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n else -3
-                    electron_config.insert(0, instr[startpos:])
-                    instr = instr[:startpos]
+                    # Always read a single digit as this orbital's principal quantum number.
+                    # '3d14s2' is genuinely ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and so is
+                    # '3d104s2'. An occupation number of 1 or 10 is common and a two-digit n
+                    # carrying an explicit occupation is not, so the single-digit reading wins.
+                    # (A two-digit n written without an occupation, '3d6(5D)10d', is handled by
+                    # the branch above, where there is no such ambiguity.)
+                    electron_config.insert(0, instr[-3:])
+                    instr = instr[:-3]
                 else:
                     # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]

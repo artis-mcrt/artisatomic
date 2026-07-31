@@ -119,10 +119,14 @@ def read_adf04(
 
             # the transition and upsilon tables index levels by this id, and the rest of the code
             # indexes the list by position, so a non-contiguous or non-1-based file would silently
-            # attach every transition to the wrong level
-            assert energylevel.qub_id == len(energylevels) - 1, (
-                f"adf04 level id {energylevel.qub_id} found at position {len(energylevels) - 1}"
-            )
+            # attach every transition to the wrong level. Not an assert: this validates an input
+            # file and must not disappear under python -O.
+            if energylevel.qub_id != len(energylevels) - 1:
+                msg = (
+                    f"adf04 level id {energylevel.qub_id} found at position {len(energylevels) - 1} in {filepath}."
+                    " Level ids must be contiguous and start at 1."
+                )
+                raise ValueError(msg)
 
         upsilonheader = fleveltrans.readline().split()
         list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
@@ -365,6 +369,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                 artisatomic.log_and_print(
                     flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
                 )
+                # clear the level so it is skipped by write_phixs_data(): both the target list and
+                # the threshold were pre-set above, and leaving them would emit an entry with a
+                # -1.0 threshold and an all-zero table
+                photoionization_targetfractions[lowerlevelid] = []
+                photoionization_thresholds_ev[lowerlevelid] = 0.0
                 continue
             target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
             scalefactorsum = sum(target_scalefactors)

@@ -73,16 +73,20 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         .alias("g")
     )
 
-    # the level table is indexed from zero in file order, and the transitions refer to those indices
-    assert dflevels["Index"].to_list() == list(range(dflevels.height))
+    # The level table is indexed from zero in file order and the transitions refer to those
+    # indices, so a gap would silently attach transitions to the wrong levels. Not an assert:
+    # this validates an input file and must not disappear under python -O.
+    if dflevels["Index"].to_list() != list(range(dflevels.height)):
+        msg = f"Level indices in {levels_file} are not contiguous and zero-based"
+        raise ValueError(msg)
 
     # Configuration is not unique (levels of the same configuration differ by J), so build a
-    # unique level name from it. The configuration stays first so that get_level_valence_n()
-    # and the adata.txt comment column both still start with it.
+    # unique level name from it. Index is contiguous, so including it guarantees uniqueness.
+    # The configuration stays first so that get_level_valence_n() and the adata.txt comment
+    # column both still start with it.
     dflevels = dflevels.with_columns(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
-    assert dflevels["levelname"].n_unique() == dflevels.height
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
@@ -101,11 +105,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
     # count per level index, not per configuration string: several levels share a configuration
-    transition_count_of_levelid: dict[int, int] = dict(
-        pl.concat([dftransitions["Lower"] + 1, dftransitions["Upper"] + 1]).value_counts().iter_rows()
+    transition_count_of_levelindex: dict[int, int] = dict(
+        pl.concat([dftransitions["Lower"], dftransitions["Upper"]]).value_counts().iter_rows()
     )
     transition_count_of_level_name = {
-        levelname: transition_count_of_levelid.get(index + 1, 0)
+        levelname: transition_count_of_levelindex.get(index, 0)
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
     assert sum(transition_count_of_level_name.values()) == 2 * dftransitions.height

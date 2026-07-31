@@ -3,6 +3,7 @@ import os
 import sys
 from collections import defaultdict
 from collections import namedtuple
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -226,9 +227,10 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 
 vy95_phixsfitrow = namedtuple("vy95_phixsfitrow", ["n", "l", "E_th_eV", "E_0", "sigma_0", "y_a", "P", "y_w"])
 
-# keys are (n, l), values are energy in Rydberg or cross_section in Megabarns
-hyd_phixs_energygrid_ryd: dict[tuple[int, int], list[float]] = {}
-hyd_phixs: dict[tuple[int, int], list[float]] = {}
+# keys are (n, l), values are energy in Rydberg or cross_section in Megabarns.
+# Stored as arrays because get_hydrogenic_nl_phixstable() is called once per level per ion.
+hyd_phixs_energygrid_ryd: dict[tuple[int, int], np.ndarray] = {}
+hyd_phixs: dict[tuple[int, int], np.ndarray] = {}
 
 # keys are n quantum number
 hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
@@ -478,14 +480,15 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # return np.zeros((len(energy_levels), args.nphixspoints)),
     # photoionization_targetfractions  # TODO: replace with real data
 
-    # charge of the ion left behind by the photoionisation (CMFGEN's ZION).
-    # Replaced by the value in the file if available.
+    # charge of the ion left behind by the photoionisation, i.e. CMFGEN's ZION (= ZXzV, which it
+    # reads from the oscillator file, where it equals the ionisation stage for every ion here)
     zion = ion_stage
     photfilenames = ions_data[(atomic_number, ion_stage)].photfilenames
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
+    levelnames_with_zero_crosssection: list[str] = []
 
     j_splitting_on = False  # hopefully this is either on or off for all photoion files associated with a given ion
 
@@ -558,14 +561,16 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
-                    # 'Screened nuclear charge' appears mislabelled in the CMFGEN database.
-                    # It is really the charge of the ion left behind, i.e. the ionisation stage
-                    # (Fe II gives 2.0, Fe III gives 3.0), which is CMFGEN's ZION.
-                    zion = int(float(row[0]))
-                    if zion != ion_stage:
+                    # CMFGEN's ZION comes from the oscillator file, not from here: RDPHOT_GEN_V2
+                    # never reads this field. The two disagree for 29 files in the shipped
+                    # database, so keep using ion_stage (which matches the oscillator value for
+                    # every ion in ions_data) and only report the discrepancy.
+                    zion_from_photfile = int(float(row[0]))
+                    if zion_from_photfile != ion_stage:
                         artisatomic.log_and_print(
                             flog,
-                            f"WARNING: file gives screened nuclear charge {zion} but ion_stage is {ion_stage}",
+                            f"WARNING: ignoring screened nuclear charge {zion_from_photfile} in {photfilename},"
+                            f" which disagrees with ion_stage {ion_stage}",
                         )
 
                 if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
@@ -826,7 +831,21 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
                     # sys.exit()
             except IndexError:
-                print(f"WARNING: No non-zero cross section points for {lowerlevelname}")
+                # The cross section is zero everywhere on the output grid, so the level is dropped
+                # and gets no photoionization at all. For a type-8 (offset) cross section this
+                # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
+                # nu/nu_edge grid that reduce_phixs_tables() samples.
+                levelnames_with_zero_crosssection.append(lowerlevelname)
+                artisatomic.log_and_print(
+                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
+                )
+
+    if levelnames_with_zero_crosssection:
+        artisatomic.log_and_print(
+            flog,
+            f"WARNING: {len(levelnames_with_zero_crosssection)} level names have a cross section that is zero"
+            " everywhere on the output energy grid, so those levels get no photoionization",
+        )
 
     # normalise the target factors and scale the phixs table
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
@@ -867,7 +886,12 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
 
             if levelname_b == lowerlevelname_a:  # due to J splitting, we may match multiple levels here
                 photoionization_crosssections[levelid] = phixstable
-                photoionization_targetconfig_fractions[levelid] = phixs_targetconfigfractions_of_levelname[levelname_b]
+                # .get() rather than the defaultdict's __getitem__: a level whose target factors
+                # all came out zero is absent here, and inserting an empty list for it would look
+                # like "has data, no targets" instead of "no data" to get_photoiontargetfractions()
+                photoionization_targetconfig_fractions[levelid] = phixs_targetconfigfractions_of_levelname.get(
+                    levelname_b
+                )
 
                 # photoionization_thresholds_ev[levelid] = energy_level.thresholdenergyev
                 photoionization_thresholds_ev[levelid] = hc_in_ev_angstrom / float(energy_level.lambdaangstrom)
@@ -911,6 +935,23 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
 
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
 # 2.18 eV threshold cross section is near 4.37072813 Mb, great!
+@cache
+def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.ndarray:
+    """Sum of (2l + 1) * sigma(n, l) over l_start <= l <= l_end, on the tabulated U grid.
+
+    Depends only on the quantum numbers, not on the level, so cache it: the callers below run
+    once per level per ion.
+    """
+    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[(n, l_start)]))
+    for l in range(l_start, l_end + 1):
+        if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], hyd_phixs_energygrid_ryd[(n, l_start)]):
+            print("TABLE MISMATCH")
+            sys.exit()
+        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[(n, l)]
+
+    return arr_sigma_summed_over_l
+
+
 def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, zion=None):
     """Hydrogenic split-l cross section table (CMFGEN cross-section types 2 and 8).
 
@@ -923,7 +964,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     """
     assert l_start >= 0
     assert l_end <= n - 1
-    energygrid = np.array(hyd_phixs_energygrid_ryd[(n, l_start)])
+    energygrid = hyd_phixs_energygrid_ryd[(n, l_start)]
     phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
@@ -932,12 +973,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     # U values at which the hydrogenic cross sections are tabulated
     u_grid = energygrid / energygrid[0]
 
-    arr_sigma_summed_over_l = np.zeros(len(energygrid))
-    for l in range(l_start, l_end + 1):
-        if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], hyd_phixs_energygrid_ryd[(n, l_start)]):
-            print("TABLE MISMATCH")
-            sys.exit()
-        arr_sigma_summed_over_l += (2 * l + 1) * np.array(hyd_phixs[(n, l)])
+    arr_sigma_summed_over_l = get_hydrogenic_sigma_summed_over_l(n, l_start, l_end)
 
     l_degeneracy = (l_end - l_start + 1) * (l_end + l_start + 1)  # == sum of (2l + 1) from l_start to l_end
 
@@ -1100,6 +1136,13 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             except KeyError:
                 level_ids_of_level_name[levelnamenoJ] = [levelid]
 
+    # total statistical weight of each term, used to share a term-resolved collision strength over
+    # its J levels. Depends only on the level list, so build it once rather than per input row.
+    g_sum_of_level_name = {
+        levelname: sum(energy_levels[levelid].g for levelid in levelids)
+        for levelname, levelids in level_ids_of_level_name.items()
+    }
+
     filename = os.path.join(
         hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, coldatafilename
     )
@@ -1198,29 +1241,33 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     # excitation rate coefficient as proportional to upsilon_ij / g_i.
                     # Both sums are over the complete term, so each pair keeps its correct value
                     # regardless of which pairs happen to be representable as lower id < upper id.
-                    lower_g_sum = sum(energy_levels[levelid].g for levelid in level_ids_of_level_name[namefrom])
-                    upper_g_sum = sum(energy_levels[levelid].g for levelid in level_ids_of_level_name[nameto])
+                    lower_g_sum = g_sum_of_level_name[namefrom]
+                    upper_g_sum = g_sum_of_level_name[nameto]
 
                     for id_lower in level_ids_of_level_name[namefrom]:
-                        id_upper_list = [levelid for levelid in level_ids_of_level_name[nameto] if levelid > id_lower]
-
-                        for id_upper in id_upper_list:
+                        for id_upper in level_ids_of_level_name[nameto]:
+                            if id_lower == id_upper:
+                                continue
                             # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
                             upsilonscaled = (
                                 upsilon
                                 * (energy_levels[id_lower].g / lower_g_sum)
                                 * (energy_levels[id_upper].g / upper_g_sum)
                             )
-                            if (id_lower, id_upper) in upsilondict and upsilondict[(id_lower, id_upper)] >= 0.0:
+                            # upsilon is symmetric, and the output wants lower id < upper id. The
+                            # two terms' J levels can interleave in energy, so order the key here
+                            # rather than dropping the pairs that come out the wrong way round.
+                            key = (min(id_lower, id_upper), max(id_lower, id_upper))
+                            if key in upsilondict and upsilondict[key] >= 0.0:
                                 artisatomic.log_and_print(
                                     flog,
                                     f"ERROR: Duplicate collisional transition from {namefrom} <->"
-                                    f" {nameto} ({id_lower} -> {id_upper}). Keeping existing collision strength of"
-                                    f" {upsilondict[(id_lower, id_upper)]:.2e} instead of new value of"
+                                    f" {nameto} ({key[0]} -> {key[1]}). Keeping existing collision strength of"
+                                    f" {upsilondict[key]:.2e} instead of new value of"
                                     f" {upsilonscaled:.2e}.",
                                 )
                             else:
-                                upsilondict[(id_lower, id_upper)] = upsilonscaled
+                                upsilondict[key] = upsilonscaled
 
                                 # print(namefrom, nameto, upsilon)
                 except KeyError:
@@ -1355,10 +1402,12 @@ def read_hyd_phixsdata():
                     )
                     sys.exit()
 
-            hyd_phixs_energygrid_ryd[(n, l)] = [
-                e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)
-            ]
-            hyd_phixs[(n, l)] = [10 ** (8 + logxs) for logxs in xs_values]  # cross sections in Megabarns
+            hyd_phixs_energygrid_ryd[(n, l)] = np.array(
+                [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
+            )
+            # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
+            # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
+            hyd_phixs[(n, l)] = np.array([10 ** (8 + logxs) for logxs in xs_values])
             # hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"

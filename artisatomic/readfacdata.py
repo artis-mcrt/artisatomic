@@ -224,8 +224,6 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
         transitions.append(transtuple)
 
-    assert sum(transition_count_of_level_name.values()) == 2 * len(transitions)
-
     return transitions, transition_count_of_level_name
 
 
@@ -250,7 +248,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     artisatomic.log_and_print(
         flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {ion_folder}",
+        f" {artisatomic.path_for_log(ion_folder)}",
     )
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]

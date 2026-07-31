@@ -65,10 +65,18 @@ def test_interpret_configuration():
     assert interpret_configuration("3d7b2Fe") == (["3d7"], 2, 3, 0, 2)
     assert interpret_configuration("3d6_3P2e") == (["3d6"], 3, 1, 0, -1)
 
-    # a two-digit principal quantum number must keep its leading digit when the orbital also
-    # carries an occupation number (the n >= 10 case without one already worked)
-    assert interpret_configuration("3d610d2_5Pe") == (["3d6", "10d2"], 5, 1, 0, -1)
+    # a two-digit principal quantum number is read as such when the orbital has no occupation
+    # number, where there is nothing else the digits could belong to
     assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
+    # ...but a leading zero rules it out: the '0' of '3d10' is part of the occupation number
+    assert interpret_configuration("3d104s_3De") == (["3d1", "4s"], 3, 2, 0, -1)
+
+    # an orbital that carries its own occupation number is always read with a single-digit n,
+    # because '3d14s2' and '3d104s2' are ambiguous and the single-digit reading is the common one
+    assert interpret_configuration("3d14s2_2De") == (["3d1", "4s2"], 2, 2, 0, -1)
+    assert interpret_configuration("3d104s2_1Se") == (["3d1", "4s2"], 1, 0, 0, -1)
+    assert interpret_configuration("4d105s1_2Se") == (["4d1", "5s1"], 2, 0, 0, -1)
+    assert interpret_configuration("4f145d106s2_1Se") == (["4f1", "5d1", "6s2"], 1, 0, 0, -1)
 
 
 def test_score_config_match():
@@ -83,6 +91,10 @@ def test_score_config_match():
     assert score_config_match("Eqv st (0S ) 0s  a4P", "3d5_4Pe[4]") == 5
     assert score_config_match("3d6    (5D ) 0s  b2F ", "3d7b2Fe") >= 12
     assert score_config_match("3d5    (2D ) 4p  v3Po", "3d5(b2D)4p_3Po") == 98
+
+    # closed d shells must score the same as any other configuration: if '3d104s2' is misparsed
+    # as 3d1 + 04s2 then the 4s2 piece stops matching and the score halves
+    assert score_config_match("3d104s2_1Se", "3d10(1S)4s2_1Se") == score_config_match("3d64s2_5De", "3d6(5D)4s2_5De")
 
 
 def test_hydrogenic_phixs():

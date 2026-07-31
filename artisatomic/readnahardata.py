@@ -48,7 +48,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     nahar_ionization_potential_rydberg = -1.0
 
     if not os.path.isfile(path_nahar_energy_file):
-        artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
+        artisatomic.log_and_print(flog, f"{artisatomic.path_for_log(path_nahar_energy_file)} does not exist")
     else:
         artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_nahar_energy_file)}")
         with open(path_nahar_energy_file) as fenlist:
@@ -246,6 +246,8 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
                 break
             if not row:
                 continue  # a blank line is not the end of the table (sum([]) == 0 used to break here)
+            if len(row) < 4 or not all(map(artisatomic.isfloat, row)):
+                break  # trailing text after the table rather than another state
             if sum(map(float, row)) == 0:
                 break  # the "0 0 0 0" terminator
 
