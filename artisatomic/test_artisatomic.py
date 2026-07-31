@@ -4,6 +4,7 @@ import typing as t
 
 import numpy as np
 import polars as pl
+import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
@@ -32,6 +33,23 @@ def test_interpret_term():
     assert get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
     assert get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
+    # names with no L character must report "unknown" rather than raising UnboundLocalError
+    for unreadable in ("e2x", "o12", "3d5", "12"):
+        assert get_term_as_tuple(unreadable) == (-1, -1, -1)
+
+
+def test_get_parity_from_config():
+    from artisatomic import get_parity_from_config
+
+    # sum of l over the occupied orbitals, mod 2
+    assert get_parity_from_config("3d7") == 0  # 2 * 7 = 14
+    assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
+    assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
+
+    # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
+    assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
+    assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
+
 
 def test_interpret_parent_term():
     assert interpret_parent_term("(3P2)") == (3, 1, 2)
@@ -46,6 +64,11 @@ def test_interpret_configuration():
     assert interpret_configuration("3d6    (5D ) 4p  z6Do") == (["3d6", "(5D)", "4p"], 6, 2, 1, 1)
     assert interpret_configuration("3d7b2Fe") == (["3d7"], 2, 3, 0, 2)
     assert interpret_configuration("3d6_3P2e") == (["3d6"], 3, 1, 0, -1)
+
+    # a two-digit principal quantum number must keep its leading digit when the orbital also
+    # carries an occupation number (the n >= 10 case without one already worked)
+    assert interpret_configuration("3d610d2_5Pe") == (["3d6", "10d2"], 5, 1, 0, -1)
+    assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
 
 
 def test_score_config_match():
@@ -339,6 +362,26 @@ def test_add_handler_if_not_set():
     ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
+
+
+def test_split_element_ionstage_str():
+    from artisatomic import split_element_ionstage_str
+
+    assert split_element_ionstage_str("FeII") == (26, 2)
+    assert split_element_ionstage_str("DyIII") == (66, 3)
+    assert split_element_ionstage_str("SiI") == (14, 1)
+    assert split_element_ionstage_str("HI") == (1, 1)
+
+    # rstrip("IVX") would leave nothing behind for the elements whose symbols are made of
+    # those letters, so these are the cases that used to raise ValueError
+    assert split_element_ionstage_str("VI") == (23, 1)  # vanadium I, not "V" as a numeral
+    assert split_element_ionstage_str("VIII") == (23, 3)  # vanadium III
+    assert split_element_ionstage_str("IV") == (53, 5)  # iodine V
+    assert split_element_ionstage_str("II") == (53, 1)  # iodine I
+    assert split_element_ionstage_str("XeIV") == (54, 4)
+
+    with pytest.raises(ValueError, match="Could not split"):
+        split_element_ionstage_str("NotAnIon")
 
 
 def test_get_default_handler():

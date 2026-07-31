@@ -75,7 +75,8 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
-        return json.load(inputhandlersfile.open(encoding="utf-8"))
+        with inputhandlersfile.open(encoding="utf-8") as f:
+            return json.load(f)
 
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
 
@@ -113,6 +114,23 @@ ryd_to_ev = 13.605693122994232
 hc_in_ev_cm = 0.0001239841984332003
 hc_in_ev_angstrom = 12398.419843320025
 h_in_ev_seconds = 4.135667696923859e-15
+
+
+def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
+    """Split a string like 'FeII' into (atomic_number, ion_stage).
+
+    Splitting on `ionstr.rstrip("IVX")` destroys the symbols of the elements whose symbols are
+    made only of those letters: V (vanadium) and I (iodine). Instead find the split point where
+    the prefix is an element symbol and the suffix is a Roman numeral. Element symbols have a
+    lowercase second letter and Roman numerals are uppercase, so the match is unambiguous.
+    """
+    for splitpos in range(1, len(ionstr)):
+        elsym, ion_stage_roman = ionstr[:splitpos], ionstr[splitpos:]
+        if elsym in elsymbols and ion_stage_roman in roman_numerals[1:]:
+            return elsymbols.index(elsym), roman_numerals.index(ion_stage_roman)
+
+    msg = f"Could not split '{ionstr}' into an element symbol and a Roman numeral ion stage"
+    raise ValueError(msg)
 
 
 def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
@@ -252,7 +270,8 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     else:
         os.makedirs(log_folder, exist_ok=True)
 
-    json.dump(obj=ion_handlers, fp=Path(log_folder, "artisatomicionhandlers.json").open("w"))
+    with Path(log_folder, "artisatomicionhandlers.json").open("w") as f:
+        json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
@@ -270,9 +289,13 @@ def clear_files(args: argparse.Namespace) -> None:
 
 
 def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
-    for atomic_number, listions in ion_handlers:
-        if not listions:
+    for atomic_number, listions_unsorted in ion_handlers:
+        if not listions_unsorted:
             continue
+
+        # is_top_ion and the photoionisation target (iondatalist[i + 1]) both assume ascending
+        # ion stages, so don't rely on the caller (or a hand-edited JSON file) having sorted them
+        listions = sorted(listions_unsorted, key=lambda entry: entry if isinstance(entry, int) else entry[0])
 
         iondatalist = [
             read_ion_data(atomic_number, ion_stage_entry, is_top_ion=(i == len(listions) - 1), args=args)
@@ -1188,6 +1211,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         return (-1, -1, -1)
 
     lposition = -1
+    l = -1  # stays -1 when no L character is found, so the fall-through below can't hit an unbound name
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
@@ -1198,6 +1222,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
             return (-1, -1, 0)
         if config[-1] == "o":
             return (-1, -1, 1)
+        return (-1, -1, -1)
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
@@ -1351,9 +1376,10 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 instr = instr[:left_bracket_pos]
             elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
+                    # startpos is -4 for a two-digit principal quantum number, e.g. '10d2'
                     startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n else -3
-                    electron_config.insert(0, instr[-3:])
-                    instr = instr[:-3]
+                    electron_config.insert(0, instr[startpos:])
+                    instr = instr[:startpos]
                 else:
                     # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]
@@ -1371,8 +1397,14 @@ def get_parity_from_config(instr) -> int:
     configsplit = interpret_configuration(instr)[0]
     lsum = 0
     for orbitalstr in configsplit:
-        l = lchars.lower().index(orbitalstr[1])
-        nelec = int(orbitalstr[2:]) if len(orbitalstr[2:]) > 0 else 1
+        if orbitalstr.startswith("("):
+            continue  # a parent term such as '(5D)', not an occupied orbital
+        # the orbital letter is the first non-digit, allowing a two-digit principal quantum number
+        lpos = next((pos for pos, char in enumerate(orbitalstr) if char in lchars.lower()), None)
+        if lpos is None:
+            continue
+        l = lchars.lower().index(orbitalstr[lpos])
+        nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
         lsum += l * nelec
 
     return lsum % 2
@@ -1478,8 +1510,11 @@ def score_config_match(config_a, config_b):
                     # print(orbitaldiff, spindiff, maxspindiff, ldiff, maxldiff, config_a, config_b)
                     parent_term_match = 0.0
                     return 0
-        score = int(98 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
-        return score
+        non_term_pieces = max(non_term_pieces_a, non_term_pieces_b)
+        if non_term_pieces == 0:
+            # both configurations are parent terms only, so there is nothing to match piece by piece
+            return 5
+        return int(98 * matched_pieces / non_term_pieces * parent_term_match)
 
     return 5  # term matches but no electron config available or it's an Eqv state...0s type
 

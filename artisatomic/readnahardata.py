@@ -56,6 +56,15 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
 
             nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
 
+            # every level energy below is measured from this, so a missing value would silently
+            # offset the whole level list (and be written to adata.txt as a negative ionization energy)
+            if nahar_ionization_potential_rydberg <= 0.0:
+                msg = (
+                    f"No ' Ion ground state' line found in {path_nahar_energy_file}, so the ionization"
+                    " potential is unknown and the level energies cannot be computed"
+                )
+                raise ValueError(msg)
+
             while True:
                 line = fenlist.readline()
                 if not line:
@@ -233,8 +242,12 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
             line = fenlist.readline()
             row = line.split()
 
-            if not line or sum(map(float, row)) == 0:
+            if not line:
                 break
+            if not row:
+                continue  # a blank line is not the end of the table (sum([]) == 0 used to break here)
+            if sum(map(float, row)) == 0:
+                break  # the "0 0 0 0" terminator
 
             twosplusone, l, parity, indexinsymmetry = int(row[0]), int(row[1]), int(row[2]), int(row[3])
 

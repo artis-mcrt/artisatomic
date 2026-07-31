@@ -1,5 +1,6 @@
 import os
 import re
+import typing as t
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +60,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     ]
     number_match = re.compile(r"\d+(\.\d+)?")
     type_match = re.compile(r"[FIXA]")
-    type_dict = {"F": np.float64, "I": np.int64, "X": str, "A": str}
+    # "Int64" rather than np.int64 because the optional integer fields (isotope numbers, NLTE
+    # level numbers, hyperfine shifts) are blank on most gfall lines and must stay nullable
+    type_dict: dict[str, t.Any] = {"F": np.float64, "I": "Int64", "X": str, "A": str}
     field_types = tuple(type_dict[item] for item in number_match.sub("", gfall_fortran_format).split(","))
 
     field_widths = list(map(int, re.sub(r"\.\d+", "", type_match.sub("", gfall_fortran_format)).split(",")))
@@ -73,7 +76,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
                 widths=field_widths,
                 skip_blank_lines=True,
                 names=gfall_columns,
-                dtypes=dict(zip(gfall_columns, field_types, strict=True)),
+                # NB the keyword is 'dtype': pandas silently accepts and ignores 'dtypes',
+                # which left every column's type to be inferred
+                dtype=dict(zip(gfall_columns, field_types, strict=True)),
                 compression="infer",
                 dtype_backend="pyarrow",
             )
@@ -170,7 +175,9 @@ def read_levels_and_transitions(
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
-        .unique(["energyabovegsinpercm", "j"], keep="first")
+        # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
+        # without it the level names in adata.txt can differ from run to run
+        .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
         .sort(["energyabovegsinpercm", "j", "label"])
         .with_row_index("levelid")
         .select(

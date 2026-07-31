@@ -505,6 +505,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             lowerlevelname = ""
             targetlevelname = ""
             numpointsexpected = 0
+            pointnumber = 0
             crosssectiontype = -1
             fitcoefficients = []
 
@@ -759,15 +760,19 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                         phixs_type_levels[crosssectiontype].append(lowerlevelname)
 
                 if len(row) == 0:
+                    # For the tabulated types the array is preallocated to the declared row count,
+                    # so a short table leaves trailing zeros behind. Compare the number of points
+                    # actually read instead. (The previous check tested `targetlevelname in
+                    # <2-D float ndarray>`, which is always False, so it never ran.)
                     if (
-                        lowerlevelname != ""
+                        crosssectiontype in [20, 21, 22]
+                        and lowerlevelname != ""
                         and lowerlevelname in phixstables[filenum]
-                        and targetlevelname in phixstables[filenum][lowerlevelname]
-                        and numpointsexpected != len(phixstables[filenum][lowerlevelname])
+                        and pointnumber != numpointsexpected
                     ):
                         print(
                             f"photoionization_crosssections mismatch: expecting {numpointsexpected:d} rows but found"
-                            f" {len(phixstables[filenum][lowerlevelname]):d}"
+                            f" {pointnumber:d}"
                         )
                         print(
                             f"A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname},"
@@ -837,9 +842,14 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
 
             if len(target_configfactors) == 0:
-                print("ERRORHERE", lowerlevelname, target_configfactors_nofilter)
-                print(reduced_phixstable)
-            max_factor = max(x[1] for x in target_configfactors)
+                # every target was below the 1% cut, so keep them all rather than dividing by zero
+                artisatomic.log_and_print(
+                    flog,
+                    f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
+                    f" ({target_configfactors_nofilter}), so keeping them unfiltered",
+                )
+                target_configfactors = target_configfactors_nofilter
+
             factor_sum = sum(x[1] for x in target_configfactors)
 
             for target_config, target_factor in target_configfactors:
@@ -1029,16 +1039,29 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # noqa: ARG
 
 
 def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
+    """Verner & Yakovlev (1995) multi-shell ground-state fits (CMFGEN cross-section type 9).
+
+    Each shell contributes only above its own threshold E_th, and the fit is evaluated at the
+    actual photon energy. See the type-9 branch of SUB_PHOT_GEN in CMFGEN's
+    newsubs/sub_phot_gen.f, where U = FREQ / CROSS_A(LMIN+3) / EV_TO_HZ is the photon energy in
+    eV divided by E_0, and each shell after the first is gated on FREQ >= EV_TO_HZ * E_th_eV.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
-    thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+    thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
+    thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
     for index, c in enumerate(energygrid):
         energydivthreshold = 1 + 20 * (c**2)
+        energy_ev = energydivthreshold * thresholdenergyev
 
         crosssection = 0.0
-        for params in fitcoefficients:
-            y = energydivthreshold * params.E_th_eV / params.E_0  # E / E_0
+        for shellnum, params in enumerate(fitcoefficients):
+            # the first shell starts at the level's own ionization edge, later (inner) shells
+            # only contribute above their own threshold
+            if shellnum > 0 and energy_ev < params.E_th_eV:
+                continue
+            y = energy_ev / params.E_0
             P = params.P
             Q = 5.5 + params.l - 0.5 * params.P
             y_a = params.y_a
@@ -1275,18 +1298,28 @@ def get_photoiontargetfractions(
 
 
 def read_hyd_phixsdata():
-    (
-        _hillier_ionization_energy_ev,
-        hillier_energy_levels,
-        _transitions,
-        _transition_count_of_level_name,
-        _hillier_level_ids_matching_term,
-    ) = read_levels_and_transitions(1, 1, open(os.devnull, "w"))
+    with open(os.devnull, "w") as devnull:
+        (
+            _hillier_ionization_energy_ev,
+            hillier_energy_levels,
+            _transitions,
+            _transition_count_of_level_name,
+            _hillier_level_ids_matching_term,
+        ) = read_levels_and_transitions(1, 1, devnull)
+
+    # the tables below are indexed by principal quantum number, so the H I level list must not
+    # have been filtered (read_levels_and_transitions drops levels with no transitions)
+    for levelid, energy_level in enumerate(hillier_energy_levels[1:], 1):
+        assert energy_level.hillierlevelid == levelid, (
+            "H I level list is not indexed by principal quantum number, so the hydrogenic"
+            " cross-section thresholds would be taken from the wrong levels"
+        )
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
     print(f"Reading hydrogen photoionization cross sections from {hyd_filename}")
     max_n = -1
     l_start_u = 0.0
+    l_del_u = 0.0
     with open(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
@@ -1331,7 +1364,8 @@ def read_hyd_phixsdata():
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")
     max_n = -1
-    l_start_u = 0.0
+    n_start_u = 0.0
+    n_del_u = 0.0
     with open(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()

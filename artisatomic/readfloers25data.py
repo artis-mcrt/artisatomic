@@ -21,11 +21,7 @@ def extend_ion_list(ion_handlers, calibrated=True):
         handlername = f"floers25{calibstr}"
         for s in BASEPATH.glob(f"*_levels_{calibstr}.txt*"):
             ionstr = s.name.lstrip("0123456789").split("_")[0]
-            elsym = ionstr.rstrip("IVX")
-            ion_stage_roman = ionstr.removeprefix(elsym)
-            atomic_number = artisatomic.elsymbols.index(elsym)
-
-            ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
+            atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
             ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
     return ion_handlers

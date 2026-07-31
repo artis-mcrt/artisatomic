@@ -157,11 +157,7 @@ def extend_ion_list(ion_handlers):
     assert Path(BASEPATH).is_dir()
     for s in Path(BASEPATH).glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip("0123456789").removesuffix(".lev.asc").removesuffix("_calib")
-        elsym = ionstr.rstrip("IVX")
-        ion_stage_roman = ionstr.removeprefix(elsym)
-        atomic_number = artisatomic.elsymbols.index(elsym)
-
-        ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
+        atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
     ion_handlers.sort(key=lambda x: x[0])
