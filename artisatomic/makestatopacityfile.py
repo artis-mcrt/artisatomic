@@ -173,16 +173,18 @@ def orbital_value(orb):
 def create_statopacdata(litvinov_file_path: Path | str):
     litvinov_ionisation_energy_data = get_litvinov_ionisation_energy_data(litvinov_file_path)
 
-    artis_files_path = Path(__file__).parent.parent.absolute() / "artis_files"
-    with open(artis_files_path / "stat_cc_opac_data.txt", mode="w", encoding="utf-8") as statopacity_filestream:
+    with open("stat_cc_opac_data.txt", mode="w", encoding="utf-8") as statopacity_filestream:
         statopacity_filestream.write(
             "Z ion_stage E_ion[eV] g_0 spin_cutoff omega_0 beta numb_active_electrons numb_lines\n"
         )
-        for atomic_number in range(20, 101):
+        for atomic_number in range(23, 101):
+            print(f"Z={atomic_number}")
+            el_symbol = at.get_elsymbol(atomic_number)
             nist_data = parse_nist_ionization_table(
                 f"https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra={at.get_elsymbol(atomic_number)}&submit=Retrieve+Data&units=1&format=0&order=0&at_num_out=on&sp_name_out=on&ion_charge_out=on&el_name_out=on&seq_out=on&shells_out=on&level_out=on&ion_conf_out=on&e_out=0&unc_out=on&biblio=on"
             )
-            for ionisation_stage in range(atomic_number + 1):
+            for ionisation_stage in range(atomic_number - 1):
+                print(f"  I={ionisation_stage}")
                 numb_electrons = atomic_number - ionisation_stage
                 ground_state_stat_weight = nist_data.loc[nist_data["ion_charge"] == ionisation_stage][
                     "g_statistical"
@@ -197,28 +199,39 @@ def create_statopacdata(litvinov_file_path: Path | str):
                 electron_configs = nist_data.loc[nist_data["ion_charge"] == ionisation_stage]["gs_config"].item()
 
                 eff_charge = atomic_number - 0.425 * numb_electrons
+                print(f"    Zeff={eff_charge}")
                 beta_pereV = numb_electrons**1.25 / (rydberg_energy_eV * eff_charge)
+                print(f"    beta_ij={beta_pereV}")
                 combinatorical_sum = 0
                 for electron_config in electron_configs:
                     combinatorical_sum += orbital_value(electron_config)
+                print(f"    combinatorical_sum={combinatorical_sum}")
                 spin_cutoff_prefactor = 0.6 - 0.4 * np.exp(-0.4 * combinatorical_sum)
+                print(f"    spin_cutoff_prefactor={spin_cutoff_prefactor}")
                 spin_cutoff = spin_cutoff_prefactor * np.sqrt(numb_electrons)
+                print(f"    spin_cutoff={spin_cutoff}")
                 numb_levels = 10 ** (0.5 * combinatorical_sum)
+                print(f"    numb_levels={numb_levels}")
                 initial_state_density = (
                     spin_cutoff_prefactor
                     * np.sqrt(2 * np.pi * numb_electrons)
                     * numb_levels
                     / (np.exp(beta_pereV * ionisation_energy_eV) - 1)
                 )
-                N_lines = max(
-                    1,
-                    15
-                    * initial_state_density**2
-                    / (16 * np.pi**3 * spin_cutoff)
-                    * (np.exp(2 * beta_pereV * ionisation_energy_eV) - 1)
-                    * (np.exp(beta_pereV * ionisation_energy_eV) - 1),
-                )
-                print(f"    has {N_lines} lines")
+                print(f"    omega_0ij={initial_state_density}")
+                if initial_state_density > 1e-150:
+                    N_lines = int(
+                        max(
+                            1,
+                            15
+                            * initial_state_density**2
+                            / (16 * np.pi**3 * spin_cutoff)
+                            * (np.exp(beta_pereV * ionisation_energy_eV) - 1) ** 2,
+                        )
+                    )
+                else:
+                    N_lines = 0
+                print(f"    N_lines={N_lines}")
                 if math.isnan(ground_state_stat_weight):
                     ground_state_stat_weight = spin_cutoff
                 statopacity_filestream.write(
@@ -230,8 +243,8 @@ def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
+        "file",
         type=Path,
-        required=True,
         help="Path to the ionisation data file by Y. Litvinov (not public)",
     )
 
