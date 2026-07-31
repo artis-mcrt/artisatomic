@@ -267,6 +267,57 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert np.all(crosssections[1] == 0.0)
 
 
+def test_read_coldata_term_to_j_redistribution():
+    """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
+
+    ARTIS forms the collisional excitation rate coefficient as proportional to upsilon_ij / g_i,
+    so the invariant that makes the total term-to-term rate correct is
+
+        sum_i sum_j upsilon_ij == upsilon_term,   upsilon_ij = upsilon_term * g_i/g_L * g_j/g_U
+
+    O III has term-resolved collision data (col_data_oiii_butler_2012.dat) and a J-split level
+    list, so it exercises the redistribution; Fe II names its collision transitions with J
+    values, so its values must pass through untouched.
+    """
+    import argparse
+    import contextlib
+    from collections import defaultdict
+
+    args = argparse.Namespace(electrontemperature=5000)
+
+    def read_ion(atomic_number, ion_stage):
+        flog = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, energy_levels, _, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+        levelids_of_term = defaultdict(list)
+        for levelid, level in enumerate(energy_levels[1:], 1):
+            levelids_of_term[level.levelname.split("[")[0]].append(levelid)
+        return energy_levels, upsilondict, levelids_of_term
+
+    energy_levels, upsilondict, levelids_of_term = read_ion(8, 3)
+
+    lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
+    upper_ids = levelids_of_term["2s_2p3_3Do"]
+    assert [energy_levels[i].g for i in lower_ids] == [1.0, 3.0, 5.0]
+
+    sums_from_lower = [
+        sum(upsilondict[(i, j)] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
+    ]
+
+    # the single value in the collision data file for this term pair
+    upsilon_term = 5.791
+    assert abs(sum(sums_from_lower) - upsilon_term) < 1e-3
+
+    # and it is split over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
+    for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
+        assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
+
+    # Fe II collision data is already J-resolved, so every value passes through unscaled
+    _, upsilondict_fe2, _ = read_ion(26, 2)
+    assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
 def test_add_handler_if_not_set():
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
 

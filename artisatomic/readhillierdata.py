@@ -1163,13 +1163,28 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
                                 upsilondict[(id_upper, id_upper2)] = -2.0
 
+                    # When the collision data is given between LS terms but the level list is
+                    # J-split, the term effective collision strength is shared over the J levels
+                    # of both terms in proportion to their statistical weights:
+                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)
+                    # so that sum_ij upsilon_ij = upsilon_term. That invariant is what makes the
+                    # total term-to-term rate come out right, because ARTIS forms the collisional
+                    # excitation rate coefficient as proportional to upsilon_ij / g_i.
+                    # Both sums are over the complete term, so each pair keeps its correct value
+                    # regardless of which pairs happen to be representable as lower id < upper id.
+                    lower_g_sum = sum(energy_levels[levelid].g for levelid in level_ids_of_level_name[namefrom])
+                    upper_g_sum = sum(energy_levels[levelid].g for levelid in level_ids_of_level_name[nameto])
+
                     for id_lower in level_ids_of_level_name[namefrom]:
                         id_upper_list = [levelid for levelid in level_ids_of_level_name[nameto] if levelid > id_lower]
-                        upper_g_sum = sum(energy_levels[id_upper].g for id_upper in id_upper_list)
 
                         for id_upper in id_upper_list:
                             # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
-                            upsilonscaled = upsilon * energy_levels[id_upper].g / upper_g_sum
+                            upsilonscaled = (
+                                upsilon
+                                * (energy_levels[id_lower].g / lower_g_sum)
+                                * (energy_levels[id_upper].g / upper_g_sum)
+                            )
                             if (id_lower, id_upper) in upsilondict and upsilondict[(id_lower, id_upper)] >= 0.0:
                                 artisatomic.log_and_print(
                                     flog,
