@@ -471,7 +471,10 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_thresholds_ev = np.zeros(len(energy_levels))
-    photoionization_targetconfig_fractions = [[] for _ in energy_levels]
+    # None means "no photoionisation data for this level". get_photoiontargetfractions() relies on
+    # this to tell those levels apart from levels that do have a cross-section table, so it must
+    # not be initialised to empty lists.
+    photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None for _ in energy_levels]
     # return np.zeros((len(energy_levels), args.nphixspoints)),
     # photoionization_targetfractions  # TODO: replace with real data
 

@@ -184,12 +184,20 @@ def read_levels_data(dflevels):
     for index, row in dflevels.iterrows():
         ilev_enlevelindex_map[int(row["Ilev"])] = index
 
+        # Config is not unique (levels of the same configuration differ in J), so append the FAC
+        # level index to make the name unique. The configuration stays first so that
+        # get_level_valence_n() and the adata.txt comment column both still start with it.
         newlevel = FACEnergyLevel(
-            levelname=row["Config"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
+            levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
+            parity=row["P"],
+            g=row["g"],
+            energyabovegsinpercm=float(row["energypercm"]),
         )
         energy_levels.append(newlevel)
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
+
+    assert len({level.levelname for level in energy_levels}) == len(energy_levels)
 
     return [None, *energy_levels], ilev_enlevelindex_map
 
@@ -219,6 +227,8 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
 
         transitions.append(transtuple)
+
+    assert sum(transition_count_of_level_name.values()) == 2 * len(transitions)
 
     return transitions, transition_count_of_level_name
 
@@ -269,7 +279,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def get_level_valence_n(levelname: str):
-    part = levelname.rsplit(" ", maxsplit=1)[-1]
+    # level names are "<configuration> Ilev=<index>" and the configuration is itself
+    # space-separated, so drop the index suffix before taking the last orbital
+    part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()

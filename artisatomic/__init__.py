@@ -1741,12 +1741,17 @@ def write_phixs_data(
         log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
         sys.exit()
 
+    skipped_nonpositive_threshold = 0
     for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
         if not targetlist:
             continue
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
+        if threshold_ev <= 0.0:
+            # a zero or negative threshold is not a usable ionisation edge, so don't emit the level
+            skipped_nonpositive_threshold += 1
+            continue
         if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
-            upperionlevelid = targetlist[0][0] if len(targetlist) > 0 else 1
+            upperionlevelid = targetlist[0][0]
 
             fphixs.write(
                 f"{atomic_number:12d}{ion_stage + 1:12d}{upperionlevelid:8d}{ion_stage:12d}{lowerlevelid:8d}{threshold_ev:16.6E}\n"
@@ -1768,6 +1773,12 @@ def write_phixs_data(
 
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
+
+    if skipped_nonpositive_threshold > 0:
+        log_and_print(
+            flog,
+            f"Skipped {skipped_nonpositive_threshold} levels with a non-positive photoionization threshold energy",
+        )
 
 
 def write_compositionfile(

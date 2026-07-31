@@ -77,7 +77,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         .alias("g")
     )
 
-    dflevels = dflevels.with_columns(pl.col("J").str.strip_suffix("/2").cast(pl.Float32).alias("2J"))
+    # the level table is indexed from zero in file order, and the transitions refer to those indices
+    assert dflevels["Index"].to_list() == list(range(dflevels.height))
+
+    # Configuration is not unique (levels of the same configuration differ by J), so build a
+    # unique level name from it. The configuration stays first so that get_level_valence_n()
+    # and the adata.txt comment column both still start with it.
+    dflevels = dflevels.with_columns(
+        levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
+    )
+    assert dflevels["levelname"].n_unique() == dflevels.height
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
@@ -95,35 +104,36 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
-    counts_lower: dict[str, int] = dict(dftransitions["Config_Lower"].value_counts().iter_rows())
-    counts_upper: dict[str, int] = dict(dftransitions["Config_Upper"].value_counts().iter_rows())
+    # count per level index, not per configuration string: several levels share a configuration
+    transition_count_of_levelid: dict[int, int] = dict(
+        pl.concat([dftransitions["Lower"] + 1, dftransitions["Upper"] + 1]).value_counts().iter_rows()
+    )
     transition_count_of_level_name = {
-        config: counts_lower.get(config, 0) + counts_upper.get(config, 0) for config in dflevels["Configuration"]
+        levelname: transition_count_of_levelid.get(index + 1, 0)
+        for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
+    assert sum(transition_count_of_level_name.values()) == 2 * dftransitions.height
 
     # use standard artisatomic column names and convert to 1-indexed levels
 
     dflevels = artisatomic.add_dummy_zero_level(
         dflevels.select(
-            levelname=pl.col("Configuration"),
+            levelname=pl.col("levelname"),
             parity=pl.col("Parity"),
             g=pl.col("g"),
             energyabovegsinpercm=pl.col("Energy"),
         )
     )
 
-    dftransitions = dftransitions.select(
-        lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"), forbidden=pl.lit(False)
-    )
-
-    # this check is slow
-    # assert sum(transition_count_of_level_name.values()) == len(transitions) * 2
+    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it
+    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"))
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
 
 def get_level_valence_n(levelname: str):
-    part = levelname.rsplit(".", maxsplit=1)[-1]
+    # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
+    part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()

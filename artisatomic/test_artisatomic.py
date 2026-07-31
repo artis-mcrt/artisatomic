@@ -463,5 +463,12 @@ def test_get_level_valence_n():
     assert readfloers25data.get_level_valence_n("5s2.5p5") == 5
     assert readfacdata.get_level_valence_n("4f9 6s1") == 6
     assert readfacdata.get_level_valence_n("4f10") == 4
+
+    # the floers25 and fac level names carry a uniquifying suffix, which must be ignored
+    assert readfloers25data.get_level_valence_n("4f10 J=8 index=0") == 4
+    assert readfloers25data.get_level_valence_n("4f9.6s J=15/2 index=137") == 6
+    assert readfloers25data.get_level_valence_n("5s2.5p5 J=3/2 index=2") == 5
+    assert readfacdata.get_level_valence_n("4f9 6s1 Ilev=42") == 6
+    assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
     assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
     assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
