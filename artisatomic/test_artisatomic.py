@@ -112,6 +112,103 @@ def test_hydrogenic_phixs():
     assert np.allclose(expected_n5, phixstable_n[:10], rtol=1e-3)
 
 
+def test_hydrogenic_phixs_effective_charge_scaling():
+    """A hydrogenic level of charge Z must have sigma_threshold = sigma_th(H, n=1) / Z**2.
+
+    The H (Z=1) cases in test_hydrogenic_phixs() cannot detect a spurious extra factor of
+    Z_eff**2, so check the scaling explicitly for Z > 1.
+    """
+    ryd_to_ev = 13.605693122994232
+    import artisatomic.readhillierdata as rhd
+
+    rhd.read_hyd_phixsdata()
+
+    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
+
+    for atomic_number in (1, 2, 3, 6, 26):
+        for n in (1, 2, 5):
+            # a hydrogenic level of charge Z and principal quantum number n ionizes at Z**2 / n**2 Ryd
+            threshold_ev = atomic_number**2 * ryd_to_ev / n**2
+            phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
+
+            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and the gaunt factor at
+            # threshold depends only on n, so the ratio to the n=1 value is exactly n / Z**2
+            # once the n-dependence of g_bf is divided out by comparing at the same n.
+            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
+            assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
+
+        # the n=1 threshold cross section must fall exactly as 1 / Z**2
+        threshold_ev = atomic_number**2 * ryd_to_ev
+        phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, 1)
+        assert np.isclose(phixstable[0][1], sigma_hydrogen_1s / atomic_number**2, rtol=1e-6)
+
+
+def test_match_hydrogenic_phixs_is_not_double_scaled():
+    """match_hydrogenic_phixs() must not rescale the table returned by get_hydrogenic_n_phixstable().
+
+    get_hydrogenic_n_phixstable() already contains the effective-charge scaling, so applying
+    a second factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a
+    typical E_th = 11 eV, n = 5 valence level).
+    """
+    import argparse
+
+    import artisatomic
+    import artisatomic.readhillierdata as rhd
+
+    rhd.read_hyd_phixsdata()
+
+    ryd_to_ev = 13.605693122994232
+    hc_in_ev_cm = artisatomic.hc_in_ev_cm
+
+    # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
+    ionization_energy_ev = 4 * ryd_to_ev
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [None, 0.0],
+            "g": [None, 2.0],
+            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+
+    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+
+    assert thresholds[1] == ionization_energy_ev
+    assert targetfractions[1] == [(1, 1.0)]
+
+    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
+    assert abs(expected_threshold_mb - 6.3067 / 4) < 1e-3  # exact hydrogenic value for He II 1s
+    # the downsampled first point is a bin average, so allow a few percent
+    assert abs(crosssections[1][0] / expected_threshold_mb - 1) < 0.05
+
+    # levels above the ionization energy must be skipped rather than dividing by a negative threshold
+    dflevels_unbound = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [None, 2 * ionization_energy_ev / hc_in_ev_cm],
+            "g": [None, 2.0],
+            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
+    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+    assert thresholds[1] == 0.0
+    assert targetfractions[1] == []
+    assert np.all(crosssections[1] == 0.0)
+
+
 def test_add_handler_if_not_set():
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
 

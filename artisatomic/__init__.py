@@ -922,9 +922,6 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
     get_n = dict_get_n_func[ion_handler]
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
-    alpha_squared = 0.0072973525643**2  # fine structure constant squared
-    mc_squared = 0.5109989461 * 1e6  # electron mass in eV
-
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.zeros(energy_levels.height)
@@ -936,17 +933,16 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
             break
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
+        if threshold_ev <= 0.0:
+            # level lies above the ionization energy, so there is nothing to ionize from
+            continue
         photoionization_thresholds_ev[lowerlevelid] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
-        if lambda_angstrom <= 0.0:
-            continue
 
         n = get_n(level["levelname"])
-        effective_charge_squared = threshold_ev * 2 * (n**2) / alpha_squared / mc_squared
-        # scale the cross sections but not the energy grid
-        phixstable = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
-        phixstable[:, 1] /= effective_charge_squared
-        phixstables[lowerlevelid] = phixstable
+        # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
+        # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
+        phixstables[lowerlevelid] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
         photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]
 
     reduced_phixs_dict = reduce_phixs_tables(
