@@ -112,6 +112,64 @@ def test_hydrogenic_phixs():
     assert np.allclose(expected_n5, phixstable_n[:10], rtol=1e-3)
 
 
+def test_hydrogenic_nl_phixs_offset_type8():
+    """CMFGEN cross-section type 8 (modified hydrogenic split l).
+
+    Pinned against the SUB_PHOT_GEN type-8 branch in CMFGEN's newsubs/sub_phot_gen.f:
+
+        IF(FREQ_VEC(I) .GE. EDGE+CROSS_A(LMIN+3))THEN
+          U=FREQ_VEC(I)/(EDGE+CROSS_A(LMIN+3))
+          X=LOG10(U) ... interpolate log10(BF_L_CROSS) linearly in X ...
+          SUM=SUM/ZION/ZION
+          PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
+    """
+    import artisatomic.readhillierdata as rhd
+
+    rhd.read_hyd_phixsdata()
+
+    h_in_ev_seconds = 4.135667696923859e-15
+    ryd_to_ev = 13.605693122994232
+
+    # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
+    threshold_ev, n, l_start, l_end, nu_o, zion = 7.90, 4, 1, 1, 0.88936, 2
+    lambda_angstrom = rhd.hc_in_ev_angstrom / threshold_ev
+    e_o_ev = nu_o * 1e15 * h_in_ev_seconds
+
+    phixstable = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion)
+
+    energy_ev = phixstable[:, 0] * ryd_to_ev
+    below_offset_edge = energy_ev < threshold_ev + e_o_ev
+
+    # zero everywhere below the offset edge, including at the true threshold
+    assert below_offset_edge[0]
+    assert np.all(phixstable[below_offset_edge, 1] == 0.0)
+    # and non-zero immediately above it
+    assert np.all(phixstable[~below_offset_edge, 1] > 0.0)
+
+    # independent reimplementation of the CMFGEN branch
+    u_grid = np.array(rhd.hyd_phixs_energygrid_ryd[(n, l_start)])
+    u_grid /= u_grid[0]
+    sigma_table = np.zeros(len(u_grid))
+    for l in range(l_start, l_end + 1):
+        sigma_table += (2 * l + 1) * np.array(rhd.hyd_phixs[(n, l)])
+
+    for index, en_ev in enumerate(energy_ev):
+        if en_ev < threshold_ev + e_o_ev:
+            continue
+        u = en_ev / (threshold_ev + e_o_ev)
+        expected = 10 ** np.interp(np.log10(u), np.log10(u_grid), np.log10(sigma_table))
+        expected /= zion**2 * (l_end - l_start + 1) * (l_end + l_start + 1)
+        assert np.isclose(phixstable[index, 1], expected, rtol=1e-10)
+
+    # the energy grid must be untouched by the offset: it still starts at the true threshold
+    assert np.isclose(phixstable[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
+
+    # nu_o=None (type 2) must be unaffected and must not require zion
+    type2 = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
+    assert type2[0, 1] > 0.0
+    assert np.isclose(type2[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
+
+
 def test_hydrogenic_phixs_effective_charge_scaling():
     """A hydrogenic level of charge Z must have sigma_threshold = sigma_th(H, n=1) / Z**2.
 

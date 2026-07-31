@@ -475,7 +475,9 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     # return np.zeros((len(energy_levels), args.nphixspoints)),
     # photoionization_targetfractions  # TODO: replace with real data
 
-    n_eff = ion_stage - 1  # effective nuclear charge (with be replaced with value in file if available)
+    # charge of the ion left behind by the photoionisation (CMFGEN's ZION).
+    # Replaced by the value in the file if available.
+    zion = ion_stage
     photfilenames = ions_data[(atomic_number, ion_stage)].photfilenames
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
@@ -552,9 +554,15 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                     # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
-                    # 'Screened nuclear charge' appears mislabelled in the CMFGEN database
-                    # it is really an ionisation stage
-                    n_eff = int(float(row[0])) - 1
+                    # 'Screened nuclear charge' appears mislabelled in the CMFGEN database.
+                    # It is really the charge of the ion left behind, i.e. the ionisation stage
+                    # (Fe II gives 2.0, Fe III gives 3.0), which is CMFGEN's ZION.
+                    zion = int(float(row[0]))
+                    if zion != ion_stage:
+                        artisatomic.log_and_print(
+                            flog,
+                            f"WARNING: file gives screened nuclear charge {zion} but ion_stage is {ion_stage}",
+                        )
 
                 if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
                     numpointsexpected = int(row[0])
@@ -675,7 +683,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                             else:
                                 lambda_angstrom = abs(float(energy_levels[lowerlevelid].lambdaangstrom))
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
-                                    lambda_angstrom, n, l_start, l_end, nu_o=nu_o
+                                    lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion
                                 )
                                 # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
@@ -890,36 +898,61 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
 
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
 # 2.18 eV threshold cross section is near 4.37072813 Mb, great!
-def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None):
+def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, zion=None):
+    """Hydrogenic split-l cross section table (CMFGEN cross-section types 2 and 8).
+
+    With nu_o given this is type 8 ("modified hydrogenic split l"), where the cross section is
+    zero below an offset edge nu_edge + nu_o and the tabulated hydrogenic cross section is read
+    at U = nu / (nu_edge + nu_o) instead of nu / nu_edge. Type 8 needs the ion charge zion,
+    since CMFGEN scales it by 1 / zion**2 rather than by the (n_eff / (n * zion))**2 of type 2.
+
+    See SUB_PHOT_GEN in CMFGEN's newsubs/sub_phot_gen.f.
+    """
     assert l_start >= 0
     assert l_end <= n - 1
-    energygrid = hyd_phixs_energygrid_ryd[(n, l_start)]
+    energygrid = np.array(hyd_phixs_energygrid_ryd[(n, l_start)])
     phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    scale_factor = 1 / thresholdenergyryd / (n**2) / ((l_end - l_start + 1) * (l_end + l_start + 1))
-    # scale_factor = 1.0
+    # U values at which the hydrogenic cross sections are tabulated
+    u_grid = energygrid / energygrid[0]
 
-    for index, energy_ryd in enumerate(energygrid):
-        energydivthreshold = energy_ryd / energygrid[0]
-        if nu_o is None:
-            U = energydivthreshold
-        else:
-            E_o = nu_o * 1e15 * h_in_ev_seconds
-            U = thresholdenergyev * energydivthreshold / (E_o + thresholdenergyev)  # energy / (E_0 + E_threshold)
-        crosssection = 0.0
-        if U > 0:
-            for l in range(l_start, l_end + 1):
-                if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], energygrid):
-                    print("TABLE MISMATCH")
-                    sys.exit()
-                crosssection += (2 * l + 1) * hyd_phixs[(n, l)][index]
-            crosssection = crosssection * scale_factor
+    arr_sigma_summed_over_l = np.zeros(len(energygrid))
+    for l in range(l_start, l_end + 1):
+        if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], hyd_phixs_energygrid_ryd[(n, l_start)]):
+            print("TABLE MISMATCH")
+            sys.exit()
+        arr_sigma_summed_over_l += (2 * l + 1) * np.array(hyd_phixs[(n, l)])
 
-        phixstable[index][0] = energydivthreshold * thresholdenergyryd  # / ryd_to_ev
-        phixstable[index][1] = crosssection
+    l_degeneracy = (l_end - l_start + 1) * (l_end + l_start + 1)  # == sum of (2l + 1) from l_start to l_end
+
+    if nu_o is None:
+        # type 2: the output energies coincide with the tabulated U values, so no interpolation
+        # 1 / thresholdenergyryd / n**2 is CMFGEN's (NEF / (n * ZION))**2
+        scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
+        arr_sigma = arr_sigma_summed_over_l * scale_factor
+    else:
+        assert zion is not None, "the ion charge is required for offset (type 8) hydrogenic cross sections"
+        # type 8: CMFGEN ignores the n_eff correction and uses 1 / zion**2 (see sub_phot_gen.f)
+        scale_factor = 1 / (zion**2) / l_degeneracy
+        e_o_ev = nu_o * 1e15 * h_in_ev_seconds
+        # energy / (E_o + E_threshold), i.e. U measured from the offset edge rather than the true edge
+        u_offset = thresholdenergyev * u_grid / (e_o_ev + thresholdenergyev)
+
+        # CMFGEN interpolates log10(cross section) linearly in log10(U), and the tabulated U grid is
+        # geometric, so this reproduces its RJ = LOG10(U) / L_DEL_U indexing.
+        # u_offset <= u_grid for e_o_ev >= 0, so we never need to extrapolate past the table end.
+        with np.errstate(divide="ignore"):
+            log_sigma = np.log10(arr_sigma_summed_over_l)
+        arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_grid), log_sigma) * scale_factor
+
+        # the cross section is zero until the offset edge is reached
+        arr_sigma[u_offset < 1.0] = 0.0
+
+    phixstable[:, 0] = u_grid * thresholdenergyryd
+    phixstable[:, 1] = arr_sigma
 
     return phixstable
 
