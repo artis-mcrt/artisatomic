@@ -159,7 +159,7 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     path_gfall = find_gfall(atomic_number, ion_charge)
-    artisatomic.log_and_print(flog, f"Reading {path_gfall}")
+    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_gfall)}")
 
     gfall = parse_gfall(fname=str(path_gfall))
     column_renames = {

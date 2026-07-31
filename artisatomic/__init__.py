@@ -470,7 +470,7 @@ def read_ion_data(
             nahar_phixs_tables: dict = {}
             thresholds_ev_dict: dict = {}
             if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_nahar_px_file}")
+                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
                 nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
                     path_nahar_px_file, atomic_number, ion_stage, args
                 )
@@ -514,7 +514,7 @@ def read_ion_data(
             nahar_phixs_tables = {}
             thresholds_ev_dict = {}
             if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_nahar_px_file}")
+                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
                 nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
                     path_nahar_px_file, atomic_number, ion_stage, args
                 )
@@ -609,7 +609,7 @@ def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
     upsilondict = {}
 
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
-    log_and_print(flog, f"Reading effective collision strengths from {filename}")
+    log_and_print(flog, f"Reading effective collision strengths from {path_for_log(filename)}")
 
     with open(filename) as fstoreydata:
         found_tablestart = False
@@ -878,6 +878,19 @@ def combine_hillier_nahar(
 def log_and_print(flog, strout):
     print(strout)
     flog.write(strout + "\n")
+
+
+def path_for_log(filepath: str | Path) -> str:
+    """Render an input data path relative to the repository root where possible.
+
+    The log files are compared by checksum in CI, so an absolute path would make them depend on
+    where the repository happens to be checked out. Paths outside the repository (some readers
+    load data from elsewhere) are returned unchanged.
+    """
+    try:
+        return str(Path(filepath).resolve().relative_to(PYDIR.parent))
+    except ValueError:
+        return str(filepath)
 
 
 def isfloat(value: t.Any) -> bool:
@@ -1776,14 +1789,16 @@ def write_phixs_data(
         log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
         sys.exit()
 
-    skipped_nonpositive_threshold = 0
+    skipped_zero_threshold = 0
     for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
         if not targetlist:
             continue
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
-        if threshold_ev <= 0.0:
-            # a zero or negative threshold is not a usable ionisation edge, so don't emit the level
-            skipped_nonpositive_threshold += 1
+        if threshold_ev == 0.0:
+            # the threshold arrays start as zeros and are only filled in for levels that got a
+            # cross-section table, so a threshold of exactly zero means "no data for this level".
+            # (A negative threshold is a deliberate sentinel used by readqubdata, so keep those.)
+            skipped_zero_threshold += 1
             continue
         if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
             upperionlevelid = targetlist[0][0]
@@ -1809,10 +1824,10 @@ def write_phixs_data(
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
 
-    if skipped_nonpositive_threshold > 0:
+    if skipped_zero_threshold > 0:
         log_and_print(
             flog,
-            f"Skipped {skipped_nonpositive_threshold} levels with a non-positive photoionization threshold energy",
+            f"Skipped {skipped_zero_threshold} levels with no photoionization threshold energy",
         )
 
 

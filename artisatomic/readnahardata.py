@@ -50,7 +50,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     if not os.path.isfile(path_nahar_energy_file):
         artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
     else:
-        artisatomic.log_and_print(flog, f"Reading {path_nahar_energy_file}")
+        artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_nahar_energy_file)}")
         with open(path_nahar_energy_file) as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 

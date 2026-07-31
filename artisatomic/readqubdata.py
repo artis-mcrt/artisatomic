@@ -54,7 +54,7 @@ def read_adf04(
     energylevels: list[QUBEnergyLevel | None] = [None]
     upsilondict = {}
     ionization_energy_ev = 0.0
-    artisatomic.log_and_print(flog, f"Reading {filepath}")
+    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filepath)}")
     with artisatomic.xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
@@ -334,7 +334,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in [1, 2, 3, 4, 5, 6, 7, 8]:
             filename = tyndall_co3_path / f"{lowerlevelid:d}.gz"
-            artisatomic.log_and_print(flog, f"Reading {filename}")
+            artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
             photdata = pd.read_csv(filename, sep=r"\s+", header=None)
             phixstables = {}
             # ntargets = 40

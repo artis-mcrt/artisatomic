@@ -278,7 +278,7 @@ def read_levels_and_transitions(
         ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
     )
 
-    artisatomic.log_and_print(flog, f"Reading {filename}")
+    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
     hillier_transition_row = namedtuple(
         "hillier_transition_row",
@@ -498,7 +498,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
             hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
         )
 
-        artisatomic.log_and_print(flog, f"Reading {filename}")
+        artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
         with artisatomic.xopen_check_extension(filename) as fhillierphot:
             lowerlevelid = -1
@@ -1103,7 +1103,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     filename = os.path.join(
         hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, coldatafilename
     )
-    artisatomic.log_and_print(flog, f"Reading {filename}")
+    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
     coll_lines_in = 0
     number_expected_transitions = -1
     with artisatomic.xopen_check_extension(filename) as fcoldata:
