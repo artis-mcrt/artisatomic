@@ -52,7 +52,7 @@ jobs:
               run: uv run -- basedpyright
 
             - name: Run prek pre-commit checks
-              uses: j178/prek-action@v2
+              uses: j178/prek-action@v2.0.6
 
     pytest:
         runs-on: ubuntu-26.04-arm
