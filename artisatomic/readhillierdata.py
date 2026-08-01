@@ -488,7 +488,7 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
-    levelnames_with_zero_crosssection: list[str] = []
+    num_levelnames_with_zero_crosssection = 0
 
     j_splitting_on = False  # hopefully this is either on or off for all photoion files associated with a given ion
 
@@ -835,15 +835,15 @@ def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
                 # and gets no photoionization at all. For a type-8 (offset) cross section this
                 # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
                 # nu/nu_edge grid that reduce_phixs_tables() samples.
-                levelnames_with_zero_crosssection.append(lowerlevelname)
+                num_levelnames_with_zero_crosssection += 1
                 artisatomic.log_and_print(
                     flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
                 )
 
-    if levelnames_with_zero_crosssection:
+    if num_levelnames_with_zero_crosssection > 0:
         artisatomic.log_and_print(
             flog,
-            f"WARNING: {len(levelnames_with_zero_crosssection)} level names have a cross section that is zero"
+            f"WARNING: {num_levelnames_with_zero_crosssection} level names have a cross section that is zero"
             " everywhere on the output energy grid, so those levels get no photoionization",
         )
 
@@ -1345,6 +1345,10 @@ def get_photoiontargetfractions(
 
 
 def read_hyd_phixsdata():
+    # the cached (2l+1)-weighted sums are built from the tables filled in below, so a reload
+    # (repeated calls happen in the tests) must not leave sums computed from the previous tables
+    get_hydrogenic_sigma_summed_over_l.cache_clear()
+
     with open(os.devnull, "w") as devnull:
         (
             _hillier_ionization_energy_ev,

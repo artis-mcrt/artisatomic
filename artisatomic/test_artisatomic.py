@@ -71,6 +71,10 @@ def test_interpret_configuration():
     # ...but a leading zero rules it out: the '0' of '3d10' is part of the occupation number
     assert interpret_configuration("3d104s_3De") == (["3d1", "4s"], 3, 2, 0, -1)
 
+    # a digit followed by two letters keeps the digit with the letters ('4sp' is treated as an
+    # orbital-plus-occupation, matching the historical handling of this malformed Hillier name)
+    assert interpret_configuration("4sp(3P)_7Po[2]") == (["4sp", "(3P)"], 7, 1, 1, -1)
+
     # an orbital that carries its own occupation number is always read with a single-digit n,
     # because '3d14s2' and '3d104s2' are ambiguous and the single-digit reading is the common one
     assert interpret_configuration("3d14s2_2De") == (["3d1", "4s2"], 2, 2, 0, -1)

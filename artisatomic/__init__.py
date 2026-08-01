@@ -1390,8 +1390,15 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
     if not instr.startswith("Eqv st"):
         while instr:
             if instr[-1].upper() in lchars:
-                # orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'
-                startpos = -3 if len(instr) >= 3 and is_two_digit_n(instr[-3:-1]) else -2
+                # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'.
+                # The digit-letter-letter case keeps its leading digit, so '4sp(3P)_7Po[2]'
+                # yields a pretend orbital '4sp' rather than dropping the 4 (as before).
+                startpos = (
+                    -3
+                    if len(instr) >= 3
+                    and (is_two_digit_n(instr[-3:-1]) or (instr[-3].isdigit() and not instr[-2].isdigit()))
+                    else -2
+                )
 
                 electron_config.insert(0, instr[startpos:])
                 instr = instr[:startpos]

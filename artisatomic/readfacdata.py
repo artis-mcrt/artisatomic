@@ -160,8 +160,7 @@ def extend_ion_list(ion_handlers):
         atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
-    ion_handlers.sort(key=lambda x: x[0])
-    # print(ion_handlers)
+    # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return ion_handlers
 
 
