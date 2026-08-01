@@ -332,7 +332,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
 def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog):
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
-    photoionization_targetfractions = [[(1, 1.0)] for _ in energy_levels]
+    # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
+    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in energy_levels]
     photoionization_thresholds_ev = np.zeros(len(energy_levels))
 
     if atomic_number == 27 and ion_stage == 2:
@@ -343,8 +344,6 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             phixstables = {}
             # ntargets = 40
             ntargets = 4  # just the 4Fe ground quartet
-            photoionization_thresholds_ev[lowerlevelid] = -1.0
-            # photoionization_thresholds_ev[lowerlevelid] = photdata.loc[0][0]
 
             for targetlevel in range(1, ntargets + 1):
                 phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.0][[0, targetlevel]].to_numpy()
@@ -366,19 +365,16 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
             scalefactorsum = sum(target_scalefactors)
             if scalefactorsum <= 0.0:
+                # nothing was assigned for this level, so write_phixs_data() will skip it
                 artisatomic.log_and_print(
                     flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
                 )
-                # clear the level so it is skipped by write_phixs_data(): both the target list and
-                # the threshold were pre-set above, and leaving them would emit an entry with a
-                # -1.0 threshold and an all-zero table
-                photoionization_targetfractions[lowerlevelid] = []
-                photoionization_thresholds_ev[lowerlevelid] = 0.0
                 continue
             target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
             scalefactorsum = sum(target_scalefactors)
 
-            photoionization_targetfractions[lowerlevelid] = []
+            photoionization_thresholds_ev[lowerlevelid] = -1.0
+            # photoionization_thresholds_ev[lowerlevelid] = photdata.loc[0][0]
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
                 target_fraction = target_scalefactor / scalefactorsum
                 if target_fraction > 0.001:
