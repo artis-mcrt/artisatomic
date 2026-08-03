@@ -104,6 +104,19 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
+    # Transitions reference levels by zero-based index, and an out-of-range reference would be
+    # silently dropped by the level-id joins in add_level_ids_forbidden(), leaving an incomplete
+    # database. Not an assert: this validates an input file and must not disappear under python -O.
+    if dftransitions.height > 0:
+        min_index = min(dftransitions["Lower"].min(), dftransitions["Upper"].min())
+        max_index = max(dftransitions["Lower"].max(), dftransitions["Upper"].max())
+        if min_index < 0 or max_index >= dflevels.height:
+            msg = (
+                f"Transition level indices in {lines_file} span {min_index}..{max_index}, outside the"
+                f" level table's 0..{dflevels.height - 1}"
+            )
+            raise ValueError(msg)
+
     # count per level index, not per configuration string: several levels share a configuration
     transition_count_of_levelindex: dict[int, int] = dict(
         pl.concat([dftransitions["Lower"], dftransitions["Upper"]]).value_counts().iter_rows()
@@ -112,7 +125,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         levelname: transition_count_of_levelindex.get(index, 0)
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
-    assert sum(transition_count_of_level_name.values()) == 2 * dftransitions.height
 
     # use standard artisatomic column names and convert to 1-indexed levels
 

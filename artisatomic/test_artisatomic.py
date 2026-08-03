@@ -74,6 +74,11 @@ def test_interpret_configuration():
     # number, where there is nothing else the digits could belong to
     assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
 
+    # ...and also with an occupation number, when the digits cannot belong to a preceding
+    # orbital (start of string, or right after a parent term)
+    assert interpret_configuration("10d1_2De") == (["10d1"], 2, 2, 0, -1)
+    assert interpret_configuration("3d6(5D)10d1_5Pe") == (["3d6", "(5D)", "10d1"], 5, 1, 0, -1)
+
     # a digit followed by two letters keeps the digit with the letters ('4sp' is treated as an
     # orbital-plus-occupation, matching the historical handling of this malformed Hillier name)
     assert interpret_configuration("4sp(3P)_7Po[2]") == (["4sp", "(3P)"], 7, 1, 1, -1)

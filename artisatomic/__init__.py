@@ -1409,14 +1409,20 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 instr = instr[:left_bracket_pos]
             elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    # Single-digit occupation. The n is always read as a single digit here:
-                    # '3d14s2' is genuinely ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and an
-                    # occupation of 1 is common while a two-digit n carrying an explicit
-                    # occupation is not, so the single-digit reading wins. (A two-digit n
-                    # written without an occupation, '3d6(5D)10d', is handled by the branch
-                    # above, where there is no such ambiguity.)
-                    electron_config.insert(0, instr[-3:])
-                    instr = instr[:-3]
+                    # Single-digit occupation. A two-digit n is kept ('10d1') only when the
+                    # digits cannot belong to a preceding orbital: '3d14s2' is genuinely
+                    # ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and there the single-digit
+                    # reading wins because an occupation of 1 is common and a two-digit n
+                    # carrying an explicit occupation is not. At the start of the string or
+                    # after a parent term there is no such ambiguity.
+                    two_digit_n = (
+                        len(instr) >= 4
+                        and is_two_digit_n(instr[-4:-2])
+                        and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
+                    )
+                    startpos = -4 if two_digit_n else -3
+                    electron_config.insert(0, instr[startpos:])
+                    instr = instr[:startpos]
                 elif len(instr) >= 3 and str.isdigit(instr[-2]) and instr[-3].upper() in lchars:
                     # Two-digit occupation, e.g. the closed shells '3d10' and '4f14'. This is
                     # unambiguous: trailing digits after the orbital letter are the occupation.
