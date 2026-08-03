@@ -50,8 +50,8 @@ def extend_ion_list(ion_handlers):
 
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
-) -> tuple[float, list[QUBEnergyLevel | None], dict[tuple[int, int], float]]:
-    energylevels: list[QUBEnergyLevel | None] = [None]
+) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float]]:
+    energylevels: list[QUBEnergyLevel] = []
     upsilondict = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filepath)}")
@@ -117,13 +117,13 @@ def read_adf04(
             energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
             energylevels.append(energylevel)
 
-            # the transition and upsilon tables index levels by this id, and the rest of the code
-            # indexes the list by position, so a non-contiguous or non-1-based file would silently
-            # attach every transition to the wrong level. Not an assert: this validates an input
-            # file and must not disappear under python -O.
-            if energylevel.qub_id != len(energylevels) - 1:
+            # the transition and upsilon tables index levels by this 1-based id, and the rest of
+            # the code looks up id n at list index n - 1, so a non-contiguous or non-1-based file
+            # would silently attach every transition to the wrong level. Not an assert: this
+            # validates an input file and must not disappear under python -O.
+            if energylevel.qub_id != len(energylevels):
                 msg = (
-                    f"adf04 level id {energylevel.qub_id} found at position {len(energylevels) - 1} in {filepath}."
+                    f"adf04 level id {energylevel.qub_id} found at position {len(energylevels)} in {filepath}."
                     " Level ids must be contiguous and start at 1."
                 )
                 raise ValueError(msg)
@@ -175,7 +175,7 @@ def read_adf04(
                     f" {upsilondict[(lower, upper)]:5.2e} instead of using {upsilon:5.2e}",
                 )
 
-    artisatomic.log_and_print(flog, f"Read {len(energylevels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energylevels):d} levels")
 
     return ionization_energy_ev, energylevels, upsilondict
 
@@ -228,10 +228,13 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 id_lower = int(row[1])
                 A = float(row[2])
                 if A > 2e-30:
-                    level_upper = qub_energylevels[id_upper]
-                    level_lower = qub_energylevels[id_lower]
-                    assert level_upper is not None
-                    assert level_lower is not None
+                    # a raise rather than an assert: this validates an input file, and a
+                    # non-positive id would otherwise wrap to the wrong level via negative indexing
+                    if id_lower < 1 or id_upper < 1:
+                        msg = f"non-positive transition level ids {id_lower}, {id_upper} in {transitionfile}"
+                        raise ValueError(msg)
+                    level_upper = qub_energylevels[id_upper - 1]
+                    level_lower = qub_energylevels[id_lower - 1]
                     namefrom = level_upper.levelname
                     nameto = level_lower.levelname
                     # WARNING replace with correct selection rules!
@@ -251,11 +254,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
-        qub_energylevels: list[QUBEnergyLevel | None] = [None]
+        qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
         qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
         upsilondict = {}
         ionization_energy_ev = 54.9000015
-        qub_energylevels.append(QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0))
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
         atom_file = f"{atomic_number}_{ion_stage}.adf04"
@@ -299,10 +301,13 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         id_lower = int(row[1])
                     A = float(row[2].replace("-", "E-").replace("+", "E+"))
                     if A > 2e-30:
-                        level_upper = qub_energylevels[id_upper]
-                        level_lower = qub_energylevels[id_lower]
-                        assert level_upper is not None
-                        assert level_lower is not None
+                        # a raise rather than an assert: this validates an input file, and a
+                        # non-positive id would otherwise wrap to the wrong level via negative indexing
+                        if id_lower < 1 or id_upper < 1:
+                            msg = f"non-positive transition level ids {id_lower}, {id_upper} in {atom_file}"
+                            raise ValueError(msg)
+                        level_upper = qub_energylevels[id_upper - 1]
+                        level_lower = qub_energylevels[id_lower - 1]
                         namefrom = level_upper.levelname
                         nameto = level_lower.levelname
                         forbidden = artisatomic.check_forbidden(level_upper, level_lower)
@@ -350,14 +355,14 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             reduced_phixs_dict = artisatomic.reduce_phixs_tables(
                 phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )
-            target_scalefactors = np.zeros(ntargets + 1)
+            target_scalefactors = np.zeros(ntargets)
             upperlevelid_withmaxfraction = 1
             max_scalefactor = 0.0
             for upperlevelid in reduced_phixs_dict:
                 # take the ratio of cross sections at the threshold energies
                 scalefactor = reduced_phixs_dict[upperlevelid][0]
-                target_scalefactors[upperlevelid] = scalefactor
-                # target_scalefactors[upperlevelid] = np.average(reduced_phixs_dict[upperlevelid])
+                target_scalefactors[upperlevelid - 1] = scalefactor
+                # target_scalefactors[upperlevelid - 1] = np.average(reduced_phixs_dict[upperlevelid])
                 if scalefactor > max_scalefactor:
                     upperlevelid_withmaxfraction = upperlevelid
                     max_scalefactor = scalefactor
@@ -374,14 +379,14 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
 
             # -1.0 sentinel: the threshold energy comes from the level energies, not from the
             # first energy point of the cross-section table
-            photoionization_thresholds_ev[lowerlevelid] = -1.0
-            for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
+            photoionization_thresholds_ev[lowerlevelid - 1] = -1.0
+            for upperlevelid, target_scalefactor in enumerate(target_scalefactors, 1):
                 target_fraction = target_scalefactor / scalefactorsum
                 if target_fraction > 0.001:
-                    photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
+                    photoionization_targetfractions[lowerlevelid - 1].append((upperlevelid, target_fraction))
 
             max_fraction = max_scalefactor / scalefactorsum
-            photoionization_crosssections[lowerlevelid] = (
+            photoionization_crosssections[lowerlevelid - 1] = (
                 reduced_phixs_dict[upperlevelid_withmaxfraction] / max_fraction
             )
 
@@ -502,11 +507,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
         # Unlike the Co II branch above, every level is deliberately given a phixs entry: levels
         # of the ground quartet get the tabulated cross section, and all higher levels get an
         # explicit all-zero table (no photoionization) rather than being omitted from the output.
-        for lowerlevelid in range(1, len(energy_levels)):
-            photoionization_thresholds_ev[lowerlevelid] = -1.0
-            photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]
-            if lowerlevelid <= 4:
-                photoionization_crosssections[lowerlevelid] = phixsvalues
+        for levelindex in range(len(energy_levels)):
+            photoionization_thresholds_ev[levelindex] = -1.0
+            photoionization_targetfractions[levelindex] = [(1, 1.0)]
+            if levelindex < 4:
+                photoionization_crosssections[levelindex] = phixsvalues
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 

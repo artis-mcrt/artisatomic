@@ -55,19 +55,17 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ) as reader:
             hc_in_ev_cm = 0.0001239841984332003
 
-            dflevels = artisatomic.add_dummy_zero_level(
-                pl.from_pandas(reader.get_chunk(levelcount)).select(
-                    energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
-                    parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
-                    g=pl.col("g").cast(pl.Float64),
-                    levelname=pl.format(
-                        "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
-                    ),
-                    levelid=pl.col("levelid").cast(pl.Int64),
-                )
+            dflevels = pl.from_pandas(reader.get_chunk(levelcount)).select(
+                energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
+                parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
+                g=pl.col("g").cast(pl.Float64),
+                levelname=pl.format(
+                    "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
+                ),
+                levelid=pl.col("levelid").cast(pl.Int64),
             )
 
-        assert (dflevels.height - 1) == levelcount
+        assert dflevels.height == levelcount
 
         line = fin.readline().strip()
         assert line in ("# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)")
@@ -90,8 +88,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
     )
     transition_count_of_level_name = {
-        dflevels["levelname"][levelid]: transition_count_of_levelid.get(levelid, 0)
-        for levelid in dflevels["levelid"][1:]
+        levelname: transition_count_of_levelid.get(levelid, 0)
+        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
     }
     assert dftransitions.height == transitioncount
 

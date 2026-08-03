@@ -191,32 +191,23 @@ def add_handler_if_not_set(
     return ion_handlers_out
 
 
-def add_dummy_zero_level(dflevels: pl.DataFrame) -> pl.DataFrame:
-    # keep the zero index as null since we use 1-index level indicies
-    anycolname = dflevels.columns[0]
-    return pl.concat(
-        [
-            pl.DataFrame({anycolname: [None]}, schema={anycolname: dflevels.schema[anycolname]}),
-            dflevels,
-        ],
-        how="diagonal",
-    )
-
-
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
-    if isinstance(energy_levels, pl.DataFrame):
-        dflevels = energy_levels
-        assert energy_levels["energyabovegsinpercm"].item(0) is None
-
-    else:
-        dflevels = add_dummy_zero_level(
-            pl.DataFrame(energy_levels[1:]),
-        )
+    """Convert a zero-indexed list of level tuples (or a DataFrame) into a DataFrame with 1-based levelid values."""
+    dflevels = energy_levels if isinstance(energy_levels, pl.DataFrame) else pl.DataFrame(energy_levels)
 
     if "levelid" not in dflevels.columns:
-        dflevels = dflevels.with_row_index(name="levelid")
+        dflevels = dflevels.with_row_index(name="levelid", offset=1)
 
-    return dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
+    dflevels = dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
+
+    # positional lookups throughout assume level id n is at row n - 1, so a reader-supplied
+    # levelid column (e.g. from the tanakajplt data files) must be contiguous and start at 1.
+    # A raise rather than an assert: this can be validating an input file's id column.
+    if not dflevels["levelid"].equals(pl.int_range(1, dflevels.height + 1, dtype=pl.Int64, eager=True)):
+        msg = "level ids must be contiguous and start at 1"
+        raise ValueError(msg)
+
+    return dflevels
 
 
 def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
@@ -325,14 +316,14 @@ class IonData(t.NamedTuple):
     dftransitions: pl.DataFrame
     transition_count_of_level_name: dict
     upsilondict: dict
-    # list of readnahardata.NaharCoreState with a dummy None at index zero ([None] if unavailable)
+    # list of readnahardata.NaharCoreState, where core state id n is at index n - 1 ([] if unavailable)
     nahar_core_states: list
     # keys are (2S+1, L, parity), values are strings of electron configuration
     nahar_configurations: dict
     hillier_photoion_targetconfigs: list | None
-    photoionization_crosssections: t.Any  # cross sections in Mb, indexed by levelid
+    photoionization_crosssections: t.Any  # cross sections in Mb, level id n at index n - 1
     photoionization_targetfractions: list
-    photoionization_thresholds_ev: t.Any  # indexed by levelid
+    photoionization_thresholds_ev: t.Any  # level id n at index n - 1
 
 
 def get_default_handler(atomic_number: int, ion_stage: int) -> str:
@@ -396,7 +387,7 @@ def read_ion_data(
     ionization_energy_ev = 0.0
     transition_count_of_level_name: dict = {}
     upsilondict: dict = {}
-    nahar_core_states: list = [None]
+    nahar_core_states: list = []
     nahar_configurations: dict = {}
     hillier_photoion_targetconfigs = None
     photoionization_crosssections: t.Any = []  # list of cross section in Mb
@@ -491,7 +482,7 @@ def read_ion_data(
                 photoionization_crosssections,
                 photoionization_thresholds_ev,
             ) = combine_hillier_nahar(
-                [None],
+                [],
                 defaultdict(list),
                 [],
                 nahar_energy_levels,
@@ -665,11 +656,12 @@ def combine_hillier_nahar(
     levelids_of_levelnamenoJ = defaultdict(list)
 
     if useallnaharlevels:
-        added_nahar_levels = nahar_energy_levels[1:]
+        added_nahar_levels = list(nahar_energy_levels)
     else:
-        for levelid, energy_level in enumerate(hillier_energy_levels[1:], 1):
+        # values are zero-based indices into hillier_energy_levels
+        for levelindex, energy_level in enumerate(hillier_energy_levels):
             levelnamenoJ = energy_level.levelname.split("[")[0]
-            levelids_of_levelnamenoJ[levelnamenoJ].append(levelid)
+            levelids_of_levelnamenoJ[levelnamenoJ].append(levelindex)
 
         # match up Nahar states given in phixs data with Hillier levels, adding
         # missing levels as necessary
@@ -834,13 +826,13 @@ def combine_hillier_nahar(
 
     log_and_print(
         flog,
-        f"Included {len(hillier_energy_levels) - 1} levels from Hillier dataset and added"
-        f" {len(added_nahar_levels)} levels from Nahar phixs tables for a total of {len(energy_levels) - 1} levels",
+        f"Included {len(hillier_energy_levels)} levels from Hillier dataset and added"
+        f" {len(added_nahar_levels)} levels from Nahar phixs tables for a total of {len(energy_levels)} levels",
     )
 
     # sort the concatenated energy level list by energy
     print("Sorting levels by energy...")
-    energy_levels.sort(key=lambda x: float(getattr(x, "energyabovegsinpercm", "-inf")))
+    energy_levels.sort(key=lambda x: float(x.energyabovegsinpercm))
 
     if len(nahar_phixs_tables.keys()) > 0:
         photoionization_crosssections = np.zeros(
@@ -860,15 +852,15 @@ def combine_hillier_nahar(
 
             for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_dict.items():
                 foundamatch = False
-                for levelid, energylevel in enumerate(energy_levels[1:], 1):
+                for levelindex, energylevel in enumerate(energy_levels):
                     if (
                         int(energylevel.twosplusone) == twosplusone
                         and int(energylevel.l) == l
                         and int(energylevel.parity) == parity
                         and int(energylevel.indexinsymmetry) == indexinsymmetry
                     ):
-                        photoionization_crosssections[levelid] = phixstable
-                        photoionization_thresholds_ev[levelid] = thresholds_ev_dict[
+                        photoionization_crosssections[levelindex] = phixstable
+                        photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[
                             (twosplusone, l, parity, indexinsymmetry)
                         ]
                         foundamatch = (
@@ -972,9 +964,8 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
     photoionization_targetfractions: list = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.zeros(energy_levels.height)
     phixstables = {}
-    for level in energy_levels[1:].iter_rows(named=True):
-        lowerlevelid = level["levelid"]
-        if lowerlevelid > 100:
+    for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
+        if levelindex >= 100:
             # limit levels with hydrogenic photoionization cross sections
             break
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
@@ -982,20 +973,20 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
         if threshold_ev <= 0.0:
             # level lies above the ionization energy, so there is nothing to ionize from
             continue
-        photoionization_thresholds_ev[lowerlevelid] = threshold_ev
+        photoionization_thresholds_ev[levelindex] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
 
         n = get_n(level["levelname"])
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
-        phixstables[lowerlevelid] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
-        photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]
+        phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
+        photoionization_targetfractions[levelindex] = [(1, 1.0)]
 
     reduced_phixs_dict = reduce_phixs_tables(
         phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
     )
-    for lowerlevelid, reduced_phixs_table in reduced_phixs_dict.items():
-        photoionization_crosssections[lowerlevelid] = reduced_phixs_table
+    for levelindex, reduced_phixs_table in reduced_phixs_dict.items():
+        photoionization_crosssections[levelindex] = reduced_phixs_table
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
@@ -1194,6 +1185,7 @@ def check_forbidden(levela, levelb) -> bool:
 
 
 def weightedavgenergyinev(energylevels_thision, ids) -> float:
+    """Statistical-weight-averaged energy of the levels at the given zero-based list indices."""
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
@@ -1204,6 +1196,7 @@ def weightedavgenergyinev(energylevels_thision, ids) -> float:
 
 
 def weightedavgthresholdinev(energylevels_thision, ids) -> float:
+    """Statistical-weight-averaged ionisation threshold of the levels at the given zero-based list indices."""
     genergysum = 0.0
     gsum = 0.0
     for levelid in ids:
@@ -1643,8 +1636,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 orient="row",
             ).with_columns(A=0.0)
             for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(named=False):
-                namefrom = dfenergylevels_ion["levelname"][id_upper]
-                nameto = dfenergylevels_ion["levelname"][id_lower]
+                namefrom = dfenergylevels_ion["levelname"][id_upper - 1]
+                nameto = dfenergylevels_ion["levelname"][id_lower - 1]
 
                 transition_count_of_level_name[namefrom] += 1
                 transition_count_of_level_name[nameto] += 1
@@ -1693,7 +1686,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         if i < len(iondatalist) - 1 and not args.nophixs:  # ignore the top ion
             photoionization_targetfractions = iondata.photoionization_targetfractions
             if len(photoionization_targetfractions) < 1:
-                if len(iondata.nahar_core_states) > 1:
+                if len(iondata.nahar_core_states) > 0:
                     photoionization_targetfractions = readnahardata.get_photoiontargetfractions(
                         dfenergylevels_ion,
                         iondatalist[i + 1].dfenergylevels,
@@ -1730,10 +1723,10 @@ def write_adata(
     transition_count_of_level_name,
     flog,
 ) -> None:
-    log_and_print(flog, f"Writing {dfenergylevels.height - 1} levels to 'adata.txt'")
-    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height - 1:12d}{ionization_energy:15.7f}\n")
+    log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
+    fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    for energylevel in dfenergylevels[1:].iter_rows(named=True):
+    for energylevel in dfenergylevels.iter_rows(named=True):
         transitioncount = (
             transition_count_of_level_name.get(energylevel["levelname"], 0) if "levelname" in energylevel else 0
         )
@@ -1825,15 +1818,16 @@ def write_phixs_data(
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
-    if len(photoionization_crosssections) >= 2 and photoionization_crosssections[1][0] == 0.0:
+    if len(photoionization_crosssections) >= 1 and photoionization_crosssections[0][0] == 0.0:
         log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
         sys.exit()
 
     skipped_zero_threshold = 0
-    for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
+    for levelindex, targetlist in enumerate(photoionization_targetfractions):
+        lowerlevelid = levelindex + 1
         if not targetlist:
             continue
-        threshold_ev = photoionization_thresholds_ev[lowerlevelid]
+        threshold_ev = photoionization_thresholds_ev[levelindex]
         if threshold_ev == 0.0:
             # the threshold arrays start as zeros and are only filled in for levels that got a
             # cross-section table, so a threshold of exactly zero means "no data for this level".
@@ -1861,7 +1855,7 @@ def write_phixs_data(
                 print(f"level id {lowerlevelid}")
                 sys.exit()
 
-        for crosssection in photoionization_crosssections[lowerlevelid]:
+        for crosssection in photoionization_crosssections[levelindex]:
             fphixs.write(f"{crosssection:16.8E}\n")
 
     if skipped_zero_threshold > 0:

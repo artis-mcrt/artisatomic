@@ -269,10 +269,10 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     ionization_energy_ev = 4 * ryd_to_ev
     dflevels = pl.DataFrame(
         {
-            "levelid": [0, 1],
-            "energyabovegsinpercm": [None, 0.0],
-            "g": [None, 2.0],
-            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+            "levelid": [1],
+            "energyabovegsinpercm": [0.0],
+            "g": [2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
@@ -285,21 +285,21 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         args=args,
     )
 
-    assert thresholds[1] == ionization_energy_ev
-    assert targetfractions[1] == [(1, 1.0)]
+    assert thresholds[0] == ionization_energy_ev
+    assert targetfractions[0] == [(1, 1.0)]
 
     expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
     assert abs(expected_threshold_mb - 6.3067 / 4) < 1e-3  # exact hydrogenic value for He II 1s
     # the downsampled first point is a bin average, so allow a few percent
-    assert abs(crosssections[1][0] / expected_threshold_mb - 1) < 0.05
+    assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
 
     # levels above the ionization energy must be skipped rather than dividing by a negative threshold
     dflevels_unbound = pl.DataFrame(
         {
-            "levelid": [0, 1],
-            "energyabovegsinpercm": [None, 2 * ionization_energy_ev / hc_in_ev_cm],
-            "g": [None, 2.0],
-            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+            "levelid": [1],
+            "energyabovegsinpercm": [2 * ionization_energy_ev / hc_in_ev_cm],
+            "g": [2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
     crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
@@ -309,9 +309,9 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         ion_handler="kurucz",
         args=args,
     )
-    assert thresholds[1] == 0.0
-    assert targetfractions[1] == []
-    assert np.all(crosssections[1] == 0.0)
+    assert thresholds[0] == 0.0
+    assert targetfractions[0] == []
+    assert np.all(crosssections[0] == 0.0)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -338,7 +338,7 @@ def test_read_coldata_term_to_j_redistribution():
             _, energy_levels, _, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
             upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
         levelids_of_term = defaultdict(list)
-        for levelid, level in enumerate(energy_levels[1:], 1):
+        for levelid, level in enumerate(energy_levels, 1):
             levelids_of_term[level.levelname.split("[")[0]].append(levelid)
         return energy_levels, upsilondict, levelids_of_term
 
@@ -346,7 +346,7 @@ def test_read_coldata_term_to_j_redistribution():
 
     lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
     upper_ids = levelids_of_term["2s_2p3_3Do"]
-    assert [energy_levels[i].g for i in lower_ids] == [1.0, 3.0, 5.0]
+    assert [energy_levels[i - 1].g for i in lower_ids] == [1.0, 3.0, 5.0]
 
     sums_from_lower = [
         sum(upsilondict[(i, j)] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
@@ -481,9 +481,9 @@ def test_read_adf04():
         (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
     )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
-    assert len(energylevels) - 1 == 262
+    assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    level1 = energylevels[1]
+    level1 = energylevels[0]
     assert level1 is not None
     assert level1.levelname == "3s23p63d7(4F)_4Fe[9/2]_id=1"
     assert level1.energyabovegsinpercm == 0.0
@@ -501,7 +501,7 @@ def test_read_nahar_energy_level_file_missing():
         nahar_configurations,
         nahar_ionization_potential_rydberg,
     ) = readnahardata.read_nahar_energy_level_file("does/not/exist.en.ls.txt", 26, 2, flog)
-    assert nahar_energy_levels == [None]
+    assert nahar_energy_levels == []
     assert nahar_core_states == []
     assert nahar_level_index_of_state == {}
     assert nahar_configurations == {}
@@ -510,15 +510,11 @@ def test_read_nahar_energy_level_file_missing():
 
 
 def test_nahar_get_photoiontargetfractions():
-    dflower = pl.DataFrame(
-        {"levelid": [0, 1], "energyabovegsinpercm": [None, 0.0], "g": [None, 9.0], "levelname": [None, "gs"]}
-    )
-    dfupper = pl.DataFrame(
-        {"levelid": [0, 1], "energyabovegsinpercm": [None, 0.0], "g": [None, 10.0], "levelname": [None, "gs2"]}
-    )
-    nahar_core_states = [None, readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
+    dflower = pl.DataFrame({"levelid": [1], "energyabovegsinpercm": [0.0], "g": [9.0], "levelname": ["gs"]})
+    dfupper = pl.DataFrame({"levelid": [1], "energyabovegsinpercm": [0.0], "g": [10.0], "levelname": ["gs2"]})
+    nahar_core_states = [readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
     targetlist = readnahardata.get_photoiontargetfractions(dflower, dfupper, nahar_core_states, {}, io.StringIO())
-    assert targetlist[1] == [(1, 1.0)]
+    assert targetlist[0] == [(1, 1.0)]
 
 
 def test_get_level_valence_n():

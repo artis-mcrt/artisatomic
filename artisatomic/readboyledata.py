@@ -40,7 +40,7 @@ def read_levels_data(atomic_number, ion_stage):
         "energy_level_row",
         "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname",
     )
-    energy_levels: list[energy_level_row | None] = [None]
+    energy_levels: list[energy_level_row] = []
 
     for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
@@ -97,7 +97,6 @@ def read_lines_data(atomic_number, ion_stage):
 
 def read_levels_and_transitions(atomic_number, ion_stage):
     assert atomic_number == 2
-    # energy_levels = ['IGNORE']
     # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
 
@@ -105,6 +104,6 @@ def read_levels_and_transitions(atomic_number, ion_stage):
     # ionization_energy_in_ev = -1
 
     energy_levels = read_levels_data(atomic_number, ion_stage)
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
+    # artisatomic.log_and_print(flog, f'Read {len(energy_levels):d} levels')
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

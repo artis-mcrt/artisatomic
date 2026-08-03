@@ -129,7 +129,7 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None, *energy_levels]
+    return energy_levels
 
 
 def read_lines_data(energy_levels, dflines):
@@ -144,8 +144,8 @@ def read_lines_data(energy_levels, dflines):
         transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
         # print(line)
-        transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
+        transition_count_of_level_name[energy_levels[lowerlevel - 1].levelname] += 1
+        transition_count_of_level_name[energy_levels[upperlevel - 1].levelname] += 1
 
         transitions.append(transtuple)
 
@@ -194,6 +194,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = -1
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

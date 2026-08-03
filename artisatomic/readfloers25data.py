@@ -127,15 +127,13 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
 
-    # use standard artisatomic column names and convert to 1-indexed levels
+    # use standard artisatomic column names
 
-    dflevels = artisatomic.add_dummy_zero_level(
-        dflevels.select(
-            levelname=pl.col("levelname"),
-            parity=pl.col("Parity"),
-            g=pl.col("g"),
-            energyabovegsinpercm=pl.col("Energy"),
-        )
+    dflevels = dflevels.select(
+        levelname=pl.col("levelname"),
+        parity=pl.col("Parity"),
+        g=pl.col("g"),
+        energyabovegsinpercm=pl.col("Energy"),
     )
 
     # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it

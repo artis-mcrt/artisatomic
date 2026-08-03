@@ -199,7 +199,7 @@ def read_levels_data(dflevels):
         msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
         raise ValueError(msg)
 
-    return [None, *energy_levels], ilev_enlevelindex_map
+    return energy_levels, ilev_enlevelindex_map
 
 
 class FACTransition(t.NamedTuple):
@@ -223,8 +223,8 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
         transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
 
-        transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
+        transition_count_of_level_name[energy_levels[lowerlevel - 1].levelname] += 1
+        transition_count_of_level_name[energy_levels[upperlevel - 1].levelname] += 1
 
         transitions.append(transtuple)
 
@@ -264,7 +264,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     assert Path(lines_file).exists()
     dflines = GetLines(filename=lines_file, Z=atomic_number)

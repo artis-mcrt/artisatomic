@@ -31,7 +31,6 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [
-        None,
         EnergyLevel(
             levelname=this_ion["config"].to_numpy()[0],
             parity=0,
