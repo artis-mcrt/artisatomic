@@ -378,16 +378,16 @@ def get_naharphotoion_upperlevelids(
 
             # after matching process, still no upper levels matched!
             if not upper_level_ids_of_core_state_id[core_state_id]:
-                upper_level_ids_of_core_state_id[core_state_id] = [1]
+                upper_level_ids_of_core_state_id[core_state_id] = [0]  # the upper ion's ground state
                 artisatomic.log_and_print(
                     flog,
-                    "No upper levels matched. Defaulting to level 1 (reduced string:"
+                    "No upper levels matched. Defaulting to the ground state (reduced string:"
                     f" '{nahar_core_state_reduced_configuration}')",
                 )
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
     else:
-        upperionlevelids = [1]
+        upperionlevelids = [0]  # the upper ion's ground state
 
     return upperionlevelids
 
@@ -397,7 +397,7 @@ def get_photoiontargetfractions(
 ):
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)
-    for lowerlevelindex in range(dfenergy_levels.height):
+    for lowerlevelid in range(dfenergy_levels.height):
         # find the upper level ids from the Nahar core state
         upperionlevelids = get_naharphotoion_upperlevelids(
             dfenergy_levels_upperion,
@@ -407,11 +407,9 @@ def get_photoiontargetfractions(
             flog,
         )
 
-        summed_statistical_weights = sum(
-            float(dfenergy_levels_upperion["g"][levelid - 1]) for levelid in upperionlevelids
-        )
+        summed_statistical_weights = sum(float(dfenergy_levels_upperion["g"][levelid]) for levelid in upperionlevelids)
         for upperionlevelid in sorted(upperionlevelids):
-            phixsprobability = dfenergy_levels_upperion["g"][upperionlevelid - 1] / summed_statistical_weights
-            targetlist[lowerlevelindex].append((upperionlevelid, phixsprobability))
+            phixsprobability = dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights
+            targetlist[lowerlevelid].append((upperionlevelid, phixsprobability))
 
     return targetlist

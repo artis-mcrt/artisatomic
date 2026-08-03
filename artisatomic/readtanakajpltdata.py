@@ -59,10 +59,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
                 parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
                 g=pl.col("g").cast(pl.Float64),
+                # the level name keeps the file's own 1-based number, but the level id is
+                # zero-based like everywhere else in memory
                 levelname=pl.format(
                     "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
                 ),
-                levelid=pl.col("levelid").cast(pl.Int64),
+                levelid=pl.col("levelid").cast(pl.Int64) - 1,
             )
 
         assert dflevels.height == levelcount
@@ -79,8 +81,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 dtype_backend="pyarrow",
             )
         ).select(
-            pl.col("lowerlevel").cast(pl.Int64),
-            pl.col("upperlevel").cast(pl.Int64),
+            # the file numbers levels from one; level ids are zero-based in memory
+            pl.col("lowerlevel").cast(pl.Int64) - 1,
+            pl.col("upperlevel").cast(pl.Int64) - 1,
             pl.col("g_u_times_A").cast(pl.Float64),
         )
 

@@ -137,15 +137,12 @@ def read_lines_data(energy_levels, dflines):
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
 
-    for (lowerindex, upperindex), row in dflines.iterrows():
-        lowerlevel = lowerindex + 1
-        upperlevel = upperindex + 1
-
+    for (lowerlevel, upperlevel), row in dflines.iterrows():
         transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
         # print(line)
-        transition_count_of_level_name[energy_levels[lowerlevel - 1].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperlevel - 1].levelname] += 1
+        transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
+        transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
 
         transitions.append(transtuple)
 

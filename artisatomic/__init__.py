@@ -192,19 +192,23 @@ def add_handler_if_not_set(
 
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
-    """Convert a zero-indexed list of level tuples (or a DataFrame) into a DataFrame with 1-based levelid values."""
+    """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
+
+    Level ids are zero-based everywhere in memory; the 1-based numbering of the output files is
+    applied by the write_*() functions.
+    """
     dflevels = energy_levels if isinstance(energy_levels, pl.DataFrame) else pl.DataFrame(energy_levels)
 
     if "levelid" not in dflevels.columns:
-        dflevels = dflevels.with_row_index(name="levelid", offset=1)
+        dflevels = dflevels.with_row_index(name="levelid")
 
     dflevels = dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
 
-    # positional lookups throughout assume level id n is at row n - 1, so a reader-supplied
-    # levelid column (e.g. from the tanakajplt data files) must be contiguous and start at 1.
+    # lookups elsewhere index this frame by level id, so a reader-supplied levelid column
+    # (e.g. from the tanakajplt data files) must be contiguous and start at zero.
     # A raise rather than an assert: this can be validating an input file's id column.
-    if not dflevels["levelid"].equals(pl.int_range(1, dflevels.height + 1, dtype=pl.Int64, eager=True)):
-        msg = "level ids must be contiguous and start at 1"
+    if not dflevels["levelid"].equals(pl.int_range(dflevels.height, dtype=pl.Int64, eager=True)):
+        msg = "level ids must be contiguous and start at zero"
         raise ValueError(msg)
 
     return dflevels
@@ -980,7 +984,7 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
-        photoionization_targetfractions[levelindex] = [(1, 1.0)]
+        photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
     reduced_phixs_dict = reduce_phixs_tables(
         phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
@@ -1636,8 +1640,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 orient="row",
             ).with_columns(A=0.0)
             for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(named=False):
-                namefrom = dfenergylevels_ion["levelname"][id_upper - 1]
-                nameto = dfenergylevels_ion["levelname"][id_lower - 1]
+                namefrom = dfenergylevels_ion["levelname"][id_upper]
+                nameto = dfenergylevels_ion["levelname"][id_lower]
 
                 transition_count_of_level_name[namefrom] += 1
                 transition_count_of_level_name[nameto] += 1
@@ -1757,8 +1761,9 @@ def write_adata(
         else:
             level_comment = level_comment.rstrip()
 
+        # level ids are zero-based in memory, but the output format numbers them from one
         fatommodels.write(
-            f"{energylevel['levelid']:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {level_comment:}\n"
+            f"{energylevel['levelid'] + 1:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {level_comment:}\n"
         )
 
     fatommodels.write("\n")
@@ -1781,8 +1786,9 @@ def write_transition_data(
         ].iter_rows():
             assert levelid_lower < levelid_upper
 
+            # level ids are zero-based in memory, but the output format numbers them from one
             ftransitiondata.write(
-                f"{levelid_lower:4d} {levelid_upper:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
+                f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
             )
 
     ftransitiondata.write("\n")
@@ -1823,11 +1829,12 @@ def write_phixs_data(
         sys.exit()
 
     skipped_zero_threshold = 0
-    for levelindex, targetlist in enumerate(photoionization_targetfractions):
-        lowerlevelid = levelindex + 1
+    # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
+    # memory, but the output format numbers them from one
+    for lowerlevelid, targetlist in enumerate(photoionization_targetfractions):
         if not targetlist:
             continue
-        threshold_ev = photoionization_thresholds_ev[levelindex]
+        threshold_ev = photoionization_thresholds_ev[lowerlevelid]
         if threshold_ev == 0.0:
             # the threshold arrays start as zeros and are only filled in for levels that got a
             # cross-section table, so a threshold of exactly zero means "no data for this level".
@@ -1838,16 +1845,16 @@ def write_phixs_data(
             upperionlevelid = targetlist[0][0]
 
             fphixs.write(
-                f"{atomic_number:12d}{ion_stage + 1:12d}{upperionlevelid:8d}{ion_stage:12d}{lowerlevelid:8d}{threshold_ev:16.6E}\n"
+                f"{atomic_number:12d}{ion_stage + 1:12d}{upperionlevelid + 1:8d}{ion_stage:12d}{lowerlevelid + 1:8d}{threshold_ev:16.6E}\n"
             )
         else:
             fphixs.write(
-                f"{atomic_number:12d}{ion_stage + 1:12d}{-1:8d}{ion_stage:12d}{lowerlevelid:8d}{threshold_ev:16.6E}\n"
+                f"{atomic_number:12d}{ion_stage + 1:12d}{-1:8d}{ion_stage:12d}{lowerlevelid + 1:8d}{threshold_ev:16.6E}\n"
             )
             fphixs.write(f"{len(targetlist):8d}\n")
             probability_sum = 0.0
             for upperionlevelid, targetprobability in targetlist:
-                fphixs.write(f"{upperionlevelid:8d}{targetprobability:12f}\n")
+                fphixs.write(f"{upperionlevelid + 1:8d}{targetprobability:12f}\n")
                 probability_sum += targetprobability
             if abs(probability_sum - 1.0) > 0.00001:
                 print(f"STOP! phixs fractions sum to {probability_sum:.5f} != 1.0")
@@ -1855,7 +1862,7 @@ def write_phixs_data(
                 print(f"level id {lowerlevelid}")
                 sys.exit()
 
-        for crosssection in photoionization_crosssections[levelindex]:
+        for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
 
     if skipped_zero_threshold > 0:

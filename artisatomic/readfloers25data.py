@@ -136,8 +136,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         energyabovegsinpercm=pl.col("Energy"),
     )
 
-    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it
-    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"))
+    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it.
+    # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory
+    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower"), upperlevel=pl.col("Upper"), A=pl.col("A"))
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 

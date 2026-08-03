@@ -215,16 +215,16 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
     for index, row in dflines.iterrows():
         try:
-            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])] + 1
-            upperlevel = ilev_enlevelindex_map[int(row["Upper"])] + 1
+            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])]
+            upperlevel = ilev_enlevelindex_map[int(row["Upper"])]
         except KeyError:
             continue
         assert lowerlevel < upperlevel
 
         transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
 
-        transition_count_of_level_name[energy_levels[lowerlevel - 1].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperlevel - 1].levelname] += 1
+        transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
+        transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
 
         transitions.append(transtuple)
 

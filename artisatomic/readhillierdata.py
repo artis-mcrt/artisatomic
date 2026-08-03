@@ -1117,7 +1117,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
 
     found_nonjsplit_transition = False
     level_ids_of_level_name = {}
-    for levelid, energy_level in enumerate(energy_levels, 1):
+    for levelid, energy_level in enumerate(energy_levels):
         if hasattr(energy_level, "levelname"):
             levelname = energy_level.levelname
 
@@ -1138,7 +1138,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     # total statistical weight of each term, used to share a term-resolved collision strength over
     # its J levels. Depends only on the level list, so build it once rather than per input row.
     g_sum_of_level_name = {
-        levelname: sum(energy_levels[levelid - 1].g for levelid in levelids)
+        levelname: sum(energy_levels[levelid].g for levelid in levelids)
         for levelname, levelids in level_ids_of_level_name.items()
     }
 
@@ -1250,8 +1250,8 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
                             upsilonscaled = (
                                 upsilon
-                                * (energy_levels[id_lower - 1].g / lower_g_sum)
-                                * (energy_levels[id_upper - 1].g / upper_g_sum)
+                                * (energy_levels[id_lower].g / lower_g_sum)
+                                * (energy_levels[id_upper].g / upper_g_sum)
                             )
                             # upsilon is symmetric, and the output wants lower id < upper id. The
                             # two terms' J levels can interleave in energy, so order the key here
@@ -1308,8 +1308,8 @@ def get_photoiontargetfractions(
     if hillier_photoion_targetconfigs is None:
         return targetlist
 
-    for lowerlevelindex in range(dfenergy_levels.height):
-        targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelindex]
+    for lowerlevelid in range(dfenergy_levels.height):
+        targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelid]
         if targetconfig_fractions is None:
             continue  # photoionisation flagged as not available
 
@@ -1324,23 +1324,21 @@ def get_photoiontargetfractions(
                     if upperlevelnamenoj in targetconfiglist:
                         upperionlevelids.append(upperlevelid)
                 if not upperionlevelids:
-                    upperionlevelids = [1]
+                    upperionlevelids = [0]  # the upper ion's ground state
                 targetlist_of_targetconfig[targetconfig] = []
 
                 summed_statistical_weights = sum(
-                    float(dfenergy_levels_upperion["g"][index - 1]) for index in upperionlevelids
+                    float(dfenergy_levels_upperion["g"][levelid]) for levelid in upperionlevelids
                 )
                 for upperionlevelid in sorted(upperionlevelids):
-                    statweight_fraction = (
-                        dfenergy_levels_upperion["g"][upperionlevelid - 1] / summed_statistical_weights
-                    )
+                    statweight_fraction = dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights
                     targetlist_of_targetconfig[targetconfig].append((upperionlevelid, statweight_fraction))
 
             for upperlevelid, statweight_fraction in targetlist_of_targetconfig[targetconfig]:
-                targetlist[lowerlevelindex].append((upperlevelid, targetconfig_fraction * statweight_fraction))
+                targetlist[lowerlevelid].append((upperlevelid, targetconfig_fraction * statweight_fraction))
 
-        if len(targetlist[lowerlevelindex]) == 0:
-            targetlist[lowerlevelindex].append((1, 1.0))
+        if len(targetlist[lowerlevelid]) == 0:
+            targetlist[lowerlevelid].append((0, 1.0))  # the upper ion's ground state
 
     return targetlist
 

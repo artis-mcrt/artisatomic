@@ -80,8 +80,9 @@ def read_lines_data(atomic_number, ion_stage):
         ) = rowtuple
 
         coll_str = -1  # TODO
+        # the file's level numbers are already zero-based, matching the level ids used in memory
         line = transition_tuple(
-            atomic_num, ion_number, int(level_number_lower + 1), int(level_number_upper + 1), A_ul, wavelength, coll_str
+            atomic_num, ion_number, int(level_number_lower), int(level_number_upper), A_ul, wavelength, coll_str
         )
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue

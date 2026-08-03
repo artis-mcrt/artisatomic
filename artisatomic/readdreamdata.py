@@ -78,8 +78,8 @@ def read_lines_data(dfiondata, energy_levels):
         transtuple = transitiontuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=-1)
 
         # print(line)
-        transition_count_of_level_name[energy_levels[lowerindex - 1].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperindex - 1].levelname] += 1
+        transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1
+        transition_count_of_level_name[energy_levels[upperindex].levelname] += 1
 
         transitions.append(transtuple)
 
@@ -109,10 +109,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # for x in energy_levels:
     #     print(x)
     def get_level_index(row, prefix):
-        """Return the 1-based level id of the row's level."""
+        """Return the zero-based level id of the row's level."""
         leveltuple = energytuplefromrow(row, prefix)
         if leveltuple in energy_levels:
-            return energy_levels.index(leveltuple) + 1
+            return energy_levels.index(leveltuple)
         raise AssertionError
 
     dfiondata.insert(
