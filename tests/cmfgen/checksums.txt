@@ -2,15 +2,3 @@
 2e3bd7a2e27ee823afa9977e1b4dc2a5  compositiondata.txt
 580d7cda17b2c33faabbe1cd0a046272  phixsdata_v2.txt
 e0c7911cecb198c41b53e724768b0273  transitiondata.txt
-9902b05f52267c5f33f00eb503c36b9c  atomic_data_logs/co2.txt
-7e9afd9135e54970498f720e0000f1fe  atomic_data_logs/co3.txt
-1276af4af2adfa9e5b2401af91cd21fb  atomic_data_logs/co4.txt
-5060fd9d7884ff61860121532526ab0a  atomic_data_logs/fe1.txt
-ac384d31e7524d6f9c39d29fd3b50006  atomic_data_logs/fe2.txt
-fa3e636c672432f1e645a3686e84a4e6  atomic_data_logs/fe3.txt
-7da98cf09dbc1ae0f4571b7e4de03c7e  atomic_data_logs/fe4.txt
-52faa74188f102c7611ec82db22e5ce2  atomic_data_logs/fe5.txt
-dfb9112460f1da6452a2ee3b67bf76c3  atomic_data_logs/ni2.txt
-67ac94b21929384528ad0f23e66b7ed2  atomic_data_logs/ni3.txt
-7eb51c2d59fa80e24738d58af82b9646  atomic_data_logs/ni4.txt
-8a12b7ac72ac8323fd8c775e6ca53f00  atomic_data_logs/ni5.txt
