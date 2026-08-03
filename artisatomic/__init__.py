@@ -1836,7 +1836,17 @@ def write_phixs_data(
     args,
     flog,
 ) -> None:
-    log_and_print(flog, f"Writing {len(photoionization_crosssections)} phixs tables to 'phixsdata2.txt'")
+    # a level gets a table only if it has photoionisation targets and a threshold energy. The
+    # threshold arrays start as zeros and are only filled in for levels that got a cross-section
+    # table, so a threshold of exactly zero means "no data for this level". (A negative threshold
+    # is a deliberate sentinel used by readqubdata, so keep those.)
+    levelids_with_targets = [
+        levelid for levelid, targetlist in enumerate(photoionization_targetfractions) if targetlist
+    ]
+    levelids_to_write = [levelid for levelid in levelids_with_targets if photoionization_thresholds_ev[levelid] != 0.0]
+    skipped_zero_threshold = len(levelids_with_targets) - len(levelids_to_write)
+
+    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata2.txt'")
     flog.write(
         f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
@@ -1846,19 +1856,11 @@ def write_phixs_data(
         log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
         sys.exit()
 
-    skipped_zero_threshold = 0
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
-    for lowerlevelid, targetlist in enumerate(photoionization_targetfractions):
-        if not targetlist:
-            continue
+    for lowerlevelid in levelids_to_write:
+        targetlist = photoionization_targetfractions[lowerlevelid]
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
-        if threshold_ev == 0.0:
-            # the threshold arrays start as zeros and are only filled in for levels that got a
-            # cross-section table, so a threshold of exactly zero means "no data for this level".
-            # (A negative threshold is a deliberate sentinel used by readqubdata, so keep those.)
-            skipped_zero_threshold += 1
-            continue
         if len(targetlist) == 1 and targetlist[0][1] > 0.99:
             upperionlevelid = targetlist[0][0]
 
