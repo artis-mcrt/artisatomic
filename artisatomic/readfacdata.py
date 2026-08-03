@@ -157,15 +157,10 @@ def extend_ion_list(ion_handlers):
     assert Path(BASEPATH).is_dir()
     for s in Path(BASEPATH).glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip("0123456789").removesuffix(".lev.asc").removesuffix("_calib")
-        elsym = ionstr.rstrip("IVX")
-        ion_stage_roman = ionstr.removeprefix(elsym)
-        atomic_number = artisatomic.elsymbols.index(elsym)
-
-        ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
+        atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
-    ion_handlers.sort(key=lambda x: x[0])
-    # print(ion_handlers)
+    # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return ion_handlers
 
 
@@ -184,12 +179,25 @@ def read_levels_data(dflevels):
     for index, row in dflevels.iterrows():
         ilev_enlevelindex_map[int(row["Ilev"])] = index
 
+        # Config is not unique (levels of the same configuration differ in J), so append the FAC
+        # level index to make the name unique. The configuration stays first so that
+        # get_level_valence_n() and the adata.txt comment column both still start with it.
         newlevel = FACEnergyLevel(
-            levelname=row["Config"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
+            levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
+            parity=row["P"],
+            g=row["g"],
+            energyabovegsinpercm=float(row["energypercm"]),
         )
         energy_levels.append(newlevel)
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
+
+    # A duplicated Ilev would silently overwrite its map entry and misroute every transition
+    # that references it (and implies duplicate level names, since Ilev is embedded in them).
+    # Not an assert: this validates an input file and must not disappear under python -O.
+    if len(ilev_enlevelindex_map) != len(energy_levels):
+        msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
+        raise ValueError(msg)
 
     return [None, *energy_levels], ilev_enlevelindex_map
 
@@ -244,7 +252,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     artisatomic.log_and_print(
         flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {ion_folder}",
+        f" {artisatomic.path_for_log(ion_folder)}",
     )
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
@@ -269,7 +277,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def get_level_valence_n(levelname: str):
-    part = levelname.rsplit(" ", maxsplit=1)[-1]
+    # level names are "<configuration> Ilev=<index>" and the configuration is itself
+    # space-separated, so drop the index suffix before taking the last orbital
+    part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()

@@ -4,6 +4,7 @@ import typing as t
 
 import numpy as np
 import polars as pl
+import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
@@ -14,6 +15,7 @@ from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
+from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
@@ -32,6 +34,27 @@ def test_interpret_term():
     assert get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
     assert get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
+    # names with no L character must report "unknown" rather than raising UnboundLocalError
+    for unreadable in ("e2x", "o12", "3d5", "12"):
+        assert get_term_as_tuple(unreadable) == (-1, -1, -1)
+
+
+def test_get_parity_from_config():
+    from artisatomic import get_parity_from_config
+
+    # sum of l over the occupied orbitals, mod 2
+    assert get_parity_from_config("3d7") == 0  # 2 * 7 = 14
+    assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
+    assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
+
+    # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
+    assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
+    assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
+
+    # closed shells with two-digit occupations: a truncated '4f1' reading would give the
+    # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
+    assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
+
 
 def test_interpret_parent_term():
     assert interpret_parent_term("(3P2)") == (3, 1, 2)
@@ -47,6 +70,30 @@ def test_interpret_configuration():
     assert interpret_configuration("3d7b2Fe") == (["3d7"], 2, 3, 0, 2)
     assert interpret_configuration("3d6_3P2e") == (["3d6"], 3, 1, 0, -1)
 
+    # a two-digit principal quantum number is read as such when the orbital has no occupation
+    # number, where there is nothing else the digits could belong to
+    assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
+
+    # ...and also with an occupation number, when the digits cannot belong to a preceding
+    # orbital (start of string, or right after a parent term)
+    assert interpret_configuration("10d1_2De") == (["10d1"], 2, 2, 0, -1)
+    assert interpret_configuration("3d6(5D)10d1_5Pe") == (["3d6", "(5D)", "10d1"], 5, 1, 0, -1)
+
+    # a digit followed by two letters keeps the digit with the letters ('4sp' is treated as an
+    # orbital-plus-occupation, matching the historical handling of this malformed Hillier name)
+    assert interpret_configuration("4sp(3P)_7Po[2]") == (["4sp", "(3P)"], 7, 1, 1, -1)
+
+    # an orbital with a SINGLE-digit occupation is always read with a single-digit n, because
+    # '3d14s2' is genuinely ambiguous and the occupation-1 reading is the common one
+    assert interpret_configuration("3d14s2_2De") == (["3d1", "4s2"], 2, 2, 0, -1)
+
+    # ...but trailing digits after the orbital letter are the occupation, so closed d and f
+    # shells with TWO-digit occupations are unambiguous and must keep both digits
+    assert interpret_configuration("3d104s_3De") == (["3d10", "4s"], 3, 2, 0, -1)
+    assert interpret_configuration("3d104s2_1Se") == (["3d10", "4s2"], 1, 0, 0, -1)
+    assert interpret_configuration("4d105s1_2Se") == (["4d10", "5s1"], 2, 0, 0, -1)
+    assert interpret_configuration("4f145d106s2_1Se") == (["4f14", "5d10", "6s2"], 1, 0, 0, -1)
+
 
 def test_score_config_match():
     assert score_config_match("3d64s  (4P ) 4p  w5Do", "3d6(3P)4s4p_w5Do[4]") == 100
@@ -61,10 +108,13 @@ def test_score_config_match():
     assert score_config_match("3d6    (5D ) 0s  b2F ", "3d7b2Fe") >= 12
     assert score_config_match("3d5    (2D ) 4p  v3Po", "3d5(b2D)4p_3Po") == 98
 
+    # closed d shells must score the same as any other configuration: if '3d104s2' is misparsed
+    # as 3d1 + 04s2 then the 4s2 piece stops matching and the score halves
+    assert score_config_match("3d104s2_1Se", "3d10(1S)4s2_1Se") == score_config_match("3d64s2_5De", "3d6(5D)4s2_5De")
+
 
 def test_hydrogenic_phixs():
-    ryd_to_ev = 13.605693122994232
-    import artisatomic.readhillierdata as rhd
+    ryd_to_ev = rhd.ryd_to_ev
 
     rhd.read_hyd_phixsdata()
 
@@ -112,6 +162,209 @@ def test_hydrogenic_phixs():
     assert np.allclose(expected_n5, phixstable_n[:10], rtol=1e-3)
 
 
+def test_hydrogenic_nl_phixs_offset_type8():
+    """CMFGEN cross-section type 8 (modified hydrogenic split l).
+
+    Pinned against the SUB_PHOT_GEN type-8 branch in CMFGEN's newsubs/sub_phot_gen.f:
+
+        IF(FREQ_VEC(I) .GE. EDGE+CROSS_A(LMIN+3))THEN
+          U=FREQ_VEC(I)/(EDGE+CROSS_A(LMIN+3))
+          X=LOG10(U) ... interpolate log10(BF_L_CROSS) linearly in X ...
+          SUM=SUM/ZION/ZION
+          PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
+    """
+
+    rhd.read_hyd_phixsdata()
+
+    h_in_ev_seconds = rhd.h_in_ev_seconds
+    ryd_to_ev = rhd.ryd_to_ev
+
+    # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
+    threshold_ev, n, l_start, l_end, nu_o, zion = 7.90, 4, 1, 1, 0.88936, 2
+    lambda_angstrom = rhd.hc_in_ev_angstrom / threshold_ev
+    e_o_ev = nu_o * 1e15 * h_in_ev_seconds
+
+    phixstable = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion)
+
+    energy_ev = phixstable[:, 0] * ryd_to_ev
+    below_offset_edge = energy_ev < threshold_ev + e_o_ev
+
+    # zero everywhere below the offset edge, including at the true threshold
+    assert below_offset_edge[0]
+    assert np.all(phixstable[below_offset_edge, 1] == 0.0)
+    # and non-zero immediately above it
+    assert np.all(phixstable[~below_offset_edge, 1] > 0.0)
+
+    # independent reimplementation of the CMFGEN branch
+    grid = rhd.hyd_phixs_energygrid_ryd[(n, l_start)]
+    u_grid = grid / grid[0]  # not in-place: the module-global table must stay untouched
+    sigma_table = np.zeros(len(u_grid))
+    for l in range(l_start, l_end + 1):
+        sigma_table += (2 * l + 1) * rhd.hyd_phixs[(n, l)]
+
+    for index, en_ev in enumerate(energy_ev):
+        if en_ev < threshold_ev + e_o_ev:
+            continue
+        u = en_ev / (threshold_ev + e_o_ev)
+        expected = 10 ** np.interp(np.log10(u), np.log10(u_grid), np.log10(sigma_table))
+        expected /= zion**2 * (l_end - l_start + 1) * (l_end + l_start + 1)
+        assert np.isclose(phixstable[index, 1], expected, rtol=1e-10)
+
+    # the energy grid must be untouched by the offset: it still starts at the true threshold
+    assert np.isclose(phixstable[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
+
+    # nu_o=None (type 2) must be unaffected and must not require zion
+    type2 = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
+    assert type2[0, 1] > 0.0
+    assert np.isclose(type2[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
+
+
+def test_hydrogenic_phixs_effective_charge_scaling():
+    """A hydrogenic level of charge Z must have sigma_threshold = sigma_th(H, n=1) / Z**2.
+
+    The H (Z=1) cases in test_hydrogenic_phixs() cannot detect a spurious extra factor of
+    Z_eff**2, so check the scaling explicitly for Z > 1.
+    """
+    ryd_to_ev = rhd.ryd_to_ev
+
+    rhd.read_hyd_phixsdata()
+
+    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
+
+    for atomic_number in (1, 2, 3, 6, 26):
+        for n in (1, 2, 5):
+            # a hydrogenic level of charge Z and principal quantum number n ionizes at Z**2 / n**2 Ryd
+            threshold_ev = atomic_number**2 * ryd_to_ev / n**2
+            phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
+
+            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and the gaunt factor at
+            # threshold depends only on n, so the ratio to the n=1 value is exactly n / Z**2
+            # once the n-dependence of g_bf is divided out by comparing at the same n.
+            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
+            assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
+
+        # the n=1 threshold cross section must fall exactly as 1 / Z**2
+        threshold_ev = atomic_number**2 * ryd_to_ev
+        phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, 1)
+        assert np.isclose(phixstable[0][1], sigma_hydrogen_1s / atomic_number**2, rtol=1e-6)
+
+
+def test_match_hydrogenic_phixs_is_not_double_scaled():
+    """match_hydrogenic_phixs() must not rescale the table returned by get_hydrogenic_n_phixstable().
+
+    get_hydrogenic_n_phixstable() already contains the effective-charge scaling, so applying
+    a second factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a
+    typical E_th = 11 eV, n = 5 valence level).
+    """
+    import argparse
+
+    import artisatomic
+
+    rhd.read_hyd_phixsdata()
+
+    ryd_to_ev = rhd.ryd_to_ev
+    hc_in_ev_cm = artisatomic.hc_in_ev_cm
+
+    # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
+    ionization_energy_ev = 4 * ryd_to_ev
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [None, 0.0],
+            "g": [None, 2.0],
+            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+
+    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+
+    assert thresholds[1] == ionization_energy_ev
+    assert targetfractions[1] == [(1, 1.0)]
+
+    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
+    assert abs(expected_threshold_mb - 6.3067 / 4) < 1e-3  # exact hydrogenic value for He II 1s
+    # the downsampled first point is a bin average, so allow a few percent
+    assert abs(crosssections[1][0] / expected_threshold_mb - 1) < 0.05
+
+    # levels above the ionization energy must be skipped rather than dividing by a negative threshold
+    dflevels_unbound = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [None, 2 * ionization_energy_ev / hc_in_ev_cm],
+            "g": [None, 2.0],
+            "levelname": [None, "s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
+    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+    assert thresholds[1] == 0.0
+    assert targetfractions[1] == []
+    assert np.all(crosssections[1] == 0.0)
+
+
+def test_read_coldata_term_to_j_redistribution():
+    """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
+
+    ARTIS forms the collisional excitation rate coefficient as proportional to upsilon_ij / g_i,
+    so the invariant that makes the total term-to-term rate correct is
+
+        sum_i sum_j upsilon_ij == upsilon_term,   upsilon_ij = upsilon_term * g_i/g_L * g_j/g_U
+
+    O III has term-resolved collision data (col_data_oiii_butler_2012.dat) and a J-split level
+    list, so it exercises the redistribution; Fe II names its collision transitions with J
+    values, so its values must pass through untouched.
+    """
+    import argparse
+    import contextlib
+    from collections import defaultdict
+
+    args = argparse.Namespace(electrontemperature=5000)
+
+    def read_ion(atomic_number, ion_stage):
+        flog = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, energy_levels, _, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+        levelids_of_term = defaultdict(list)
+        for levelid, level in enumerate(energy_levels[1:], 1):
+            levelids_of_term[level.levelname.split("[")[0]].append(levelid)
+        return energy_levels, upsilondict, levelids_of_term
+
+    energy_levels, upsilondict, levelids_of_term = read_ion(8, 3)
+
+    lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
+    upper_ids = levelids_of_term["2s_2p3_3Do"]
+    assert [energy_levels[i].g for i in lower_ids] == [1.0, 3.0, 5.0]
+
+    sums_from_lower = [
+        sum(upsilondict[(i, j)] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
+    ]
+
+    # the single value in the collision data file for this term pair
+    upsilon_term = 5.791
+    assert abs(sum(sums_from_lower) - upsilon_term) < 1e-3
+
+    # and it is split over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
+    for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
+        assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
+
+    # Fe II collision data is already J-resolved, so every value passes through unscaled
+    _, upsilondict_fe2, _ = read_ion(26, 2)
+    assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
 def test_add_handler_if_not_set():
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
 
@@ -133,6 +386,26 @@ def test_add_handler_if_not_set():
     ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
+
+
+def test_split_element_ionstage_str():
+    from artisatomic import split_element_ionstage_str
+
+    assert split_element_ionstage_str("FeII") == (26, 2)
+    assert split_element_ionstage_str("DyIII") == (66, 3)
+    assert split_element_ionstage_str("SiI") == (14, 1)
+    assert split_element_ionstage_str("HI") == (1, 1)
+
+    # rstrip("IVX") would leave nothing behind for the elements whose symbols are made of
+    # those letters, so these are the cases that used to raise ValueError
+    assert split_element_ionstage_str("VI") == (23, 1)  # vanadium I, not "V" as a numeral
+    assert split_element_ionstage_str("VIII") == (23, 3)  # vanadium III
+    assert split_element_ionstage_str("IV") == (53, 5)  # iodine V
+    assert split_element_ionstage_str("II") == (53, 1)  # iodine I
+    assert split_element_ionstage_str("XeIV") == (54, 4)
+
+    with pytest.raises(ValueError, match="Could not split"):
+        split_element_ionstage_str("NotAnIon")
 
 
 def test_get_default_handler():
@@ -257,5 +530,12 @@ def test_get_level_valence_n():
     assert readfloers25data.get_level_valence_n("5s2.5p5") == 5
     assert readfacdata.get_level_valence_n("4f9 6s1") == 6
     assert readfacdata.get_level_valence_n("4f10") == 4
+
+    # the floers25 and fac level names carry a uniquifying suffix, which must be ignored
+    assert readfloers25data.get_level_valence_n("4f10 J=8 index=0") == 4
+    assert readfloers25data.get_level_valence_n("4f9.6s J=15/2 index=137") == 6
+    assert readfloers25data.get_level_valence_n("5s2.5p5 J=3/2 index=2") == 5
+    assert readfacdata.get_level_valence_n("4f9 6s1 Ilev=42") == 6
+    assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
     assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
     assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5

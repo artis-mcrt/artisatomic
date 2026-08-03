@@ -48,13 +48,22 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     nahar_ionization_potential_rydberg = -1.0
 
     if not os.path.isfile(path_nahar_energy_file):
-        artisatomic.log_and_print(flog, f"{path_nahar_energy_file} does not exist")
+        artisatomic.log_and_print(flog, f"{artisatomic.path_for_log(path_nahar_energy_file)} does not exist")
     else:
-        artisatomic.log_and_print(flog, f"Reading {path_nahar_energy_file}")
+        artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_nahar_energy_file)}")
         with open(path_nahar_energy_file) as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 
             nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
+
+            # every level energy below is measured from this, so a missing value would silently
+            # offset the whole level list (and be written to adata.txt as a negative ionization energy)
+            if nahar_ionization_potential_rydberg <= 0.0:
+                msg = (
+                    f"No ' Ion ground state' line found in {path_nahar_energy_file}, so the ionization"
+                    " potential is unknown and the level energies cannot be computed"
+                )
+                raise ValueError(msg)
 
             while True:
                 line = fenlist.readline()
@@ -233,8 +242,14 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
             line = fenlist.readline()
             row = line.split()
 
-            if not line or sum(map(float, row)) == 0:
+            if not line:
                 break
+            if not row:
+                continue  # a blank line is not the end of the table (sum([]) == 0 used to break here)
+            if len(row) < 4 or not all(map(artisatomic.isfloat, row)):
+                break  # trailing text after the table rather than another state
+            if sum(map(float, row)) == 0:
+                break  # the "0 0 0 0" terminator
 
             twosplusone, l, parity, indexinsymmetry = int(row[0]), int(row[1]), int(row[2]), int(row[3])
 

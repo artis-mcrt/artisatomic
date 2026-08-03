@@ -75,7 +75,8 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
-        return json.load(inputhandlersfile.open(encoding="utf-8"))
+        with inputhandlersfile.open(encoding="utf-8") as f:
+            return sort_ion_handlers(json.load(f))
 
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
 
@@ -104,7 +105,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
-    return ion_handlers
+    return sort_ion_handlers(ion_handlers)
 
 
 USE_QUB_COBALT = False
@@ -115,16 +116,46 @@ hc_in_ev_angstrom = 12398.419843320025
 h_in_ev_seconds = 4.135667696923859e-15
 
 
+def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
+    """Split a string like 'FeII' into (atomic_number, ion_stage).
+
+    Splitting on `ionstr.rstrip("IVX")` destroys the symbols of the elements whose symbols are
+    made only of those letters: V (vanadium) and I (iodine). Instead find the split point where
+    the prefix is an element symbol and the suffix is a Roman numeral. Element symbols have a
+    lowercase second letter and Roman numerals are uppercase, so the match is unambiguous.
+    """
+    for splitpos in range(1, len(ionstr)):
+        elsym, ion_stage_roman = ionstr[:splitpos], ionstr[splitpos:]
+        if elsym in elsymbols and ion_stage_roman in roman_numerals[1:]:
+            return elsymbols.index(elsym), roman_numerals.index(ion_stage_roman)
+
+    msg = f"Could not split '{ionstr}' into an element symbol and a Roman numeral ion stage"
+    raise ValueError(msg)
+
+
+def get_ion_stage(entry: int | tuple[int, str]) -> int:
+    """Ion stage of an ion_handlers entry, which is either a bare ion stage or (ion_stage, handler)."""
+    return entry if isinstance(entry, int) else entry[0]
+
+
+def sort_ion_handlers(
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+) -> list[tuple[int, list[int | tuple[int, str]]]]:
+    """Sort by atomic number, and each element's ions by ion stage.
+
+    process_files() relies on ascending ion stages to identify the top ion and to find each ion's
+    photoionisation target, so normalise the order here, before the handler list is written to
+    artisatomicionhandlers.json and passed to write_compositionfile().
+    """
+    return sorted(
+        ((atomic_number, sorted(listions, key=get_ion_stage)) for atomic_number, listions in ion_handlers),
+        key=lambda x: x[0],
+    )
+
+
 def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
     """Replace [(ion_stage, 'handler1'), (ion_stage2, 'handler2'), ion_stage3] with [ion_stage1, ion_stage2, ion_stage3]."""
-    list_out = []
-    for ion_stage in list_ions:
-        if isinstance(ion_stage, int):
-            list_out.append(ion_stage)
-        else:
-            list_out.append(ion_stage[0])
-
-    return list_out
+    return [get_ion_stage(ion_stage) for ion_stage in list_ions]
 
 
 def add_handler_if_not_set(
@@ -134,9 +165,10 @@ def add_handler_if_not_set(
 
     The input list is not modified, so the return value must be used.
     """
-
-    def get_ion_stage(entry: int | tuple[int, str]) -> int:
-        return entry if isinstance(entry, int) else entry[0]
+    # readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
+    # numpy integers, so normalise here rather than in each caller
+    atomic_number = int(atomic_number)
+    ion_stage = int(ion_stage)
 
     ion_handlers_out: list[tuple[int, list[int | tuple[int, str]]]] = []
     found_element = False
@@ -252,7 +284,8 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     else:
         os.makedirs(log_folder, exist_ok=True)
 
-    json.dump(obj=ion_handlers, fp=Path(log_folder, "artisatomicionhandlers.json").open("w"))
+    with Path(log_folder, "artisatomicionhandlers.json").open("w") as f:
+        json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
@@ -447,7 +480,7 @@ def read_ion_data(
             nahar_phixs_tables: dict = {}
             thresholds_ev_dict: dict = {}
             if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_nahar_px_file}")
+                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
                 nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
                     path_nahar_px_file, atomic_number, ion_stage, args
                 )
@@ -491,7 +524,7 @@ def read_ion_data(
             nahar_phixs_tables = {}
             thresholds_ev_dict = {}
             if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_nahar_px_file}")
+                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
                 nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
                     path_nahar_px_file, atomic_number, ion_stage, args
                 )
@@ -586,7 +619,7 @@ def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
     upsilondict = {}
 
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
-    log_and_print(flog, f"Reading effective collision strengths from {filename}")
+    log_and_print(flog, f"Reading effective collision strengths from {path_for_log(filename)}")
 
     with open(filename) as fstoreydata:
         found_tablestart = False
@@ -857,6 +890,19 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
+def path_for_log(filepath: str | Path) -> str:
+    """Render an input data path relative to the repository root where possible.
+
+    The log files are compared by checksum in CI, so an absolute path would make them depend on
+    where the repository happens to be checked out. Paths outside the repository (some readers
+    load data from elsewhere) are returned unchanged.
+    """
+    try:
+        return str(Path(filepath).resolve().relative_to(PYDIR.parent))
+    except ValueError:
+        return str(filepath)
+
+
 def isfloat(value: t.Any) -> bool:
     try:
         float(value.replace("D", "E"))
@@ -922,9 +968,6 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
     get_n = dict_get_n_func[ion_handler]
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
-    alpha_squared = 0.0072973525643**2  # fine structure constant squared
-    mc_squared = 0.5109989461 * 1e6  # electron mass in eV
-
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.zeros(energy_levels.height)
@@ -936,17 +979,16 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
             break
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
+        if threshold_ev <= 0.0:
+            # level lies above the ionization energy, so there is nothing to ionize from
+            continue
         photoionization_thresholds_ev[lowerlevelid] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
-        if lambda_angstrom <= 0.0:
-            continue
 
         n = get_n(level["levelname"])
-        effective_charge_squared = threshold_ev * 2 * (n**2) / alpha_squared / mc_squared
-        # scale the cross sections but not the energy grid
-        phixstable = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
-        phixstable[:, 1] /= effective_charge_squared
-        phixstables[lowerlevelid] = phixstable
+        # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
+        # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
+        phixstables[lowerlevelid] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
         photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]
 
     reduced_phixs_dict = reduce_phixs_tables(
@@ -1202,6 +1244,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
             return (-1, -1, 0)
         if config[-1] == "o":
             return (-1, -1, 1)
+        return (-1, -1, -1)
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
@@ -1335,16 +1378,27 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         indexinsymmetry = reversedalphabets.index(instr[-1]) + 1 if term_parity == 1 else alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
+    def is_two_digit_n(strn: str) -> bool:
+        """Are these two digits a principal quantum number, rather than one digit of something else?
+
+        n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
+        '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.
+        """
+        return strn.isdigit() and 10 <= int(strn) < max_n
+
     electron_config: list[str] = []
     if not instr.startswith("Eqv st"):
         while instr:
             if instr[-1].upper() in lchars:
-                try:
-                    startpos = -3 if len(instr) >= 3 and str.isdigit(instr[-3]) and int(instr[-3:-1]) < max_n else -2
-                except ValueError:
-                    startpos = (
-                        -3  # this tripped on '4sp(3P)_7Po[2]'. just pretend 4sp is an orbital and occupation number
-                    )
+                # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'.
+                # The digit-letter-letter case keeps its leading digit, so '4sp(3P)_7Po[2]'
+                # yields a pretend orbital '4sp' rather than dropping the 4 (as before).
+                startpos = (
+                    -3
+                    if len(instr) >= 3
+                    and (is_two_digit_n(instr[-3:-1]) or (instr[-3].isdigit() and not instr[-2].isdigit()))
+                    else -2
+                )
 
                 electron_config.insert(0, instr[startpos:])
                 instr = instr[:startpos]
@@ -1353,11 +1407,28 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 str_parent_term = instr[left_bracket_pos:].replace(" ", "")
                 electron_config.insert(0, str_parent_term)
                 instr = instr[:left_bracket_pos]
-            elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
+            elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) and int(instr[-4:-2]) < max_n else -3
-                    electron_config.insert(0, instr[-3:])
-                    instr = instr[:-3]
+                    # Single-digit occupation. A two-digit n is kept ('10d1') only when the
+                    # digits cannot belong to a preceding orbital: '3d14s2' is genuinely
+                    # ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and there the single-digit
+                    # reading wins because an occupation of 1 is common and a two-digit n
+                    # carrying an explicit occupation is not. At the start of the string or
+                    # after a parent term there is no such ambiguity.
+                    two_digit_n = (
+                        len(instr) >= 4
+                        and is_two_digit_n(instr[-4:-2])
+                        and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
+                    )
+                    startpos = -4 if two_digit_n else -3
+                    electron_config.insert(0, instr[startpos:])
+                    instr = instr[:startpos]
+                elif len(instr) >= 3 and str.isdigit(instr[-2]) and instr[-3].upper() in lchars:
+                    # Two-digit occupation, e.g. the closed shells '3d10' and '4f14'. This is
+                    # unambiguous: trailing digits after the orbital letter are the occupation.
+                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) else -3
+                    electron_config.insert(0, instr[startpos:])
+                    instr = instr[:startpos]
                 else:
                     # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]
@@ -1373,10 +1444,20 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
 
 def get_parity_from_config(instr) -> int:
     configsplit = interpret_configuration(instr)[0]
+    lchars_lower = lchars.lower()
     lsum = 0
     for orbitalstr in configsplit:
-        l = lchars.lower().index(orbitalstr[1])
-        nelec = int(orbitalstr[2:]) if len(orbitalstr[2:]) > 0 else 1
+        if orbitalstr.startswith("("):
+            continue  # a parent term such as '(5D)', not an occupied orbital
+        # the orbital letter is the first non-digit, allowing a two-digit principal quantum number
+        lpos = next((pos for pos, char in enumerate(orbitalstr) if char in lchars_lower), None)
+        if lpos is None:
+            # don't fail silently: a skipped orbital means the parity (and hence the forbidden
+            # flags of every transition involving this level) could come out wrong
+            print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}', skipping it for the parity")
+            continue
+        l = lchars_lower.index(orbitalstr[lpos])
+        nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
         lsum += l * nelec
 
     return lsum % 2
@@ -1482,8 +1563,11 @@ def score_config_match(config_a, config_b):
                     # print(orbitaldiff, spindiff, maxspindiff, ldiff, maxldiff, config_a, config_b)
                     parent_term_match = 0.0
                     return 0
-        score = int(98 * matched_pieces / max(non_term_pieces_a, non_term_pieces_b) * parent_term_match)
-        return score
+        non_term_pieces = max(non_term_pieces_a, non_term_pieces_b)
+        if non_term_pieces == 0:
+            # both configurations are parent terms only, so there is nothing to match piece by piece
+            return 5
+        return int(98 * matched_pieces / non_term_pieces * parent_term_match)
 
     return 5  # term matches but no electron config available or it's an Eqv state...0s type
 
@@ -1745,12 +1829,19 @@ def write_phixs_data(
         log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
         sys.exit()
 
+    skipped_zero_threshold = 0
     for lowerlevelid, targetlist in enumerate(photoionization_targetfractions[1:], 1):
         if not targetlist:
             continue
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
-        if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
-            upperionlevelid = targetlist[0][0] if len(targetlist) > 0 else 1
+        if threshold_ev == 0.0:
+            # the threshold arrays start as zeros and are only filled in for levels that got a
+            # cross-section table, so a threshold of exactly zero means "no data for this level".
+            # (A negative threshold is a deliberate sentinel used by readqubdata, so keep those.)
+            skipped_zero_threshold += 1
+            continue
+        if len(targetlist) == 1 and targetlist[0][1] > 0.99:
+            upperionlevelid = targetlist[0][0]
 
             fphixs.write(
                 f"{atomic_number:12d}{ion_stage + 1:12d}{upperionlevelid:8d}{ion_stage:12d}{lowerlevelid:8d}{threshold_ev:16.6E}\n"
@@ -1772,6 +1863,12 @@ def write_phixs_data(
 
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
+
+    if skipped_zero_threshold > 0:
+        log_and_print(
+            flog,
+            f"Skipped {skipped_zero_threshold} levels with no photoionization threshold energy",
+        )
 
 
 def write_compositionfile(

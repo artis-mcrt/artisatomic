@@ -21,11 +21,7 @@ def extend_ion_list(ion_handlers, calibrated=True):
         handlername = f"floers25{calibstr}"
         for s in BASEPATH.glob(f"*_levels_{calibstr}.txt*"):
             ionstr = s.name.lstrip("0123456789").split("_")[0]
-            elsym = ionstr.rstrip("IVX")
-            ion_stage_roman = ionstr.removeprefix(elsym)
-            atomic_number = artisatomic.elsymbols.index(elsym)
-
-            ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
+            atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
             ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
     return ion_handlers
@@ -77,7 +73,20 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         .alias("g")
     )
 
-    dflevels = dflevels.with_columns(pl.col("J").str.strip_suffix("/2").cast(pl.Float32).alias("2J"))
+    # The level table is indexed from zero in file order and the transitions refer to those
+    # indices, so a gap would silently attach transitions to the wrong levels. Not an assert:
+    # this validates an input file and must not disappear under python -O.
+    if dflevels["Index"].to_list() != list(range(dflevels.height)):
+        msg = f"Level indices in {levels_file} are not contiguous and zero-based"
+        raise ValueError(msg)
+
+    # Configuration is not unique (levels of the same configuration differ by J), so build a
+    # unique level name from it. Index is contiguous, so including it guarantees uniqueness.
+    # The configuration stays first so that get_level_valence_n() and the adata.txt comment
+    # column both still start with it.
+    dflevels = dflevels.with_columns(
+        levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
+    )
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
@@ -95,35 +104,49 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
-    counts_lower: dict[str, int] = dict(dftransitions["Config_Lower"].value_counts().iter_rows())
-    counts_upper: dict[str, int] = dict(dftransitions["Config_Upper"].value_counts().iter_rows())
+    # Transitions reference levels by zero-based index, and an out-of-range reference would be
+    # silently dropped by the level-id joins in add_level_ids_forbidden(), leaving an incomplete
+    # database. Not an assert: this validates an input file and must not disappear under python -O.
+    if dftransitions.height > 0:
+        transition_level_indices = pl.concat([dftransitions["Lower"], dftransitions["Upper"]])
+        min_index = t.cast("int", transition_level_indices.min())
+        max_index = t.cast("int", transition_level_indices.max())
+        if min_index < 0 or max_index >= dflevels.height:
+            msg = (
+                f"Transition level indices in {lines_file} span {min_index}..{max_index}, outside the"
+                f" level table's 0..{dflevels.height - 1}"
+            )
+            raise ValueError(msg)
+
+    # count per level index, not per configuration string: several levels share a configuration
+    transition_count_of_levelindex: dict[int, int] = dict(
+        pl.concat([dftransitions["Lower"], dftransitions["Upper"]]).value_counts().iter_rows()
+    )
     transition_count_of_level_name = {
-        config: counts_lower.get(config, 0) + counts_upper.get(config, 0) for config in dflevels["Configuration"]
+        levelname: transition_count_of_levelindex.get(index, 0)
+        for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
 
     # use standard artisatomic column names and convert to 1-indexed levels
 
     dflevels = artisatomic.add_dummy_zero_level(
         dflevels.select(
-            levelname=pl.col("Configuration"),
+            levelname=pl.col("levelname"),
             parity=pl.col("Parity"),
             g=pl.col("g"),
             energyabovegsinpercm=pl.col("Energy"),
         )
     )
 
-    dftransitions = dftransitions.select(
-        lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"), forbidden=pl.lit(False)
-    )
-
-    # this check is slow
-    # assert sum(transition_count_of_level_name.values()) == len(transitions) * 2
+    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it
+    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"))
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
 
 def get_level_valence_n(levelname: str):
-    part = levelname.rsplit(".", maxsplit=1)[-1]
+    # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
+    part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()

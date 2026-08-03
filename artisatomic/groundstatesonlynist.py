@@ -48,24 +48,9 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 def extend_ion_list(ion_handlers):
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
-    for index, row in groundstatesdata.iterrows():
-        atomic_number = row["Z"]
-        ion_stage = row["ion"]
-        found_element = False
-        for tmp_atomic_number, list_ions_handlers in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                # add an ion that is not present in the element's list
-                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
-                    list_ions_handlers.append((ion_stage, "gsnist"))
-                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
-                found_element = True
+    for _index, row in groundstatesdata.iterrows():
+        # add_handler_if_not_set() returns a new list rather than mutating its argument,
+        # and normalises the pandas numpy integers to plain ints
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, row["Z"], row["ion"], "gsnist")
 
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "gsnist")],
-                )
-            )
-    ion_handlers.sort(key=lambda x: x[0])
     return ion_handlers

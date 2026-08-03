@@ -130,8 +130,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions, transition_count_of_level_name = read_lines_data(dfiondata, energy_levels)
 
-    # ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
-    ionization_energy_in_ev = -1
+    # DREAM has no ionization energies, so take them from NIST as the other handlers do
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
 
