@@ -6,6 +6,7 @@ from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import polars as pl
 
@@ -344,7 +345,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
 
 
-def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog):
+def read_qub_photoionizations(
+    atomic_number, ion_stage, energy_levels, args, flog
+) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in energy_levels]

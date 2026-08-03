@@ -7,6 +7,7 @@ from functools import cache
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 
 import artisatomic
@@ -468,7 +469,9 @@ phixs_type_labels = {
 }
 
 
-def read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog):
+def read_phixs_tables(
+    atomic_number, ion_stage, energy_levels, args, flog
+) -> tuple[npt.NDArray[np.float64], list[list[tuple[str, float]] | None], npt.NDArray[np.float64]]:
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
     photoionization_thresholds_ev = np.zeros(len(energy_levels))

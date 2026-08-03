@@ -19,6 +19,7 @@ from pathlib import Path
 
 import argcomplete
 import numpy as np
+import numpy.typing as npt
 import pandas as pd
 import polars as pl
 from scipy import integrate
@@ -318,16 +319,17 @@ class IonData(t.NamedTuple):
     ionization_energy_ev: float
     dfenergylevels: pl.DataFrame
     dftransitions: pl.DataFrame
-    transition_count_of_level_name: dict
-    upsilondict: dict
-    # list of readnahardata.NaharCoreState, where core state id n is at index n - 1 ([] if unavailable)
-    nahar_core_states: list
-    # keys are (2S+1, L, parity), values are strings of electron configuration
-    nahar_configurations: dict
-    hillier_photoion_targetconfigs: list | None
-    photoionization_crosssections: t.Any  # cross sections in Mb, level id n at index n - 1
-    photoionization_targetfractions: list
-    photoionization_thresholds_ev: t.Any  # level id n at index n - 1
+    transition_count_of_level_name: dict[str, int]
+    upsilondict: dict[tuple[int, int], float]
+    # core state id n is at index n - 1 ([] if unavailable)
+    nahar_core_states: list[readnahardata.NaharCoreState]
+    # keys are (2S+1, L, parity, index in symmetry), values are strings of electron configuration
+    nahar_configurations: dict[tuple[int, int, int, int], str]
+    # None where a level has no photoionisation data (and None entirely if none was read)
+    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None
+    photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
+    photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
+    photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
 
 
 def get_default_handler(atomic_number: int, ion_stage: int) -> str:
@@ -389,14 +391,15 @@ def read_ion_data(
         ion_stage, handler = ion_stage_entry
 
     ionization_energy_ev = 0.0
-    transition_count_of_level_name: dict = {}
-    upsilondict: dict = {}
-    nahar_core_states: list = []
-    nahar_configurations: dict = {}
-    hillier_photoion_targetconfigs = None
-    photoionization_crosssections: t.Any = []  # list of cross section in Mb
-    photoionization_targetfractions: list = []
-    photoionization_thresholds_ev: t.Any = []
+    transition_count_of_level_name: dict[str, int] = {}
+    upsilondict: dict[tuple[int, int], float] = {}
+    nahar_core_states: list[readnahardata.NaharCoreState] = []
+    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
+    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
+    # empty until a handler below reads photoionisation data (and left empty for the top ion)
+    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
+    photoionization_targetfractions: list[list[tuple[int, float]]] = []
+    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
 
     logfilepath = Path(
         args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
@@ -655,8 +658,9 @@ def combine_hillier_nahar(
     useallnaharlevels=False,
 ):
     added_nahar_levels = []
-    photoionization_crosssections = []
-    photoionization_thresholds_ev = []
+    # stay empty unless there are Nahar phixs tables to attach to the combined level list
+    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))
+    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
     levelids_of_levelnamenoJ = defaultdict(list)
 
     if useallnaharlevels:
@@ -946,7 +950,9 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return dictioniz
 
 
-def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_ev: float, ion_handler: str, args):
+def match_hydrogenic_phixs(
+    atomic_number: int, energy_levels: pl.DataFrame, ionization_energy_ev: float, ion_handler: str, args
+) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     dict_get_n_func = {
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
@@ -959,13 +965,13 @@ def match_hydrogenic_phixs(atomic_number: int, energy_levels, ionization_energy_
         print(
             f"WARNING: Can't assign hydrogenic photoionization cross sections because I don't know how to find principle quantum numbers for {ion_handler} levels"
         )
-        return [], [], []
+        return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
     get_n = dict_get_n_func[ion_handler]
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
-    photoionization_targetfractions: list = [[] for _ in range(energy_levels.height)]
+    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.zeros(energy_levels.height)
     phixstables = {}
     for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
@@ -1812,9 +1818,9 @@ def write_phixs_data(
     fphixs,
     atomic_number: int,
     ion_stage: int,
-    photoionization_crosssections,
-    photoionization_targetfractions,
-    photoionization_thresholds_ev,
+    photoionization_crosssections: npt.NDArray[np.float64],
+    photoionization_targetfractions: list[list[tuple[int, float]]],
+    photoionization_thresholds_ev: npt.NDArray[np.float64],
     args,
     flog,
 ) -> None:

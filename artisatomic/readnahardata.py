@@ -40,10 +40,19 @@ class NaharEnergyLevel(t.NamedTuple):
     naharconfiguration: str
 
 
-def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
-    nahar_configurations = {}
+def read_nahar_energy_level_file(
+    path_nahar_energy_file, atomic_number, ion_stage, flog
+) -> tuple[
+    list[NaharEnergyLevel],
+    list[NaharCoreState],
+    dict[tuple[int, int, int, int], int],
+    dict[tuple[int, int, int, int], str],
+    float,
+]:
+    # state tuples are (2S+1, L, parity, index in symmetry)
+    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_energy_levels: list[NaharEnergyLevel] = []
-    nahar_level_index_of_state = {}
+    nahar_level_index_of_state: dict[tuple[int, int, int, int], int] = {}
     nahar_core_states: list[NaharCoreState] = []
     nahar_ionization_potential_rydberg = -1.0
 
@@ -267,8 +276,8 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     return nahar_phixs_tables, thresholds_ev_dict
 
 
-def read_nahar_configurations(fenlist, flog):
-    nahar_configurations = {}
+def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, int], str], float]:
+    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_ionization_potential_rydberg = -1.0
     while True:
         line = fenlist.readline()
@@ -393,8 +402,12 @@ def get_naharphotoion_upperlevelids(
 
 
 def get_photoiontargetfractions(
-    dfenergy_levels, dfenergy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog
-):
+    dfenergy_levels,
+    dfenergy_levels_upperion,
+    nahar_core_states: list[NaharCoreState],
+    nahar_configurations_upperion: dict[tuple[int, int, int, int], str],
+    flog,
+) -> list[list[tuple[int, float]]]:
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)
     for lowerlevelid in range(dfenergy_levels.height):
