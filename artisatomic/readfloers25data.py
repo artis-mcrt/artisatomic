@@ -127,19 +127,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
 
-    # use standard artisatomic column names and convert to 1-indexed levels
+    # use standard artisatomic column names
 
-    dflevels = artisatomic.add_dummy_zero_level(
-        dflevels.select(
-            levelname=pl.col("levelname"),
-            parity=pl.col("Parity"),
-            g=pl.col("g"),
-            energyabovegsinpercm=pl.col("Energy"),
-        )
+    dflevels = dflevels.select(
+        levelname=pl.col("levelname"),
+        parity=pl.col("Parity"),
+        g=pl.col("g"),
+        energyabovegsinpercm=pl.col("Energy"),
     )
 
-    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it
-    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower") + 1, upperlevel=pl.col("Upper") + 1, A=pl.col("A"))
+    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it.
+    # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory
+    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower"), upperlevel=pl.col("Upper"), A=pl.col("A"))
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 

@@ -31,7 +31,6 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [
-        None,
         EnergyLevel(
             levelname=this_ion["config"].to_numpy()[0],
             parity=0,
@@ -39,8 +38,8 @@ def read_ground_levels(atomic_number, ion_stage, flog):
             energyabovegsinpercm=0.0,
         ),
     ]
-    transitions = []
-    transition_count_of_level_name = defaultdict(int)
+    transitions: list[t.Any] = []  # this handler provides ground states only, so never any transitions
+    transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
 

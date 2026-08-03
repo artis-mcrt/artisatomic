@@ -199,7 +199,7 @@ def read_levels_data(dflevels):
         msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
         raise ValueError(msg)
 
-    return [None, *energy_levels], ilev_enlevelindex_map
+    return energy_levels, ilev_enlevelindex_map
 
 
 class FACTransition(t.NamedTuple):
@@ -215,8 +215,8 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
     for index, row in dflines.iterrows():
         try:
-            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])] + 1
-            upperlevel = ilev_enlevelindex_map[int(row["Upper"])] + 1
+            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])]
+            upperlevel = ilev_enlevelindex_map[int(row["Upper"])]
         except KeyError:
             continue
         assert lowerlevel < upperlevel
@@ -264,7 +264,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     assert Path(lines_file).exists()
     dflines = GetLines(filename=lines_file, Z=atomic_number)

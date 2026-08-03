@@ -63,7 +63,7 @@ def read_levels_data(dflines):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    return [None, *energy_levels]
+    return energy_levels
 
 
 def read_lines_data(dfiondata, energy_levels):
@@ -109,6 +109,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # for x in energy_levels:
     #     print(x)
     def get_level_index(row, prefix):
+        """Return the zero-based level id of the row's level."""
         leveltuple = energytuplefromrow(row, prefix)
         if leveltuple in energy_levels:
             return energy_levels.index(leveltuple)
@@ -134,6 +135,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

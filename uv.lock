@@ -81,6 +81,7 @@ dev = [
     { name = "ty" },
     { name = "types-pytz" },
     { name = "types-requests" },
+    { name = "types-tqdm" },
 ]
 
 [package.metadata]
@@ -95,7 +96,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.0" },
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "tables", specifier = ">=3.11.1" },
-    { name = "tqdm", specifier = ">=4.67.3" },
+    { name = "tqdm", specifier = ">=4.70.0" },
     { name = "xopen", specifier = ">=2.1.0" },
 ]
 
@@ -114,6 +115,7 @@ dev = [
     { name = "ty", specifier = ">=0.0.65" },
     { name = "types-pytz", specifier = ">=2025.2.0.20250809" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },
+    { name = "types-tqdm", specifier = ">=4.70.0.20260731" },
 ]
 
 [[package]]
@@ -1901,6 +1903,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/db/51/703318f7b7be8bee126ec13bf615050f932d0179b8784420f3a0199cc769/types_requests-2.33.0.20260712.tar.gz", hash = "sha256:2141b67ab534a5c5cd2dac5034f2a35f42e699c5bf185eee608c5246a069d7fb", size = 25084, upload-time = "2026-07-12T05:14:20.455Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/62/e7/010c87f559e216d83f9dc51e939633fd0d0ead3377340181ab0e223cd3b5/types_requests-2.33.0.20260712-py3-none-any.whl", hash = "sha256:de027e28c171d3da529689cbfa023b0b4eab188c8dfa22fd834eebd2cee6e7bb", size = 21392, upload-time = "2026-07-12T05:14:19.616Z" },
+]
+
+[[package]]
+name = "types-tqdm"
+version = "4.70.0.20260731"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/00/8992629b9ce59e80c8ac486f80c691d2ff4e8aba8c4f5afe02fef72c05eb/types_tqdm-4.70.0.20260731.tar.gz", hash = "sha256:6b02430954866dbb87b4ada1a16f396775508d0cafbe4c694673d65645e1984e", size = 19061, upload-time = "2026-07-31T05:22:09.618Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/f3/2b6b01a9c815411566b5c5dba03bb537d8fbf374f76289bacbd2c16204e6/types_tqdm-4.70.0.20260731-py3-none-any.whl", hash = "sha256:d2a8b4ced62afecc84b89d75e40397c22a228ca273eb778899713981e9b323dc", size = 25137, upload-time = "2026-07-31T05:22:08.555Z" },
 ]
 
 [[package]]

@@ -40,11 +40,20 @@ class NaharEnergyLevel(t.NamedTuple):
     naharconfiguration: str
 
 
-def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog):
-    nahar_configurations = {}
-    nahar_energy_levels: list[NaharEnergyLevel | None] = [None]
-    nahar_level_index_of_state = {}
-    nahar_core_states: list[NaharCoreState | None] = []
+def read_nahar_energy_level_file(
+    path_nahar_energy_file, atomic_number, ion_stage, flog
+) -> tuple[
+    list[NaharEnergyLevel],
+    list[NaharCoreState],
+    dict[tuple[int, int, int, int], int],
+    dict[tuple[int, int, int, int], str],
+    float,
+]:
+    # state tuples are (2S+1, L, parity, index in symmetry)
+    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
+    nahar_energy_levels: list[NaharEnergyLevel] = []
+    nahar_level_index_of_state: dict[tuple[int, int, int, int], int] = {}
+    nahar_core_states: list[NaharCoreState] = []
     nahar_ionization_potential_rydberg = -1.0
 
     if not os.path.isfile(path_nahar_energy_file):
@@ -148,17 +157,16 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
                             "",
                         )
                     )
-                    assert nahar_energy_levels[-1] is not None
                     energyabovegsinpercm = (
-                        (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))  # ty:ignore[possibly-missing-attribute]
+                        (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))
                         * ryd_to_ev
                         / hc_in_ev_cm
                     )
 
-                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(  # ty:ignore[possibly-missing-attribute]
+                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
                         indexinsymmetry=indexinsymmetry,
                         corestateid=nahar_core_state_id,
-                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),  # ty:ignore[possibly-missing-attribute]
+                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),
                         energyabovegsinpercm=energyabovegsinpercm,
                         g=twosplusone * (2 * l_val + 1),
                     )
@@ -178,7 +186,7 @@ def read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stag
     )
 
 
-def read_nahar_core_states(fenlist) -> list[NaharCoreState | None]:
+def read_nahar_core_states(fenlist) -> list[NaharCoreState]:
     while True:
         line = fenlist.readline()
         if not line:
@@ -199,15 +207,14 @@ def read_nahar_core_states(fenlist) -> list[NaharCoreState | None]:
     fenlist.readline()  # ' target states and energies:'
     fenlist.readline()  # blank line
 
-    nahar_core_states: list[NaharCoreState | None] = [None] * (numberofcorestates + 1)
+    # core state id n is stored at index n - 1
+    nahar_core_states: list[NaharCoreState] = []
     for c in range(1, numberofcorestates + 1):
         row = fenlist.readline().split()
         state = NaharCoreState(int(row[0]), row[1], row[2], float(row[3]))
-        nahar_core_states[c] = state
-        if int(state.nahar_core_state_id) != c:  # ty:ignore[possibly-missing-attribute]
-            print(
-                f"Nahar levels mismatch: id {c:d} found at entry number {int(state.nahar_core_state_id):d}"  # ty:ignore[possibly-missing-attribute]
-            )
+        nahar_core_states.append(state)
+        if int(state.nahar_core_state_id) != c:
+            print(f"Nahar levels mismatch: id {c:d} found at entry number {int(state.nahar_core_state_id):d}")
             sys.exit()
     return nahar_core_states
 
@@ -269,8 +276,8 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     return nahar_phixs_tables, thresholds_ev_dict
 
 
-def read_nahar_configurations(fenlist, flog):
-    nahar_configurations = {}
+def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, int], str], float]:
+    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_ionization_potential_rydberg = -1.0
     while True:
         line = fenlist.readline()
@@ -326,10 +333,10 @@ def get_naharphotoion_upperlevelids(
     """Returns a list of upper level id numbers for a given energy level's photoionisation processes."""
     # core_state_id = int(energy_level.corestateid)
     core_state_id = 1  # temporary fix
-    if core_state_id > 0 and core_state_id < len(nahar_core_states):
+    if core_state_id > 0 and core_state_id <= len(nahar_core_states):
         if not upper_level_ids_of_core_state_id[core_state_id]:
             # go find matching levels if they haven't been found yet
-            nahar_core_state = nahar_core_states[core_state_id]
+            nahar_core_state = nahar_core_states[core_state_id - 1]
             nahar_core_state_reduced_configuration = artisatomic.reduce_configuration(
                 nahar_core_state.configuration + "_" + nahar_core_state.term
             )
@@ -339,8 +346,9 @@ def get_naharphotoion_upperlevelids(
                 f" E={core_state_energy_ev:0.3f} eV to:\n"
             )
 
-            candidate_upper_levels = {}
-            for upperlevel in dfenergy_levels_upperion[1:].iter_rows(named=True):
+            # per configuration: the energy differences and the upper ion level ids
+            candidate_upper_levels: dict[str, tuple[list[float], list[int]]] = {}
+            for upperlevel in dfenergy_levels_upperion.iter_rows(named=True):
                 upperlevelid = upperlevel["levelid"]
                 if "levelname" in upperlevel:
                     upperlevelconfig = upperlevel["levelname"]
@@ -359,7 +367,7 @@ def get_naharphotoion_upperlevelids(
                     ediff = energyev - core_state_energy_ev
                     upperlevelconfignoj = upperlevelconfig.split("[")[0]
                     if upperlevelconfignoj not in candidate_upper_levels:
-                        candidate_upper_levels[upperlevelconfignoj] = [[], []]
+                        candidate_upper_levels[upperlevelconfignoj] = ([], [])
                     candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
                     candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
                     flog.write(
@@ -367,7 +375,7 @@ def get_naharphotoion_upperlevelids(
                     )
 
             best_ediff = float("inf")
-            best_match_upperlevelids = []
+            best_match_upperlevelids: list[int] = []
             for ediffs, upperlevelids in candidate_upper_levels.values():
                 avg_ediff = abs(sum(ediffs) / len(ediffs))
                 if avg_ediff < best_ediff:
@@ -380,27 +388,30 @@ def get_naharphotoion_upperlevelids(
 
             # after matching process, still no upper levels matched!
             if not upper_level_ids_of_core_state_id[core_state_id]:
-                upper_level_ids_of_core_state_id[core_state_id] = [1]
+                upper_level_ids_of_core_state_id[core_state_id] = [0]  # the upper ion's ground state
                 artisatomic.log_and_print(
                     flog,
-                    "No upper levels matched. Defaulting to level 1 (reduced string:"
+                    "No upper levels matched. Defaulting to the ground state (reduced string:"
                     f" '{nahar_core_state_reduced_configuration}')",
                 )
 
         upperionlevelids = upper_level_ids_of_core_state_id[core_state_id]
     else:
-        upperionlevelids = [1]
+        upperionlevelids = [0]  # the upper ion's ground state
 
     return upperionlevelids
 
 
 def get_photoiontargetfractions(
-    dfenergy_levels, dfenergy_levels_upperion, nahar_core_states, nahar_configurations_upperion, flog
-):
+    dfenergy_levels,
+    dfenergy_levels_upperion,
+    nahar_core_states: list[NaharCoreState],
+    nahar_configurations_upperion: dict[tuple[int, int, int, int], str],
+    flog,
+) -> list[list[tuple[int, float]]]:
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)
-    for energy_level in dfenergy_levels[1:].iter_rows(named=True):
-        lowerlevelid = energy_level["levelid"]
+    for lowerlevelid in range(dfenergy_levels.height):
         # find the upper level ids from the Nahar core state
         upperionlevelids = get_naharphotoion_upperlevelids(
             dfenergy_levels_upperion,

@@ -42,7 +42,7 @@ E_thresholdinev = 54.801  # Fe I level 200
 nu_edge = E_thresholdinev * EV / H
 phixslist = []
 phixsintegral = 0.0
-lastpoint = []
+lastpoint: list[float] = []
 
 print(f"Z={atomicnumber:d},fromionstage={ionstage:d},fromlevel={levelnumber:d}")
 with open("example_run/phixsdata.txt", encoding="utf-8") as filein:

@@ -179,7 +179,6 @@ def read_levels_and_transitions(
         # without it the level names in adata.txt can differ from run to run
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
         .sort(["energyabovegsinpercm", "j", "label"])
-        .with_row_index("levelid")
         .select(
             pl.col("energyabovegsinpercm"),
             pl.col("j"),
@@ -195,13 +194,10 @@ def read_levels_and_transitions(
         .sort("energyabovegsinpercm", "j")
         .collect()
     )
-    dflevels = (
-        artisatomic.add_dummy_zero_level(dflevels)
-        .with_row_index("levelid")
-        .with_columns(pl.col("levelid").cast(pl.Int64))
-        .with_columns(parity=-pl.col("levelid"))  # give a unique parity so that all transitions are permitted
+    dflevels = artisatomic.leveltuples_to_pldataframe(dflevels).with_columns(
+        parity=-pl.col("levelid")  # give a unique parity so that all transitions are permitted
     )
-    artisatomic.log_and_print(flog, f"Read {len(dflevels) - 1:d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
 
     transitions = (
         gfall.select(

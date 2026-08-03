@@ -6,7 +6,7 @@ from pathlib import Path
 datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
 try:
-    import h5py
+    import h5py  # pyright: ignore[reportMissingTypeStubs]
 
     aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
 except ModuleNotFoundError:
@@ -40,11 +40,13 @@ def read_levels_data(atomic_number, ion_stage):
         "energy_level_row",
         "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname",
     )
-    energy_levels: list[energy_level_row | None] = [None]
+    energy_levels: list[energy_level_row] = []
 
     for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
-        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments]
+        # the six unpacked columns plus three more make up the nine fields, which the type
+        # checkers cannot count through the star-unpacking
+        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments] # pyright: ignore[reportCallIssue]
 
         if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
             continue
@@ -80,8 +82,9 @@ def read_lines_data(atomic_number, ion_stage):
         ) = rowtuple
 
         coll_str = -1  # TODO
+        # the file's level numbers are already zero-based, matching the level ids used in memory
         line = transition_tuple(
-            atomic_num, ion_number, int(level_number_lower + 1), int(level_number_upper + 1), A_ul, wavelength, coll_str
+            atomic_num, ion_number, int(level_number_lower), int(level_number_upper), A_ul, wavelength, coll_str
         )
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
@@ -97,7 +100,6 @@ def read_lines_data(atomic_number, ion_stage):
 
 def read_levels_and_transitions(atomic_number, ion_stage):
     assert atomic_number == 2
-    # energy_levels = ['IGNORE']
     # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
 
@@ -105,6 +107,6 @@ def read_levels_and_transitions(atomic_number, ion_stage):
     # ionization_energy_in_ev = -1
 
     energy_levels = read_levels_data(atomic_number, ion_stage)
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
+    # artisatomic.log_and_print(flog, f'Read {len(energy_levels):d} levels')
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
