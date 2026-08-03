@@ -5,7 +5,7 @@ import sys
 from collections import namedtuple
 from pathlib import Path
 
-import ChiantiPy.core as ch
+import ChiantiPy.core as ch  # pyright: ignore[reportMissingTypeStubs]
 import numpy as np
 import pandas as pd
 from artistools import get_composition_data
@@ -16,7 +16,7 @@ def read_nahar_rrcfile(filename, noprint=False):
     if not noprint:
         print(f"  reading {filename}")
 
-    header_row = []
+    header_row: list[str] = []
     with open(filename) as filein:
         while True:
             line = filein.readline()
@@ -52,7 +52,8 @@ def read_nahar_rrcfile(filename, noprint=False):
 
 def main():
     # Shull & Steenberg 1982
-    A_rad, X_rad = {}, {}
+    A_rad: dict[tuple[int, int], float] = {}
+    X_rad: dict[tuple[int, int], float] = {}
     A_rad[26, 1], X_rad[26, 1] = 1.42e-13, 0.891
     A_rad[26, 2], X_rad[26, 2] = 1.02e-12, 0.843
     A_rad[26, 3], X_rad[26, 3] = 3.32e-12, 0.746

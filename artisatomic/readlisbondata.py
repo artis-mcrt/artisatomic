@@ -44,7 +44,8 @@ class LisbonReader:
             keys `levels` and `lines`.
 
         """
-        from carsus.util import parse_selected_species  # ty:ignore[unresolved-import]
+        # carsus is an optional extra that is not a declared dependency of this package
+        from carsus.util import parse_selected_species  # noqa: I001 # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
 
         lvl_list = []
         lns_list = []
@@ -82,7 +83,7 @@ class LisbonReader:
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
         levels = pd.concat(lvl_list)
-        lines = pd.concat(lns_list)
+        lines = pd.concat(lns_list)  # pyright: ignore[reportUnreachable]
         self.levels = levels
         self.lines = lines
 

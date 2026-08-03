@@ -346,7 +346,8 @@ def get_naharphotoion_upperlevelids(
                 f" E={core_state_energy_ev:0.3f} eV to:\n"
             )
 
-            candidate_upper_levels = {}
+            # per configuration: the energy differences and the upper ion level ids
+            candidate_upper_levels: dict[str, tuple[list[float], list[int]]] = {}
             for upperlevel in dfenergy_levels_upperion.iter_rows(named=True):
                 upperlevelid = upperlevel["levelid"]
                 if "levelname" in upperlevel:
@@ -366,7 +367,7 @@ def get_naharphotoion_upperlevelids(
                     ediff = energyev - core_state_energy_ev
                     upperlevelconfignoj = upperlevelconfig.split("[")[0]
                     if upperlevelconfignoj not in candidate_upper_levels:
-                        candidate_upper_levels[upperlevelconfignoj] = [[], []]
+                        candidate_upper_levels[upperlevelconfignoj] = ([], [])
                     candidate_upper_levels[upperlevelconfignoj][1].append(upperlevelid)
                     candidate_upper_levels[upperlevelconfignoj][0].append(ediff)
                     flog.write(
@@ -374,7 +375,7 @@ def get_naharphotoion_upperlevelids(
                     )
 
             best_ediff = float("inf")
-            best_match_upperlevelids = []
+            best_match_upperlevelids: list[int] = []
             for ediffs, upperlevelids in candidate_upper_levels.values():
                 avg_ediff = abs(sum(ediffs) / len(ediffs))
                 if avg_ediff < best_ediff:

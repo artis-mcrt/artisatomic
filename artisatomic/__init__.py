@@ -22,8 +22,8 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 import polars as pl
-from scipy import integrate
-from scipy import interpolate
+from scipy import integrate  # pyright: ignore[reportMissingTypeStubs]
+from scipy import interpolate  # pyright: ignore[reportMissingTypeStubs]
 
 from artisatomic import groundstatesonlynist
 from artisatomic import readboyledata
@@ -360,7 +360,7 @@ def get_default_handler(atomic_number: int, ion_stage: int) -> str:
 # handlers whose readers share a common call signature and return
 # (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name)
 # with an additional upsilondict for qub_data
-simple_handler_readers: dict[str, Callable[..., tuple]] = {
+simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
     "boyle": lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(
         atomic_number, ion_stage
     ),
@@ -475,8 +475,8 @@ def read_ion_data(
 
             # keys are (2S+1, L, parity, indexinsymmetry), values are lists of
             # (energy in Rydberg, cross section in Mb) tuples
-            nahar_phixs_tables: dict = {}
-            thresholds_ev_dict: dict = {}
+            nahar_phixs_tables: dict[tuple[int, int, int, int], npt.NDArray[np.float64]] = {}
+            thresholds_ev_dict: dict[tuple[int, int, int, int], float] = {}
             if not is_top_ion:  # don't get cross sections for top ion
                 log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
                 nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
@@ -912,7 +912,7 @@ def isfloat(value: t.Any) -> bool:
     return True
 
 
-def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO:
+def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     from xopen import xopen
 
     extensions = ["", ".zst", ".gz", ".xz"]
@@ -927,7 +927,7 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO:
 
 
 # split a list into evenly sized chunks
-def chunks(listin: list, chunk_size: int) -> list:
+def chunks[T](listin: list[T], chunk_size: int) -> list[list[T]]:
     return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]
 
 
@@ -1010,7 +1010,9 @@ def parallel_map[ResultType](
     use_multiprocessing = True
     if sys.version_info >= (3, 13):
         with contextlib.suppress(AttributeError):
-            if not sys._is_gil_enabled():  # noqa: SLF001
+            # unreachable at the minimum supported version (3.12), which is what the type
+            # checkers are configured for, but reachable on the 3.13+ free-threading builds
+            if not sys._is_gil_enabled():  # noqa: SLF001 # pyright: ignore[reportUnreachable]
                 # return a thread pool if we have no GIL (free threading)
                 use_multiprocessing = False
 
@@ -1028,11 +1030,19 @@ def parallel_map[ResultType](
     return results
 
 
-def reduce_phixs_tables(dicttables, optimaltemperature: float, nphixspoints: int, phixsnuincrement: float) -> dict:
+def reduce_phixs_tables[KeyType](
+    dicttables: dict[KeyType, npt.NDArray[np.float64]],
+    optimaltemperature: float,
+    nphixspoints: int,
+    phixsnuincrement: float,
+) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Receives a dictionary, with each item being a 2D array of energy and cross section points
     Returns a dictionary with the items having been downsampled into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
+
+    The key type is preserved: callers index the tables by level name, by Nahar state tuple, or
+    by level id.
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
@@ -1237,6 +1247,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         return (-1, -1, -1)
 
     lposition = -1
+    l = -1
     for charpos, char in reversed(list(enumerate(config))):
         if char in lchars:
             lposition = charpos
@@ -1277,6 +1288,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
 def interpret_parent_term(strin: str) -> tuple[int, int, int]:
     strin = strin.strip("()")
     lposition = -1
+    l = -1
     for charpos, char in reversed(list(enumerate(strin))):
         if char in lchars:
             lposition = charpos

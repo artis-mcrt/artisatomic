@@ -6,7 +6,7 @@ from pathlib import Path
 datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
 try:
-    import h5py
+    import h5py  # pyright: ignore[reportMissingTypeStubs]
 
     aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
 except ModuleNotFoundError:
@@ -44,7 +44,9 @@ def read_levels_data(atomic_number, ion_stage):
 
     for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
-        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments]
+        # the six unpacked columns plus three more make up the nine fields, which the type
+        # checkers cannot count through the star-unpacking
+        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments] # pyright: ignore[reportCallIssue]
 
         if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
             continue

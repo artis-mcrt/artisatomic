@@ -25,6 +25,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     with artisatomic.xopen_check_extension(jpltpath / filename) as fin:
+        readlinein = ""
         for linenumber in range(7):
             readlinein = fin.readline().strip()
             if linenumber < 3:

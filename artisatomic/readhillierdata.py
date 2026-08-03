@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+import typing as t
 from collections import defaultdict
 from collections import namedtuple
 from functools import cache
@@ -253,12 +254,14 @@ def hillier_ion_folder(atomic_number, ion_stage):
 
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
-) -> tuple[float, list, list, defaultdict[str, int], defaultdict[tuple[int, int, int], list[str]]]:
-    hillier_energy_levels: list = []
+) -> tuple[float, list[t.Any], list[t.Any], defaultdict[str, int], defaultdict[tuple[int, int, int], list[str]]]:
+    # the level and transition rows are namedtuples built at runtime from the column names in
+    # each oscillator file, so they cannot be given a static type
+    hillier_energy_levels: list[t.Any] = []
     hillier_levelnamesnoJ_matching_term: defaultdict[tuple[int, int, int], list[str]] = defaultdict(list)
     transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
-    transitions: list = []
+    transitions: list[t.Any] = []
 
     if atomic_number == 1 and ion_stage == 2:
         ionization_energy_ev = 0.0
@@ -429,7 +432,9 @@ def read_levels_and_transitions(
                         )
                         # sys.exit()
                 else:
-                    artisatomic.log_and_print(
+                    # dead while the duplicate check above is disabled for speed, but kept so
+                    # that re-enabling it restores the error path
+                    artisatomic.log_and_print(  # pyright: ignore[reportUnreachable]
                         flog, f"FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}"
                     )
                     sys.exit()
@@ -512,7 +517,7 @@ def read_phixs_tables(
             numpointsexpected = 0
             pointnumber = 0
             crosssectiontype = -1
-            fitcoefficients = []
+            fitcoefficients: list[t.Any] = []
 
             for line in fhillierphot:
                 row = line.split()
@@ -1112,7 +1117,7 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
 
 def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
-    upsilondict = {}
+    upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
     if coldatafilename == "":
         artisatomic.log_and_print(flog, "No collisional data file specified")
@@ -1152,7 +1157,7 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
     coll_lines_in = 0
     number_expected_transitions = -1
     with artisatomic.xopen_check_extension(filename) as fcoldata:
-        header_row = []
+        header_row: list[str] = []
         temperature_index = -1
         num_expected_t_values = -1
         for line in fcoldata:
@@ -1395,7 +1400,7 @@ def read_hyd_phixsdata():
             n, l, num_points = (int(x) for x in line.split())
             e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n - 1].lambdaangstrom)
 
-            xs_values = []
+            xs_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
                 xs_values = xs_values + values_thisline
@@ -1443,7 +1448,7 @@ def read_hyd_phixsdata():
             n, num_points = (int(x) for x in line.split())
             e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n - 1].lambdaangstrom)
 
-            gaunt_values = []
+            gaunt_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
                 gaunt_values = gaunt_values + values_thisline

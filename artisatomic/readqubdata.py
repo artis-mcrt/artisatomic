@@ -53,7 +53,7 @@ def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float]]:
     energylevels: list[QUBEnergyLevel] = []
-    upsilondict = {}
+    upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filepath)}")
     with artisatomic.xopen_check_extension(filepath) as fleveltrans:
@@ -263,7 +263,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
         qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
-        upsilondict = {}
+        upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
