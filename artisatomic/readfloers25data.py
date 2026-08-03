@@ -108,8 +108,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     # silently dropped by the level-id joins in add_level_ids_forbidden(), leaving an incomplete
     # database. Not an assert: this validates an input file and must not disappear under python -O.
     if dftransitions.height > 0:
-        min_index = min(dftransitions["Lower"].min(), dftransitions["Upper"].min())
-        max_index = max(dftransitions["Lower"].max(), dftransitions["Upper"].max())
+        transition_level_indices = pl.concat([dftransitions["Lower"], dftransitions["Upper"]])
+        min_index = t.cast("int", transition_level_indices.min())
+        max_index = t.cast("int", transition_level_indices.max())
         if min_index < 0 or max_index >= dflevels.height:
             msg = (
                 f"Transition level indices in {lines_file} span {min_index}..{max_index}, outside the"
