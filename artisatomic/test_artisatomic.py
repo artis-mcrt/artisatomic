@@ -15,6 +15,7 @@ from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
+from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
@@ -50,6 +51,10 @@ def test_get_parity_from_config():
     assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
     assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
 
+    # closed shells with two-digit occupations: a truncated '4f1' reading would give the
+    # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
+    assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
+
 
 def test_interpret_parent_term():
     assert interpret_parent_term("(3P2)") == (3, 1, 2)
@@ -68,19 +73,21 @@ def test_interpret_configuration():
     # a two-digit principal quantum number is read as such when the orbital has no occupation
     # number, where there is nothing else the digits could belong to
     assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
-    # ...but a leading zero rules it out: the '0' of '3d10' is part of the occupation number
-    assert interpret_configuration("3d104s_3De") == (["3d1", "4s"], 3, 2, 0, -1)
 
     # a digit followed by two letters keeps the digit with the letters ('4sp' is treated as an
     # orbital-plus-occupation, matching the historical handling of this malformed Hillier name)
     assert interpret_configuration("4sp(3P)_7Po[2]") == (["4sp", "(3P)"], 7, 1, 1, -1)
 
-    # an orbital that carries its own occupation number is always read with a single-digit n,
-    # because '3d14s2' and '3d104s2' are ambiguous and the single-digit reading is the common one
+    # an orbital with a SINGLE-digit occupation is always read with a single-digit n, because
+    # '3d14s2' is genuinely ambiguous and the occupation-1 reading is the common one
     assert interpret_configuration("3d14s2_2De") == (["3d1", "4s2"], 2, 2, 0, -1)
-    assert interpret_configuration("3d104s2_1Se") == (["3d1", "4s2"], 1, 0, 0, -1)
-    assert interpret_configuration("4d105s1_2Se") == (["4d1", "5s1"], 2, 0, 0, -1)
-    assert interpret_configuration("4f145d106s2_1Se") == (["4f1", "5d1", "6s2"], 1, 0, 0, -1)
+
+    # ...but trailing digits after the orbital letter are the occupation, so closed d and f
+    # shells with TWO-digit occupations are unambiguous and must keep both digits
+    assert interpret_configuration("3d104s_3De") == (["3d10", "4s"], 3, 2, 0, -1)
+    assert interpret_configuration("3d104s2_1Se") == (["3d10", "4s2"], 1, 0, 0, -1)
+    assert interpret_configuration("4d105s1_2Se") == (["4d10", "5s1"], 2, 0, 0, -1)
+    assert interpret_configuration("4f145d106s2_1Se") == (["4f14", "5d10", "6s2"], 1, 0, 0, -1)
 
 
 def test_score_config_match():
@@ -102,8 +109,7 @@ def test_score_config_match():
 
 
 def test_hydrogenic_phixs():
-    ryd_to_ev = 13.605693122994232
-    import artisatomic.readhillierdata as rhd
+    ryd_to_ev = rhd.ryd_to_ev
 
     rhd.read_hyd_phixsdata()
 
@@ -162,12 +168,11 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
-    import artisatomic.readhillierdata as rhd
 
     rhd.read_hyd_phixsdata()
 
-    h_in_ev_seconds = 4.135667696923859e-15
-    ryd_to_ev = 13.605693122994232
+    h_in_ev_seconds = rhd.h_in_ev_seconds
+    ryd_to_ev = rhd.ryd_to_ev
 
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
     threshold_ev, n, l_start, l_end, nu_o, zion = 7.90, 4, 1, 1, 0.88936, 2
@@ -186,11 +191,11 @@ def test_hydrogenic_nl_phixs_offset_type8():
     assert np.all(phixstable[~below_offset_edge, 1] > 0.0)
 
     # independent reimplementation of the CMFGEN branch
-    u_grid = np.array(rhd.hyd_phixs_energygrid_ryd[(n, l_start)])
-    u_grid /= u_grid[0]
+    grid = rhd.hyd_phixs_energygrid_ryd[(n, l_start)]
+    u_grid = grid / grid[0]  # not in-place: the module-global table must stay untouched
     sigma_table = np.zeros(len(u_grid))
     for l in range(l_start, l_end + 1):
-        sigma_table += (2 * l + 1) * np.array(rhd.hyd_phixs[(n, l)])
+        sigma_table += (2 * l + 1) * rhd.hyd_phixs[(n, l)]
 
     for index, en_ev in enumerate(energy_ev):
         if en_ev < threshold_ev + e_o_ev:
@@ -215,8 +220,7 @@ def test_hydrogenic_phixs_effective_charge_scaling():
     The H (Z=1) cases in test_hydrogenic_phixs() cannot detect a spurious extra factor of
     Z_eff**2, so check the scaling explicitly for Z > 1.
     """
-    ryd_to_ev = 13.605693122994232
-    import artisatomic.readhillierdata as rhd
+    ryd_to_ev = rhd.ryd_to_ev
 
     rhd.read_hyd_phixsdata()
 
@@ -250,11 +254,10 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     import argparse
 
     import artisatomic
-    import artisatomic.readhillierdata as rhd
 
     rhd.read_hyd_phixsdata()
 
-    ryd_to_ev = 13.605693122994232
+    ryd_to_ev = rhd.ryd_to_ev
     hc_in_ev_cm = artisatomic.hc_in_ev_cm
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb

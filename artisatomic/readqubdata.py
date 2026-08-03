@@ -342,8 +342,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
             photdata = pd.read_csv(filename, sep=r"\s+", header=None)
             phixstables = {}
-            # ntargets = 40
-            ntargets = 4  # just the 4Fe ground quartet
+            ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
 
             for targetlevel in range(1, ntargets + 1):
                 phixstables[targetlevel] = photdata.loc[photdata[:][targetlevel] > 0.0][[0, targetlevel]].to_numpy()
@@ -373,8 +372,9 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
             target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
             scalefactorsum = sum(target_scalefactors)
 
+            # -1.0 sentinel: the threshold energy comes from the level energies, not from the
+            # first energy point of the cross-section table
             photoionization_thresholds_ev[lowerlevelid] = -1.0
-            # photoionization_thresholds_ev[lowerlevelid] = photdata.loc[0][0]
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors[1:], 1):
                 target_fraction = target_scalefactor / scalefactorsum
                 if target_fraction > 0.001:
@@ -499,6 +499,9 @@ def read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flo
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
 
+        # Unlike the Co II branch above, every level is deliberately given a phixs entry: levels
+        # of the ground quartet get the tabulated cross section, and all higher levels get an
+        # explicit all-zero table (no photoionization) rather than being omitted from the output.
         for lowerlevelid in range(1, len(energy_levels)):
             photoionization_thresholds_ev[lowerlevelid] = -1.0
             photoionization_targetfractions[lowerlevelid] = [(1, 1.0)]

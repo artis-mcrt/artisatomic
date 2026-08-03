@@ -49,11 +49,8 @@ def extend_ion_list(ion_handlers):
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
     for _index, row in groundstatesdata.iterrows():
-        # int() because pandas hands back numpy integers, which json.dump() cannot serialise
-        # when main() writes artisatomicionhandlers.json
-        atomic_number = int(row["Z"])
-        ion_stage = int(row["ion"])
-        # add_handler_if_not_set() returns a new list rather than mutating its argument
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "gsnist")
+        # add_handler_if_not_set() returns a new list rather than mutating its argument,
+        # and normalises the pandas numpy integers to plain ints
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, row["Z"], row["ion"], "gsnist")
 
     return ion_handlers

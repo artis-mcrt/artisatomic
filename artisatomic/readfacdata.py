@@ -192,7 +192,12 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    assert len({level.levelname for level in energy_levels}) == len(energy_levels)
+    # A duplicated Ilev would silently overwrite its map entry and misroute every transition
+    # that references it (and implies duplicate level names, since Ilev is embedded in them).
+    # Not an assert: this validates an input file and must not disappear under python -O.
+    if len(ilev_enlevelindex_map) != len(energy_levels):
+        msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
+        raise ValueError(msg)
 
     return [None, *energy_levels], ilev_enlevelindex_map
 

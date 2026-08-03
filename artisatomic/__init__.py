@@ -1407,16 +1407,22 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 str_parent_term = instr[left_bracket_pos:].replace(" ", "")
                 electron_config.insert(0, str_parent_term)
                 instr = instr[:left_bracket_pos]
-            elif str.isdigit(instr[-1]):  # probably the number of electrons in an orbital
+            elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    # Always read a single digit as this orbital's principal quantum number.
-                    # '3d14s2' is genuinely ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and so is
-                    # '3d104s2'. An occupation number of 1 or 10 is common and a two-digit n
-                    # carrying an explicit occupation is not, so the single-digit reading wins.
-                    # (A two-digit n written without an occupation, '3d6(5D)10d', is handled by
-                    # the branch above, where there is no such ambiguity.)
+                    # Single-digit occupation. The n is always read as a single digit here:
+                    # '3d14s2' is genuinely ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and an
+                    # occupation of 1 is common while a two-digit n carrying an explicit
+                    # occupation is not, so the single-digit reading wins. (A two-digit n
+                    # written without an occupation, '3d6(5D)10d', is handled by the branch
+                    # above, where there is no such ambiguity.)
                     electron_config.insert(0, instr[-3:])
                     instr = instr[:-3]
+                elif len(instr) >= 3 and str.isdigit(instr[-2]) and instr[-3].upper() in lchars:
+                    # Two-digit occupation, e.g. the closed shells '3d10' and '4f14'. This is
+                    # unambiguous: trailing digits after the orbital letter are the occupation.
+                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) else -3
+                    electron_config.insert(0, instr[startpos:])
+                    instr = instr[:startpos]
                 else:
                     # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]
@@ -1432,15 +1438,19 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
 
 def get_parity_from_config(instr) -> int:
     configsplit = interpret_configuration(instr)[0]
+    lchars_lower = lchars.lower()
     lsum = 0
     for orbitalstr in configsplit:
         if orbitalstr.startswith("("):
             continue  # a parent term such as '(5D)', not an occupied orbital
         # the orbital letter is the first non-digit, allowing a two-digit principal quantum number
-        lpos = next((pos for pos, char in enumerate(orbitalstr) if char in lchars.lower()), None)
+        lpos = next((pos for pos, char in enumerate(orbitalstr) if char in lchars_lower), None)
         if lpos is None:
+            # don't fail silently: a skipped orbital means the parity (and hence the forbidden
+            # flags of every transition involving this level) could come out wrong
+            print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}', skipping it for the parity")
             continue
-        l = lchars.lower().index(orbitalstr[lpos])
+        l = lchars_lower.index(orbitalstr[lpos])
         nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
         lsum += l * nelec
 
@@ -1824,7 +1834,7 @@ def write_phixs_data(
             # (A negative threshold is a deliberate sentinel used by readqubdata, so keep those.)
             skipped_zero_threshold += 1
             continue
-        if len(targetlist) <= 1 and targetlist[0][1] > 0.99:
+        if len(targetlist) == 1 and targetlist[0][1] > 0.99:
             upperionlevelid = targetlist[0][0]
 
             fphixs.write(
