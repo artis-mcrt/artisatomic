@@ -29,9 +29,7 @@ jobs:
                   activate-environment: true
 
             - name: Install artisatomic
-              run: |
-                  uv sync
-                  uv pip install --compile-bytecode --editable .
+              run: uv sync --compile-bytecode
 
             - name: Run Ruff
               if: always()
@@ -68,9 +66,7 @@ jobs:
                   activate-environment: true
 
             - name: Install artisatomic
-              run: |
-                  uv sync
-                  uv pip install --compile-bytecode --editable .
+              run: uv sync --compile-bytecode
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
@@ -136,9 +132,7 @@ jobs:
                   activate-environment: true
 
             - name: Install artisatomic
-              run: |
-                  uv sync
-                  uv pip install --compile-bytecode --editable .
+              run: uv sync --compile-bytecode
 
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
