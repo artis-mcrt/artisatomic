@@ -34,7 +34,6 @@ dependencies = [
     "requests>=2.34.0",
     "scipy>=1.15.3",
     "tqdm>=4.70.0",
-    "urllib3>=2.7.0",
     "xopen>=2.1.0",
 ]
 

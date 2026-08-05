@@ -58,7 +58,6 @@ dependencies = [
     { name = "requests" },
     { name = "scipy" },
     { name = "tqdm" },
-    { name = "urllib3" },
     { name = "xopen" },
 ]
 
@@ -93,7 +92,6 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.0" },
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "tqdm", specifier = ">=4.70.0" },
-    { name = "urllib3", specifier = ">=2.7.0" },
     { name = "xopen", specifier = ">=2.1.0" },
 ]
 

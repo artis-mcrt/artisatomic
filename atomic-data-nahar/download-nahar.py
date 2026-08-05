@@ -2,7 +2,7 @@
 import shutil
 from pathlib import Path
 
-import urllib3
+import requests
 
 
 def main():
@@ -58,22 +58,21 @@ def main():
         "si1.en.ls.txt",
     ]
 
-    for file in file_list:
-        if Path(file).exists():
-            print(f"{file} already exists. Skipping.")
-        else:
-            url = f"https://norad.astronomy.osu.edu/{file.split('.')[0]}/{file}"
+    with requests.Session() as session:
+        for file in file_list:
+            if Path(file).exists():
+                print(f"{file} already exists. Skipping.")
+                continue
 
-            c = urllib3.PoolManager()
+            url = f"https://norad.astronomy.osu.edu/{file.split('.')[0]}/{file}"
 
             print(f"Downloading {url}")
 
-            with c.request("GET", url, preload_content=False) as resp, open(file, "wb") as out_file:
-                assert resp.status == 200
-                shutil.copyfileobj(resp, out_file)
+            with session.get(url, stream=True, timeout=60) as resp, open(file, "wb") as out_file:
+                resp.raise_for_status()
+                resp.raw.decode_content = True
+                shutil.copyfileobj(resp.raw, out_file)
 
-            resp.release_conn()
 
-
-if __name__ == "main":
+if __name__ == "__main__":
     main()
