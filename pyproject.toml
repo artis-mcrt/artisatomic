@@ -63,9 +63,6 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 makeartisatomicfiles = "artisatomic:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
 
-[tool.black]
-line-length = 120
-
 [tool.mypy]
 python_executable = ".venv/bin/python3"
 python_version = '3.13'
@@ -73,10 +70,6 @@ exclude = "(build)|(tests)"
 packages = "artisatomic"
 ignore_missing_imports = true
 warn_unused_configs = true
-
-[tool.pylint]
-max-line-length = 120
-errors-only = true
 
 [tool.pyrefly]
 preset = "strict"
@@ -87,7 +80,7 @@ project-excludes = [
     'build',
     'dist',
     'target',
-    '**/version.py',
+    '**/_version.py',
     '**/.venv',
     '**/rd_cmfgen.py',
 ]
@@ -127,7 +120,6 @@ reportUnreachable = true
 typeCheckingMode = "standard"
 useLibraryCodeForTypes = true
 pythonVersion = "3.13"
-extraPaths = ["../artistools"]
 
 [tool.ruff]
 line-length = 120
@@ -215,10 +207,8 @@ order-by-type = false
 include-package-data = true
 
 [tool.setuptools.packages.find]
-namespaces = true
 where = ["."]
-include = ["*", "**/matplotlibrc", "**/data"]
-exclude = ["tests", "**/dist", "**/lib", "**/build", "*.egg-info", "**/.*"]
+include = ["artisatomic*"]
 
 [tool.setuptools_scm]
 write_to = "_version.py"
