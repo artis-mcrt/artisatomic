@@ -50,6 +50,7 @@ dev = [
     "prek>=0.1.6",
     "pyrefly>=1.2.0",
     "pytest>=8.3.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.16.1",
     "ty>=0.0.65",
     "types-pytz>=2025.2.0.20250809",
@@ -228,3 +229,13 @@ local_scheme = "no-local-version"
 
 [tool.ty.rules]
 unused-ignore-comment = "ignore"
+
+[tool.pytest.ini_options]
+addopts = "--cov=artisatomic --cov-report=xml:coverage.xml --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["artisatomic"]
+omit = ["artisatomic/test_artisatomic.py"]
+
+[tool.coverage.report]
+skip_covered = false

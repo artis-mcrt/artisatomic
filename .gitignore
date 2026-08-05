@@ -23,3 +23,8 @@ testoutput/*
 _version.py
 build
 .venv
+
+# coverage
+coverage.xml
+.coverage
+htmlcov/
