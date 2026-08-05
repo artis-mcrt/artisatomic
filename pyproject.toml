@@ -1,6 +1,5 @@
 [build-system]
 requires = [
-    "psutil>=7.2.2",
     "setuptools>=82.0.1",
     "setuptools_scm>=10.0.5",
 ]
@@ -25,22 +24,22 @@ dynamic = ["version"]
 readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
+    "artistools>=2026.4.14",
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
-    "pandas[compression]>=3.0.3",
+    "pandas[compression,hdf5]>=3.0.3",
     "polars>=1.37.1",
     "pyarrow>=18.1.0",
     "requests>=2.34.0",
     "scipy>=1.15.3",
-    "tables>=3.11.1",
     "tqdm>=4.70.0",
+    "urllib3>=2.7.0",
     "xopen>=2.1.0",
 ]
 
 [dependency-groups]
 dev = [
-    "artistools>=2026.4.14",
     "basedpyright>=1.39.3",
     "matplotlib>=3.10.7",
     "mypy>=2.1.0",
