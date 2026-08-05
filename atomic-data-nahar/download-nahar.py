@@ -16,7 +16,6 @@ def main():
         "fe2.f.ls.txt",
         "fe2.ptpx.txt",
         "fe2.px.txt",
-        "fe2.px.txt",
         "fe2.rrc-ls.txt",
         "fe3.en.ls.txt",
         "fe3.f.fs.txt",
