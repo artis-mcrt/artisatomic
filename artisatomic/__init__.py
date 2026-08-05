@@ -1007,14 +1007,8 @@ def parallel_map[ResultType](
     **kwargs: t.Any,
 ) -> list[ResultType]:
     """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
-    use_multiprocessing = True
-    if sys.version_info >= (3, 13):
-        with contextlib.suppress(AttributeError):
-            # unreachable at the minimum supported version (3.12), which is what the type
-            # checkers are configured for, but reachable on the 3.13+ free-threading builds
-            if not sys._is_gil_enabled():  # noqa: SLF001 # pyright: ignore[reportUnreachable]
-                # return a thread pool if we have no GIL (free threading)
-                use_multiprocessing = False
+    # use a thread pool if we have no GIL (free threading)
+    use_multiprocessing = sys._is_gil_enabled()  # noqa: SLF001
 
     if use_multiprocessing:
         mp.set_start_method("spawn", force=True)
