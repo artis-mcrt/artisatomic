@@ -551,15 +551,19 @@ def read_phixs_tables(
                     row[-3:]
                 ) == "!Configuration name [*]":
                     lowerlevelname = row[0]
-                    if "[" in lowerlevelname:
+                    # with J splitting, the name (including any [J] suffix) maps to exactly one
+                    # level, so it must be kept intact. Without J splitting, strip the [J] suffix
+                    # so the table applies to all levels sharing the configuration
+                    if not j_splitting_on and "[" in lowerlevelname:
                         lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
                     lowerlevelindex = 0
-                    # find the zero-based index of the first matching level (several matches may differ by J values)
+                    # find the zero-based index of the first matching level (without J splitting,
+                    # several matches may differ by J values)
                     for levelindex, energy_level in enumerate(energy_levels):
-                        this_levelnamenoj = energy_level.levelname.split("[")[0]
-                        if this_levelnamenoj == lowerlevelname:
+                        levelname = energy_level.levelname if j_splitting_on else energy_level.levelname.split("[")[0]
+                        if levelname == lowerlevelname:
                             lowerlevelindex = levelindex
                             break
                     if targetlevelname == "":
