@@ -1239,10 +1239,8 @@ def write_adata(
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
     # every reader names its own levels, and that name is the whole level comment
-    has_levelname = "levelname" in dfenergylevels.columns
-
     for energylevel in dfenergylevels.iter_rows(named=True):
-        levelname = energylevel["levelname"] if has_levelname else ""
+        levelname = energylevel.get("levelname", "")
         transitioncount = transition_count_of_level_name.get(levelname, 0)
 
         # level ids are zero-based in memory, but the output format numbers them from one
