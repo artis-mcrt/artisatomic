@@ -424,9 +424,6 @@ def read_ion_data(
         )
         log_and_print(flog, f"Source handler: {handler}")
 
-        path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
-        path_nahar_px_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt"
-
         # upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
         # if (atomic_number, ion_stage) in upsilondatafilenames:
         #     upsilonfilename = os.path.join('atomic-data-tiptopbase',
@@ -477,7 +474,9 @@ def read_ion_data(
                     atomic_number, ion_stage, levelcount=len(energy_levels), args=args, flog=flog
                 )
 
-        elif handler == "nahar":  # Nahar only, usually just for testing purposes
+        elif handler == "nahar":
+            path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
+            path_nahar_px_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt"
             (
                 nahar_energy_levels,
                 nahar_core_states,
