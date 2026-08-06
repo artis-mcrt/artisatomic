@@ -46,15 +46,15 @@ class HillierTransition(t.NamedTuple):
     hilliertransitionid: int
 
 
-_pl_dtype_of: dict[type, pl.DataType] = {str: pl.String(), float: pl.Float64(), int: pl.Int64()}
+_pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64}
 
 # derived from the NamedTuples so the row classes stay the single source of the frame layouts
-hillier_level_schema: dict[str, pl.DataType] = {
-    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()
-}
-hillier_transition_schema: dict[str, pl.DataType] = {
-    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()
-}
+hillier_level_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()}
+)
+hillier_transition_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()}
+)
 
 # every schema column except parity is read straight out of the level table
 hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname != "parity")

@@ -194,11 +194,7 @@ def add_handler_if_not_set(
 # The id-keyed transition columns consumed by write_transition_data(). Readers with nothing to
 # report use this schema so an empty frame still carries them; name-keyed reader frames (e.g.
 # Hillier's namefrom/nameto) get lowerlevel/upperlevel joined on later by add_level_ids_forbidden().
-empty_transitions_schema: dict[str, pl.DataType] = {
-    "lowerlevel": pl.Int64(),
-    "upperlevel": pl.Int64(),
-    "A": pl.Float64(),
-}
+empty_transitions_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
 
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
@@ -1245,7 +1241,14 @@ def write_adata(
     has_naharindex = "indexinsymmetry" in dfenergylevels.columns
     # the Nahar annotation below reads these columns unconditionally; checking up front turns a
     # malformed frame into a clean failure instead of a partially written adata.txt
-    assert not has_naharindex or {"twosplusone", "l", "parity", "naharconfiguration"} <= set(dfenergylevels.columns)
+    if has_naharindex:
+        missingcolumns = {"twosplusone", "l", "parity", "naharconfiguration"} - set(dfenergylevels.columns)
+        if missingcolumns:
+            msg = (
+                f"Level table for Z={atomic_number} ion_stage={ion_stage} has an indexinsymmetry column but is"
+                f" missing {', '.join(sorted(missingcolumns))}, which the Nahar level comment needs"
+            )
+            raise ValueError(msg)
 
     for energylevel in dfenergylevels.iter_rows(named=True):
         transitioncount = transition_count_of_level_name.get(energylevel["levelname"], 0) if has_levelname else 0
