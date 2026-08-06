@@ -588,14 +588,12 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
     assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
 
 
-def test_write_adata_level_comment_padding():
-    """Hillier level comments are space-padded to a fixed width; other readers' are rstripped.
+def test_write_adata_level_comment():
+    """Level comments carry no padding: the name, then a Nahar annotation where there is one.
 
-    write_adata() keys the choice on the presence of a hillierlevelid column, and the H II dummy
-    level relies on omitting that column to stay unpadded. No CI fixture includes hydrogen, so
-    this is the only check of that coupling.
+    artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
+    not whitespace, so any padding written here ends up inside the level name it reports.
     """
-    # a Hillier-style frame: hillierlevelid present, so the comment keeps its ljust(27) padding
     dfhillier = leveltuples_to_pldataframe(
         pl.DataFrame(
             {
@@ -611,17 +609,28 @@ def test_write_adata_level_comment_padding():
     buf = io.StringIO()
     write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())
     hillier_line = buf.getvalue().splitlines()[1]
-    assert hillier_line.endswith("someion_gs".ljust(27))
+    assert hillier_line.endswith(" someion_gs")
+    assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # the H II-style frame omits hillierlevelid, so the trailing whitespace is stripped
-    dfbareproton = leveltuples_to_pldataframe(
-        pl.DataFrame({"levelname": ["I"], "energyabovegsinpercm": [0.0], "g": [10.0], "parity": [0]})
+    # a Nahar level has no name, so the annotation is the whole comment
+    dfnahar = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "energyabovegsinpercm": [0.0],
+                "g": [9.0],
+                "twosplusone": [3],
+                "l": [1],
+                "parity": [0],
+                "indexinsymmetry": [1],
+                "naharconfiguration": ["2s22p2"],
+            }
+        )
     )
     buf = io.StringIO()
-    write_adata(buf, 1, 2, dfbareproton, 0.0, {}, io.StringIO())
-    bareproton_line = buf.getvalue().splitlines()[1]
-    assert bareproton_line.endswith(" I")
-    assert bareproton_line == bareproton_line.rstrip()
+    write_adata(buf, 8, 1, dfnahar, 13.6, {}, io.StringIO())
+    nahar_line = buf.getvalue().splitlines()[1]
+    assert nahar_line.endswith(" Nahar: 3Pe index 1 '2s22p2'")
+    assert nahar_line.split(maxsplit=4)[4] == "Nahar: 3Pe index 1 '2s22p2'"
 
 
 def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):

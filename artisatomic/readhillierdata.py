@@ -269,17 +269,17 @@ def read_levels_and_transitions(
     hillier_ionization_energy_ev = 0.0
 
     if atomic_number == 1 and ion_stage == 2:
-        # a bare proton: a single dummy level, and no oscillator file to read. Adding hillierlevelid
-        # here would pad this level's comment out in adata.txt (see write_adata).
+        # a bare proton: a single dummy level, and no oscillator file to read
         return (
             hillier_ionization_energy_ev,
             pl.DataFrame(
-                {
-                    "levelname": ["I"],
-                    "energyabovegsinpercm": [0.0],
-                    "g": [10.0],
-                    "parity": [0],
-                }
+                [
+                    HillierEnergyLevel(
+                        levelname="I", g=10.0, energyabovegsinpercm=0.0, lambdaangstrom=0.0, hillierlevelid=1, parity=0
+                    )
+                ],
+                schema=hillier_level_schema,
+                orient="row",
             ),
             pl.DataFrame(schema=hillier_transition_schema),
             transition_count_of_level_name,

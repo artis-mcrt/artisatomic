@@ -1227,10 +1227,6 @@ def write_adata(
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    # Hillier level comments are padded to a fixed width, so that a Nahar annotation always starts
-    # in the same column. Other data sets write theirs with no trailing whitespace. (Nahar levels
-    # need no test of their own: their indexinsymmetry counts from one, so they are always annotated.)
-    fixed_width_level_comments = "hillierlevelid" in dfenergylevels.columns
     has_levelname = "levelname" in dfenergylevels.columns
     has_naharindex = "indexinsymmetry" in dfenergylevels.columns
     # the Nahar annotation below reads these columns unconditionally; checking up front turns a
@@ -1247,24 +1243,21 @@ def write_adata(
     for energylevel in dfenergylevels.iter_rows(named=True):
         transitioncount = transition_count_of_level_name.get(energylevel["levelname"], 0) if has_levelname else 0
 
+        commentparts = []
         if has_levelname:
             hlevelname = energylevel["levelname"]
-            if hlevelname in hillier_name_replacements:
-                hlevelname = hillier_name_replacements[hlevelname]
-            level_comment = hlevelname.ljust(27)
-        else:
-            level_comment = " " * 27
+            commentparts.append(hillier_name_replacements.get(hlevelname, hlevelname))
 
         if has_naharindex and energylevel["indexinsymmetry"] >= 0:
             config = energylevel["naharconfiguration"]
             if config.strip() in nahar_configuration_replacements:
                 config += f" replaced by {nahar_configuration_replacements[config.strip()]}"
-            level_comment += (
+            commentparts.append(
                 f"Nahar: {energylevel['twosplusone']:d}{lchars[energylevel['l']]:}{['e', 'o'][energylevel['parity']]:} index"
                 f" {energylevel['indexinsymmetry']:} '{config}'"
             )
-        elif not fixed_width_level_comments:
-            level_comment = level_comment.rstrip()
+
+        level_comment = " ".join(commentparts)
 
         # level ids are zero-based in memory, but the output format numbers them from one
         fatommodels.write(
