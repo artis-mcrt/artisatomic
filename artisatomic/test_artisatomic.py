@@ -8,7 +8,6 @@ import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
-from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
 from artisatomic import PYDIR
@@ -20,23 +19,22 @@ from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic import reduce_configuration
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 
 
 def test_reduce_configuration():
-    assert reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
-    assert reduce_configuration("3d6_3P2e") == "3d6_3Pe"
+    assert readnahardata.reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
+    assert readnahardata.reduce_configuration("3d6_3P2e") == "3d6_3Pe"
 
 
 def test_interpret_term():
-    assert get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
-    assert get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
+    assert readhillierdata.get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
+    assert readhillierdata.get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
     # names with no L character must report "unknown" rather than raising UnboundLocalError
     for unreadable in ("e2x", "o12", "3d5", "12"):
-        assert get_term_as_tuple(unreadable) == (-1, -1, -1)
+        assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
 
 def test_get_parity_from_config():
@@ -54,6 +52,12 @@ def test_get_parity_from_config():
     # closed shells with two-digit occupations: a truncated '4f1' reading would give the
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
+
+    # CMFGEN packs the high-l levels of a shell into one level whose orbital letter is a merge
+    # marker, not a real l: '5z' would be l=22 and '13w' l=19, both impossible for their n. Such a
+    # level spans several l of both parities, so only the real orbitals decide the parity.
+    assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
+    assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
 
 def test_interpret_configuration():
@@ -575,10 +579,11 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
     args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
     dflevels, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
 
-    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else
-    assert dflevels.select("indexinsymmetry", "naharconfiguration").rows() == [
-        (1, "UNKNOWN CONFIG"),
-        (2, "3d54s  (7S ) 6s  b8S "),
+    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else, and the
+    # reader builds each level's adata.txt name from its symmetry and configuration
+    assert dflevels.select("indexinsymmetry", "naharconfiguration", "levelname").rows() == [
+        (1, "UNKNOWN CONFIG", "Nahar: 8Se index 1 'UNKNOWN CONFIG'"),
+        (2, "3d54s  (7S ) 6s  b8S ", "Nahar: 8Se index 2 '3d54s  (7S ) 6s  b8S '"),
     ]
 
     # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
@@ -588,14 +593,14 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
     assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
 
 
-def test_write_adata_level_comment_padding():
-    """Hillier level comments are space-padded to a fixed width; other readers' are rstripped.
+def test_write_adata_level_comment():
+    """The level comment is the level's name, with no padding.
 
-    write_adata() keys the choice on the presence of a hillierlevelid column, and the H II dummy
-    level relies on omitting that column to stay unpadded. No CI fixture includes hydrogen, so
-    this is the only check of that coupling.
+    artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
+    not whitespace, so any padding written here ends up inside the level name it reports. The
+    Hillier display replacements are applied here rather than in the reader, where the name is the
+    key that transitions are matched on.
     """
-    # a Hillier-style frame: hillierlevelid present, so the comment keeps its ljust(27) padding
     dfhillier = leveltuples_to_pldataframe(
         pl.DataFrame(
             {
@@ -611,17 +616,19 @@ def test_write_adata_level_comment_padding():
     buf = io.StringIO()
     write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())
     hillier_line = buf.getvalue().splitlines()[1]
-    assert hillier_line.endswith("someion_gs".ljust(27))
+    assert hillier_line.endswith(" someion_gs")
+    assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # the H II-style frame omits hillierlevelid, so the trailing whitespace is stripped
-    dfbareproton = leveltuples_to_pldataframe(
-        pl.DataFrame({"levelname": ["I"], "energyabovegsinpercm": [0.0], "g": [10.0], "parity": [0]})
+    # a Nahar level's name is the annotation its reader built, and is written unchanged
+    naharlevelname = "Nahar: 3Pe index 1 '2s22p2'"
+    dfnahar = leveltuples_to_pldataframe(
+        pl.DataFrame({"levelname": [naharlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
     )
     buf = io.StringIO()
-    write_adata(buf, 1, 2, dfbareproton, 0.0, {}, io.StringIO())
-    bareproton_line = buf.getvalue().splitlines()[1]
-    assert bareproton_line.endswith(" I")
-    assert bareproton_line == bareproton_line.rstrip()
+    write_adata(buf, 8, 1, dfnahar, 13.6, {}, io.StringIO())
+    nahar_line = buf.getvalue().splitlines()[1]
+    assert nahar_line.endswith(" " + naharlevelname)
+    assert nahar_line.split(maxsplit=4)[4] == naharlevelname
 
 
 def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
