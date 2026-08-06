@@ -16,11 +16,7 @@ from artistools import get_elsymbolslist
 
 
 def read_nahar_rrcfile(filename, noprint=False):
-    """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate.
-
-    Returns:
-        the temperatures and recombination rates.
-    """
+    """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
     if not noprint:
         print(f"  reading {filename}")
 

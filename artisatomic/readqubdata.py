@@ -78,20 +78,12 @@ default_handler_ions = frozenset(
 
 
 def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
-    """Whether a transition between two levels is forbidden, i.e. they have the same parity.
-
-    Returns:
-        True if the transition is forbidden.
-    """
+    """Whether a transition between two levels is forbidden, i.e. they have the same parity."""
     return levela.parity == levelb.parity
 
 
 def extend_ion_list(ion_handlers):
-    """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler.
-
-    Returns:
-        the handler list with every QUB ion added.
-    """
+    """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler."""
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
@@ -108,12 +100,6 @@ def read_adf04(
     (lower, upper) pair of zero-based level ids. The file numbers levels from one, and the rest
     of the code looks up id n at list index n - 1, so the level ids are validated as contiguous
     and 1-based. Collision strengths are taken at one temperature, chosen per element.
-
-    Returns:
-        the ionization energy in eV, the levels, and the upsilon values keyed by level id pair.
-
-    Raises:
-        ValueError: if the file's level ids are not contiguous and 1-based.
     """
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
@@ -253,12 +239,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     Covers both the newer per-ion adf04 calculations and the older Co II/III/IV data sets, which
     have their own file layouts. Also returns the effective collision strengths, so this reader
     supplies an upsilondict where most others leave it to be filled in elsewhere.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, the transition count per level name, and the upsilon values.
-
-    Raises:
-        ValueError: if a transition references a level outside the level table.
     """
     qub_transition_row = namedtuple(
         "qub_transition_row", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str"
@@ -428,9 +408,6 @@ def read_qub_photoionizations(
     Returns the cross sections, the upper-ion target fractions per level, and the threshold
     energies, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
-
-    Returns:
-        the cross sections, target fractions and threshold energies, indexed by level id.
     """
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
@@ -622,9 +599,6 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
-
-    Returns:
-        the principal quantum number of the valence electron, or 1 if the name cannot be read.
     """
     namesplit = levelname.split("_")
     part = namesplit[0].strip()

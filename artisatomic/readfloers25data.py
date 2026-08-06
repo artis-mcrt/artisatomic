@@ -11,11 +11,7 @@ import artisatomic
 
 
 def get_basepath() -> Path:
-    """Directory holding the Floers+25 level and transition tables.
-
-    Returns:
-        the directory holding the Floers+25 tables.
-    """
+    """Directory holding the Floers+25 level and transition tables."""
     return artisatomic.PYDIR / ".." / "atomic-data-floers25" / "OutputFiles"
 
 
@@ -24,9 +20,6 @@ def extend_ion_list(ion_handlers, calibrated=True):
 
     With calibrated=True the uncalibrated files are added as well, so that an ion with no
     calibrated data still gets its uncalibrated version rather than being left out.
-
-    Returns:
-        the handler list with every Floers+25 ion added.
     """
     BASEPATH = get_basepath()
     assert BASEPATH.is_dir()
@@ -59,12 +52,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     (levels of one configuration differ by J), so level names combine the configuration, J and
     the file's index. Both the level indices and the transitions' references to them are
     validated, since a gap or an out-of-range index would silently misattach transitions.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
-
-    Raises:
-        ValueError: if the file has no data table, or its level indices are not contiguous and zero-based, or a transition references a level outside the table.
     """
     # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
@@ -179,9 +166,6 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
-
-    Returns:
-        the principal quantum number of the valence electron.
     """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]

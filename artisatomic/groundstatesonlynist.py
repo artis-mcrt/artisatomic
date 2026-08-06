@@ -31,9 +31,6 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
     This handler supplies a single level per ion and never any transitions, so an ion using it
     contributes only its ground state and ionization energy to the output.
-
-    Returns:
-        the ionization energy in eV, the single ground level, no transitions, and an empty transition count.
     """
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
@@ -57,11 +54,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
 
 def extend_ion_list(ion_handlers):
-    """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler.
-
-    Returns:
-        the handler list with every NIST ground-state ion added.
-    """
+    """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
     for _index, row in groundstatesdata.iterrows():

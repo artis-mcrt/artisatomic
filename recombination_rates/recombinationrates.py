@@ -135,9 +135,6 @@ def naharfeiitonumber(strin):
     the exponent, which is always negative: that token is 1.23e-10. The characters in between are
     an artefact of however the tables were extracted, and the field widths are relied on rather
     than parsed, so this only works for those files.
-
-    Returns:
-        the parsed value.
     """
     return float(strin[:4]) * 10 ** (-float(strin[6:8]))
 

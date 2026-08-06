@@ -537,11 +537,7 @@ Lines - Ne number of lines: Index, T(valence electron state)/C(equivalent
 
 @pytest.fixture
 def nahar_en_ls_path(tmp_path):
-    """Write the cut-down Nahar energy file to a temporary path.
-
-    Returns:
-        the path of the written file.
-    """
+    """Write the cut-down Nahar energy file to a temporary path."""
     path = tmp_path / "fe2.en.ls.txt"
     path.write_text(NAHAR_EN_LS_FIXTURE)
     return path

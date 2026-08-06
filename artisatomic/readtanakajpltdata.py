@@ -11,11 +11,7 @@ jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" /
 
 
 def extend_ion_list(ion_handlers, maxionstage=None):
-    """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers.
-
-    Returns:
-        the handler list with every JPLT ion added.
-    """
+    """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     tanakaions = sorted(
         [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
@@ -35,9 +31,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     quotes g_u * A rather than A, so ids are shifted to the zero-based convention used in
     memory and the rate is divided by the upper level's statistical weight. Self-transitions
     (equal upper and lower level) appear in some files and are dropped with a warning.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
@@ -137,9 +130,6 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
-
-    Returns:
-        the principal quantum number of the valence electron.
     """
     n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
     assert n >= 0

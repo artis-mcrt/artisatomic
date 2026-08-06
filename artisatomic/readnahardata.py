@@ -68,11 +68,7 @@ def build_nahar_levels_and_phixs(
     args,
     flog,
 ) -> tuple[pl.DataFrame, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Build the level table for a Nahar-only ion and attach its photoionization cross sections.
-
-    Returns:
-        the levels sorted by energy, the cross sections, and the threshold energies.
-    """
+    """Build the level table for a Nahar-only ion and attach its photoionization cross sections."""
     # the explicit schema keeps an empty level list (e.g. a missing energy file) producing a frame
     # with the columns that the sort below and write_adata() expect
     dfenergy_levels = pl.DataFrame(nahar_energy_levels, schema=nahar_level_schema, orient="row")
@@ -139,12 +135,6 @@ def read_nahar_energy_level_file(
     Returns the levels, the core states, the electron configurations of the bound states, and the
     ionization potential in Rydberg. A missing file is logged and returns empty data rather than
     raising, so an ion with no Nahar data simply contributes nothing.
-
-    Returns:
-        the levels, the core states, the bound-state configurations, and the ionization potential in Rydberg.
-
-    Raises:
-        ValueError: if the file has no ionization potential line, or a table iii row is not in the expected format.
     """
     # state tuples are (2S+1, L, parity, index in symmetry)
     nahar_configurations: dict[tuple[int, int, int, int], str] = {}
@@ -287,9 +277,6 @@ def read_nahar_core_states(fenlist) -> list[NaharCoreState]:
 
     Reads from the current position of the open file and leaves it just past the table. Core
     state id n is stored at index n - 1, and the file's numbering is checked against that.
-
-    Returns:
-        the core states, with core state id n at index n - 1.
     """
     while True:
         line = fenlist.readline()
@@ -329,9 +316,6 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     Returns the cross-section tables and each state's threshold energy in eV. The tables are
     (energy in Rydberg, cross section in Megabarns) pairs, at the file's own energy resolution;
     reduce_phixs_tables() downsamples them onto the output grid later.
-
-    Returns:
-        the cross-section tables and the threshold energies, keyed by state.
     """
     nahar_phixs_tables = {}
     thresholds_ev_dict = {}
@@ -397,9 +381,6 @@ def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, 
     it just past the table. Only bound states appear here, so levels above the ionization
     threshold have no entry. The index in symmetry comes from the seniority letter that prefixes
     each term, ascending for even parity and descending for odd.
-
-    Returns:
-        the bound-state configurations keyed by state, and the ionization potential in Rydberg.
     """
     nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_ionization_potential_rydberg = -1.0
@@ -453,9 +434,6 @@ def reduce_configuration(instr: str) -> str:
     Drops the parent term, the seniority letter and any J value, giving a form close to the
     Hillier style "3d6(5D)4s8p_5Fo" but without the parent term. Used to compare a Nahar core
     state against an upper-ion level name, which the two data sets spell differently.
-
-    Returns:
-        the normalised configuration.
     """
     if instr == "-1":
         return "-1"
@@ -477,9 +455,6 @@ def remove_bracketed_part(instr: str) -> str:
     """Remove anything between parentheses, and the parentheses themselves.
 
     e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'.
-
-    Returns:
-        the string with any parenthesised parts removed.
     """
     outstr = ""
     in_brackets = False
@@ -502,11 +477,7 @@ def get_naharphotoion_upperlevelids(
     upper_level_ids_of_core_state_id,
     flog,
 ):
-    """Get the upper level id numbers for a given energy level's photoionisation processes.
-
-    Returns:
-        the upper ion level ids this level photoionises to.
-    """
+    """Get the upper level id numbers for a given energy level's photoionisation processes."""
     # core_state_id = int(energy_level.corestateid)
     core_state_id = 1  # temporary fix
     if core_state_id > 0 and core_state_id <= len(nahar_core_states):
@@ -591,9 +562,6 @@ def get_photoiontargetfractions(
     core state names the upper-ion state it ionises to; where that matches several J-split levels
     of the upper ion, the fraction is shared over them in proportion to their statistical
     weights. Levels whose core state cannot be matched fall back to the upper ion's ground state.
-
-    Returns:
-        per level id, the (upper ion level id, fraction) pairs it photoionises to.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)

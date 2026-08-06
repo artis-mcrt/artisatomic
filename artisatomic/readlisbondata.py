@@ -20,7 +20,6 @@ class LisbonReader:
     ----------
     levels : DataFrame
     lines : DataFrame
-
     """
 
     def __init__(self, data, priority=10) -> None:
@@ -46,7 +45,6 @@ class LisbonReader:
         data : dict
             Dictionary containing one dictionary per species with
             keys `levels` and `lines`.
-
         """
         # carsus is an optional extra that is not a declared dependency of this package
         from carsus.util import parse_selected_species  # ruff: ignore[unsorted-imports] # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
@@ -115,11 +113,7 @@ class LisbonReader:
 
 
 def get_levelname(row):
-    """Name a Lisbon level from its label and J, since the label alone is not unique.
-
-    Returns:
-        the level's name.
-    """
+    """Name a Lisbon level from its label and J, since the label alone is not unique."""
     return f"{row.label}, j={row.j}"
 
 
@@ -128,9 +122,6 @@ def read_levels_data(dflevels):
 
     Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
     transitions forbidden: this data set does not supply parities.
-
-    Returns:
-        the levels sorted by energy.
     """
     energy_level_tuple = namedtuple("energy_level_tuple", "levelname energyabovegsinpercm g parity")
 
@@ -153,8 +144,7 @@ def read_levels_data(dflevels):
 def read_lines_data(energy_levels, dflines):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
-    Returns:
-        the transitions and the number of them touching each level name.
+    Returns the transitions and the number of them touching each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
@@ -173,11 +163,7 @@ def read_lines_data(energy_levels, dflines):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    """Read one ion from the Lisbon data set. Not currently wired into the handler dispatch.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
-    """
+    """Read one ion from the Lisbon data set. Not currently wired into the handler dispatch."""
     ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]

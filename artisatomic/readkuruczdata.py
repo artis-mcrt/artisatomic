@@ -23,12 +23,6 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     format. The two levels are ordered into lower/upper by energy here, since the file lists
     them in an arbitrary order. A negative energy in the file means a predicted (rather than
     measured) level, which is recorded in a "theoretical" flag and the magnitude kept.
-
-    Returns:
-        the transitions, each carrying its lower and upper level.
-
-    Raises:
-        ValueError: if the file holds more than one ion.
     """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
@@ -152,12 +146,6 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 
     Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
     has no data for it.
-
-    Returns:
-        the path of this ion's line list.
-
-    Raises:
-        FileNotFoundError: if the ion has no Kurucz file.
     """
     extended_atoms_filenames = [
         f"gf{atomic_number:02d}{ion_charge:02d}.lines.zst",
@@ -186,9 +174,6 @@ def read_levels_and_transitions(
     The files are transition lists rather than level lists, so the levels are recovered by
     taking the distinct lower and upper levels of every transition. The ionization energy comes
     from NIST rather than the file.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
     """
     ion_charge = ion_stage - 1
 
@@ -304,9 +289,6 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
-
-    Returns:
-        the principal quantum number of the valence electron, or 1 if the label cannot be read.
     """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):

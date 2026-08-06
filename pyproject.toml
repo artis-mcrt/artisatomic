@@ -146,6 +146,11 @@ ignore = [
     "missing-trailing-comma",
     "missing-copyright-notice",
     "line-too-long",
+    # a Google-style Returns:/Yields:/Raises: section is nearly always a restatement of the summary
+    # line for these functions, so say it once in prose instead
+    "docstring-missing-returns",
+    "docstring-missing-yields",
+    "docstring-missing-exception",
     "ambiguous-variable-name",
     "raw-string-in-exception",
     "f-string-in-exception",
@@ -200,8 +205,7 @@ unfixable = [
 
 [tool.ruff.lint.pydocstyle]
 # Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and
-# leaves Args sections optional. Returns/Raises sections are still required, but by the separate
-# DOC201/DOC501 rules rather than by the convention.
+# leaves Args/Returns/Raises sections optional.
 convention = "pep257"
 
 [tool.ruff.lint.isort]

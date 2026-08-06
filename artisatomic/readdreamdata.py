@@ -29,11 +29,7 @@ def init_dreamdata():
 
 
 def extend_ion_list(ion_handlers):
-    """Add every ion in the DREAM line list to ion_handlers under the "dream" handler.
-
-    Returns:
-        the handler list with every DREAM ion added.
-    """
+    """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
     init_dreamdata()
     assert dreamdata is not None
     for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
@@ -48,9 +44,6 @@ def energytuplefromrow(row, prefix):
 
     DREAM levels have no spectroscopic names, so each is named after the energy, parity and
     statistical weight that identify it, which is what read_levels_data() deduplicates on.
-
-    Returns:
-        the level named by its energy, parity and statistical weight.
     """
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
     dream_energy_level_row = namedtuple("dream_energy_level_row", "levelname energyabovegsinpercm g parity")
@@ -71,9 +64,6 @@ def read_levels_data(dflines):
 
     Each line carries both of its levels inline, so the levels are the distinct lower and upper
     levels over all lines, sorted by energy.
-
-    Returns:
-        the distinct levels of all lines, sorted by energy.
     """
     energy_levels = []
 
@@ -93,8 +83,7 @@ def read_levels_data(dflines):
 def read_lines_data(dfiondata, energy_levels):
     """Convert DREAM lines to transitions referencing zero-based level ids.
 
-    Returns:
-        the transitions and the number of them touching each level name.
+    Returns the transitions and the number of them touching each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
@@ -116,11 +105,7 @@ def read_lines_data(dfiondata, energy_levels):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    """Read one ion from the DREAM database of Z >= 57.
-
-    Returns:
-        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
-    """
+    """Read one ion from the DREAM database of Z >= 57."""
     init_dreamdata()
     assert dreamdata is not None
     charge = ion_stage - 1
@@ -143,14 +128,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # for x in energy_levels:
     #     print(x)
     def get_level_index(row, prefix):
-        """Return the zero-based level id of the row's level.
-
-        Returns:
-            the zero-based id of the level matching this row.
-
-        Raises:
-            AssertionError: if the row matches no level.
-        """
+        """Return the zero-based level id of the row's level."""
         leveltuple = energytuplefromrow(row, prefix)
         if leveltuple in energy_levels:
             return energy_levels.index(leveltuple)
