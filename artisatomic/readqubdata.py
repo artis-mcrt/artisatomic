@@ -398,7 +398,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def read_qub_photoionizations(
-    atomic_number, ion_stage, energy_levels, ionization_energy_ev: float, args, flog
+    atomic_number, ion_stage, levelcount: int, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     """Read QUB photoionization cross sections for one ion, downsampled onto the output grid.
 
@@ -406,13 +406,10 @@ def read_qub_photoionizations(
     energies, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
     """
-    levelcount = len(energy_levels)
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
     photoionization_thresholds_ev = np.full(levelcount, np.nan)
-    # these files give no threshold energy of their own, so it comes from the level energies
-    level_thresholds_ev = artisatomic.photoionization_thresholds_ev_of_levels(energy_levels, ionization_energy_ev)
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in range(8):
@@ -452,7 +449,9 @@ def read_qub_photoionizations(
             target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
             scalefactorsum = sum(target_scalefactors)
 
-            photoionization_thresholds_ev[lowerlevelid] = level_thresholds_ev[lowerlevelid]
+            # -1.0 sentinel: the threshold energy comes from the level energies, not from the
+            # first energy point of the cross-section table
+            photoionization_thresholds_ev[lowerlevelid] = -1.0
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors):
                 target_fraction = target_scalefactor / scalefactorsum
                 if target_fraction > 0.001:
@@ -580,7 +579,7 @@ def read_qub_photoionizations(
         # unlike the Co II branch above, every level deliberately gets a phixs entry: the ground
         # quartet gets the tabulated cross section and higher levels an explicit all-zero table
         for levelid in range(levelcount):
-            photoionization_thresholds_ev[levelid] = level_thresholds_ev[levelid]
+            photoionization_thresholds_ev[levelid] = -1.0
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
             if levelid < 4:
                 photoionization_crosssections[levelid] = phixsvalues
