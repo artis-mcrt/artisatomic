@@ -7,10 +7,11 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
+from artisatomic import build_nahar_levels_and_phixs
 from artisatomic import get_default_handler
 from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
-from artisatomic import interpret_parent_term
+from artisatomic import leveltuples_to_pldataframe
 from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
@@ -22,7 +23,7 @@ from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic import reduce_configuration
 from artisatomic import reduce_phixs_tables_worker
-from artisatomic import score_config_match
+from artisatomic import write_adata
 
 
 def test_reduce_configuration():
@@ -54,11 +55,6 @@ def test_get_parity_from_config():
     # closed shells with two-digit occupations: a truncated '4f1' reading would give the
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
-
-
-def test_interpret_parent_term():
-    assert interpret_parent_term("(3P2)") == (3, 1, 2)
-    assert interpret_parent_term("(b2D)") == (2, 2, -1)
 
 
 def test_interpret_configuration():
@@ -93,24 +89,6 @@ def test_interpret_configuration():
     assert interpret_configuration("3d104s2_1Se") == (["3d10", "4s2"], 1, 0, 0, -1)
     assert interpret_configuration("4d105s1_2Se") == (["4d10", "5s1"], 2, 0, 0, -1)
     assert interpret_configuration("4f145d106s2_1Se") == (["4f14", "5d10", "6s2"], 1, 0, 0, -1)
-
-
-def test_score_config_match():
-    assert score_config_match("3d64s  (4P ) 4p  w5Do", "3d6(3P)4s4p_w5Do[4]") == 100
-    match1 = score_config_match("3d64s  (6D ) 5g  i5F ", "3d6(5D)4s5g_5Fe[4]")
-    assert match1 >= 49
-    assert score_config_match("3d64s  (6D ) 5g  (1S) i5F ", "3d6(5D)4s5g_5Fe[4]") == match1
-    assert score_config_match("3d6    (5D ) 6s  e6D ", "3d6(5D)6se6De[9/2]") > score_config_match(
-        "3d6    (5D ) 6s  e6D ", "3d6(5D)5s6De[9/2]"
-    )
-
-    assert score_config_match("Eqv st (0S ) 0s  a4P", "3d5_4Pe[4]") == 5
-    assert score_config_match("3d6    (5D ) 0s  b2F ", "3d7b2Fe") >= 12
-    assert score_config_match("3d5    (2D ) 4p  v3Po", "3d5(b2D)4p_3Po") == 98
-
-    # closed d shells must score the same as any other configuration: if '3d104s2' is misparsed
-    # as 3d1 + 04s2 then the 4s2 piece stops matching and the score halves
-    assert score_config_match("3d104s2_1Se", "3d10(1S)4s2_1Se") == score_config_match("3d64s2_5De", "3d6(5D)4s2_5De")
 
 
 def test_hydrogenic_phixs():
@@ -335,18 +313,18 @@ def test_read_coldata_term_to_j_redistribution():
     def read_ion(atomic_number, ion_stage):
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
-            _, energy_levels, _, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+            _, dflevels, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, flog, args)
         levelids_of_term = defaultdict(list)
-        for levelid, level in enumerate(energy_levels):
-            levelids_of_term[level.levelname.split("[")[0]].append(levelid)
-        return energy_levels, upsilondict, levelids_of_term
+        for levelid, levelname in enumerate(dflevels["levelname"]):
+            levelids_of_term[levelname.split("[")[0]].append(levelid)
+        return dflevels["g"].to_list(), upsilondict, levelids_of_term
 
-    energy_levels, upsilondict, levelids_of_term = read_ion(8, 3)
+    gvalues, upsilondict, levelids_of_term = read_ion(8, 3)
 
     lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
     upper_ids = levelids_of_term["2s_2p3_3Do"]
-    assert [energy_levels[i].g for i in lower_ids] == [1.0, 3.0, 5.0]
+    assert [gvalues[i] for i in lower_ids] == [1.0, 3.0, 5.0]
 
     sums_from_lower = [
         sum(upsilondict[(i, j)] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
@@ -497,16 +475,163 @@ def test_read_nahar_energy_level_file_missing():
     (
         nahar_energy_levels,
         nahar_core_states,
-        nahar_level_index_of_state,
         nahar_configurations,
         nahar_ionization_potential_rydberg,
     ) = readnahardata.read_nahar_energy_level_file("does/not/exist.en.ls.txt", 26, 2, flog)
     assert nahar_energy_levels == []
     assert nahar_core_states == []
-    assert nahar_level_index_of_state == {}
     assert nahar_configurations == {}
     assert nahar_ionization_potential_rydberg == -1.0
     assert "does not exist" in flog.getvalue()
+
+
+# a cut-down .en.ls.txt: two core states, one spectroscopic row, and one table iii symmetry.
+# Column positions matter to the parser, so the rows are copied from a real Nahar file.
+NAHAR_EN_LS_FIXTURE = """\
+ i) Table of target/core states in the wavefunction expansion
+
+ Z = 26, no of target/core electrons= 24
+
+ no of target/core states in WF = 2
+
+ target states and energies:
+
+  1  3d6      5D    0.00000E+00
+  2  3d54s    7S    2.74191E-01
+
+ii) Table of bound (negative) state energies (with spectroscopic notation)
+
+ Ion ground state = 60202400.0000, Eo(Ry) = -1.1782E+00 =-IP
+
+ 3d54s  (7S ) 6s  b8S        -0.00097
+
+iii) Table of complete set (both negative and positive) of energies
+
+Lines - Ne number of lines: Index, T(valence electron state)/C(equivalent
+     electron state), Core state number, n, l, energy (Ry)
+
+------------------------------------------------------
+   26   24    E
+    8    0    0    2
+    2  2.741910E-01
+    1  T  2  5 0  -2.42474E-01
+    2  C  1  6 0  -9.72970E-04
+    0    0    0    0
+"""
+
+
+@pytest.fixture
+def nahar_en_ls_path(tmp_path):
+    path = tmp_path / "fe2.en.ls.txt"
+    path.write_text(NAHAR_EN_LS_FIXTURE)
+    return path
+
+
+def test_read_nahar_energy_level_file(nahar_en_ls_path):
+    """The second column of a table iii row is a T/C letter, not a number.
+
+    Misreading it shifts the core state, n, l and energy that follow it, so the parsed values are
+    checked column by column rather than only for the absence of an exception.
+    """
+    flog = io.StringIO()
+    (
+        nahar_energy_levels,
+        nahar_core_states,
+        nahar_configurations,
+        nahar_ionization_potential_rydberg,
+    ) = readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, flog)
+
+    assert nahar_ionization_potential_rydberg == pytest.approx(1.1782)
+    assert nahar_core_states == [
+        readnahardata.NaharCoreState(1, "3d6", "5D", 0.0),
+        readnahardata.NaharCoreState(2, "3d54s", "7S", 0.274191),
+    ]
+    # keyed by (2S+1, L, parity, index in symmetry); 'b' is the second even-parity seniority
+    assert nahar_configurations == {(8, 0, 0, 2): "3d54s  (7S ) 6s  b8S "}
+
+    assert len(nahar_energy_levels) == 2
+    valence, equivalent = nahar_energy_levels
+    assert (valence.TC, valence.corestateid, valence.elecn, valence.elecl) == ("T", 2, 5, 0)
+    assert (equivalent.TC, equivalent.corestateid, equivalent.elecn, equivalent.elecl) == ("C", 1, 6, 0)
+
+    # the symmetry line gives 2S+1 = 8, L = 0, even parity, so g = 8 * (2 * 0 + 1)
+    assert (valence.twosplusone, valence.l, valence.parity, valence.g) == (8, 0, 0, 8)
+
+    # energies are quoted relative to the ionization potential
+    assert valence.energyreltoionpotrydberg == pytest.approx(-0.242474)
+    expected_percm = (1.1782 - 0.242474) * readnahardata.ryd_to_ev / readnahardata.hc_in_ev_cm
+    assert valence.energyabovegsinpercm == pytest.approx(expected_percm)
+
+
+def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
+    # the spectroscopic table covers only the bound states, so levels above the ionization
+    # threshold have no configuration and must be labelled as such rather than left blank
+    import argparse
+
+    flog = io.StringIO()
+    nahar_energy_levels, _cores, _configs, _ip = readnahardata.read_nahar_energy_level_file(
+        str(nahar_en_ls_path), 26, 2, flog
+    )
+
+    args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
+    dflevels, _phixs, _thresholds = build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
+
+    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else
+    assert dflevels.select("indexinsymmetry", "naharconfiguration").rows() == [
+        (1, "UNKNOWN CONFIG"),
+        (2, "3d54s  (7S ) 6s  b8S "),
+    ]
+
+    # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
+    # columns write_adata() and the energy sort need, not a column-less frame that crashes later
+    dfempty, _phixs, _thresholds = build_nahar_levels_and_phixs([], {}, {}, args, flog)
+    assert dfempty.height == 0
+    assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
+
+
+def test_write_adata_level_comment_padding():
+    """Hillier level comments are space-padded to a fixed width; other readers' are rstripped.
+
+    write_adata() keys the choice on the presence of a hillierlevelid column, and the H II dummy
+    level relies on omitting that column to stay unpadded. No CI fixture includes hydrogen, so
+    this is the only check of that coupling.
+    """
+    # a Hillier-style frame: hillierlevelid present, so the comment keeps its ljust(27) padding
+    dfhillier = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "levelname": ["someion_gs"],
+                "g": [9.0],
+                "energyabovegsinpercm": [0.0],
+                "lambdaangstrom": [911.0],
+                "hillierlevelid": [1],
+                "parity": [0],
+            }
+        )
+    )
+    buf = io.StringIO()
+    write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())
+    hillier_line = buf.getvalue().splitlines()[1]
+    assert hillier_line.endswith("someion_gs".ljust(27))
+
+    # the H II-style frame omits hillierlevelid, so the trailing whitespace is stripped
+    dfbareproton = leveltuples_to_pldataframe(
+        pl.DataFrame({"levelname": ["I"], "energyabovegsinpercm": [0.0], "g": [10.0], "parity": [0]})
+    )
+    buf = io.StringIO()
+    write_adata(buf, 1, 2, dfbareproton, 0.0, {}, io.StringIO())
+    bareproton_line = buf.getvalue().splitlines()[1]
+    assert bareproton_line.endswith(" I")
+    assert bareproton_line == bareproton_line.rstrip()
+
+
+def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
+    # a numeric second column means the row is not in the format the parser assumes, so the
+    # remaining columns cannot be trusted: fail loudly rather than reading them from the wrong place
+    nahar_en_ls_path.write_text(NAHAR_EN_LS_FIXTURE.replace("    1  T  2  5 0", "    1  9  2  5 0"))
+
+    with pytest.raises(ValueError, match="Expected 'T' or 'C'"):
+        readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, io.StringIO())
 
 
 def test_nahar_get_photoiontargetfractions():
