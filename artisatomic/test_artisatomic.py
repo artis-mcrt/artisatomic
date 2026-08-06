@@ -55,6 +55,12 @@ def test_get_parity_from_config():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
+    # CMFGEN packs the high-l levels of a shell into one level whose orbital letter is a merge
+    # marker, not a real l: '5z' would be l=22 and '13w' l=19, both impossible for their n. Such a
+    # level spans several l of both parities, so only the real orbitals decide the parity.
+    assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
+    assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
+
 
 def test_interpret_configuration():
     assert interpret_configuration("3d7(4F)6d_5Pbe") == (["3d7", "(4F)", "6d"], 5, 1, 2, -1)

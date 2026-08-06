@@ -13,7 +13,6 @@ import pandas as pd
 import polars as pl
 
 import artisatomic
-from artisatomic.manual_matches import hillier_name_replacements
 
 # need to also include collision strengths from e.g., o2col.dat
 
@@ -362,10 +361,7 @@ def read_levels_and_transitions(
                 levelname = row[colindex["levelname"]]
                 energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
                 lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
-                if levelname not in hillier_name_replacements:
-                    (twosplusone, _l, parity) = artisatomic.get_term_as_tuple(levelname)
-                else:
-                    (twosplusone, _l, parity) = artisatomic.get_term_as_tuple(hillier_name_replacements[levelname])
+                (twosplusone, _l, parity) = artisatomic.get_term_as_tuple(levelname)
 
                 levelrows.append(
                     HillierEnergyLevel(

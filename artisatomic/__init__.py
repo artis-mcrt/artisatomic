@@ -34,7 +34,6 @@ from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic.manual_matches import hillier_name_replacements
 
 # import artisatomic.readlisbondata as readlisbondata
 
@@ -871,7 +870,11 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
-            parity = 0
+            # No 'e'/'o' suffix to read the parity from. CMFGEN writes its merged high-l levels
+            # this way, with the orbital letter repeated as the term symbol (2s2_13w_2W,
+            # 2s2_2p3(4So)5z_5Z), so the term letter is a merge marker rather than a real L.
+            # Sum l over the occupied orbitals instead of assuming the term is even.
+            parity = get_parity_from_config(config)
         elif config[lposition + 1] == "o":
             parity = 1
         elif config[lposition + 1] == "e":
@@ -1060,6 +1063,15 @@ def get_parity_from_config(instr) -> int:
             continue
         l = lchars_lower.index(orbitalstr[lpos])
         nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
+
+        # An orbital must satisfy l <= n - 1. CMFGEN packs the high-l levels of a shell into one
+        # level whose orbital letter is a merge marker rather than a real l ('2s2_13w_2W',
+        # '2s2_2p3(4So)5z_5Z'), and those fail this test. Such a level spans several l of both
+        # parities, so the marker contributes no definite parity and only the real orbitals count.
+        principalquantumnumber = int(orbitalstr[:lpos]) if orbitalstr[:lpos].isdigit() else 0
+        if l >= principalquantumnumber:
+            continue
+
         lsum += l * nelec
 
     return lsum % 2
@@ -1226,18 +1238,16 @@ def write_adata(
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    # every reader names its levels; the comment is that name, with the Hillier display
-    # replacements applied here rather than in the reader, where the name is the transition key
+    # every reader names its own levels, and that name is the whole level comment
     has_levelname = "levelname" in dfenergylevels.columns
 
     for energylevel in dfenergylevels.iter_rows(named=True):
         levelname = energylevel["levelname"] if has_levelname else ""
         transitioncount = transition_count_of_level_name.get(levelname, 0)
-        level_comment = hillier_name_replacements.get(levelname, levelname)
 
         # level ids are zero-based in memory, but the output format numbers them from one
         fatommodels.write(
-            f"{energylevel['levelid'] + 1:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {level_comment:}\n"
+            f"{energylevel['levelid'] + 1:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {levelname:}\n"
         )
 
     fatommodels.write("\n")
