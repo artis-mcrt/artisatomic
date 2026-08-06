@@ -20,11 +20,14 @@ recombination_rates/phixs.pdf
 .tags*
 testoutput
 testoutput/*
+# written by the checksum verification runs in tests/*/
+tests/*/output/
 _version.py
 build
 .venv
 
 # coverage
 coverage.xml
-.coverage
+# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms
+.coverage*
 htmlcov/

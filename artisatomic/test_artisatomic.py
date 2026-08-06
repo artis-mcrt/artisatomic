@@ -296,7 +296,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         ion_handler="kurucz",
         args=args,
     )
-    assert thresholds[0] == 0.0
+    assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
     assert targetfractions[0] == []
     assert np.all(crosssections[0] == 0.0)
 

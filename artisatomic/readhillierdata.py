@@ -580,7 +580,7 @@ def read_phixs_tables(
 
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
-    photoionization_thresholds_ev = np.zeros(levelcount)
+    photoionization_thresholds_ev = np.full(levelcount, np.nan)
     # None means "no photoionisation data for this level". get_photoiontargetfractions() relies on
     # this to tell those levels apart from levels that do have a cross-section table, so it must
     # not be initialised to empty lists.
@@ -1520,7 +1520,7 @@ def read_hyd_phixsdata():
     max_n = -1
     l_start_u = 0.0
     l_del_u = 0.0
-    with open(hyd_filename, encoding="utf-8") as fhyd:
+    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1568,7 +1568,7 @@ def read_hyd_phixsdata():
     max_n = -1
     n_start_u = 0.0
     n_del_u = 0.0
-    with open(hyd_filename, encoding="utf-8") as fhyd:
+    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":

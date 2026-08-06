@@ -1,6 +1,5 @@
 """Read levels, configurations and photoionization cross sections from Nahar's NORAD data."""
 
-import os
 import sys
 import typing as t
 from collections import defaultdict
@@ -91,7 +90,7 @@ def build_nahar_levels_and_phixs(
 
     if nahar_phixs_tables:
         photoionization_crosssections = np.zeros((dfenergy_levels.height, args.nphixspoints))
-        photoionization_thresholds_ev = np.zeros(dfenergy_levels.height)
+        photoionization_thresholds_ev = np.full(dfenergy_levels.height, np.nan)
 
         if not args.nophixs:
             reduced_phixs_dict = artisatomic.reduce_phixs_tables(
@@ -109,7 +108,10 @@ def build_nahar_levels_and_phixs(
                 matching_levelindices = levelindices_of_state.get(state_tuple, [])
                 for levelindex in matching_levelindices:
                     photoionization_crosssections[levelindex] = phixstable
-                    photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
+                    # a state right at the ionization threshold has nothing to ionize from, so
+                    # leave it with no threshold energy and let write_phixs_data() skip it
+                    if thresholds_ev_dict[state_tuple] > 0.0:
+                        photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
 
                 if not matching_levelindices:
                     twosplusone, l, parity, indexinsymmetry = state_tuple
@@ -142,11 +144,13 @@ def read_nahar_energy_level_file(
     nahar_core_states: list[NaharCoreState] = []
     nahar_ionization_potential_rydberg = -1.0
 
-    if not os.path.isfile(path_nahar_energy_file):
+    # the plain name may not be on disk when the compressed form is, so ask the same resolver that
+    # xopen_check_extension() uses rather than testing the plain name with os.path.isfile()
+    if artisatomic.find_file_check_extension(path_nahar_energy_file) is None:
         artisatomic.log_and_print(flog, f"{artisatomic.path_for_log(path_nahar_energy_file)} does not exist")
     else:
         artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_nahar_energy_file)}")
-        with open(path_nahar_energy_file, encoding="utf-8") as fenlist:
+        with artisatomic.xopen_check_extension(path_nahar_energy_file) as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 
             nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
@@ -319,7 +323,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     """
     nahar_phixs_tables = {}
     thresholds_ev_dict = {}
-    with open(path_nahar_px_file, encoding="utf-8") as fenlist:
+    with artisatomic.xopen_check_extension(path_nahar_px_file) as fenlist:
         while True:
             line = fenlist.readline()
             if not line:

@@ -14,7 +14,7 @@ def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
     artisatomic.log_and_print(flog, f"Reading effective collision strengths from {artisatomic.path_for_log(filename)}")
 
-    with open(filename, encoding="utf-8") as fstoreydata:
+    with artisatomic.xopen_check_extension(filename) as fstoreydata:
         found_tablestart = False
         while True:
             line = fstoreydata.readline()

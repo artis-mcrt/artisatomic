@@ -184,16 +184,13 @@ def add_handler_if_not_set(
             if ion_stage not in [get_ion_stage(x) for x in list_ions_handlers_out]:
                 # add an ion that is not present in the element's list
                 list_ions_handlers_out.append((ion_stage, handler))
-                list_ions_handlers_out.sort(key=get_ion_stage)
         ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
 
     if not found_element:
         new_element_ions: list[int | tuple[int, str]] = [(ion_stage, handler)]
         ion_handlers_out.append((atomic_number, new_element_ions))
 
-    ion_handlers_out.sort(key=operator.itemgetter(0))
-
-    return ion_handlers_out
+    return sort_ion_handlers(ion_handlers_out)
 
 
 # The id-keyed transition columns consumed by write_transition_data(). Readers with nothing to
@@ -567,6 +564,18 @@ def isfloat(value: t.Any) -> bool:
     return True
 
 
+compression_extensions = ("", ".zst", ".gz", ".xz")
+
+
+def find_file_check_extension(filename: str | Path) -> Path | None:
+    """Find a data file by its plain name, accepting any of the compressed variants of that name.
+
+    Returns None if neither the plain name nor any compressed form exists, so that callers which
+    treat a missing file as "no data for this ion" can say so without opening it.
+    """
+    return next((path for ext in compression_extensions if (path := Path(f"{filename}{ext}")).is_file()), None)
+
+
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """Open a data file, trying the compressed variants of the name if it does not exist.
 
@@ -575,15 +584,13 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """
     from xopen import xopen
 
-    extensions = ["", ".zst", ".gz", ".xz"]
-    filepaths = [f"{filename}{ext}" for ext in extensions]
-    for filepath in filepaths:
-        try:
-            return xopen(filepath, **kwargs)
-        except FileNotFoundError:
-            continue
-    msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
-    raise FileNotFoundError(msg)
+    filepath = find_file_check_extension(filename)
+    if filepath is None:
+        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
+        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
+        raise FileNotFoundError(msg)
+
+    return xopen(filepath, **kwargs)
 
 
 # split a list into evenly sized chunks
@@ -639,7 +646,7 @@ def match_hydrogenic_phixs(
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
-    photoionization_thresholds_ev = np.zeros(energy_levels.height)
+    photoionization_thresholds_ev = np.full(energy_levels.height, np.nan)
     phixstables = {}
     for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
         if levelindex >= 100:
@@ -1281,14 +1288,16 @@ def write_phixs_data(
     numbered from one in the output.
     """
     # a level gets a table only if it has photoionisation targets and a threshold energy. The
-    # threshold arrays start as zeros and are only filled in for levels that got a cross-section
-    # table, so a threshold of exactly zero means "no data for this level". (A negative threshold
-    # is a deliberate sentinel used by readqubdata, so keep those.)
+    # threshold arrays start as NaN and are only filled in for levels that got a cross-section
+    # table, so NaN means "no data for this level". Every number is a real threshold, including
+    # readqubdata's -1.0, which tells ARTIS to take the threshold from the level energies.
     levelids_with_targets = [
         levelid for levelid, targetlist in enumerate(photoionization_targetfractions) if targetlist
     ]
-    levelids_to_write = [levelid for levelid in levelids_with_targets if photoionization_thresholds_ev[levelid] != 0.0]
-    skipped_zero_threshold = len(levelids_with_targets) - len(levelids_to_write)
+    levelids_to_write = [
+        levelid for levelid in levelids_with_targets if not np.isnan(photoionization_thresholds_ev[levelid])
+    ]
+    skipped_no_threshold = len(levelids_with_targets) - len(levelids_to_write)
 
     log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata2.txt'")
     flog.write(
@@ -1329,10 +1338,10 @@ def write_phixs_data(
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
 
-    if skipped_zero_threshold > 0:
+    if skipped_no_threshold > 0:
         log_and_print(
             flog,
-            f"Skipped {skipped_zero_threshold} levels with no photoionization threshold energy",
+            f"Skipped {skipped_no_threshold} levels with no photoionization threshold energy",
         )
 
 
