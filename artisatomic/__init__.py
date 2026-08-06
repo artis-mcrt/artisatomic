@@ -81,27 +81,18 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = []
 
     ion_handlers = [
-        (26, [1, 2, 3, 4, 5]),
-        (27, [2, 3, 4]),
-        (28, [2, 3, 4, 5]),
+        #     (2, [(3, "boyle")]),
+        (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
+        (39, [(1, "kurucz"), (2, "kurucz")]),
+        (40, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
     ]
-
-    # ion_handlers = [
-    #     (2, [(3, "boyle")]),
-    #     (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-    #     (39, [(1, "kurucz"), (2, "kurucz")]),
-    #     (40, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-    #     (70, [(5, "gsnist")]),
-    #     (92, [(2, "fac"), (3, "fac")]),
-    #     (94, [(2, "fac"), (3, "fac")]),
-    # ]
 
     # include everything we have data for
     # ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    # ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
-    # ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
+    ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
     # ion_handlers = groundstatesonlynist.extend_ion_list(ion_handlers)
 
@@ -159,7 +150,10 @@ def drop_handlers(list_ions: list[int | tuple[int, str]]) -> list[int]:
 
 
 def add_handler_if_not_set(
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], atomic_number: int, ion_stage: int, handler: str
+    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+    atomic_number: int | str,
+    ion_stage: int | str,
+    handler: str,
 ) -> list[tuple[int, list[int | tuple[int, str]]]]:
     """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
 
