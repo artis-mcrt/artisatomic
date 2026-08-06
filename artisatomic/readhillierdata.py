@@ -555,7 +555,7 @@ phixs_type_labels = {
     2: "Hydrogenic split l (z states, n > 11) [n, l_start, l_end]",
     3: "Hydrogenic pure n level (all l, n >= 13) [scale, n]",
     4: "Used for CIV rates from Leobowitz (JQSRT 1972,12,299) (6 numbers)",
-    5: "Opacity project fits (from Peach, Sraph, and Seaton (1988) (5 numbers)",
+    5: "Opacity project fits (from Peach, Saraph, and Seaton (1988) (5 numbers)",
     6: "Hummer fits to the opacity cross-sections for HeI",
     7: "Modified Seaton formula fit (cross section zero until offset edge)",
     8: "Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]",
@@ -1176,9 +1176,9 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     return phixstable
 
 
-# Peach, Sraph, and Seaton (1988)
+# Peach, Saraph, and Seaton (1988)
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
-    """Evaluate an Opacity Project fit of Peach, Sraph and Seaton (1988) (CMFGEN type 5).
+    """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (1988) (CMFGEN type 5).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs.
 

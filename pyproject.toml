@@ -202,8 +202,9 @@ unfixable = [
 ]
 
 [tool.ruff.lint.pydocstyle]
-# plain summary-then-prose docstrings, without the mandatory Args/Returns sections that the
-# google and numpy conventions enforce
+# Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and
+# leaves Args sections optional. Returns/Raises sections are still required, but by the separate
+# DOC201/DOC501 rules rather than by the convention.
 convention = "pep257"
 
 [tool.ruff.lint.isort]

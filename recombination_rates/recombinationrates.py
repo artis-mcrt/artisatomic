@@ -129,7 +129,12 @@ for ionindex in range(4):
 
 
 def naharfeiitonumber(strin):
-    """Parse the Fortran-style "1.23-04" number format used in Nahar's Fe II tables.
+    """Parse one rate from the fixed-width tables in recombinationdatanahar9*fe*.txt.
+
+    Those files hold tokens like "1.23@210#", where characters 0-3 are the mantissa and 6-7 are
+    the exponent, which is always negative: that token is 1.23e-10. The characters in between are
+    an artefact of however the tables were extracted, and the field widths are relied on rather
+    than parsed, so this only works for those files.
 
     Returns:
         the parsed value.
