@@ -4,6 +4,8 @@ import typing as t
 from collections import defaultdict
 
 import numpy as np
+import numpy.typing as npt
+import polars as pl
 
 import artisatomic
 
@@ -27,7 +29,8 @@ class NaharCoreState(t.NamedTuple):
 
 class NaharEnergyLevel(t.NamedTuple):
     indexinsymmetry: int
-    TC: int
+    # "T" for a valence electron state, "C" for an equivalent electron state
+    TC: str
     corestateid: int
     elecn: int
     elecl: int
@@ -40,19 +43,87 @@ class NaharEnergyLevel(t.NamedTuple):
     naharconfiguration: str
 
 
+# derived from the row class so it stays the single source of the frame layout
+nahar_level_schema = pl.Schema(
+    {
+        name: {str: pl.String, float: pl.Float64, int: pl.Int64}[fieldtype]
+        for name, fieldtype in NaharEnergyLevel.__annotations__.items()
+    }
+)
+
+
+def build_nahar_levels_and_phixs(
+    nahar_energy_levels: list[NaharEnergyLevel],
+    nahar_phixs_tables,
+    thresholds_ev_dict,
+    args,
+    flog,
+) -> tuple[pl.DataFrame, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Build the level table for a Nahar-only ion and attach its photoionization cross sections."""
+    # the explicit schema keeps an empty level list (e.g. a missing energy file) producing a frame
+    # with the columns that the sort below and write_adata() expect
+    dfenergy_levels = pl.DataFrame(nahar_energy_levels, schema=nahar_level_schema, orient="row")
+
+    levels_with_config = (dfenergy_levels["naharconfiguration"] != "UNKNOWN CONFIG").sum()
+    artisatomic.log_and_print(
+        flog,
+        f"Included {dfenergy_levels.height} levels from Nahar dataset"
+        f" ({levels_with_config} with an electron configuration)",
+    )
+
+    # Level ids are assigned from the row order, so ties must keep the order they were read in:
+    # polars sorts unstably by default.
+    print("Sorting levels by energy...")
+    dfenergy_levels = dfenergy_levels.sort("energyabovegsinpercm", maintain_order=True)
+
+    # stay empty unless there are Nahar phixs tables to attach to the level list
+    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))
+    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
+
+    if nahar_phixs_tables:
+        photoionization_crosssections = np.zeros((dfenergy_levels.height, args.nphixspoints))
+        photoionization_thresholds_ev = np.zeros(dfenergy_levels.height)
+
+        if not args.nophixs:
+            reduced_phixs_dict = artisatomic.reduce_phixs_tables(
+                nahar_phixs_tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+            )
+
+            # there can be more than one level per state, and they all get the same table
+            levelindices_of_state: dict[tuple[int, int, int, int], list[int]] = {}
+            for levelindex, levelstate in enumerate(
+                dfenergy_levels.select("twosplusone", "l", "parity", "indexinsymmetry").iter_rows()
+            ):
+                levelindices_of_state.setdefault(levelstate, []).append(levelindex)
+
+            for state_tuple, phixstable in reduced_phixs_dict.items():
+                matching_levelindices = levelindices_of_state.get(state_tuple, [])
+                for levelindex in matching_levelindices:
+                    photoionization_crosssections[levelindex] = phixstable
+                    photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
+
+                if not matching_levelindices:
+                    twosplusone, l, parity, indexinsymmetry = state_tuple
+                    artisatomic.log_and_print(
+                        flog,
+                        "No Nahar state to match with photoionization crosssection of"
+                        f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}",
+                    )
+
+    return dfenergy_levels, photoionization_crosssections, photoionization_thresholds_ev
+
+
 def read_nahar_energy_level_file(
     path_nahar_energy_file, atomic_number, ion_stage, flog
 ) -> tuple[
     list[NaharEnergyLevel],
     list[NaharCoreState],
-    dict[tuple[int, int, int, int], int],
     dict[tuple[int, int, int, int], str],
     float,
 ]:
     # state tuples are (2S+1, L, parity, index in symmetry)
     nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_energy_levels: list[NaharEnergyLevel] = []
-    nahar_level_index_of_state: dict[tuple[int, int, int, int], int] = {}
     nahar_core_states: list[NaharCoreState] = []
     nahar_ionization_potential_rydberg = -1.0
 
@@ -122,7 +193,11 @@ def read_nahar_energy_level_file(
                 for _ in range(number_of_states_in_symmetry):
                     row = fenlist.readline().split()
                     indexinsymmetry = int(row[0])
-                    TC = int(row[1])
+                    # a letter, not a number: reading it as one would shift every column after it
+                    TC = row[1]
+                    if TC not in {"T", "C"}:
+                        msg = f"Expected 'T' or 'C' in column 2 of the table iii energy row {row}, but found {TC!r}"
+                        raise ValueError(msg)
                     nahar_core_state_id = int(row[2])
                     elecn = int(row[3])
                     elecl = int(row[4])
@@ -141,37 +216,29 @@ def read_nahar_energy_level_file(
                         )
                         nahar_core_state_id = 1
 
-                    nahar_energy_levels.append(
-                        NaharEnergyLevel(
-                            indexinsymmetry,
-                            TC,
-                            nahar_core_state_id,
-                            elecn,
-                            elecl,
-                            energyreltoionpotrydberg,
-                            twosplusone,
-                            l_val,
-                            parity,
-                            -1.0,
-                            0,
-                            "",
-                        )
-                    )
                     energyabovegsinpercm = (
-                        (nahar_ionization_potential_rydberg + float(nahar_energy_levels[-1].energyreltoionpotrydberg))
-                        * ryd_to_ev
-                        / hc_in_ev_cm
+                        (nahar_ionization_potential_rydberg + energyreltoionpotrydberg) * ryd_to_ev / hc_in_ev_cm
                     )
 
-                    nahar_energy_levels[-1] = nahar_energy_levels[-1]._replace(
-                        indexinsymmetry=indexinsymmetry,
-                        corestateid=nahar_core_state_id,
-                        energyreltoionpotrydberg=float(nahar_energy_levels[-1].energyreltoionpotrydberg),
-                        energyabovegsinpercm=energyabovegsinpercm,
-                        g=twosplusone * (2 * l_val + 1),
-                    )
-                    nahar_level_index_of_state[(twosplusone, l_val, parity, indexinsymmetry)] = (
-                        len(nahar_energy_levels) - 1
+                    nahar_energy_levels.append(
+                        NaharEnergyLevel(
+                            indexinsymmetry=indexinsymmetry,
+                            TC=TC,
+                            corestateid=nahar_core_state_id,
+                            elecn=elecn,
+                            elecl=elecl,
+                            energyreltoionpotrydberg=energyreltoionpotrydberg,
+                            twosplusone=twosplusone,
+                            l=l_val,
+                            parity=parity,
+                            energyabovegsinpercm=energyabovegsinpercm,
+                            g=twosplusone * (2 * l_val + 1),
+                            # the spectroscopic table covers only the bound states, so the levels
+                            # above the ionization threshold have no known configuration
+                            naharconfiguration=nahar_configurations.get(
+                                (twosplusone, l_val, parity, indexinsymmetry), "UNKNOWN CONFIG"
+                            ),
+                        )
                     )
 
     #                if float(nahar_energy_levels[-1].energyreltoionpotrydberg) >= 0.0:
@@ -180,7 +247,6 @@ def read_nahar_energy_level_file(
     return (
         nahar_energy_levels,
         nahar_core_states,
-        nahar_level_index_of_state,
         nahar_configurations,
         nahar_ionization_potential_rydberg,
     )

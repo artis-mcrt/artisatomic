@@ -9,7 +9,6 @@ import multiprocessing as mp
 import os
 import sys
 import typing as t
-from collections import defaultdict
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Sequence
@@ -192,6 +191,12 @@ def add_handler_if_not_set(
     return ion_handlers_out
 
 
+# The id-keyed transition columns consumed by write_transition_data(). Readers with nothing to
+# report use this schema so an empty frame still carries them; name-keyed reader frames (e.g.
+# Hillier's namefrom/nameto) get lowerlevel/upperlevel joined on later by add_level_ids_forbidden().
+empty_transitions_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
+
+
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
 
@@ -219,7 +224,7 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     if args is None:
         parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            description="Produce an ARTIS atomic database by combining Hillier and Nahar data sets.",
+            description="Produce an ARTIS atomic database from published atomic data sets.",
         )
         parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
         parser.add_argument(
@@ -337,8 +342,6 @@ def get_default_handler(atomic_number: int, ion_stage: int) -> str:
         return "boyle"
     if USE_QUB_COBALT and atomic_number == 27:
         return "qub_cobalt"
-    # if atomic_number in [8, 26] and os.path.isfile(path_nahar_energy_file):
-    #     return "hillier_nahar"  # Hillier/Nahar hybrid
     if atomic_number <= 28 or atomic_number == 56:  # Hillier data only
         return "cmfgen"
     if (
@@ -410,32 +413,6 @@ def read_ion_data(
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
         )
         log_and_print(flog, f"Source handler: {handler}")
-
-        path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
-        path_nahar_px_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt"
-
-        # upsilondatafilenames = {(26, 2): 'fe_ii_upsilon-data.txt', (26, 3): 'fe_iii_upsilon-data.txt'}
-        # if (atomic_number, ion_stage) in upsilondatafilenames:
-        #     upsilonfilename = os.path.join('atomic-data-tiptopbase',
-        #                                    upsilondatafilenames[(atomic_number, ion_stage)])
-        #     log_and_print(flog, f'Reading effective collision strengths from {upsilonfilename}')
-        #     upsilondatadf = pd.read_csv(upsilonfilename,
-        #                                 names=["Z", "ion_stage", "lower", "upper", "upsilon"],
-        #                                 index_col=False, header=None, sep=" ")
-        #     if len(upsilondatadf) > 0:
-        #         for _, row in upsilondatadf.iterrows():
-        #             lower = int(row['lower'])
-        #             upper = int(row['upper'])
-        #             if upper < lower:
-        #                 print(f'Problem in {upsilondatafilenames[(atomic_number, ion_stage)]}, lower {lower} upper {upper}. Swapping lower and upper')
-        #                 old_lower = lower
-        #                 lower = upper
-        #                 upper = old_lower
-        #             if (lower, upper) not in upsilondict:
-        #                 upsilondict[(lower, upper)] = row['upsilon']
-        #             else:
-        #                 log_and_print(flog, f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping {upsilondict[(lower, upper)]:5.2e} instead of using {row['upsilon']:5.2e}")
-
         if handler == "qub_cobalt":
             if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
                 (
@@ -447,13 +424,12 @@ def read_ion_data(
                 ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
             else:  # hillier levels and transitions
                 # if ion_stage == 2:
-                #     upsilondict = read_storey_2016_upsilondata(flog)
+                #     upsilondict = readstoreydata.read_storey_2016_upsilondata(flog)
                 (
                     ionization_energy_ev,
                     energy_levels,
                     transitions,
                     transition_count_of_level_name,
-                    hillier_levelnamesnoJ_matching_term,
                 ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
@@ -461,13 +437,16 @@ def read_ion_data(
                     photoionization_crosssections,
                     photoionization_targetfractions,
                     photoionization_thresholds_ev,
-                ) = readqubdata.read_qub_photoionizations(atomic_number, ion_stage, energy_levels, args, flog)
+                ) = readqubdata.read_qub_photoionizations(
+                    atomic_number, ion_stage, levelcount=len(energy_levels), args=args, flog=flog
+                )
 
-        elif handler == "nahar":  # Nahar only, usually just for testing purposes
+        elif handler == "nahar":
+            path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
+            path_nahar_px_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt"
             (
                 nahar_energy_levels,
                 nahar_core_states,
-                nahar_level_index_of_state,
                 nahar_configurations,
                 nahar_ionization_potential_rydberg,
             ) = readnahardata.read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog)
@@ -483,71 +462,13 @@ def read_ion_data(
                     path_nahar_px_file, atomic_number, ion_stage, args
                 )
 
-            (
-                energy_levels,
-                transitions,
-                photoionization_crosssections,
-                photoionization_thresholds_ev,
-            ) = combine_hillier_nahar(
-                [],
-                defaultdict(list),
-                [],
-                nahar_energy_levels,
-                nahar_level_index_of_state,
-                nahar_configurations,
-                nahar_phixs_tables,
-                thresholds_ev_dict,
-                args,
-                flog,
-                useallnaharlevels=True,
-            )
-
-        elif handler == "hillier_nahar":  # Hillier/Nahar hybrid
-            (
-                nahar_energy_levels,
-                nahar_core_states,
-                nahar_level_index_of_state,
-                nahar_configurations,
-                _nahar_ionization_potential_rydberg,
-            ) = readnahardata.read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog)
-
-            (
-                ionization_energy_ev,
-                hillier_energy_levels,
-                hillier_transitions,
-                transition_count_of_level_name,
-                hillier_levelnamesnoJ_matching_term,
-            ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-
-            nahar_phixs_tables = {}
-            thresholds_ev_dict = {}
-            if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
-                nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
-                    path_nahar_px_file, atomic_number, ion_stage, args
+            (energy_levels, photoionization_crosssections, photoionization_thresholds_ev) = (
+                readnahardata.build_nahar_levels_and_phixs(
+                    nahar_energy_levels, nahar_phixs_tables, thresholds_ev_dict, args, flog
                 )
-
-            (
-                energy_levels,
-                transitions,
-                photoionization_crosssections,
-                photoionization_thresholds_ev,
-            ) = combine_hillier_nahar(
-                hillier_energy_levels,
-                hillier_levelnamesnoJ_matching_term,
-                hillier_transitions,
-                nahar_energy_levels,
-                nahar_level_index_of_state,
-                nahar_configurations,
-                nahar_phixs_tables,
-                thresholds_ev_dict,
-                args,
-                flog,
             )
-            # reading the collision data (in terms of level names) must be done after the data sets have
-            # been combined so that the level numbers are correct
-            if len(upsilondict) == 0:
-                upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+            # the Nahar data set gives no bound-bound transitions
+            transitions = pl.DataFrame(schema=empty_transitions_schema)
 
         elif handler == "cmfgen":  # Hillier CMFGEN data only
             (
@@ -555,7 +476,6 @@ def read_ion_data(
                 energy_levels,
                 transitions,
                 transition_count_of_level_name,
-                hillier_levelnamesnoJ_matching_term,
             ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
             if len(upsilondict) == 0:
@@ -611,278 +531,6 @@ def read_ion_data(
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
     )
-
-
-def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
-    upsilondict = {}
-
-    filename = "atomic-data-storey/storetetal2016-co-ii.txt"
-    log_and_print(flog, f"Reading effective collision strengths from {path_for_log(filename)}")
-
-    with open(filename) as fstoreydata:
-        found_tablestart = False
-        while True:
-            line = fstoreydata.readline()
-            if not line:
-                break
-
-            if found_tablestart:
-                row = line.split()
-
-                if len(row) <= 5:
-                    break
-
-                lower = int(row[0])
-                upper = int(row[1])
-                upsilon = float(row[11])
-                upsilondict[(lower, upper)] = upsilon
-            if line.startswith(
-                "--	--	------	------	------	------	------	------	------	------	------	------	------	------	------"
-            ):
-                found_tablestart = True
-
-    return upsilondict
-
-
-def combine_hillier_nahar(
-    hillier_energy_levels,
-    hillier_levelnamesnoJ_matching_term,
-    hillier_transitions,
-    nahar_energy_levels,
-    nahar_level_index_of_state,
-    nahar_configurations,
-    nahar_phixs_tables,
-    thresholds_ev_dict,
-    args,
-    flog,
-    useallnaharlevels=False,
-):
-    added_nahar_levels = []
-    # stay empty unless there are Nahar phixs tables to attach to the combined level list
-    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))
-    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
-    levelids_of_levelnamenoJ = defaultdict(list)
-
-    if useallnaharlevels:
-        added_nahar_levels = list(nahar_energy_levels)
-    else:
-        # values are zero-based indices into hillier_energy_levels
-        for levelindex, energy_level in enumerate(hillier_energy_levels):
-            levelnamenoJ = energy_level.levelname.split("[")[0]
-            levelids_of_levelnamenoJ[levelnamenoJ].append(levelindex)
-
-        # match up Nahar states given in phixs data with Hillier levels, adding
-        # missing levels as necessary
-        def energy_if_available(state_tuple):
-            if state_tuple in nahar_level_index_of_state:
-                return hc_in_ev_cm * nahar_energy_levels[nahar_level_index_of_state[state_tuple]].energyabovegsinpercm
-
-            return 999999.0
-
-        phixs_state_tuples_sorted = sorted(nahar_phixs_tables.keys(), key=energy_if_available)
-        for state_tuple in phixs_state_tuples_sorted:
-            twosplusone, l, parity, indexinsymmetry = state_tuple
-            hillier_level_ids_matching_this_nahar_state = []
-
-            if state_tuple in nahar_level_index_of_state:
-                nahar_energy_level = nahar_energy_levels[nahar_level_index_of_state[state_tuple]]
-                nahar_energyabovegsinev = hc_in_ev_cm * nahar_energy_level.energyabovegsinpercm
-            else:
-                nahar_energy_level = None
-                nahar_energyabovegsinev = 999999.0
-
-            nahar_configuration_this_state = "_CONFIG NOT FOUND_"
-            flog.write("\n")
-            if state_tuple in nahar_configurations:
-                nahar_configuration_this_state = nahar_configurations[state_tuple]
-
-                if nahar_configuration_this_state.strip() in nahar_configuration_replacements:
-                    nahar_configuration_this_state = nahar_configuration_replacements[
-                        nahar_configurations[state_tuple].strip()
-                    ]
-                    flog.write(
-                        f"Replacing Nahar configuration of '{nahar_configurations[state_tuple]}' with"
-                        f" '{nahar_configuration_this_state}'\n"
-                    )
-
-            if hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
-                # match the electron configurations from the levels with matching terms
-                if nahar_configuration_this_state != "_CONFIG NOT FOUND_":
-                    level_match_scores = []
-                    for levelname in hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
-                        altlevelname = hillier_name_replacements.get(levelname, levelname)
-
-                        # set zero if already matched this level to something
-                        match_score = (
-                            0
-                            if hillier_energy_levels[levelids_of_levelnamenoJ[levelname][0]].indexinsymmetry >= 0
-                            else score_config_match(altlevelname, nahar_configuration_this_state)
-                        )
-
-                        avghillierenergyabovegsinev = weightedavgenergyinev(
-                            hillier_energy_levels, levelids_of_levelnamenoJ[levelname]
-                        )
-                        if nahar_energyabovegsinev < 999:
-                            # reduce the score by 30% for every eV of energy difference (up to 100%)
-                            match_score *= 1 - min(1, 0.3 * abs(avghillierenergyabovegsinev - nahar_energyabovegsinev))
-
-                        level_match_scores.append([levelname, match_score])
-
-                    level_match_scores.sort(key=lambda x: -x[1])
-                    best_match_score = level_match_scores[0][1]
-                    if best_match_score > 0:
-                        best_levelname = level_match_scores[0][0]
-                        core_state_id = nahar_energy_level.corestateid if nahar_energy_level is not None else 0
-
-                        confignote = nahar_configurations[state_tuple]
-
-                        if nahar_configuration_this_state != confignote:
-                            confignote += f" replaced by {nahar_configuration_this_state}"
-
-                        for levelid in levelids_of_levelnamenoJ[best_levelname]:
-                            hillierlevel = hillier_energy_levels[levelid]
-                            # print(hillierlevel.twosplusone, hillierlevel.l, hillierlevel.parity, hillierlevel.levelname)
-                            hillier_energy_levels[levelid] = hillier_energy_levels[levelid]._replace(
-                                twosplusone=twosplusone,
-                                l=l,
-                                parity=parity,
-                                indexinsymmetry=indexinsymmetry,
-                                corestateid=core_state_id,
-                                naharconfiguration=confignote,
-                                matchscore=best_match_score,
-                            )
-                            hillier_level_ids_matching_this_nahar_state.append(levelid)
-                    # else:
-                    #     print("no match for", nahar_configuration_this_state)
-                else:
-                    log_and_print(
-                        flog,
-                        f"No electron configuration for {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index"
-                        f" {indexinsymmetry:d}",
-                    )
-            else:
-                flog.write(f"No Hillier levels with term {twosplusone:d}{lchars[l]}{['e', 'o'][parity]}\n")
-
-            if not hillier_level_ids_matching_this_nahar_state:
-                flog.write(
-                    "No matched Hillier levels for Nahar cross section of"
-                    f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index"
-                    f" {indexinsymmetry:d} '{nahar_configuration_this_state}' "
-                )
-
-                # now find the Nahar level and add it to the new list
-                if state_tuple in nahar_level_index_of_state:
-                    nahar_energy_level = nahar_energy_levels[nahar_level_index_of_state[state_tuple]]
-                    nahar_energy_eV = nahar_energy_level.energyabovegsinpercm * hc_in_ev_cm
-                    flog.write(f"(E = {nahar_energy_eV:.3f} eV, g = {nahar_energy_level.g:.1f})\n")
-
-                    if nahar_energy_eV < 0.002:
-                        flog.write(" but prevented duplicating the ground state\n")
-                    else:
-                        added_nahar_levels.append(
-                            nahar_energy_level._replace(
-                                naharconfiguration=nahar_configurations.get(state_tuple, "UNKNOWN CONFIG")
-                            )
-                        )
-                else:
-                    flog.write(" (and no matching entry in Nahar energy table, so can't be added)\n")
-            else:  # there are Hillier levels matched to this state
-                # avghillierthreshold = weightedavgthresholdinev(
-                #    hillier_energy_levels, hillier_level_ids_matching_this_nahar_state)
-                # strhilliermatchesthreshold = '[' + ', '.join(
-                #     ['{0} ({1:.3f} eV)'.format(hillier_energy_levels[k].levelname,
-                #                                hc_in_ev_angstrom / float(hillier_energy_levels[k].lambdaangstrom))
-                #      for k in hillier_level_ids_matching_this_nahar_state]) + ']'
-
-                str_nahar_energy_g = (
-                    f"E = {nahar_energyabovegsinev:.3f} eV, g = {nahar_energy_level.g:.1f}"
-                    if nahar_energy_level is not None
-                    else "not in Nahar energy table"
-                )
-                flog.write(
-                    "Matched Nahar phixs for {:d}{}{} index {:d} '{}' ({}) to \n".format(
-                        twosplusone,
-                        lchars[l],
-                        ["e", "o"][parity],
-                        indexinsymmetry,
-                        nahar_configuration_this_state,
-                        str_nahar_energy_g,
-                    )
-                )
-
-                if len(hillier_level_ids_matching_this_nahar_state) > 1:
-                    avghillierenergyabovegsinev = weightedavgenergyinev(
-                        hillier_energy_levels, hillier_level_ids_matching_this_nahar_state
-                    )
-                    sumhillierstatweights = sum(
-                        hillier_energy_levels[levelid].g for levelid in hillier_level_ids_matching_this_nahar_state
-                    )
-                    flog.write(f"<E> = {avghillierenergyabovegsinev:.3f} eV, g_sum = {sumhillierstatweights:.1f}: \n")
-                    if abs(nahar_energyabovegsinev / avghillierenergyabovegsinev - 1) > 0.5:
-                        flog.write("ENERGY DISCREPANCY WARNING\n")
-
-                strhilliermatches = "\n".join(
-                    [
-                        f"{hillier_energy_levels[k].levelname} ({hc_in_ev_cm * float(hillier_energy_levels[k].energyabovegsinpercm):.3f} eV, g = {hillier_energy_levels[k].g:.1f}, match_score = {hillier_energy_levels[k].matchscore:.1f})"
-                        for k in hillier_level_ids_matching_this_nahar_state
-                    ]
-                )
-
-                flog.write(strhilliermatches + "\n")
-
-    energy_levels = hillier_energy_levels + added_nahar_levels
-
-    log_and_print(
-        flog,
-        f"Included {len(hillier_energy_levels)} levels from Hillier dataset and added"
-        f" {len(added_nahar_levels)} levels from Nahar phixs tables for a total of {len(energy_levels)} levels",
-    )
-
-    # sort the concatenated energy level list by energy
-    print("Sorting levels by energy...")
-    energy_levels.sort(key=lambda x: float(x.energyabovegsinpercm))
-
-    if len(nahar_phixs_tables.keys()) > 0:
-        photoionization_crosssections = np.zeros(
-            (
-                len(energy_levels),
-                args.nphixspoints,
-            )
-        )  # this probably gets overwritten anyway
-        photoionization_thresholds_ev = np.zeros(len(energy_levels))
-
-        # process the phixs tables and attach them to any matching levels in the output list
-
-        if not args.nophixs:
-            reduced_phixs_dict = reduce_phixs_tables(
-                nahar_phixs_tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
-            )
-
-            for (twosplusone, l, parity, indexinsymmetry), phixstable in reduced_phixs_dict.items():
-                foundamatch = False
-                for levelindex, energylevel in enumerate(energy_levels):
-                    if (
-                        int(energylevel.twosplusone) == twosplusone
-                        and int(energylevel.l) == l
-                        and int(energylevel.parity) == parity
-                        and int(energylevel.indexinsymmetry) == indexinsymmetry
-                    ):
-                        photoionization_crosssections[levelindex] = phixstable
-                        photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[
-                            (twosplusone, l, parity, indexinsymmetry)
-                        ]
-                        foundamatch = (
-                            True  # there could be more than one match, but this flags there being at least one
-                        )
-
-                if not foundamatch:
-                    log_and_print(
-                        flog,
-                        "No Hillier or Nahar state to match with photoionization crosssection of"
-                        f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}",
-                    )
-
-    return energy_levels, hillier_transitions, photoionization_crosssections, photoionization_thresholds_ev
 
 
 def log_and_print(flog, strout):
@@ -1194,32 +842,6 @@ def reduce_phixs_tables_worker(
     return arr_sigma_out
 
 
-def check_forbidden(levela, levelb) -> bool:
-    return levela.parity == levelb.parity
-
-
-def weightedavgenergyinev(energylevels_thision, ids) -> float:
-    """Statistical-weight-averaged energy of the levels at the given zero-based list indices."""
-    genergysum = 0.0
-    gsum = 0.0
-    for levelid in ids:
-        statisticalweight = float(energylevels_thision[levelid].g)
-        genergysum += statisticalweight * hc_in_ev_cm * float(energylevels_thision[levelid].energyabovegsinpercm)
-        gsum += statisticalweight
-    return genergysum / gsum
-
-
-def weightedavgthresholdinev(energylevels_thision, ids) -> float:
-    """Statistical-weight-averaged ionisation threshold of the levels at the given zero-based list indices."""
-    genergysum = 0.0
-    gsum = 0.0
-    for levelid in ids:
-        statisticalweight = float(energylevels_thision[levelid].g)
-        genergysum += statisticalweight * hc_in_ev_angstrom / float(energylevels_thision[levelid].lambdaangstrom)
-        gsum += statisticalweight
-    return genergysum / gsum
-
-
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
@@ -1275,28 +897,6 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         l = -1
         parity = -1
     return (twosplusone, l, parity)
-
-
-# e.g. turn '(4F)' into (4, 3, -1)
-# or '(4F1) into (4, 3, 1)
-def interpret_parent_term(strin: str) -> tuple[int, int, int]:
-    strin = strin.strip("()")
-    lposition = -1
-    l = -1
-    for charpos, char in reversed(list(enumerate(strin))):
-        if char in lchars:
-            lposition = charpos
-            l = lchars.index(char)
-            break
-    if lposition < 0:
-        return (-1, -1, -1)
-
-    twosplusone = int(strin[:lposition].lstrip(alphabets))  # could this be two digits long?
-
-    jvalue = (
-        int(strin[lposition + 1 :]) if lposition < len(strin) - 1 and strin[lposition + 1 :] not in ["e", "o"] else -1
-    )
-    return (twosplusone, l, jvalue)
 
 
 # e.g. convert "3d64s  (6D ) 8p  j5Fo" to "3d64s8p_5Fo",
@@ -1472,115 +1072,6 @@ def get_parity_from_config(instr) -> int:
     return lsum % 2
 
 
-def score_config_match(config_a, config_b):
-    if config_a.split("[")[0] == config_b.split("[")[0]:
-        return 100
-
-    electron_config_a, term_twosplusone_a, term_l_a, term_parity_a, indexinsymmetry_a = interpret_configuration(
-        config_a
-    )
-    electron_config_b, term_twosplusone_b, term_l_b, term_parity_b, indexinsymmetry_b = interpret_configuration(
-        config_b
-    )
-
-    if term_twosplusone_a != term_twosplusone_b or term_l_a != term_l_b or term_parity_a != term_parity_b:
-        return 0
-    if (
-        indexinsymmetry_a != -1
-        and indexinsymmetry_b != -1
-        and ("0s" not in electron_config_a and "0s" not in electron_config_b)
-    ):
-        if indexinsymmetry_a == indexinsymmetry_b:
-            return 100  # exact match between Hillier and Nahar
-
-        return 0  # both correspond to Nahar states but do not match
-
-    if electron_config_a == electron_config_b:
-        return 99
-
-    if len(electron_config_a) > 0 and len(electron_config_b) > 0:
-        parent_term_match = 0.5  # 0 is definite mismatch, 0.5 is consistent, 1 is definite match
-        parent_term_index_a, parent_term_index_b = -1, -1
-        matched_pieces = 0
-        if "0s" in electron_config_a or "0s" in electron_config_b:
-            matched_pieces += 0.5  # make sure 0s states gets matched to something
-        index_a, index_b = 0, 0
-
-        non_term_pieces_a = sum(not a.startswith("(") for a in electron_config_a)
-        non_term_pieces_b = sum(not b.startswith("(") for b in electron_config_b)
-        # go through the configuration piece by piece
-        while index_a < len(electron_config_a) and index_b < len(electron_config_b):
-            piece_a = electron_config_a[index_a]  # an orbital electron count or a parent term
-            piece_b = electron_config_b[index_b]  # an orbital electron count or a parent term
-
-            if piece_a.startswith("(") or piece_b.startswith("("):
-                if piece_a.startswith("("):
-                    if parent_term_index_a == -1:
-                        parent_term_index_a = index_a
-                    index_a += 1
-                if piece_b.startswith("("):
-                    if parent_term_index_b == -1:
-                        parent_term_index_b = index_b
-                    index_b += 1
-            else:  # orbital occupation piece
-                if piece_a == piece_b:
-                    matched_pieces += 1
-                # elif '0s' in [piece_a, piece_b]:  # wildcard piece
-                #     matched_pieces += 0.5
-                # pass
-                # else:
-                #     return 0
-
-                index_a += 1
-                index_b += 1
-
-        if parent_term_index_a != -1 and parent_term_index_b != -1:
-            parent_term_a = interpret_parent_term(electron_config_a[parent_term_index_a])
-            parent_term_b = interpret_parent_term(electron_config_b[parent_term_index_b])
-            if parent_term_index_a == parent_term_index_b:
-                if parent_term_a == parent_term_b:
-                    parent_term_match = 1.0
-                elif parent_term_a[:2] == parent_term_b[:2] and -1 in [
-                    parent_term_a[2],
-                    parent_term_b[2],
-                ]:  # e.g., '(3F1)' matches '(3F)'
-                    # strip J values from the parent term
-                    parent_term_match = 0.75
-                else:
-                    parent_term_match = 0.0
-                    return 0
-            else:  # parent terms occur at different locations. are they consistent?
-                orbitaldiff = (
-                    electron_config_b[parent_term_index_a:parent_term_index_b]
-                    if parent_term_index_b > parent_term_index_a
-                    else electron_config_a[parent_term_index_b:parent_term_index_a]
-                )
-
-                maxldiff = 0
-                maxspindiff = 0  # two times s
-                for orbital in orbitaldiff:
-                    for pos, char in enumerate(orbital):
-                        if char in lchars.lower():
-                            maxldiff += lchars.lower().index(char)
-                            occupation = orbital[pos + 1 :]
-                            maxspindiff += int(occupation) if len(occupation) > 0 else 1
-                            break
-
-                spindiff = abs(parent_term_a[0] - parent_term_b[0])
-                ldiff = abs(parent_term_a[1] - parent_term_b[1])
-                if spindiff > maxspindiff or ldiff > maxldiff:  # parent terms are inconsistent -> no match
-                    # print(orbitaldiff, spindiff, maxspindiff, ldiff, maxldiff, config_a, config_b)
-                    parent_term_match = 0.0
-                    return 0
-        non_term_pieces = max(non_term_pieces_a, non_term_pieces_b)
-        if non_term_pieces == 0:
-            # both configurations are parent terms only, so there is nothing to match piece by piece
-            return 5
-        return int(98 * matched_pieces / non_term_pieces * parent_term_match)
-
-    return 5  # term matches but no electron config available or it's an Eqv state...0s type
-
-
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -1742,35 +1233,43 @@ def write_adata(
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    for energylevel in dfenergylevels.iter_rows(named=True):
-        transitioncount = (
-            transition_count_of_level_name.get(energylevel["levelname"], 0) if "levelname" in energylevel else 0
-        )
+    # Hillier level comments are padded to a fixed width, so that a Nahar annotation always starts
+    # in the same column. Other data sets write theirs with no trailing whitespace. (Nahar levels
+    # need no test of their own: their indexinsymmetry counts from one, so they are always annotated.)
+    fixed_width_level_comments = "hillierlevelid" in dfenergylevels.columns
+    has_levelname = "levelname" in dfenergylevels.columns
+    has_naharindex = "indexinsymmetry" in dfenergylevels.columns
+    # the Nahar annotation below reads these columns unconditionally; checking up front turns a
+    # malformed frame into a clean failure instead of a partially written adata.txt
+    if has_naharindex:
+        missingcolumns = {"twosplusone", "l", "parity", "naharconfiguration"} - set(dfenergylevels.columns)
+        if missingcolumns:
+            msg = (
+                f"Level table for Z={atomic_number} ion_stage={ion_stage} has an indexinsymmetry column but is"
+                f" missing {', '.join(sorted(missingcolumns))}, which the Nahar level comment needs"
+            )
+            raise ValueError(msg)
 
-        level_comment = ""
-        if "levelname" in energylevel:
+    for energylevel in dfenergylevels.iter_rows(named=True):
+        transitioncount = transition_count_of_level_name.get(energylevel["levelname"], 0) if has_levelname else 0
+
+        if has_levelname:
             hlevelname = energylevel["levelname"]
             if hlevelname in hillier_name_replacements:
-                # hlevelname += ' replaced by {0}'.format(hillier_name_replacements[hlevelname])
                 hlevelname = hillier_name_replacements[hlevelname]
             level_comment = hlevelname.ljust(27)
         else:
             level_comment = " " * 27
 
-        if "indexinsymmetry" in energylevel:
-            if energylevel["indexinsymmetry"] >= 0:
-                level_comment += (
-                    f"Nahar: {energylevel['twosplusone']:d}{lchars[energylevel['l']]:}{['e', 'o'][energylevel['parity']]:} index"
-                    f" {energylevel['indexinsymmetry']:}"
-                )
-                if "naharconfiguration" in energylevel:
-                    config = energylevel["naharconfiguration"]
-                    if config.strip() in nahar_configuration_replacements:
-                        config += f" replaced by {nahar_configuration_replacements[energylevel['naharconfiguration'].strip()]}"
-                    level_comment += f" '{config}'"
-                else:
-                    level_comment += " (no config)"
-        else:
+        if has_naharindex and energylevel["indexinsymmetry"] >= 0:
+            config = energylevel["naharconfiguration"]
+            if config.strip() in nahar_configuration_replacements:
+                config += f" replaced by {nahar_configuration_replacements[config.strip()]}"
+            level_comment += (
+                f"Nahar: {energylevel['twosplusone']:d}{lchars[energylevel['l']]:}{['e', 'o'][energylevel['parity']]:} index"
+                f" {energylevel['indexinsymmetry']:} '{config}'"
+            )
+        elif not fixed_width_level_comments:
             level_comment = level_comment.rstrip()
 
         # level ids are zero-based in memory, but the output format numbers them from one
@@ -1913,7 +1412,4 @@ def write_compositionfile(
 
 
 if __name__ == "__main__":
-    # print(interpret_configuration('3d64s_4H'))
-    # print(interpret_configuration('3d6(3H)4sa4He[11/2]'))
-    # print(score_config_match('3d64s_4H','3d6(3H)4sa4He[11/2]'))
     main()

@@ -41,6 +41,10 @@ class QUBEnergyLevel(t.NamedTuple):
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
 
+def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
+    return levela.parity == levelb.parity
+
+
 def extend_ion_list(ion_handlers):
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
@@ -262,7 +266,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
-        qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
+        qub_transitions = pl.DataFrame(schema=artisatomic.empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
 
@@ -320,7 +324,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         level_lower = qub_energylevels[id_lower]
                         namefrom = level_upper.levelname
                         nameto = level_lower.levelname
-                        forbidden = artisatomic.check_forbidden(level_upper, level_lower)
+                        forbidden = check_forbidden(level_upper, level_lower)
                         transition_count_of_level_name[namefrom] += 1
                         transition_count_of_level_name[nameto] += 1
                         delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
@@ -346,12 +350,12 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def read_qub_photoionizations(
-    atomic_number, ion_stage, energy_levels, args, flog
+    atomic_number, ion_stage, levelcount: int, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
+    photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
-    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in energy_levels]
-    photoionization_thresholds_ev = np.zeros(len(energy_levels))
+    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
+    photoionization_thresholds_ev = np.zeros(levelcount)
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in range(8):
@@ -521,7 +525,7 @@ def read_qub_photoionizations(
         # Unlike the Co II branch above, every level is deliberately given a phixs entry: levels
         # of the ground quartet get the tabulated cross section, and all higher levels get an
         # explicit all-zero table (no photoionization) rather than being omitted from the output.
-        for levelid in range(len(energy_levels)):
+        for levelid in range(levelcount):
             photoionization_thresholds_ev[levelid] = -1.0
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
             if levelid < 4:
