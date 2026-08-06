@@ -86,8 +86,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     import pandas as pd
 
     gfall = (
-        pl
-        .from_pandas(
+        pl.from_pandas(
             pd.read_fwf(
                 fname,
                 widths=field_widths,
@@ -110,15 +109,13 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     )
     gfall = gfall.with_columns(
-        pl
-        .when(pl.col("order_lower_upper"))
+        pl.when(pl.col("order_lower_upper"))
         .then(f"{column}_first")
         .otherwise(f"{column}_second")
         .alias(f"{column}_lower")
         for column in double_columns
     ).with_columns(
-        pl
-        .when(pl.col("order_lower_upper"))
+        pl.when(pl.col("order_lower_upper"))
         .then(f"{column}_second")
         .otherwise(f"{column}_first")
         .alias(f"{column}_upper")
@@ -213,8 +210,7 @@ def read_levels_and_transitions(
 
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
     dflevels = (
-        pl
-        .concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
+        pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
         # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
         # without it the level names in adata.txt can differ from run to run
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
@@ -240,17 +236,18 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
 
     transitions = (
-        gfall
-        .select([
-            "atomic_number",
-            "ion_charge",
-            "energyabovegsinpercm_lower",
-            "j_lower",
-            "energyabovegsinpercm_upper",
-            "j_upper",
-            "wavelength_nm",
-            "loggf",
-        ])
+        gfall.select(
+            [
+                "atomic_number",
+                "ion_charge",
+                "energyabovegsinpercm_lower",
+                "j_lower",
+                "energyabovegsinpercm_upper",
+                "j_upper",
+                "wavelength_nm",
+                "loggf",
+            ]
+        )
         .with_columns(gf=10 ** pl.col("loggf"))
         .drop("loggf")
         .join(

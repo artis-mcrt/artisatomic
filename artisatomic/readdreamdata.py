@@ -93,8 +93,6 @@ def read_levels_data(dflines):
 def read_lines_data(dfiondata, energy_levels):
     """Convert DREAM lines to transitions referencing zero-based level ids.
 
-    Returns the transitions and the number of them touching each level name.
-
     Returns:
         the transitions and the number of them touching each level name.
     """

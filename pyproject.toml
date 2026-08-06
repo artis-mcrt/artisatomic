@@ -126,9 +126,9 @@ line-length = 120
 fix = true
 show-fixes = true
 extend-exclude = ["_version.py"]
-preview = true
 
 [tool.ruff.lint]
+preview = true
 select = ["ALL"]
 ignore = [
     # every float comparison here is deliberate: a divide-by-zero guard, a validation of an exact
@@ -191,9 +191,6 @@ ignore = [
 ]
 fixable = ["ALL"]
 unfixable = [
-    "missing-trailing-comma",
-    "commented-out-code",
-    "unused-variable",
     "unused-noqa",
     "expr-or-true",
     "expr-and-false",

@@ -45,6 +45,37 @@ class QUBEnergyLevel(t.NamedTuple):
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
+# the ions that get_default_handler() picks "qub_data" for. Nd II (60, 2) has an adf04 file and is
+# read if the handler is set explicitly, but is deliberately not the default for that ion.
+default_handler_ions = frozenset(
+    {
+        (38, 1),
+        (38, 2),
+        (38, 3),
+        (38, 4),
+        (38, 5),
+        (39, 2),
+        (39, 3),
+        (40, 1),
+        (40, 2),
+        (40, 3),
+        (52, 1),
+        (52, 2),
+        (52, 3),
+        (52, 4),
+        (52, 5),
+        (74, 1),
+        (74, 2),
+        (74, 3),
+        (78, 1),
+        (78, 2),
+        (78, 3),
+        (79, 1),
+        (79, 2),
+        (79, 3),
+    }
+)
+
 
 def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
     """Whether a transition between two levels is forbidden, i.e. they have the same parity.

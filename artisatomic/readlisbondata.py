@@ -153,8 +153,6 @@ def read_levels_data(dflevels):
 def read_lines_data(energy_levels, dflines):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
-    Returns the transitions and the number of them touching each level name.
-
     Returns:
         the transitions and the number of them touching each level name.
     """

@@ -267,8 +267,7 @@ class FACTransition(t.NamedTuple):
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
     """Convert FAC lines to transitions referencing zero-based level ids.
 
-    Lines referencing an Ilev with no level are skipped. Returns the transitions and the number
-    of them touching each level name.
+    Lines referencing an Ilev with no level are skipped.
 
     Returns:
         the transitions and the number of them touching each level name.

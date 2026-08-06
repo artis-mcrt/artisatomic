@@ -20,15 +20,17 @@ colreplacements = {
 
 
 def main():
-    """Download ENDF decay data and write the gamma spectra used by ARTIS."""
+    """Fetch a NuDat3 decay table for every nuclide in betaminusdecays.txt and alphadecays.txt.
+
+    Each nuclide's gamma lines are written to artis_files/data/gamma_<nuclide>.txt.
+    """
     elsymbols = at.get_elsymbolslist()
 
     outfolder = Path(__file__).parent.parent.absolute() / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
 
     dfbetaminus = (
-        pl
-        .read_csv(
+        pl.read_csv(
             at.get_path("datadir") / "betaminusdecays.txt",
             separator=" ",
             comment_prefix="#",
@@ -42,8 +44,7 @@ def main():
     assert dfbetaminus.height == dfbetaminus.unique(("Z", "A")).height
 
     dfalpha = (
-        pl
-        .read_csv(
+        pl.read_csv(
             at.get_path("datadir") / "alphadecays.txt",
             separator=" ",
             comment_prefix="#",
@@ -173,10 +174,12 @@ def main():
                     strwarn = "" if math.isclose(e_gamma, file_e_gamma, rel_tol=0.1) else " WARNING!!!!!!"
                     print(f"        alphadecays.txt Egamma: {file_e_gamma:7.1f} keV {strwarn}")
 
-                dfout = pl.DataFrame({
-                    "energy_mev": dfgammadecays["radiationenergy_kev"] / 1000.0,
-                    "intensity": dfgammadecays["intensity"] / 100.0,
-                }).sort("energy_mev")
+                dfout = pl.DataFrame(
+                    {
+                        "energy_mev": dfgammadecays["radiationenergy_kev"] / 1000.0,
+                        "intensity": dfgammadecays["intensity"] / 100.0,
+                    }
+                ).sort("energy_mev")
                 if len(dfout) > 0:
                     with nucoutfilepath.open("w", encoding="utf-8") as fout:
                         fout.write(f"{len(dfout)}\n")

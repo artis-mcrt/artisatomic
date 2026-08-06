@@ -107,18 +107,20 @@ def test_hydrogenic_phixs():
     rhd.read_hyd_phixsdata()
 
     oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / ryd_to_ev
-    expected_n1 = np.array([
-        [1.0, 6.30341644],
-        [1.1, 4.88284569],
-        [1.21, 3.77314939],
-        [1.331, 2.90845266],
-        [1.4641, 2.23644386],
-        [1.61051, 1.71560775],
-        [1.771561, 1.31303106],
-        [1.9487171, 1.00268611],
-        [2.1435888, 0.76405918],
-        [2.35794768, 0.58102658],
-    ])
+    expected_n1 = np.array(
+        [
+            [1.0, 6.30341644],
+            [1.1, 4.88284569],
+            [1.21, 3.77314939],
+            [1.331, 2.90845266],
+            [1.4641, 2.23644386],
+            [1.61051, 1.71560775],
+            [1.771561, 1.31303106],
+            [1.9487171, 1.00268611],
+            [2.1435888, 0.76405918],
+            [2.35794768, 0.58102658],
+        ]
+    )
 
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 1, 0, 0)
     assert np.allclose(expected_n1, phixstable_nl[:10], rtol=1e-3)
@@ -127,18 +129,20 @@ def test_hydrogenic_phixs():
     assert np.allclose(expected_n1, phixstable_n[:10], rtol=1e-3)
 
     oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / (5**2 * ryd_to_ev)
-    expected_n5 = np.array([
-        [2.50000000e01, 5.91880525e-02],
-        [2.75000000e01, 4.48991991e-02],
-        [3.02500000e01, 3.40407216e-02],
-        [3.32750000e01, 2.57948374e-02],
-        [3.66024999e01, 1.95370282e-02],
-        [4.02627499e01, 1.47907913e-02],
-        [4.42890249e01, 1.11930170e-02],
-        [4.87179274e01, 8.46718091e-03],
-        [5.35897201e01, 6.40292666e-03],
-        [5.89486921e01, 4.84036618e-03],
-    ])
+    expected_n5 = np.array(
+        [
+            [2.50000000e01, 5.91880525e-02],
+            [2.75000000e01, 4.48991991e-02],
+            [3.02500000e01, 3.40407216e-02],
+            [3.32750000e01, 2.57948374e-02],
+            [3.66024999e01, 1.95370282e-02],
+            [4.02627499e01, 1.47907913e-02],
+            [4.42890249e01, 1.11930170e-02],
+            [4.87179274e01, 8.46718091e-03],
+            [5.35897201e01, 6.40292666e-03],
+            [5.89486921e01, 4.84036618e-03],
+        ]
+    )
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 5, 0, 4)
     assert np.allclose(expected_n5, phixstable_nl[:10], rtol=1e-3)
 
@@ -250,12 +254,14 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
-    dflevels = pl.DataFrame({
-        "levelid": [0],
-        "energyabovegsinpercm": [0.0],
-        "g": [2.0],
-        "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
-    })
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0],
+            "energyabovegsinpercm": [0.0],
+            "g": [2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
 
     crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
@@ -275,12 +281,14 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
 
     # levels above the ionization energy must be skipped rather than dividing by a negative threshold
-    dflevels_unbound = pl.DataFrame({
-        "levelid": [0],
-        "energyabovegsinpercm": [2 * ionization_energy_ev / hc_in_ev_cm],
-        "g": [2.0],
-        "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
-    })
+    dflevels_unbound = pl.DataFrame(
+        {
+            "levelid": [0],
+            "energyabovegsinpercm": [2 * ionization_energy_ev / hc_in_ev_cm],
+            "g": [2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
+        }
+    )
     crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_unbound,
@@ -478,7 +486,6 @@ def test_read_adf04():
 
 def test_read_nahar_energy_level_file_missing():
     """A missing Nahar file is logged and returned as empty data, not raised."""
-    # a missing file should be logged and returned as empty data, not crash
     flog = io.StringIO()
     (
         nahar_energy_levels,
@@ -615,14 +622,16 @@ def test_write_adata_level_comment():
     key that transitions are matched on.
     """
     dfhillier = leveltuples_to_pldataframe(
-        pl.DataFrame({
-            "levelname": ["someion_gs"],
-            "g": [9.0],
-            "energyabovegsinpercm": [0.0],
-            "lambdaangstrom": [911.0],
-            "hillierlevelid": [1],
-            "parity": [0],
-        })
+        pl.DataFrame(
+            {
+                "levelname": ["someion_gs"],
+                "g": [9.0],
+                "energyabovegsinpercm": [0.0],
+                "lambdaangstrom": [911.0],
+                "hillierlevelid": [1],
+                "parity": [0],
+            }
+        )
     )
     buf = io.StringIO()
     write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())

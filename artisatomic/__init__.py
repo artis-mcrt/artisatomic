@@ -329,7 +329,6 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
 
 def clear_files(args: argparse.Namespace) -> None:
     """Truncate the output files and write the phixs header, which the ions are appended to."""
-    # clear out the file contents, so these can be appended to later
     with (
         open(os.path.join(args.output_folder, "adata.txt"), "w", encoding="utf-8"),
         open(os.path.join(args.output_folder, "transitiondata.txt"), "w", encoding="utf-8"),
@@ -379,18 +378,6 @@ class IonData(t.NamedTuple):
     photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
 
 
-# the ions that QUB has its own calculations for, which get_default_handler() prefers over DREAM
-qub_data_ionstages_of_atomic_number: dict[int, frozenset[int]] = {
-    38: frozenset({1, 2, 3, 4, 5}),
-    39: frozenset({2, 3}),
-    40: frozenset({1, 2, 3}),
-    52: frozenset({1, 2, 3, 4, 5}),
-    74: frozenset({1, 2, 3}),
-    78: frozenset({1, 2, 3}),
-    79: frozenset({1, 2, 3}),
-}
-
-
 def get_default_handler(atomic_number: int, ion_stage: int) -> str:
     """Get the data source to use for an ion when the handler list does not name one.
 
@@ -403,8 +390,8 @@ def get_default_handler(atomic_number: int, ion_stage: int) -> str:
         return "qub_cobalt"
     if atomic_number <= 28 or atomic_number == 56:  # Hillier data only
         return "cmfgen"
-    # QUB calculations take precedence over DREAM for W, Pt and Au
-    if ion_stage in qub_data_ionstages_of_atomic_number.get(atomic_number, frozenset()):
+    # a QUB calculation is preferred over the Kurucz line lists, and over DREAM for W, Pt and Au
+    if (atomic_number, ion_stage) in readqubdata.default_handler_ions:
         return "qub_data"
     if atomic_number >= 57:  # DREAM database of Z > 57
         return "dream"
@@ -1155,8 +1142,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
     if "forbidden" not in dftransitions_ion.columns:
         dftransitions_ion = (
-            dftransitions_ion
-            .join(
+            dftransitions_ion.join(
                 dfenergylevels_ion.select(
                     pl.col("levelid").alias("lowerlevel"), pl.col("parity").alias("lower_parity")
                 ),
@@ -1226,8 +1212,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
         if not dftransitions_ion.is_empty():
             dftransitions_ion = dftransitions_ion.with_columns(
-                pl
-                .struct(["lowerlevel", "upperlevel", "forbidden"])
+                pl.struct(["lowerlevel", "upperlevel", "forbidden"])
                 .map_elements(
                     lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
                         (row["lowerlevel"], row["upperlevel"]),

@@ -53,10 +53,12 @@ class NaharEnergyLevel(t.NamedTuple):
 
 
 # derived from the row class so it stays the single source of the frame layout
-nahar_level_schema = pl.Schema({
-    name: {str: pl.String, float: pl.Float64, int: pl.Int64}[fieldtype]
-    for name, fieldtype in NaharEnergyLevel.__annotations__.items()
-})
+nahar_level_schema = pl.Schema(
+    {
+        name: {str: pl.String, float: pl.Float64, int: pl.Int64}[fieldtype]
+        for name, fieldtype in NaharEnergyLevel.__annotations__.items()
+    }
+)
 
 
 def build_nahar_levels_and_phixs(

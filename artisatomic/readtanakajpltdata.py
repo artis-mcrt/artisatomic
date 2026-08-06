@@ -16,9 +16,9 @@ def extend_ion_list(ion_handlers, maxionstage=None):
     Returns:
         the handler list with every JPLT ion added.
     """
-    tanakaions = sorted([
-        tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")
-    ])
+    tanakaions = sorted(
+        [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
+    )
     if maxionstage is not None:
         tanakaions = [ion for ion in tanakaions if ion[1] <= maxionstage]
 
@@ -115,8 +115,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     assert dftransitions.height == transitioncount
 
     dftransitions = (
-        dftransitions
-        .join(
+        dftransitions.join(
             dflevels.select(g_u=pl.col("g"), upperlevel=pl.col("levelid")),
             on="upperlevel",
             how="left",

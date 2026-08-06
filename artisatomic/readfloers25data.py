@@ -96,8 +96,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         raise ValueError(f"Did not find expected data table in {levels_file}")
 
     dflevels = dflevels.with_columns(
-        pl
-        .when(pl.col("J").str.ends_with("/2"))
+        pl.when(pl.col("J").str.ends_with("/2"))
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
             pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1

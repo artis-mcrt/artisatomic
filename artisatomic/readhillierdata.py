@@ -54,12 +54,12 @@ class HillierTransition(t.NamedTuple):
 _pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64}
 
 # derived from the NamedTuples so the row classes stay the single source of the frame layouts
-hillier_level_schema = pl.Schema({
-    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()
-})
-hillier_transition_schema = pl.Schema({
-    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()
-})
+hillier_level_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()}
+)
+hillier_transition_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()}
+)
 
 # every schema column except parity is read straight out of the level table
 hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname != "parity")
@@ -946,10 +946,12 @@ def read_phixs_tables(
                     flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
                 )
             else:
-                phixs_targetconfigfactors_of_levelname[lowerlevelname].append((
-                    phixstargets[filenum],
-                    phixs_at_threshold,
-                ))
+                phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
+                    (
+                        phixstargets[filenum],
+                        phixs_at_threshold,
+                    )
+                )
 
                 # add the new phixs table, or replace the
                 # existing one if this target has a larger threshold cross section
@@ -1180,8 +1182,6 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (1988) (CMFGEN type 5).
 
-    Returns (energy in Rydberg, cross section in Megabarns) pairs.
-
     Returns:
         (energy in Rydberg, cross section in Megabarns) pairs.
     """
@@ -1274,7 +1274,6 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
-    Returns a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids.
     Where the file gives one value for a whole term but the level list is J-split, the value is
     shared over the term's J levels in proportion to g_i * g_j, so that summing over the term
     recovers the file's value.
@@ -1596,9 +1595,9 @@ def read_hyd_phixsdata():
                     )
                     sys.exit()
 
-            hyd_phixs_energygrid_ryd[n, l] = np.array([
-                e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)
-            ])
+            hyd_phixs_energygrid_ryd[n, l] = np.array(
+                [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
+            )
             # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
             # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
             hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
