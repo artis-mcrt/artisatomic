@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Download ENDF decay data and write the gamma spectra used by ARTIS."""
+
 import io
 import math
 from pathlib import Path
@@ -18,6 +20,10 @@ colreplacements = {
 
 
 def main():
+    """Fetch a NuDat3 decay table for every nuclide in betaminusdecays.txt and alphadecays.txt.
+
+    Each nuclide's gamma lines are written to artis_files/data/gamma_<nuclide>.txt.
+    """
     elsymbols = at.get_elsymbolslist()
 
     outfolder = Path(__file__).parent.parent.absolute() / "artis_files" / "data"

@@ -1,4 +1,7 @@
+"""Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data."""
+
 import re
+import string
 import typing as t
 from collections import defaultdict
 from pathlib import Path
@@ -25,6 +28,7 @@ hc = 4.1357e-15 * cspeed
 
 
 def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
 
@@ -46,6 +50,7 @@ def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the level table of a cFAC ascii output file, whose columns differ from FAC's."""
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
 
@@ -66,19 +71,18 @@ def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
-    """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
+    """Get a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
-    data : str
+    filename : str
         Filename of cFAC ascii output for the energy levels
 
     Z: int
         Ion atomic number
-
     """
     headerlines: list[str] = []
-    with open(filename) as f:
+    with open(filename, encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(10))
 
     GState = headerlines[7][8:]
@@ -99,6 +103,7 @@ def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> p
 
 
 def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the transition table of an FAC ascii output file."""
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
@@ -112,6 +117,7 @@ def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the transition table of a cFAC ascii output file."""
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
 
     widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
@@ -124,19 +130,18 @@ def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
-    """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
+    """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
-    data : str
+    filename : str
         Filename of cFAC ascii output for the transitions
 
     Z: int
         Ion atomic number
-
     """
     headerlines: list[str] = []
-    with open(filename) as f:
+    with open(filename, encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
     GState = headerlines[8][8:]
     Multi = headerlines[10][9:]
@@ -154,9 +159,10 @@ def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
 
 
 def extend_ion_list(ion_handlers):
+    """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
     assert Path(BASEPATH).is_dir()
     for s in Path(BASEPATH).glob("**/*.lev.asc"):
-        ionstr = s.parts[-1].lstrip("0123456789").removesuffix(".lev.asc").removesuffix("_calib")
+        ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
         atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
@@ -165,6 +171,8 @@ def extend_ion_list(ion_handlers):
 
 
 class FACEnergyLevel(t.NamedTuple):
+    """One energy level of an FAC calculation."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -172,6 +180,11 @@ class FACEnergyLevel(t.NamedTuple):
 
 
 def read_levels_data(dflevels):
+    """Convert the FAC level table to level tuples, sorted by energy.
+
+    Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
+    needs because sorting by energy reorders the levels.
+    """
     energy_levels = []
     ilev_enlevelindex_map = {}
 
@@ -203,6 +216,8 @@ def read_levels_data(dflevels):
 
 
 class FACTransition(t.NamedTuple):
+    """One bound-bound transition of an FAC calculation, keyed by zero-based level id."""
+
     lowerlevel: int
     upperlevel: int
     A: float
@@ -210,6 +225,11 @@ class FACTransition(t.NamedTuple):
 
 
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
+    """Convert FAC lines to transitions referencing zero-based level ids.
+
+    Lines referencing an Ilev with no level are skipped. Returns the transitions and the number
+    of them touching each level name.
+    """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
@@ -232,6 +252,7 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the FAC data set, an early version of the Floers+25 calibrated data."""
     # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
@@ -241,7 +262,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     levels_file = ion_folder + f"/{ionstr}.lev.asc"
     lines_file = ion_folder + f"/{ionstr}.tr.asc"
 
-    if atomic_number == 92 and ion_stage in [2, 3]:
+    if atomic_number == 92 and ion_stage in {2, 3}:
         ion_folder = str(
             Path.home()
             / f"Google Drive/Shared drives/Atomic Data Group/Paper_Nd_U/FAC/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
@@ -255,7 +276,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         f" {artisatomic.path_for_log(ion_folder)}",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     assert Path(levels_file).exists()
     dflevels = GetLevels(filename=levels_file, Z=atomic_number, ionization_energy_in_ev=ionization_energy_in_ev)
@@ -277,11 +298,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from an FAC level name.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     # level names are "<configuration> Ilev=<index>" and the configuration is itself
     # space-separated, so drop the index suffix before taking the last orbital
     part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     return int(part.rstrip("spdfg"))

@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Lisbon data set. Not currently wired into the dispatch."""
+
 from collections import defaultdict
 from collections import namedtuple
 
@@ -9,20 +11,21 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 class LisbonReader:
-    """Copied from Andreas Floers code in git.gsi.de:nucastro/opacities.git
-    Class for extracting levels and lines from the Lisbon Atomic Group.
+    """Extract levels and lines from the Lisbon Atomic Group data.
 
-    Mimics the GFALLReader class.
+    Copied from Andreas Floers' code in git.gsi.de:nucastro/opacities.git, and mimics the
+    GFALLReader class.
 
     Attributes
     ----------
     levels : DataFrame
     lines : DataFrame
-
     """
 
     def __init__(self, data, priority=10) -> None:
-        """Parameters
+        """Store the Lisbon data and its priority.
+
+        Parameters
         ----------
         data : dict
             Dictionary containing one dictionary per species with
@@ -35,17 +38,16 @@ class LisbonReader:
         self._get_levels_lines(data)
 
     def _get_levels_lines(self, data):
-        """Generates `levels` and `lines` DataFrames.
+        """Generate the `levels` and `lines` DataFrames.
 
         Parameters
         ----------
         data : dict
             Dictionary containing one dictionary per species with
             keys `levels` and `lines`.
-
         """
         # carsus is an optional extra that is not a declared dependency of this package
-        from carsus.util import parse_selected_species  # noqa: I001 # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
+        from carsus.util import parse_selected_species  # ruff: ignore[unsorted-imports] # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
 
         lvl_list = []
         lns_list = []
@@ -111,10 +113,16 @@ class LisbonReader:
 
 
 def get_levelname(row):
+    """Name a Lisbon level from its label and J, since the label alone is not unique."""
     return f"{row.label}, j={row.j}"
 
 
 def read_levels_data(dflevels):
+    """Convert the Lisbon level table to level tuples, sorted by energy.
+
+    Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
+    transitions forbidden: this data set does not supply parities.
+    """
     energy_level_tuple = namedtuple("energy_level_tuple", "levelname energyabovegsinpercm g parity")
 
     energy_levels = []
@@ -134,6 +142,10 @@ def read_levels_data(dflevels):
 
 
 def read_lines_data(energy_levels, dflines):
+    """Convert Lisbon lines to transitions referencing zero-based level ids.
+
+    Returns the transitions and the number of them touching each level name.
+    """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
@@ -151,12 +163,13 @@ def read_lines_data(energy_levels, dflines):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the Lisbon data set. Not currently wired into the handler dispatch."""
     ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
 
-    assert elsym in ["Nd", "U"]
-    assert ion_stage in [2, 3]
+    assert elsym in {"Nd", "U"}
+    assert ion_stage in {2, 3}
 
     print(f"Reading Lisbon data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman})")
 

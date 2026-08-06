@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
+"""Build an ARTIS atomic database from published atomic data sets.
+
+Each data source has its own read*.py module; this package selects a handler per ion, calls it,
+and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2.txt.
+"""
+
 import argparse
 import contextlib
 import glob
 import json
 import math
 import multiprocessing as mp
+import operator
 import os
 import sys
 import typing as t
@@ -69,6 +76,12 @@ roman_numerals = (
 
 
 def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
+    """Get the ions to process and the handler to read each one with.
+
+    Read from artisatomicionhandlers.json when that file exists, so a run can be repeated
+    exactly; otherwise built from the hard-coded selection below plus whatever the readers'
+    extend_ion_list() functions find data for.
+    """
     inputhandlersfile = Path("artisatomicionhandlers.json")
 
     if inputhandlersfile.exists():
@@ -138,7 +151,7 @@ def sort_ion_handlers(
     """
     return sorted(
         ((atomic_number, sorted(listions, key=get_ion_stage)) for atomic_number, listions in ion_handlers),
-        key=lambda x: x[0],
+        key=operator.itemgetter(0),
     )
 
 
@@ -178,7 +191,7 @@ def add_handler_if_not_set(
         new_element_ions: list[int | tuple[int, str]] = [(ion_stage, handler)]
         ion_handlers_out.append((atomic_number, new_element_ions))
 
-    ion_handlers_out.sort(key=lambda x: x[0])
+    ion_handlers_out.sort(key=operator.itemgetter(0))
 
     return ion_handlers_out
 
@@ -213,6 +226,7 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
 
 
 def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
+    """Write an ARTIS atomic database from the configured ions and handlers."""
     if args is None:
         parser = argparse.ArgumentParser(
             formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -277,7 +291,7 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     else:
         os.makedirs(log_folder, exist_ok=True)
 
-    with Path(log_folder, "artisatomicionhandlers.json").open("w") as f:
+    with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
@@ -285,17 +299,23 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
 
 
 def clear_files(args: argparse.Namespace) -> None:
-    # clear out the file contents, so these can be appended to later
+    """Truncate the output files and write the phixs header, which the ions are appended to."""
     with (
-        open(os.path.join(args.output_folder, "adata.txt"), "w"),
-        open(os.path.join(args.output_folder, "transitiondata.txt"), "w"),
-        open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w") as fphixs,
+        open(os.path.join(args.output_folder, "adata.txt"), "w", encoding="utf-8"),
+        open(os.path.join(args.output_folder, "transitiondata.txt"), "w", encoding="utf-8"),
+        open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w", encoding="utf-8") as fphixs,
     ):
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
 def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
+    """Read every configured ion and append it to the output files, one element at a time.
+
+    Ion stages are processed in ascending order so that each ion's photoionisation targets, which
+    are levels of the next ion up, are already known, and so the top ion can be identified and
+    given no cross sections.
+    """
     for atomic_number, listions in ion_handlers:
         if not listions:
             continue
@@ -330,22 +350,15 @@ class IonData(t.NamedTuple):
 
 
 def get_default_handler(atomic_number: int, ion_stage: int) -> str:
+    """Get the data source to use for an ion when the handler list does not name one."""
     if atomic_number == 2 and ion_stage == 3:
         return "boyle"
     if USE_QUB_COBALT and atomic_number == 27:
         return "qub_cobalt"
     if atomic_number <= 28 or atomic_number == 56:  # Hillier data only
         return "cmfgen"
-    if (
-        (atomic_number == 38 and ion_stage in [1, 2, 3, 4, 5])
-        or (atomic_number == 39 and ion_stage in [2, 3])
-        or (atomic_number == 40 and ion_stage in [1, 2, 3])
-        or (atomic_number == 74 and ion_stage in [1, 2, 3])
-        or (atomic_number == 52 and ion_stage in [1, 2, 3, 4, 5])
-        or (atomic_number == 78 and ion_stage in [1, 2, 3])
-        or (atomic_number == 79 and ion_stage in [1, 2, 3])
-    ):
-        # QUB calculations take precedence over DREAM for W, Pt, and Au
+    # a QUB calculation is preferred over the Kurucz line lists, and over DREAM for W, Pt and Au
+    if (atomic_number, ion_stage) in readqubdata.default_handler_ions:
         return "qub_data"
     if atomic_number >= 57:  # DREAM database of Z > 57
         return "dream"
@@ -399,14 +412,14 @@ def read_ion_data(
     logfilepath = Path(
         args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
     )
-    with logfilepath.open("w") as flog:
+    with logfilepath.open("w", encoding="utf-8") as flog:
         log_and_print(
             flog,
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
         )
         log_and_print(flog, f"Source handler: {handler}")
         if handler == "qub_cobalt":
-            if ion_stage in [3, 4]:  # QUB levels and transitions, or single-level Co IV
+            if ion_stage in {3, 4}:  # QUB levels and transitions, or single-level Co IV
                 (
                     ionization_energy_ev,
                     energy_levels,
@@ -526,6 +539,7 @@ def read_ion_data(
 
 
 def log_and_print(flog, strout):
+    """Write a line to both stdout and this ion's log file."""
     print(strout)
     flog.write(strout + "\n")
 
@@ -544,6 +558,7 @@ def path_for_log(filepath: str | Path) -> str:
 
 
 def isfloat(value: t.Any) -> bool:
+    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3)."""
     try:
         float(value.replace("D", "E"))
     except ValueError:
@@ -553,6 +568,11 @@ def isfloat(value: t.Any) -> bool:
 
 
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
+    """Open a data file, trying the compressed variants of the name if it does not exist.
+
+    The data sets ship some files compressed and some not, and which ones varies between
+    downloads, so callers name the plain file and this finds whichever form is present.
+    """
     from xopen import xopen
 
     extensions = ["", ".zst", ".gz", ".xz"]
@@ -568,6 +588,7 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
 
 # split a list into evenly sized chunks
 def chunks[T](listin: list[T], chunk_size: int) -> list[list[T]]:
+    """Split a list into consecutive chunks of at most chunk_size items."""
     return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]
 
 
@@ -586,13 +607,19 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     ].itertuples(index=False):
         with contextlib.suppress(ValueError):
             ion_stage = int(ion_charge) + 1
-            dictioniz[(int(atomic_number), ion_stage)] = ioniz_ev
+            dictioniz[int(atomic_number), ion_stage] = ioniz_ev
     return dictioniz
 
 
 def match_hydrogenic_phixs(
     atomic_number: int, energy_levels: pl.DataFrame, ionization_energy_ev: float, ion_handler: str, args
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
+    """Estimate photoionization cross sections for a data set that supplies none.
+
+    Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
+    the lowest levels, scaled to that level's own ionisation threshold, with the upper ion's ground
+    state as the only target. Enabled by -use_hydrogenic_for_unknown_phixs.
+    """
     dict_get_n_func = {
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
@@ -648,7 +675,7 @@ def parallel_map[ResultType](
 ) -> list[ResultType]:
     """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
     # use a thread pool if we have no GIL (free threading)
-    use_multiprocessing = sys._is_gil_enabled()  # noqa: SLF001
+    use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
     if use_multiprocessing:
         mp.set_start_method("spawn", force=True)
@@ -670,8 +697,7 @@ def reduce_phixs_tables[KeyType](
     nphixspoints: int,
     phixsnuincrement: float,
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
-    """Receives a dictionary, with each item being a 2D array of energy and cross section points
-    Returns a dictionary with the items having been downsampled into a 1D array.
+    """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
 
@@ -708,6 +734,12 @@ def reduce_phixs_tables_worker(
     phixsnuincrement: float,
     tablein: np.ndarray,
 ) -> np.ndarray:
+    """Downsample one cross-section table onto the output's nu/nu_edge grid.
+
+    Each output point is the average of the input over that point's frequency bin, weighted by
+    nu^2 exp(-h nu / k T) so that the recombination rate at optimaltemperature is preserved
+    rather than the cross section itself.
+    """
     ryd_to_hz = 3289841960250880.5
     h_over_kb_in_K_sec = 4.799243073366221e-11
 
@@ -716,6 +748,7 @@ def reduce_phixs_tables_worker(
     # fac = math.exp(h_over_kb_in_K_sec * nu0 / optimaltemperature)
 
     def integrand(nu):
+        """Weight for averaging the cross section: proportional to the recombination rate."""
         return (nu**2) * math.exp(-h_over_kb_in_K_sec * nu / optimaltemperature)
 
     # def integrand_vec(nu_list):
@@ -840,6 +873,13 @@ lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
 def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, int]:
+    """Split a level name into its orbitals and term.
+
+    Returns (orbitals, 2S+1, L, parity, index in symmetry), where orbitals is the configuration
+    split into occupied orbitals and parent terms (kept in parentheses), and the index in
+    symmetry comes from the seniority letter if the name has one. Term components that cannot be
+    read come back as -1.
+    """
     max_n = 20  # maximum possible principle quantum number n
     instr = instr_orig
     instr = instr.split("[")[0]  # remove trailing bracketed J value
@@ -865,9 +905,9 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
             instr = instr[:-1]
             break
         if not str.isdigit(instr[-1]):
-            term_parity = (
-                term_parity + 2
-            )  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
+            term_parity += (
+                2  # this accounts for things like '3d7(4F)6d_5Pbe' in the Hillier levels. Shouldn't match these
+            )
         instr = instr[:-1]
         if all(char not in lchars for char in instr):
             print("Warning: Check QUB file formatting")
@@ -890,7 +930,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         instr = instr[:-1]
 
     def is_two_digit_n(strn: str) -> bool:
-        """Are these two digits a principal quantum number, rather than one digit of something else?
+        """Test whether two digits are a principal quantum number, not one digit of something else.
 
         n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
         '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.
@@ -943,7 +983,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 else:
                     # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]
-            elif instr[-1] in ["_", " "]:
+            elif instr[-1] in {"_", " "}:
                 instr = instr[:-1]
             else:
                 # print('Unknown character ' + instr[-1])
@@ -954,6 +994,11 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
 
 
 def get_parity_from_config(instr) -> int:
+    """Parity of a level from its configuration: the sum of l over the occupied orbitals, mod 2.
+
+    Returns 0 for even and 1 for odd. Parent terms in parentheses are not occupied orbitals and
+    are skipped, as are merge markers (see the l >= n check below).
+    """
     configsplit = interpret_configuration(instr)[0]
     lchars_lower = lchars.lower()
     lsum = 0
@@ -984,6 +1029,12 @@ def get_parity_from_config(instr) -> int:
 
 
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
+    """Fill in whichever of lowerlevel, upperlevel and forbidden a reader did not supply.
+
+    Readers that key their transitions by level name (namefrom/nameto) get the level ids joined
+    on here; readers that already supply ids keep them. A transition is forbidden when its two
+    levels have the same parity.
+    """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
 
@@ -1019,6 +1070,11 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
 
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
+    """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
+
+    Takes the element's ions together because an ion's photoionisation targets are levels of the
+    next ion up, so the target fractions can only be resolved once both are in hand.
+    """
     for i, iondata in enumerate(iondatalist):
         ion_stage = iondata.ion_stage
         upsilondict = iondata.upsilondict
@@ -1030,6 +1086,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
             ),
             "a",
+            encoding="utf-8",
         )
 
         log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
@@ -1076,7 +1133,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 .alias("coll_str")
             )
 
-        with open(os.path.join(args.output_folder, "adata.txt"), "a") as fatommodels:
+        with open(os.path.join(args.output_folder, "adata.txt"), "a", encoding="utf-8") as fatommodels:
             write_adata(
                 fatommodels,
                 atomic_number,
@@ -1092,7 +1149,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             if dftransitions_ion.is_empty()
             else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
         )
-        with open(os.path.join(args.output_folder, "transitiondata.txt"), "a") as ftransitiondata:
+        with open(os.path.join(args.output_folder, "transitiondata.txt"), "a", encoding="utf-8") as ftransitiondata:
             write_transition_data(
                 ftransitiondata,
                 atomic_number,
@@ -1117,7 +1174,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         dfenergylevels_ion, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
                     )
 
-            with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a") as fphixs:
+            with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
                 write_phixs_data(
                     fphixs,
                     atomic_number,
@@ -1141,6 +1198,12 @@ def write_adata(
     transition_count_of_level_name,
     flog,
 ) -> None:
+    """Append one ion's level list to adata.txt.
+
+    Level ids are zero-based in memory but numbered from one in the output. Each level line ends
+    with the level's name as a free-text comment; artistools reads it back as everything after the
+    fourth field, so it must not be padded.
+    """
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
@@ -1164,6 +1227,11 @@ def write_transition_data(
     dftransitions_ion: pl.DataFrame,
     flog,
 ) -> None:
+    """Append one ion's transitions to transitiondata.txt.
+
+    Level ids are zero-based in memory but numbered from one in the output, and every transition
+    is written with the lower id first.
+    """
     log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
@@ -1206,6 +1274,12 @@ def write_phixs_data(
     args,
     flog,
 ) -> None:
+    """Append one ion's photoionization cross sections to phixsdata_v2.txt.
+
+    Only levels with both targets and a threshold energy are written; the rest are counted and
+    reported. Level ids, of this ion and of the upper ion's targets, are zero-based in memory but
+    numbered from one in the output.
+    """
     # a level gets a table only if it has photoionisation targets and a threshold energy. The
     # threshold arrays start as zeros and are only filled in for levels that got a cross-section
     # table, so a threshold of exactly zero means "no data for this level". (A negative threshold
@@ -1265,8 +1339,9 @@ def write_phixs_data(
 def write_compositionfile(
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace
 ) -> None:
+    """Write compositiondata.txt, listing each element's contiguous range of ion stages."""
     print("Writing compositiondata.txt")
-    with open(os.path.join(args.output_folder, "compositiondata.txt"), "w") as fcomp:
+    with open(os.path.join(args.output_folder, "compositiondata.txt"), "w", encoding="utf-8") as fcomp:
         fcomp.write(f"{len(ion_handlers):d}\n")
         fcomp.write("0\n0\n")
         for atomic_number, listions in ion_handlers:

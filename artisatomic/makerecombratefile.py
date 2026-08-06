@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # import itertools
+"""Write recombrates.txt from the Nahar total recombination rate files."""
+
 import glob
+import string
 import sys
 from collections import namedtuple
 from pathlib import Path
@@ -13,11 +16,12 @@ from artistools import get_elsymbolslist
 
 
 def read_nahar_rrcfile(filename, noprint=False):
+    """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
     if not noprint:
         print(f"  reading {filename}")
 
     header_row: list[str] = []
-    with open(filename) as filein:
+    with open(filename, encoding="utf-8") as filein:
         while True:
             line = filein.readline()
             if not line:  # end of file, otherwise a file without the marker would loop forever
@@ -51,6 +55,7 @@ def read_nahar_rrcfile(filename, noprint=False):
 
 
 def main():
+    """Write recombrates.txt from the Nahar recombination rate files."""
     # Shull & Steenberg 1982
     A_rad: dict[tuple[int, int], float] = {}
     X_rad: dict[tuple[int, int], float] = {}
@@ -93,7 +98,7 @@ def main():
                 ):  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
                     ionstr = Path(naharfilename).name.split(".")[0]  # should be something like 'fe2'
-                    elsymbol = ionstr.rstrip("0123456789")
+                    elsymbol = ionstr.rstrip(string.digits)
                     lowerionstage = int(ionstr[len(elsymbol) :])
                     upperionstage = lowerionstage + 1
                     atomic_number = get_elsymbolslist().index(elsymbol.title())

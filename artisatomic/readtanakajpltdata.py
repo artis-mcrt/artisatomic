@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
+
 from pathlib import Path
 
 import pandas as pd
@@ -9,6 +11,7 @@ jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" /
 
 
 def extend_ion_list(ion_handlers, maxionstage=None):
+    """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     tanakaions = sorted(
         [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
@@ -22,6 +25,13 @@ def extend_ion_list(ion_handlers, maxionstage=None):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the Tanaka et al. Japan-Lithuania database.
+
+    Levels and transitions are returned as DataFrames. The file numbers levels from one and
+    quotes g_u * A rather than A, so ids are shifted to the zero-based convention used in
+    memory and the rate is divided by the upper level's statistical weight. Self-transitions
+    (equal upper and lower level) appear in some files and are dropped with a warning.
+    """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     with artisatomic.xopen_check_extension(jpltpath / filename) as fin:
@@ -71,7 +81,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         assert dflevels.height == levelcount
 
         line = fin.readline().strip()
-        assert line in ("# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)")
+        assert line in {"# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"}
         if line == "# Transitions":
             assert fin.readline().strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
         dftransitions = pl.from_pandas(
@@ -116,6 +126,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a JPLT level name.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
     assert n >= 0
     assert n < 20

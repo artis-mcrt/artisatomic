@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Download the Nahar NORAD data files that the nahar handler reads."""
+
 import shutil
 from pathlib import Path
 
@@ -6,6 +8,7 @@ import requests
 
 
 def main():
+    """Download each Nahar data file that is not already present."""
     file_list = [
         "fe1.en.ls.txt",
         "fe1.f.ls.txt",

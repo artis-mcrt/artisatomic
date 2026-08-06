@@ -1,3 +1,5 @@
+"""Read ground states only, from the NIST ground-state table."""
+
 import os.path
 import typing as t
 from collections import defaultdict
@@ -11,6 +13,8 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 class EnergyLevel(t.NamedTuple):
+    """A ground state read from the NIST table."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -23,6 +27,11 @@ datafilepath = Path(
 
 
 def read_ground_levels(atomic_number, ion_stage, flog):
+    """Read the ground state of one ion from the NIST ground-state table.
+
+    This handler supplies a single level per ion and never any transitions, so an ion using it
+    contributes only its ground state and ionization energy to the output.
+    """
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
@@ -45,6 +54,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
 
 def extend_ion_list(ion_handlers):
+    """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
     groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
 
     for _index, row in groundstatesdata.iterrows():

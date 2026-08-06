@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Plot ARTIS recombination rates against the published Nahar values."""
+
 import math
 
 import matplotlib.axes as mplax
@@ -49,7 +51,7 @@ for ionindex in range(4):
     ylistartisold = []
     ylistSS82 = []  # radiative recombination
     ylistSS82withDI = []  # radiative and dielectric recombination
-    with open(f"{folderprefix}recombinationartisoutput.txt") as filein:
+    with open(f"{folderprefix}recombinationartisoutput.txt", encoding="utf-8") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "0" and int(row[5]) == ionindex:
@@ -75,7 +77,7 @@ for ionindex in range(4):
                 # print('DER Correction',alphadSS82/ylistSS82[-1])
     #    print(Arad[ionindex],Bdi[ionindex],T0[ionindex],T1[ionindex])
 
-    with open(f"{folderprefix}recombinationartisoutputold.txt") as filein:
+    with open(f"{folderprefix}recombinationartisoutputold.txt", encoding="utf-8") as filein:
         for line in filein:
             row = line.split()
             if row[3] == "21" and int(row[5]) == ionindex:
@@ -114,7 +116,7 @@ for ionindex in range(4):
     ]:
         xlist = []
         ylist = []
-        with open(folderprefix + artisoutputfilename) as filein:
+        with open(folderprefix + artisoutputfilename, encoding="utf-8") as filein:
             for line in filein:
                 row = line.split()
                 if line.startswith("Alpha result:") and row[3] == "0" and int(row[5]) == ionindex:
@@ -127,12 +129,19 @@ for ionindex in range(4):
 
 
 def naharfeiitonumber(strin):
+    """Parse one rate from the fixed-width tables in recombinationdatanahar9*fe*.txt.
+
+    Those files hold tokens like "1.23@210#", where characters 0-3 are the mantissa and 6-7 are
+    the exponent, which is always negative: that token is 1.23e-10. The characters in between are
+    an artefact of however the tables were extracted, and the field widths are relied on rather
+    than parsed, so this only works for those files.
+    """
     return float(strin[:4]) * 10 ** (-float(strin[6:8]))
 
 
 xlist = []
 ylist = []
-with open(f"{folderprefix}recombinationdatanahar97fei.txt") as filein:
+with open(f"{folderprefix}recombinationdatanahar97fei.txt", encoding="utf-8") as filein:
     for line in filein:
         row = line.split()
         xlist.append(float(row[0]))
@@ -147,7 +156,7 @@ for filename, label, ax in [
 ]:
     xlist = []
     ylist = []
-    with open(folderprefix + filename) as filein:
+    with open(folderprefix + filename, encoding="utf-8") as filein:
         for line in filein:
             row = line.split()
             xlist.append(float(row[0]))

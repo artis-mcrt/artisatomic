@@ -1,3 +1,5 @@
+"""Read helium levels and transitions from the Boyle AOIFE data set."""
+
 import os.path
 from collections import defaultdict
 from collections import namedtuple
@@ -17,6 +19,10 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 def read_ionization_data(atomic_number, ion_stage):
+    """Ionization energy in eV of one ion, from the AOIFE HDF5 file.
+
+    He III is a bare nucleus, so the file has no entry for it and a sentinel is used instead.
+    """
     assert aoife_dataset is not None
     ionization_data = aoife_dataset["/ionization_data"]
 
@@ -33,6 +39,12 @@ def read_ionization_data(atomic_number, ion_stage):
 
 
 def read_levels_data(atomic_number, ion_stage):
+    """Read one ion's energy levels from the AOIFE HDF5 file.
+
+    The file numbers ion stages from zero, so ion_stage is matched against ion_number + 1.
+    Levels have no spectroscopic names, so each is named after its zero-based level number,
+    in the same format read_lines_data() uses to count transitions per level.
+    """
     assert aoife_dataset is not None
     levels_data = aoife_dataset["/levels_data"]
 
@@ -56,6 +68,12 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
+    """Read one ion's bound-bound transitions from the AOIFE HDF5 file.
+
+    Returns the transitions and the number of them touching each level name. The file's level
+    numbers are already zero-based, matching the level ids used in memory. No collision
+    strengths are available, so every transition gets the -1 "unknown" sentinel.
+    """
     assert aoife_dataset is not None
     lines_data = aoife_dataset["/lines_data"]
 
@@ -99,6 +117,7 @@ def read_lines_data(atomic_number, ion_stage):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage):
+    """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
     # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
