@@ -993,7 +993,9 @@ def read_phixs_tables(
             photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
                 lowerlevelname_a
             )
-            photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / lambdaangstroms[levelindex]
+            # abs() as at the phixs-fit sites above: CMFGEN writes a negative Lam(A) for some
+            # levels, and the sign must not reach the threshold energy
+            photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
     return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
 

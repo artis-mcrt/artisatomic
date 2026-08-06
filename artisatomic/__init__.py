@@ -438,7 +438,12 @@ def read_ion_data(
                     photoionization_targetfractions,
                     photoionization_thresholds_ev,
                 ) = readqubdata.read_qub_photoionizations(
-                    atomic_number, ion_stage, levelcount=len(energy_levels), args=args, flog=flog
+                    atomic_number,
+                    ion_stage,
+                    energy_levels=energy_levels,
+                    ionization_energy_ev=ionization_energy_ev,
+                    args=args,
+                    flog=flog,
                 )
 
         elif handler == "nahar":
@@ -614,6 +619,19 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
             ion_stage = int(ion_charge) + 1
             dictioniz[int(atomic_number), ion_stage] = ioniz_ev
     return dictioniz
+
+
+def photoionization_thresholds_ev_of_levels(energy_levels, ionization_energy_ev: float) -> npt.NDArray[np.float64]:
+    """Photoionization threshold of every level: the ionization energy less its excitation energy.
+
+    A level at or above the ionization energy has nothing to ionize from, so it gets NaN, which
+    write_phixs_data() skips. Use this wherever the threshold is not read from a data file, so
+    that phixsdata_v2.txt only ever carries positive threshold energies.
+    """
+    dflevels = leveltuples_to_pldataframe(energy_levels)
+    thresholds_ev = ionization_energy_ev - hc_in_ev_cm * dflevels["energyabovegsinpercm"].to_numpy()
+
+    return np.where(thresholds_ev > 0.0, thresholds_ev, np.nan)
 
 
 def match_hydrogenic_phixs(
@@ -1282,7 +1300,6 @@ def write_phixs_data(
     """
     # a level gets a table only if it has targets and a threshold energy. The threshold arrays
     # start as NaN and are filled in only for levels that got a table, so NaN means "no data".
-    # Every number is a real threshold, including readqubdata's -1.0 ("derive it from the levels").
     levelids_with_targets = [
         levelid for levelid, targetlist in enumerate(photoionization_targetfractions) if targetlist
     ]
@@ -1290,6 +1307,17 @@ def write_phixs_data(
         levelid for levelid in levelids_with_targets if not np.isnan(photoionization_thresholds_ev[levelid])
     ]
     skipped_no_threshold = len(levelids_with_targets) - len(levelids_to_write)
+
+    # ARTIS reads this column as a photoionization edge, so a non-positive value is meaningless.
+    # Not an assert: this guards the output file and must survive python -O.
+    nonpositive = [levelid for levelid in levelids_to_write if photoionization_thresholds_ev[levelid] <= 0.0]
+    if nonpositive:
+        msg = (
+            f"Z={atomic_number} ion_stage={ion_stage}: {len(nonpositive)} levels have a non-positive"
+            f" photoionization threshold energy, e.g. level {nonpositive[0] + 1} with"
+            f" {photoionization_thresholds_ev[nonpositive[0]]:.6e} eV"
+        )
+        raise ValueError(msg)
 
     log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata2.txt'")
     flog.write(
