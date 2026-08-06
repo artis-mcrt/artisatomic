@@ -2,6 +2,7 @@
 
 import os
 import re
+import string
 import typing as t
 from pathlib import Path
 
@@ -12,7 +13,7 @@ import artisatomic
 
 kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
 if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
-    kuruczdatapath = kuruczdatapath / "test_sample"
+    kuruczdatapath /= "test_sample"
 
 
 def parse_gfall(fname: str) -> pl.LazyFrame:
@@ -22,6 +23,12 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     format. The two levels are ordered into lower/upper by energy here, since the file lists
     them in an arbitrary order. A negative energy in the file means a predicted (rather than
     measured) level, which is recorded in a "theoretical" flag and the magnitude kept.
+
+    Returns:
+        the transitions, each carrying its lower and upper level.
+
+    Raises:
+        ValueError: if the file holds more than one ion.
     """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
@@ -79,7 +86,8 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     import pandas as pd
 
     gfall = (
-        pl.from_pandas(
+        pl
+        .from_pandas(
             pd.read_fwf(
                 fname,
                 widths=field_widths,
@@ -102,13 +110,15 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     )
     gfall = gfall.with_columns(
-        pl.when(pl.col("order_lower_upper"))
+        pl
+        .when(pl.col("order_lower_upper"))
         .then(f"{column}_first")
         .otherwise(f"{column}_second")
         .alias(f"{column}_lower")
         for column in double_columns
     ).with_columns(
-        pl.when(pl.col("order_lower_upper"))
+        pl
+        .when(pl.col("order_lower_upper"))
         .then(f"{column}_second")
         .otherwise(f"{column}_first")
         .alias(f"{column}_upper")
@@ -145,6 +155,12 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 
     Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
     has no data for it.
+
+    Returns:
+        the path of this ion's line list.
+
+    Raises:
+        FileNotFoundError: if the ion has no Kurucz file.
     """
     extended_atoms_filenames = [
         f"gf{atomic_number:02d}{ion_charge:02d}.lines.zst",
@@ -173,6 +189,9 @@ def read_levels_and_transitions(
     The files are transition lists rather than level lists, so the levels are recovered by
     taking the distinct lower and upper levels of every transition. The ionization energy comes
     from NIST rather than the file.
+
+    Returns:
+        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
     """
     ion_charge = ion_stage - 1
 
@@ -194,7 +213,8 @@ def read_levels_and_transitions(
 
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
     dflevels = (
-        pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
+        pl
+        .concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
         # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
         # without it the level names in adata.txt can differ from run to run
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
@@ -220,18 +240,17 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
 
     transitions = (
-        gfall.select(
-            [
-                "atomic_number",
-                "ion_charge",
-                "energyabovegsinpercm_lower",
-                "j_lower",
-                "energyabovegsinpercm_upper",
-                "j_upper",
-                "wavelength_nm",
-                "loggf",
-            ]
-        )
+        gfall
+        .select([
+            "atomic_number",
+            "ion_charge",
+            "energyabovegsinpercm_lower",
+            "j_lower",
+            "energyabovegsinpercm_upper",
+            "j_upper",
+            "wavelength_nm",
+            "loggf",
+        ])
         .with_columns(gf=10 ** pl.col("loggf"))
         .drop("loggf")
         .join(
@@ -274,7 +293,7 @@ def read_levels_and_transitions(
     }
     artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions, transition_count_of_level_name
@@ -288,6 +307,9 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
+
+    Returns:
+        the principal quantum number of the valence electron, or 1 if the label cannot be read.
     """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
@@ -300,7 +322,7 @@ def get_level_valence_n(levelname: str):
         if not part[-1].isdigit():
             print(f"WARNING: Could not find n in {levelname}. Using n=1")
             return 1
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     part = part.strip("spdfghijklmnopqr")
 
     # inefficient way to find the last number in a string

@@ -54,12 +54,12 @@ class HillierTransition(t.NamedTuple):
 _pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64}
 
 # derived from the NamedTuples so the row classes stay the single source of the frame layouts
-hillier_level_schema = pl.Schema(
-    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()}
-)
-hillier_transition_schema = pl.Schema(
-    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()}
-)
+hillier_level_schema = pl.Schema({
+    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()
+})
+hillier_transition_schema = pl.Schema({
+    name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()
+})
 
 # every schema column except parity is read straight out of the level table
 hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname != "parity")
@@ -255,7 +255,11 @@ hyd_gaunt_factor: dict[int, list[float]] = {}
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
-    """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
+    """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II.
+
+    Returns:
+        the directory of this ion's CMFGEN data.
+    """
     return str(
         (
             artisatomic.PYDIR
@@ -274,6 +278,9 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     Returns -1 for any component that cannot be read, which readers log rather than treat as an
     error. Parity comes from the name's 'e'/'o' suffix where it has one; otherwise it is summed
     over the occupied orbitals, which is what handles CMFGEN's merged high-l levels.
+
+    Returns:
+        (2S+1, L, parity), with -1 for anything unreadable.
     """
     config = config.split("[", maxsplit=1)[0]
 
@@ -300,7 +307,9 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         if config[-1] == "o":
             return (-1, -1, 1)
         return (-1, -1, -1)
-    try:
+    # the whole parse is guarded: a malformed name can fail at the int() or at either index,
+    # and any of those means the term is simply unreadable
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
             # No 'e'/'o' suffix to read the parity from. CMFGEN writes its merged high-l levels
@@ -340,6 +349,12 @@ def read_levels_and_transitions(
 
     Transitions are keyed by level name here. add_level_ids_forbidden() joins the level ids on
     afterwards, once the level frame has been given its ids.
+
+    Returns:
+        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
+
+    Raises:
+        ValueError: if the file's column header is unusable, or its level or transition count disagrees with what was read.
     """
     transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
@@ -363,8 +378,8 @@ def read_levels_and_transitions(
 
     filename = Path(
         hillier_ion_folder(atomic_number, ion_stage),
-        ions_data[(atomic_number, ion_stage)].folder,
-        ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
+        ions_data[atomic_number, ion_stage].folder,
+        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
     )
 
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
@@ -562,6 +577,9 @@ def read_phixs_tables(
     whose targets all came out zero. The files give fit coefficients rather than tabulated cross
     sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
     functions that evaluate them.
+
+    Returns:
+        the cross sections, the target configurations and fractions, and the threshold energies, indexed by level id.
     """
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
@@ -587,7 +605,7 @@ def read_phixs_tables(
     # charge of the ion left behind by the photoionisation, i.e. CMFGEN's ZION (= ZXzV, which it
     # reads from the oscillator file, where it equals the ionisation stage for every ion here)
     zion = ion_stage
-    photfilenames = ions_data[(atomic_number, ion_stage)].photfilenames
+    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
@@ -599,10 +617,10 @@ def read_phixs_tables(
     phixs_type_levels = defaultdict(list)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
-        if photfilename == "":
+        if not photfilename:
             continue
         filename = Path(
-            hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
+            hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
         artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
@@ -660,7 +678,7 @@ def read_phixs_tables(
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
-                    if targetlevelname == "":
+                    if not targetlevelname:
                         print("ERROR: no upper level name")
                         sys.exit()
                     # print(f"Reading level {lowerlevelindex} '{lowerlevelname}'")
@@ -814,8 +832,8 @@ def read_phixs_tables(
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
                             # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(lowerlevelname))
 
-                elif crosssectiontype in [20, 21, 22]:  # sampled data points
-                    if len(row) == 2 and row_is_all_floats and lowerlevelname != "":
+                elif crosssectiontype in {20, 21, 22}:  # sampled data points
+                    if len(row) == 2 and row_is_all_floats and lowerlevelname:
                         if lowerlevelname not in phixstables[filenum]:
                             phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
 
@@ -823,11 +841,11 @@ def read_phixs_tables(
                         thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
                         enryd = float(row[0].replace("D", "E"))
 
-                        if crosssectiontype in [
+                        if crosssectiontype in {
                             20,
                             21,
                             22,
-                        ]:  # the x value is actually a fraction of the threshold, not an energy
+                        }:  # the x value is actually a fraction of the threshold, not an energy
                             if pointnumber == 0 and abs(enryd - 1.0) > 0.5:
                                 print(
                                     f"{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is not near"
@@ -875,8 +893,8 @@ def read_phixs_tables(
                     # actually read instead. (The previous check tested `targetlevelname in
                     # <2-D float ndarray>`, which is always False, so it never ran.)
                     if (
-                        crosssectiontype in [20, 21, 22]
-                        and lowerlevelname != ""
+                        crosssectiontype in {20, 21, 22}
+                        and lowerlevelname
                         and lowerlevelname in phixstables[filenum]
                         and pointnumber != numpointsexpected
                     ):
@@ -918,12 +936,20 @@ def read_phixs_tables(
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
-                phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
-                    (
-                        phixstargets[filenum],
-                        phixs_at_threshold,
-                    )
+            except IndexError:
+                # The cross section is zero everywhere on the output grid, so the level is dropped
+                # and gets no photoionization at all. For a type-8 (offset) cross section this
+                # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
+                # nu/nu_edge grid that reduce_phixs_tables() samples.
+                num_levelnames_with_zero_crosssection += 1
+                artisatomic.log_and_print(
+                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
                 )
+            else:
+                phixs_targetconfigfactors_of_levelname[lowerlevelname].append((
+                    phixstargets[filenum],
+                    phixs_at_threshold,
+                ))
 
                 # add the new phixs table, or replace the
                 # existing one if this target has a larger threshold cross section
@@ -935,15 +961,6 @@ def read_phixs_tables(
                 else:
                     print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
                     # sys.exit()
-            except IndexError:
-                # The cross section is zero everywhere on the output grid, so the level is dropped
-                # and gets no photoionization at all. For a type-8 (offset) cross section this
-                # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
-                # nu/nu_edge grid that reduce_phixs_tables() samples.
-                num_levelnames_with_zero_crosssection += 1
-                artisatomic.log_and_print(
-                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
-                )
 
     if num_levelnames_with_zero_crosssection > 0:
         artisatomic.log_and_print(
@@ -1010,6 +1027,9 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
     so the cross section is zero until the offset threshold.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
@@ -1052,13 +1072,16 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
 
     Depends only on the quantum numbers, not on the level, so cache it: the callers below run
     once per level per ion.
+
+    Returns:
+        the (2l+1)-weighted sum of the cross sections of one shell.
     """
-    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[(n, l_start)]))
+    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[n, l_start]))
     for l in range(l_start, l_end + 1):
-        if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], hyd_phixs_energygrid_ryd[(n, l_start)]):
+        if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             print("TABLE MISMATCH")
             sys.exit()
-        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[(n, l)]
+        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
 
     return arr_sigma_summed_over_l
 
@@ -1072,10 +1095,13 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     since CMFGEN scales it by 1 / zion**2 rather than by the (n_eff / (n * zion))**2 of type 2.
 
     See SUB_PHOT_GEN in CMFGEN's newsubs/sub_phot_gen.f.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     assert l_start >= 0
     assert l_end <= n - 1
-    energygrid = hyd_phixs_energygrid_ryd[(n, l_start)]
+    energygrid = hyd_phixs_energygrid_ryd[n, l_start]
     phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
@@ -1125,6 +1151,9 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
     already accounts for the effective charge, so the result must not be rescaled by the caller.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = hyd_gaunt_energygrid_ryd[n]
     phixstable = np.empty((len(energygrid), 2))
@@ -1152,6 +1181,9 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     """Evaluate an Opacity Project fit of Peach, Sraph and Seaton (1988) (CMFGEN type 5).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
@@ -1176,11 +1208,14 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 # only applies to helium
 # the threshold cross sections seems ok, but energy dependence could be slightly wrong
 # what is the h parameter that is not used??
-def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # noqa: ARG001
+def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ignore[unused-function-argument]
     """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. A cubic in log10(E/E_th)
     below the break at e, a straight line above it.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
@@ -1206,6 +1241,9 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     actual photon energy. See the type-9 branch of SUB_PHOT_GEN in CMFGEN's
     newsubs/sub_phot_gen.f, where U = FREQ / CROSS_A(LMIN+3) / EV_TO_HZ is the photon energy in
     eV divided by E_0, and each shell after the first is gated on FREQ >= EV_TO_HZ * E_th_eV.
+
+    Returns:
+        (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
@@ -1240,11 +1278,14 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
     Where the file gives one value for a whole term but the level list is J-split, the value is
     shared over the term's J levels in proportion to g_i * g_j, so that summing over the term
     recovers the file's value.
+
+    Returns:
+        upsilon values keyed by a (lower, upper) pair of zero-based level ids.
     """
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
     upsilondict: dict[tuple[int, int], float] = {}
-    coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
-    if coldatafilename == "":
+    coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
+    if not coldatafilename:
         artisatomic.log_and_print(flog, "No collisional data file specified")
         return upsilondict
 
@@ -1276,7 +1317,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
     }
 
     filename = os.path.join(
-        hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, coldatafilename
+        hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, coldatafilename
     )
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
     coll_lines_in = 0
@@ -1343,7 +1384,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
-                try:
+                # every level lookup below can raise KeyError for a name that is not in the
+                # level list, so the whole block is guarded rather than each lookup
+                try:  # ruff: ignore[too-many-statements-in-try-clause]
                     if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
                         artisatomic.log_and_print(
                             flog,
@@ -1357,12 +1400,12 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     for id_lower in level_ids_of_level_name[namefrom]:
                         for id_lower2 in level_ids_of_level_name[namefrom]:
                             if id_lower < id_lower2 and (id_lower, id_lower2) not in upsilondict:
-                                upsilondict[(id_lower, id_lower2)] = -2.0
+                                upsilondict[id_lower, id_lower2] = -2.0
 
                     for id_upper in level_ids_of_level_name[nameto]:
                         for id_upper2 in level_ids_of_level_name[nameto]:
                             if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
-                                upsilondict[(id_upper, id_upper2)] = -2.0
+                                upsilondict[id_upper, id_upper2] = -2.0
 
                     # When the collision data is given between LS terms but the level list is
                     # J-split, the term effective collision strength is shared over the J levels
@@ -1439,6 +1482,9 @@ def get_photoiontargetfractions(
     configuration that names several J-split levels of the upper ion is shared over them in
     proportion to their statistical weights. Levels with no cross-section data (None) and levels
     whose targets could not be matched both fall back to the upper ion's ground state.
+
+    Returns:
+        per level id, the (upper ion level id, fraction) pairs it photoionises to.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
@@ -1492,7 +1538,7 @@ def read_hyd_phixsdata():
     # (repeated calls happen in the tests) must not leave sums computed from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
-    with open(os.devnull, "w") as devnull:
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
         (
             _hillier_ionization_energy_ev,
             dfhillier_energy_levels,
@@ -1515,7 +1561,7 @@ def read_hyd_phixsdata():
     max_n = -1
     l_start_u = 0.0
     l_del_u = 0.0
-    with open(hyd_filename) as fhyd:
+    with open(hyd_filename, encoding="utf-8") as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1527,11 +1573,11 @@ def read_hyd_phixsdata():
             if " ".join(row[1:]) == "!L_DEL_U":
                 l_del_u = float(row[0].replace("D", "E"))
 
-            if max_n >= 0 and line.strip() == "":
+            if max_n >= 0 and not line.strip():
                 break
 
         for line in fhyd:
-            if line.strip() == "":
+            if not line.strip():
                 continue
 
             n, l, num_points = (int(x) for x in line.split())
@@ -1540,7 +1586,7 @@ def read_hyd_phixsdata():
             xs_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
-                xs_values = xs_values + values_thisline
+                xs_values += values_thisline
                 if len(xs_values) == num_points:
                     break
                 if len(xs_values) > num_points:
@@ -1550,12 +1596,12 @@ def read_hyd_phixsdata():
                     )
                     sys.exit()
 
-            hyd_phixs_energygrid_ryd[(n, l)] = np.array(
-                [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
-            )
+            hyd_phixs_energygrid_ryd[n, l] = np.array([
+                e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)
+            ])
             # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
             # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
-            hyd_phixs[(n, l)] = np.array([10 ** (8 + logxs) for logxs in xs_values])
+            hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
             # hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
@@ -1563,7 +1609,7 @@ def read_hyd_phixsdata():
     max_n = -1
     n_start_u = 0.0
     n_del_u = 0.0
-    with open(hyd_filename) as fhyd:
+    with open(hyd_filename, encoding="utf-8") as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1575,11 +1621,11 @@ def read_hyd_phixsdata():
                 elif row[1] == "!N_DEL_U":
                     n_del_u = float(row[0].replace("D", "E"))
 
-            if max_n >= 0 and line.strip() == "":
+            if max_n >= 0 and not line.strip():
                 break
 
         for line in fhyd:
-            if line.strip() == "":
+            if not line.strip():
                 continue
 
             n, num_points = (int(x) for x in line.split())
@@ -1588,7 +1634,7 @@ def read_hyd_phixsdata():
             gaunt_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
-                gaunt_values = gaunt_values + values_thisline
+                gaunt_values += values_thisline
                 if len(gaunt_values) == num_points:
                     break
                 if len(gaunt_values) > num_points:
@@ -1610,6 +1656,9 @@ def extend_ion_list(
 
     Hydrogen is excluded by default: its levels are also the source of the hydrogenic
     photoionisation tables used as a fallback for other elements.
+
+    Returns:
+        the handler list with every CMFGEN ion added.
     """
     for atomic_number, ion_stage in ions_data:
         if maxionstage is not None and ion_stage > maxionstage:

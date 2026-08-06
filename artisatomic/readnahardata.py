@@ -53,12 +53,10 @@ class NaharEnergyLevel(t.NamedTuple):
 
 
 # derived from the row class so it stays the single source of the frame layout
-nahar_level_schema = pl.Schema(
-    {
-        name: {str: pl.String, float: pl.Float64, int: pl.Int64}[fieldtype]
-        for name, fieldtype in NaharEnergyLevel.__annotations__.items()
-    }
-)
+nahar_level_schema = pl.Schema({
+    name: {str: pl.String, float: pl.Float64, int: pl.Int64}[fieldtype]
+    for name, fieldtype in NaharEnergyLevel.__annotations__.items()
+})
 
 
 def build_nahar_levels_and_phixs(
@@ -68,7 +66,11 @@ def build_nahar_levels_and_phixs(
     args,
     flog,
 ) -> tuple[pl.DataFrame, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Build the level table for a Nahar-only ion and attach its photoionization cross sections."""
+    """Build the level table for a Nahar-only ion and attach its photoionization cross sections.
+
+    Returns:
+        the levels sorted by energy, the cross sections, and the threshold energies.
+    """
     # the explicit schema keeps an empty level list (e.g. a missing energy file) producing a frame
     # with the columns that the sort below and write_adata() expect
     dfenergy_levels = pl.DataFrame(nahar_energy_levels, schema=nahar_level_schema, orient="row")
@@ -135,6 +137,12 @@ def read_nahar_energy_level_file(
     Returns the levels, the core states, the electron configurations of the bound states, and the
     ionization potential in Rydberg. A missing file is logged and returns empty data rather than
     raising, so an ion with no Nahar data simply contributes nothing.
+
+    Returns:
+        the levels, the core states, the bound-state configurations, and the ionization potential in Rydberg.
+
+    Raises:
+        ValueError: if the file has no ionization potential line, or a table iii row is not in the expected format.
     """
     # state tuples are (2S+1, L, parity, index in symmetry)
     nahar_configurations: dict[tuple[int, int, int, int], str] = {}
@@ -146,7 +154,7 @@ def read_nahar_energy_level_file(
         artisatomic.log_and_print(flog, f"{artisatomic.path_for_log(path_nahar_energy_file)} does not exist")
     else:
         artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_nahar_energy_file)}")
-        with open(path_nahar_energy_file) as fenlist:
+        with open(path_nahar_energy_file, encoding="utf-8") as fenlist:
             nahar_core_states = read_nahar_core_states(fenlist)
 
             nahar_configurations, nahar_ionization_potential_rydberg = read_nahar_configurations(fenlist, flog)
@@ -277,6 +285,9 @@ def read_nahar_core_states(fenlist) -> list[NaharCoreState]:
 
     Reads from the current position of the open file and leaves it just past the table. Core
     state id n is stored at index n - 1, and the file's numbering is checked against that.
+
+    Returns:
+        the core states, with core state id n at index n - 1.
     """
     while True:
         line = fenlist.readline()
@@ -316,10 +327,13 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
     Returns the cross-section tables and each state's threshold energy in eV. The tables are
     (energy in Rydberg, cross section in Megabarns) pairs, at the file's own energy resolution;
     reduce_phixs_tables() downsamples them onto the output grid later.
+
+    Returns:
+        the cross-section tables and the threshold energies, keyed by state.
     """
     nahar_phixs_tables = {}
     thresholds_ev_dict = {}
-    with open(path_nahar_px_file) as fenlist:
+    with open(path_nahar_px_file, encoding="utf-8") as fenlist:
         while True:
             line = fenlist.readline()
             if not line:
@@ -359,7 +373,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
 
             number_of_points = int(fenlist.readline().split()[1])
             binding_energy_ryd = float(fenlist.readline().split()[0])
-            thresholds_ev_dict[(twosplusone, l, parity, indexinsymmetry)] = binding_energy_ryd * ryd_to_ev
+            thresholds_ev_dict[twosplusone, l, parity, indexinsymmetry] = binding_energy_ryd * ryd_to_ev
 
             if not args.nophixs:
                 phixsarray = np.array([list(map(float, fenlist.readline().split())) for _ in range(number_of_points)])
@@ -368,7 +382,7 @@ def read_nahar_phixs_tables(path_nahar_px_file, atomic_number, ion_stage, args):
                     fenlist.readline()
                 phixsarray = np.zeros((2, 2))
 
-            nahar_phixs_tables[(twosplusone, l, parity, indexinsymmetry)] = phixsarray
+            nahar_phixs_tables[twosplusone, l, parity, indexinsymmetry] = phixsarray
 
     return nahar_phixs_tables, thresholds_ev_dict
 
@@ -381,6 +395,9 @@ def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, 
     it just past the table. Only bound states appear here, so levels above the ionization
     threshold have no entry. The index in symmetry comes from the seniority letter that prefixes
     each term, ascending for even parity and descending for odd.
+
+    Returns:
+        the bound-state configurations keyed by state, and the ionization potential in Rydberg.
     """
     nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     nahar_ionization_potential_rydberg = -1.0
@@ -421,7 +438,7 @@ def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, 
                 indexinsymmetry = alphabets.index(state[17]) + 1
 
             # print(state,energy,twosplusone,l,parity,indexinsymmetry)
-            nahar_configurations[(twosplusone, l_val, parity, indexinsymmetry)] = state
+            nahar_configurations[twosplusone, l_val, parity, indexinsymmetry] = state
         elif found_table:
             break
 
@@ -434,13 +451,16 @@ def reduce_configuration(instr: str) -> str:
     Drops the parent term, the seniority letter and any J value, giving a form close to the
     Hillier style "3d6(5D)4s8p_5Fo" but without the parent term. Used to compare a Nahar core
     state against an upper-ion level name, which the two data sets spell differently.
+
+    Returns:
+        the normalised configuration.
     """
     if instr == "-1":
         return "-1"
     instr = instr.split("[", maxsplit=1)[0]  # remove trailing bracketed J value
 
-    if instr[-1] not in ["o", "e"]:
-        instr = instr + "e"  # last character being S,P,D, etc means even
+    if instr[-1] not in {"o", "e"}:
+        instr += "e"  # last character being S,P,D, etc means even
     if str.isdigit(instr[-2]):  # J value is in the term, so remove it
         instr = instr[:-2] + instr[-1]
 
@@ -455,11 +475,14 @@ def remove_bracketed_part(instr: str) -> str:
     """Remove anything between parentheses, and the parentheses themselves.
 
     e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'.
+
+    Returns:
+        the string with any parenthesised parts removed.
     """
     outstr = ""
     in_brackets = False
     for char in instr[:-4]:
-        if char in (" ", "_"):
+        if char in {" ", "_"}:
             continue
         if char == "(":
             in_brackets = True
@@ -477,7 +500,11 @@ def get_naharphotoion_upperlevelids(
     upper_level_ids_of_core_state_id,
     flog,
 ):
-    """Get the upper level id numbers for a given energy level's photoionisation processes."""
+    """Get the upper level id numbers for a given energy level's photoionisation processes.
+
+    Returns:
+        the upper ion level ids this level photoionises to.
+    """
     # core_state_id = int(energy_level.corestateid)
     core_state_id = 1  # temporary fix
     if core_state_id > 0 and core_state_id <= len(nahar_core_states):
@@ -562,6 +589,9 @@ def get_photoiontargetfractions(
     core state names the upper-ion state it ionises to; where that matches several J-split levels
     of the upper ion, the fraction is shared over them in proportion to their statistical
     weights. Levels whose core state cannot be matched fall back to the upper ion's ground state.
+
+    Returns:
+        per level id, the (upper ion level id, fraction) pairs it photoionises to.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     upper_level_ids_of_core_state_id = defaultdict(list)

@@ -1,5 +1,6 @@
 """Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
 
+import string
 import typing as t
 from pathlib import Path
 
@@ -10,7 +11,11 @@ import artisatomic
 
 
 def get_basepath() -> Path:
-    """Directory holding the Floers+25 level and transition tables."""
+    """Directory holding the Floers+25 level and transition tables.
+
+    Returns:
+        the directory holding the Floers+25 tables.
+    """
     return artisatomic.PYDIR / ".." / "atomic-data-floers25" / "OutputFiles"
 
 
@@ -19,6 +24,9 @@ def extend_ion_list(ion_handlers, calibrated=True):
 
     With calibrated=True the uncalibrated files are added as well, so that an ion with no
     calibrated data still gets its uncalibrated version rather than being left out.
+
+    Returns:
+        the handler list with every Floers+25 ion added.
     """
     BASEPATH = get_basepath()
     assert BASEPATH.is_dir()
@@ -28,7 +36,7 @@ def extend_ion_list(ion_handlers, calibrated=True):
         calibstr = "calib" if searchcalib else "uncalib"
         handlername = f"floers25{calibstr}"
         for s in BASEPATH.glob(f"*_levels_{calibstr}.txt*"):
-            ionstr = s.name.lstrip("0123456789").split("_")[0]
+            ionstr = s.name.lstrip(string.digits).split("_")[0]
             atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
             ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
@@ -51,6 +59,12 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     (levels of one configuration differ by J), so level names combine the configuration, J and
     the file's index. Both the level indices and the transitions' references to them are
     validated, since a gap or an out-of-range index would silently misattach transitions.
+
+    Returns:
+        the ionization energy in eV, the levels, the transitions, and the transition count per level name.
+
+    Raises:
+        ValueError: if the file has no data table, or its level indices are not contiguous and zero-based, or a transition references a level outside the table.
     """
     # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
@@ -67,7 +81,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {levels_file.name} and {lines_file.name}",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     dashrowcount = 0
     with artisatomic.xopen_check_extension(levels_file) as f:
@@ -82,7 +96,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         raise ValueError(f"Did not find expected data table in {levels_file}")
 
     dflevels = dflevels.with_columns(
-        pl.when(pl.col("J").str.ends_with("/2"))
+        pl
+        .when(pl.col("J").str.ends_with("/2"))
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
             pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1
@@ -165,11 +180,14 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
+
+    Returns:
+        the principal quantum number of the valence electron.
     """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     return int(part.rstrip("spdfg"))
