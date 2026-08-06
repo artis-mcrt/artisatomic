@@ -8,7 +8,6 @@ import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
-from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
 from artisatomic import PYDIR
@@ -20,23 +19,22 @@ from artisatomic import readkuruczdata
 from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic import reduce_configuration
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 
 
 def test_reduce_configuration():
-    assert reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
-    assert reduce_configuration("3d6_3P2e") == "3d6_3Pe"
+    assert readnahardata.reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
+    assert readnahardata.reduce_configuration("3d6_3P2e") == "3d6_3Pe"
 
 
 def test_interpret_term():
-    assert get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
-    assert get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
+    assert readhillierdata.get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
+    assert readhillierdata.get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
     # names with no L character must report "unknown" rather than raising UnboundLocalError
     for unreadable in ("e2x", "o12", "3d5", "12"):
-        assert get_term_as_tuple(unreadable) == (-1, -1, -1)
+        assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
 
 def test_get_parity_from_config():

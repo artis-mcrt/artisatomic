@@ -261,6 +261,62 @@ def hillier_ion_folder(atomic_number, ion_stage):
     )
 
 
+# reads a Hillier level name and returns the term
+# tuple (twosplusone, l, parity)
+def get_term_as_tuple(config: str) -> tuple[int, int, int]:
+    config = config.split("[", maxsplit=1)[0]
+
+    if "{" in config and "}" in config:  # JJ coupling, no L and S
+        if config[-1] == "e":
+            return (-1, -1, 0)
+
+        if config[-1] == "o":
+            return (-1, -1, 1)
+
+        print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
+        return (-1, -1, -1)
+
+    lposition = -1
+    l = -1
+    for charpos, char in reversed(list(enumerate(config))):
+        if char in lchars:
+            lposition = charpos
+            l = lchars.index(char)
+            break
+    if lposition < 0:
+        if config[-1] == "e":
+            return (-1, -1, 0)
+        if config[-1] == "o":
+            return (-1, -1, 1)
+        return (-1, -1, -1)
+    try:
+        twosplusone = int(config[lposition - 1])  # could this be two digits long?
+        if lposition + 1 > len(config) - 1:
+            # No 'e'/'o' suffix to read the parity from. CMFGEN writes its merged high-l levels
+            # this way, with the orbital letter repeated as the term symbol (2s2_13w_2W,
+            # 2s2_2p3(4So)5z_5Z), so the term letter is a merge marker rather than a real L.
+            # Sum l over the occupied orbitals instead of assuming the term is even.
+            parity = artisatomic.get_parity_from_config(config)
+        elif config[lposition + 1] == "o":
+            parity = 1
+        elif config[lposition + 1] == "e":
+            parity = 0
+        elif config[lposition + 2] == "o":
+            parity = 1
+        elif config[lposition + 2] == "e":
+            parity = 0
+        else:
+            twosplusone = -1
+            l = -1
+            parity = -1
+    #        sys.exit()
+    except (IndexError, ValueError):
+        twosplusone = -1
+        l = -1
+        parity = -1
+    return (twosplusone, l, parity)
+
+
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
@@ -361,7 +417,7 @@ def read_levels_and_transitions(
                 levelname = row[colindex["levelname"]]
                 energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
                 lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
-                (twosplusone, _l, parity) = artisatomic.get_term_as_tuple(levelname)
+                (twosplusone, _l, parity) = get_term_as_tuple(levelname)
 
                 levelrows.append(
                     HillierEnergyLevel(

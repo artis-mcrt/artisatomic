@@ -397,6 +397,44 @@ def read_nahar_configurations(fenlist, flog) -> tuple[dict[tuple[int, int, int, 
     return nahar_configurations, nahar_ionization_potential_rydberg
 
 
+# e.g. convert "3d64s  (6D ) 8p  j5Fo" to "3d64s8p_5Fo",
+# similar to Hillier style "3d6(5D)4s8p_5Fo" but without the parent term
+# (and mysterious letter before the term if present)
+def reduce_configuration(instr: str) -> str:
+    if instr == "-1":
+        return "-1"
+    instr = instr.split("[", maxsplit=1)[0]  # remove trailing bracketed J value
+
+    if instr[-1] not in ["o", "e"]:
+        instr = instr + "e"  # last character being S,P,D, etc means even
+    if str.isdigit(instr[-2]):  # J value is in the term, so remove it
+        instr = instr[:-2] + instr[-1]
+
+    outstr = remove_bracketed_part(instr)
+    outstr += "_"
+    outstr += instr[-3:-1]
+    outstr += "o" if instr[-1] == "o" else "e"
+    return outstr
+
+
+def remove_bracketed_part(instr: str) -> str:
+    """Operates on a string by removing anything between parentheses (including the parentheses)
+    e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'.
+    """
+    outstr = ""
+    in_brackets = False
+    for char in instr[:-4]:
+        if char in (" ", "_"):
+            continue
+        if char == "(":
+            in_brackets = True
+        elif char == ")":
+            in_brackets = False
+        elif not in_brackets:
+            outstr += char
+    return outstr
+
+
 def get_naharphotoion_upperlevelids(
     dfenergy_levels_upperion,
     nahar_core_states,
@@ -411,7 +449,7 @@ def get_naharphotoion_upperlevelids(
         if not upper_level_ids_of_core_state_id[core_state_id]:
             # go find matching levels if they haven't been found yet
             nahar_core_state = nahar_core_states[core_state_id - 1]
-            nahar_core_state_reduced_configuration = artisatomic.reduce_configuration(
+            nahar_core_state_reduced_configuration = reduce_configuration(
                 nahar_core_state.configuration + "_" + nahar_core_state.term
             )
             core_state_energy_ev = nahar_core_state.energyrydberg * ryd_to_ev
@@ -437,7 +475,7 @@ def get_naharphotoion_upperlevelids(
                 energyev = upperlevel["energyabovegsinpercm"] * hc_in_ev_cm
 
                 # this ignores parent term
-                if artisatomic.reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
+                if reduce_configuration(upperlevelconfig) == nahar_core_state_reduced_configuration:
                     ediff = energyev - core_state_energy_ev
                     upperlevelconfignoj = upperlevelconfig.split("[")[0]
                     if upperlevelconfignoj not in candidate_upper_levels:
