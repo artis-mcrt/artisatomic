@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Integrate a photoionization cross section to get its recombination rate contribution."""
+
 import math
 import sys
 

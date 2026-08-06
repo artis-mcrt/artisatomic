@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Plot ARTIS recombination rates against the published Nahar values."""
+
 import math
 
 import matplotlib.axes as mplax
@@ -127,6 +129,7 @@ for ionindex in range(4):
 
 
 def naharfeiitonumber(strin):
+    """Parse the Fortran-style "1.23-04" number format used in Nahar's Fe II tables."""
     return float(strin[:4]) * 10 ** (-float(strin[6:8]))
 
 

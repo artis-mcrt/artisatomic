@@ -139,9 +139,6 @@ ignore = [
     "C901",    # complex-structure
     "COM812",  # missing-trailing-comma
     "CPY001",  # missing-copyright-notice
-    "DOC201",  # docstring-missing-returns
-    "DOC402",  # docstring-missing-yields
-    "DOC501",  # docstring-missing-exception
     "E501",    # Line too long
     "E741",    # ambiguous-variable-name
     "EM101",
