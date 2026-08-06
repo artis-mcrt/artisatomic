@@ -8,10 +8,16 @@ import artisatomic
 
 
 def get_basepath() -> Path:
+    """Directory holding the Floers+25 level and transition tables."""
     return artisatomic.PYDIR / ".." / "atomic-data-floers25" / "OutputFiles"
 
 
 def extend_ion_list(ion_handlers, calibrated=True):
+    """Add every ion with a Floers+25 data file to ion_handlers.
+
+    With calibrated=True the uncalibrated files are added as well, so that an ion with no
+    calibrated data still gets its uncalibrated version rather than being left out.
+    """
     BASEPATH = get_basepath()
     assert BASEPATH.is_dir()
     # if calibrated is requested, also add uncalibrated data where calibrated data is not available
@@ -35,6 +41,13 @@ class FloersEnergyLevel(t.NamedTuple):
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibrated: bool):
+    """Read one ion from the Floers+25 data set, calibrated or uncalibrated.
+
+    The ionization energy comes from NIST rather than the file. Configurations are not unique
+    (levels of one configuration differ by J), so level names combine the configuration, J and
+    the file's index. Both the level indices and the transitions' references to them are
+    validated, since a gap or an out-of-range index would silently misattach transitions.
+    """
     # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
@@ -144,6 +157,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a Floers+25 level name.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
     if part[-1] not in "spdfg":

@@ -111,10 +111,16 @@ class LisbonReader:
 
 
 def get_levelname(row):
+    """Name a Lisbon level from its label and J, since the label alone is not unique."""
     return f"{row.label}, j={row.j}"
 
 
 def read_levels_data(dflevels):
+    """Convert the Lisbon level table to level tuples, sorted by energy.
+
+    Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
+    transitions forbidden: this data set does not supply parities.
+    """
     energy_level_tuple = namedtuple("energy_level_tuple", "levelname energyabovegsinpercm g parity")
 
     energy_levels = []
@@ -134,6 +140,10 @@ def read_levels_data(dflevels):
 
 
 def read_lines_data(energy_levels, dflines):
+    """Convert Lisbon lines to transitions referencing zero-based level ids.
+
+    Returns the transitions and the number of them touching each level name.
+    """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
@@ -151,6 +161,7 @@ def read_lines_data(energy_levels, dflines):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the Lisbon data set. Not currently wired into the handler dispatch."""
     ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]

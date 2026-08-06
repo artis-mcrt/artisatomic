@@ -42,10 +42,12 @@ qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
 
 def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
+    """Whether a transition between two levels is forbidden, i.e. they have the same parity."""
     return levela.parity == levelb.parity
 
 
 def extend_ion_list(ion_handlers):
+    """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler."""
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
@@ -56,6 +58,13 @@ def extend_ion_list(ion_handlers):
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float]]:
+    """Read levels and effective collision strengths from an ADAS adf04 file.
+
+    Returns the ionization energy in eV, the levels, and a dict of upsilon values keyed by a
+    (lower, upper) pair of zero-based level ids. The file numbers levels from one, and the rest
+    of the code looks up id n at list index n - 1, so the level ids are validated as contiguous
+    and 1-based. Collision strengths are taken at one temperature, chosen per element.
+    """
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
@@ -189,6 +198,12 @@ def read_adf04(
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the QUB calculations.
+
+    Covers both the newer per-ion adf04 calculations and the older Co II/III/IV data sets, which
+    have their own file layouts. Also returns the effective collision strengths, so this reader
+    supplies an upsilondict where most others leave it to be filled in elsewhere.
+    """
     qub_transition_row = namedtuple(
         "qub_transition_row", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str"
     )
@@ -352,6 +367,12 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 def read_qub_photoionizations(
     atomic_number, ion_stage, levelcount: int, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
+    """Read QUB photoionization cross sections for one ion, downsampled onto the output grid.
+
+    Returns the cross sections, the upper-ion target fractions per level, and the threshold
+    energies, all indexed by zero-based level id. Levels with no data keep an empty target list,
+    which is how write_phixs_data() knows to skip them.
+    """
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
@@ -535,6 +556,14 @@ def read_qub_photoionizations(
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a QUB level name.
+
+    Falls back to n=1 with a warning when the name cannot be parsed, since a missing n only
+    affects the hydrogenic photoionisation estimate rather than the level itself.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     namesplit = levelname.split("_")
     part = namesplit[0].strip()
     if len(namesplit) < 2:

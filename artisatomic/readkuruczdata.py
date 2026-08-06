@@ -14,6 +14,13 @@ if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
 
 
 def parse_gfall(fname: str) -> pl.LazyFrame:
+    """Parse one Kurucz gfall line list into a frame of transitions with their two levels.
+
+    Each gfall row is a transition carrying both of its levels inline, in a fixed-width Fortran
+    format. The two levels are ordered into lower/upper by energy here, since the file lists
+    them in an arbitrary order. A negative energy in the file means a predicted (rather than
+    measured) level, which is recorded in a "theoretical" flag and the magnitude kept.
+    """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
     gfall_fortran_format = (
@@ -132,6 +139,11 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
+    """Locate one ion's Kurucz line list, trying the extendedatoms and zztar layouts.
+
+    Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
+    has no data for it.
+    """
     extended_atoms_filenames = [
         f"gf{atomic_number:02d}{ion_charge:02d}.lines.zst",
         f"gf{atomic_number:02d}{ion_charge:02d}.lines",
@@ -154,6 +166,12 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, dict[str, int]]:
+    """Read one ion from the Kurucz line lists.
+
+    The files are transition lists rather than level lists, so the levels are recovered by
+    taking the distinct lower and upper levels of every transition. The ionization energy comes
+    from NIST rather than the file.
+    """
     ion_charge = ion_stage - 1
 
     artisatomic.log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
@@ -261,6 +279,14 @@ def read_levels_and_transitions(
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a Kurucz level label.
+
+    Falls back to n=1 with a warning when the label cannot be parsed, since a missing n only
+    affects the hydrogenic photoionisation estimate rather than the level itself.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
         print(f"WARNING: Could not find n in {levelname}. Using n=1")

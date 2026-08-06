@@ -249,6 +249,7 @@ hyd_gaunt_factor: dict[int, list[float]] = {}
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
+    """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
         (
             artisatomic.PYDIR
@@ -261,9 +262,13 @@ def hillier_ion_folder(atomic_number, ion_stage):
     )
 
 
-# reads a Hillier level name and returns the term
-# tuple (twosplusone, l, parity)
 def get_term_as_tuple(config: str) -> tuple[int, int, int]:
+    """Read the LS term of a Hillier level name as (2S+1, L, parity), parity 0 even and 1 odd.
+
+    Returns -1 for any component that cannot be read, which readers log rather than treat as an
+    error. Parity comes from the name's 'e'/'o' suffix where it has one; otherwise it is summed
+    over the occupied orbitals, which is what handles CMFGEN's merged high-l levels.
+    """
     config = config.split("[", maxsplit=1)[0]
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
@@ -320,6 +325,16 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+    """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
+
+    Returns the ionization energy in eV, a level frame, a transition frame, and the number of
+    transitions touching each level name. Levels with no transitions are dropped. The level
+    table's columns are read from the header the file carries above it, so the layout varies by
+    ion; see hillier_rowformat_noheader for the oldest files, which have no header.
+
+    Transitions are keyed by level name here. add_level_ids_forbidden() joins the level ids on
+    afterwards, once the level frame has been given its ids.
+    """
     transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
 
@@ -533,6 +548,15 @@ phixs_type_labels = {
 def read_phixs_tables(
     atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[str, float]] | None], npt.NDArray[np.float64]]:
+    """Read one ion's CMFGEN photoionization cross sections, downsampled onto the output grid.
+
+    Returns the cross sections, the target configurations and their fractions per level, and the
+    threshold energies, all indexed by zero-based level id. A level with no data keeps None in
+    the target list, which get_photoiontargetfractions() relies on to tell it apart from a level
+    whose targets all came out zero. The files give fit coefficients rather than tabulated cross
+    sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
+    functions that evaluate them.
+    """
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
@@ -976,6 +1000,11 @@ def read_phixs_tables(
 
 
 def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
+    """Evaluate a Seaton formula fit (CMFGEN cross-section type 1, or type 7 when nu_o is given).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
+    so the cross section is zero until the offset threshold.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1086,6 +1115,11 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 # test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb?? can't find a source for this
 # give the same results as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
+    """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
+    already accounts for the effective charge, so the result must not be rescaled by the caller.
+    """
     energygrid = hyd_gaunt_energygrid_ryd[n]
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1109,6 +1143,10 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
 
 # Peach, Sraph, and Seaton (1988)
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
+    """Evaluate an Opacity Project fit of Peach, Sraph and Seaton (1988) (CMFGEN type 5).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1133,6 +1171,11 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 # the threshold cross sections seems ok, but energy dependence could be slightly wrong
 # what is the h parameter that is not used??
 def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # noqa: ARG001
+    """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. A cubic in log10(E/E_th)
+    below the break at e, a straight line above it.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1185,6 +1228,13 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
 
 
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
+    """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
+
+    Returns a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids.
+    Where the file gives one value for a whole term but the level list is J-split, the value is
+    shared over the term's J levels in proportion to g_i * g_j, so that summing over the term
+    recovers the file's value.
+    """
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
     upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
@@ -1377,6 +1427,13 @@ def get_photoiontargetfractions(
     dfenergy_levels_upperion,
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
 ) -> list[list[tuple[int, float]]]:
+    """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
+
+    Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. A target
+    configuration that names several J-split levels of the upper ion is shared over them in
+    proportion to their statistical weights. Levels with no cross-section data (None) and levels
+    whose targets could not be matched both fall back to the upper ion's ground state.
+    """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
 
@@ -1419,6 +1476,12 @@ def get_photoiontargetfractions(
 
 
 def read_hyd_phixsdata():
+    """Load the hydrogenic photoionization tables that the type 2, 3 and 8 fits interpolate.
+
+    Fills the module-level hyd_phixs / hyd_gaunt tables, so it must be called before any
+    get_hydrogenic_*_phixstable(). Thresholds are taken from the H I level list, which is
+    therefore required to be indexed by principal quantum number.
+    """
     # the cached (2l+1)-weighted sums are built from the tables filled in below, so a reload
     # (repeated calls happen in the tests) must not leave sums computed from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
@@ -1537,6 +1600,11 @@ def extend_ion_list(
     maxionstage: int | None = None,
     include_hydrogen: bool | None = False,
 ):
+    """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
+
+    Hydrogen is excluded by default: its levels are also the source of the hydrogenic
+    photoionisation tables used as a fallback for other elements.
+    """
     for atomic_number, ion_stage in ions_data:
         if maxionstage is not None and ion_stage > maxionstage:
             continue  # skip

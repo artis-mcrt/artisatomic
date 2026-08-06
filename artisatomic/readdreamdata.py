@@ -16,6 +16,7 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 def init_dreamdata():
+    """Load the DREAM line list into the module-level cache, once per process."""
     global dreamdata
     if dreamdata is not None:
         return
@@ -26,6 +27,7 @@ def init_dreamdata():
 
 
 def extend_ion_list(ion_handlers):
+    """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
     init_dreamdata()
     assert dreamdata is not None
     for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
@@ -36,6 +38,11 @@ def extend_ion_list(ion_handlers):
 
 
 def energytuplefromrow(row, prefix):
+    """Build the lower or upper level of one DREAM line, selected by prefix ("Lower"/"Upper").
+
+    DREAM levels have no spectroscopic names, so each is named after the energy, parity and
+    statistical weight that identify it, which is what read_levels_data() deduplicates on.
+    """
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
     dream_energy_level_row = namedtuple("dream_energy_level_row", "levelname energyabovegsinpercm g parity")
 
@@ -51,6 +58,11 @@ def energytuplefromrow(row, prefix):
 
 
 def read_levels_data(dflines):
+    """Recover the level list from a DREAM line list, which has no separate level table.
+
+    Each line carries both of its levels inline, so the levels are the distinct lower and upper
+    levels over all lines, sorted by energy.
+    """
     energy_levels = []
 
     for prefix in ["Lower", "Upper"]:
@@ -67,6 +79,10 @@ def read_levels_data(dflines):
 
 
 def read_lines_data(dfiondata, energy_levels):
+    """Convert DREAM lines to transitions referencing zero-based level ids.
+
+    Returns the transitions and the number of them touching each level name.
+    """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
     transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
@@ -87,6 +103,7 @@ def read_lines_data(dfiondata, energy_levels):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the DREAM database of Z >= 57."""
     init_dreamdata()
     assert dreamdata is not None
     charge = ion_stage - 1

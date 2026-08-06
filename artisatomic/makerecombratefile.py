@@ -13,6 +13,7 @@ from artistools import get_elsymbolslist
 
 
 def read_nahar_rrcfile(filename, noprint=False):
+    """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
     if not noprint:
         print(f"  reading {filename}")
 
@@ -51,6 +52,7 @@ def read_nahar_rrcfile(filename, noprint=False):
 
 
 def main():
+    """Write recombrates.txt from the Nahar recombination rate files."""
     # Shull & Steenberg 1982
     A_rad: dict[tuple[int, int], float] = {}
     X_rad: dict[tuple[int, int], float] = {}

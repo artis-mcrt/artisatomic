@@ -18,6 +18,7 @@ colreplacements = {
 
 
 def main():
+    """Download ENDF decay data and write the gamma spectra used by ARTIS."""
     elsymbols = at.get_elsymbolslist()
 
     outfolder = Path(__file__).parent.parent.absolute() / "artis_files" / "data"

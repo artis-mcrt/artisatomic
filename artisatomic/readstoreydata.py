@@ -2,6 +2,11 @@ import artisatomic
 
 
 def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
+    """Read the Storey et al. (2016) Co II effective collision strengths.
+
+    Returns a dict of upsilon values keyed by a (lower, upper) pair of level ids, using the
+    file's own numbering.
+    """
     upsilondict = {}
 
     filename = "atomic-data-storey/storetetal2016-co-ii.txt"
