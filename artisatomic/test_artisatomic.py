@@ -7,7 +7,6 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
-from artisatomic import build_nahar_levels_and_phixs
 from artisatomic import get_default_handler
 from artisatomic import get_term_as_tuple
 from artisatomic import interpret_configuration
@@ -574,7 +573,7 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
     )
 
     args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
-    dflevels, _phixs, _thresholds = build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
+    dflevels, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
 
     # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else
     assert dflevels.select("indexinsymmetry", "naharconfiguration").rows() == [
@@ -584,7 +583,7 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
 
     # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
     # columns write_adata() and the energy sort need, not a column-less frame that crashes later
-    dfempty, _phixs, _thresholds = build_nahar_levels_and_phixs([], {}, {}, args, flog)
+    dfempty, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs([], {}, {}, args, flog)
     assert dfempty.height == 0
     assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
 

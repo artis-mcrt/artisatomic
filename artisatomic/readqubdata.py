@@ -41,6 +41,10 @@ class QUBEnergyLevel(t.NamedTuple):
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
 
+def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
+    return levela.parity == levelb.parity
+
+
 def extend_ion_list(ion_handlers):
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
@@ -320,7 +324,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         level_lower = qub_energylevels[id_lower]
                         namefrom = level_upper.levelname
                         nameto = level_lower.levelname
-                        forbidden = artisatomic.check_forbidden(level_upper, level_lower)
+                        forbidden = check_forbidden(level_upper, level_lower)
                         transition_count_of_level_name[namefrom] += 1
                         transition_count_of_level_name[nameto] += 1
                         delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm

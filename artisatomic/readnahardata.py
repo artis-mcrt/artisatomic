@@ -4,6 +4,8 @@ import typing as t
 from collections import defaultdict
 
 import numpy as np
+import numpy.typing as npt
+import polars as pl
 
 import artisatomic
 
@@ -39,6 +41,74 @@ class NaharEnergyLevel(t.NamedTuple):
     energyabovegsinpercm: float
     g: int
     naharconfiguration: str
+
+
+# derived from the row class so it stays the single source of the frame layout
+nahar_level_schema: dict[str, pl.DataType] = {
+    name: {str: pl.String(), float: pl.Float64(), int: pl.Int64()}[fieldtype]
+    for name, fieldtype in NaharEnergyLevel.__annotations__.items()
+}
+
+
+def build_nahar_levels_and_phixs(
+    nahar_energy_levels: list[NaharEnergyLevel],
+    nahar_phixs_tables,
+    thresholds_ev_dict,
+    args,
+    flog,
+) -> tuple[pl.DataFrame, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """Build the level table for a Nahar-only ion and attach its photoionization cross sections."""
+    # the explicit schema keeps an empty level list (e.g. a missing energy file) producing a frame
+    # with the columns that the sort below and write_adata() expect
+    dfenergy_levels = pl.DataFrame(nahar_energy_levels, schema=nahar_level_schema, orient="row")
+
+    levels_with_config = (dfenergy_levels["naharconfiguration"] != "UNKNOWN CONFIG").sum()
+    artisatomic.log_and_print(
+        flog,
+        f"Included {dfenergy_levels.height} levels from Nahar dataset"
+        f" ({levels_with_config} with an electron configuration)",
+    )
+
+    # Level ids are assigned from the row order, so ties must keep the order they were read in:
+    # polars sorts unstably by default.
+    print("Sorting levels by energy...")
+    dfenergy_levels = dfenergy_levels.sort("energyabovegsinpercm", maintain_order=True)
+
+    # stay empty unless there are Nahar phixs tables to attach to the level list
+    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))
+    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
+
+    if nahar_phixs_tables:
+        photoionization_crosssections = np.zeros((dfenergy_levels.height, args.nphixspoints))
+        photoionization_thresholds_ev = np.zeros(dfenergy_levels.height)
+
+        if not args.nophixs:
+            reduced_phixs_dict = artisatomic.reduce_phixs_tables(
+                nahar_phixs_tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+            )
+
+            # there can be more than one level per state, and they all get the same table
+            levelindices_of_state: dict[tuple[int, int, int, int], list[int]] = {}
+            for levelindex, levelstate in enumerate(
+                dfenergy_levels.select("twosplusone", "l", "parity", "indexinsymmetry").iter_rows()
+            ):
+                levelindices_of_state.setdefault(levelstate, []).append(levelindex)
+
+            for state_tuple, phixstable in reduced_phixs_dict.items():
+                matching_levelindices = levelindices_of_state.get(state_tuple, [])
+                for levelindex in matching_levelindices:
+                    photoionization_crosssections[levelindex] = phixstable
+                    photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
+
+                if not matching_levelindices:
+                    twosplusone, l, parity, indexinsymmetry = state_tuple
+                    artisatomic.log_and_print(
+                        flog,
+                        "No Nahar state to match with photoionization crosssection of"
+                        f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}",
+                    )
+
+    return dfenergy_levels, photoionization_crosssections, photoionization_thresholds_ev
 
 
 def read_nahar_energy_level_file(

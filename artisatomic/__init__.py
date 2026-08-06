@@ -200,12 +200,6 @@ empty_transitions_schema: dict[str, pl.DataType] = {
     "A": pl.Float64(),
 }
 
-# derived from the reader's row class so it stays the single source of the frame layout
-nahar_level_schema: dict[str, pl.DataType] = {
-    name: {str: pl.String(), float: pl.Float64(), int: pl.Int64()}[fieldtype]
-    for name, fieldtype in readnahardata.NaharEnergyLevel.__annotations__.items()
-}
-
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
@@ -457,7 +451,7 @@ def read_ion_data(
                 ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
             else:  # hillier levels and transitions
                 # if ion_stage == 2:
-                #     upsilondict = read_storey_2016_upsilondata(flog)
+                #     upsilondict = readstoreydata.read_storey_2016_upsilondata(flog)
                 (
                     ionization_energy_ev,
                     energy_levels,
@@ -496,7 +490,9 @@ def read_ion_data(
                 )
 
             (energy_levels, photoionization_crosssections, photoionization_thresholds_ev) = (
-                build_nahar_levels_and_phixs(nahar_energy_levels, nahar_phixs_tables, thresholds_ev_dict, args, flog)
+                readnahardata.build_nahar_levels_and_phixs(
+                    nahar_energy_levels, nahar_phixs_tables, thresholds_ev_dict, args, flog
+                )
             )
             # the Nahar data set gives no bound-bound transitions
             transitions = pl.DataFrame(schema=empty_transitions_schema)
@@ -562,98 +558,6 @@ def read_ion_data(
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
     )
-
-
-def read_storey_2016_upsilondata(flog) -> dict[tuple[int, int], float]:
-    upsilondict = {}
-
-    filename = "atomic-data-storey/storetetal2016-co-ii.txt"
-    log_and_print(flog, f"Reading effective collision strengths from {path_for_log(filename)}")
-
-    with open(filename) as fstoreydata:
-        found_tablestart = False
-        while True:
-            line = fstoreydata.readline()
-            if not line:
-                break
-
-            if found_tablestart:
-                row = line.split()
-
-                if len(row) <= 5:
-                    break
-
-                lower = int(row[0])
-                upper = int(row[1])
-                upsilon = float(row[11])
-                upsilondict[(lower, upper)] = upsilon
-            if line.startswith(
-                "--	--	------	------	------	------	------	------	------	------	------	------	------	------	------"
-            ):
-                found_tablestart = True
-
-    return upsilondict
-
-
-def build_nahar_levels_and_phixs(
-    nahar_energy_levels: list[readnahardata.NaharEnergyLevel],
-    nahar_phixs_tables,
-    thresholds_ev_dict,
-    args,
-    flog,
-) -> tuple[pl.DataFrame, npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-    """Build the level table for a Nahar-only ion and attach its photoionization cross sections."""
-    # the explicit schema keeps an empty level list (e.g. a missing energy file) producing a frame
-    # with the columns that the sort below and write_adata() expect
-    dfenergy_levels = pl.DataFrame(nahar_energy_levels, schema=nahar_level_schema, orient="row")
-
-    levels_with_config = (dfenergy_levels["naharconfiguration"] != "UNKNOWN CONFIG").sum()
-    log_and_print(
-        flog,
-        f"Included {dfenergy_levels.height} levels from Nahar dataset"
-        f" ({levels_with_config} with an electron configuration)",
-    )
-
-    # Level ids are assigned from the row order, so ties must keep the order they were read in:
-    # polars sorts unstably by default.
-    print("Sorting levels by energy...")
-    dfenergy_levels = dfenergy_levels.sort("energyabovegsinpercm", maintain_order=True)
-
-    # stay empty unless there are Nahar phixs tables to attach to the level list
-    photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))
-    photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
-
-    if nahar_phixs_tables:
-        photoionization_crosssections = np.zeros((dfenergy_levels.height, args.nphixspoints))
-        photoionization_thresholds_ev = np.zeros(dfenergy_levels.height)
-
-        if not args.nophixs:
-            reduced_phixs_dict = reduce_phixs_tables(
-                nahar_phixs_tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
-            )
-
-            # there can be more than one level per state, and they all get the same table
-            levelindices_of_state: dict[tuple[int, int, int, int], list[int]] = {}
-            for levelindex, levelstate in enumerate(
-                dfenergy_levels.select("twosplusone", "l", "parity", "indexinsymmetry").iter_rows()
-            ):
-                levelindices_of_state.setdefault(levelstate, []).append(levelindex)
-
-            for state_tuple, phixstable in reduced_phixs_dict.items():
-                matching_levelindices = levelindices_of_state.get(state_tuple, [])
-                for levelindex in matching_levelindices:
-                    photoionization_crosssections[levelindex] = phixstable
-                    photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
-
-                if not matching_levelindices:
-                    twosplusone, l, parity, indexinsymmetry = state_tuple
-                    log_and_print(
-                        flog,
-                        "No Nahar state to match with photoionization crosssection of"
-                        f" {twosplusone:d}{lchars[l]}{['e', 'o'][parity]} index {indexinsymmetry:d}",
-                    )
-
-    return dfenergy_levels, photoionization_crosssections, photoionization_thresholds_ev
 
 
 def log_and_print(flog, strout):
@@ -963,10 +867,6 @@ def reduce_phixs_tables_worker(
             # sys.exit()
 
     return arr_sigma_out
-
-
-def check_forbidden(levela, levelb) -> bool:
-    return levela.parity == levelb.parity
 
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
