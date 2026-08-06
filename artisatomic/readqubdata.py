@@ -45,8 +45,8 @@ class QUBEnergyLevel(t.NamedTuple):
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
-# the ions that get_default_handler() picks "qub_data" for. Nd II (60, 2) has an adf04 file and is
-# read if the handler is set explicitly, but is deliberately not the default for that ion.
+# the ions get_default_handler() picks "qub_data" for. Nd II (60, 2) has an adf04 file and is read
+# when the handler is set explicitly, but is deliberately not the default.
 default_handler_ions = frozenset(
     {
         (38, 1),
@@ -167,10 +167,9 @@ def read_adf04(
             energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
             energylevels.append(energylevel)
 
-            # the transition and upsilon tables index levels by this 1-based id, and the rest of
-            # the code looks up id n at list index n - 1, so a non-contiguous or non-1-based file
-            # would silently attach every transition to the wrong level. Not an assert: this
-            # validates an input file and must not disappear under python -O.
+            # the transition and upsilon tables use these 1-based ids and the rest of the code
+            # looks up id n at index n - 1, so a non-contiguous file would misattach every
+            # transition. Not an assert: input validation must survive python -O.
             if energylevel.qub_id != len(energylevels):
                 msg = (
                     f"adf04 level id {energylevel.qub_id} found at position {len(energylevels)} in {filepath}."
@@ -180,9 +179,8 @@ def read_adf04(
 
         upsilonheader = fleveltrans.readline().split()
         list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
-        # each collision row is: upper, lower, A-value, one upsilon per temperature, and finally
-        # the infinite-energy (Born) limit. Name that last column so the row width matches and
-        # pandas does not silently drop a column to make the data fit the header.
+        # each collision row is upper, lower, A-value, one upsilon per temperature, then the
+        # infinite-energy (Born) limit. Name that last column so pandas does not drop one to fit.
         list_headers = ["upper", "lower", "avalue", *list_tempheaders, "born_limit"]
         qubupsilondf_alltemps = pd.read_csv(
             fleveltrans,
@@ -327,9 +325,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
-        # two passes are needed (the collision strengths are found by line length, which is only
-        # known after seeing every line), so read the lines once rather than rewinding the file:
-        # xopen_check_extension() may hand back a decompressing stream that cannot seek backwards
+        # two passes are needed (collision strengths are found by line length, known only after
+        # seeing every line), so read the lines once: a decompressing stream may not seek back
         with artisatomic.xopen_check_extension(atom_filepath) as ftrans:
             translines = ftrans.readlines()
 
@@ -579,9 +576,8 @@ def read_qub_photoionizations(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
 
-        # Unlike the Co II branch above, every level is deliberately given a phixs entry: levels
-        # of the ground quartet get the tabulated cross section, and all higher levels get an
-        # explicit all-zero table (no photoionization) rather than being omitted from the output.
+        # unlike the Co II branch above, every level deliberately gets a phixs entry: the ground
+        # quartet gets the tabulated cross section and higher levels an explicit all-zero table
         for levelid in range(levelcount):
             photoionization_thresholds_ev[levelid] = -1.0
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state

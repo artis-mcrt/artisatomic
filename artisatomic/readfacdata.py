@@ -192,9 +192,8 @@ def read_levels_data(dflevels):
     for index, row in dflevels.iterrows():
         ilev_enlevelindex_map[int(row["Ilev"])] = index
 
-        # Config is not unique (levels of the same configuration differ in J), so append the FAC
-        # level index to make the name unique. The configuration stays first so that
-        # get_level_valence_n() and the adata.txt comment column both still start with it.
+        # Config is not unique (levels of one configuration differ in J), so append the FAC level
+        # index. The configuration stays first, for get_level_valence_n() and the adata.txt comment.
         newlevel = FACEnergyLevel(
             levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
             parity=row["P"],
@@ -205,9 +204,8 @@ def read_levels_data(dflevels):
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
-    # A duplicated Ilev would silently overwrite its map entry and misroute every transition
-    # that references it (and implies duplicate level names, since Ilev is embedded in them).
-    # Not an assert: this validates an input file and must not disappear under python -O.
+    # a duplicated Ilev would overwrite its map entry and misroute every transition referencing
+    # it. Not an assert: input validation must survive python -O.
     if len(ilev_enlevelindex_map) != len(energy_levels):
         msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
         raise ValueError(msg)

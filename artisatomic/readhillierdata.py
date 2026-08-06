@@ -18,15 +18,13 @@ import artisatomic
 
 # need to also include collision strengths from e.g., o2col.dat
 
-# The level table's columns are read from the header line above it. The oldest oscillator files
-# (those without a "!Format date" line) carry no header, and all of them use the layout below.
-# Its fourth column is the threshold FREQUENCY, not an energy: these files have no eV column.
+# Column layout of the level table in the oldest oscillator files, which carry no header line
+# (no "!Format date"). Its fourth column is a threshold FREQUENCY, not an energy.
 hillier_rowformat_noheader = "levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid"
 
 
-# The files disagree on which columns they carry, so only the fields below are kept and every ion
-# read from an oscillator file gets the same frame. parity is not in the file: it is read out of the
-# level name, and decides which transitions are forbidden.
+# The files disagree on which columns they carry, so only these are kept and every ion gets the
+# same frame. parity is not in the file: it is read from the level name and decides forbidden-ness.
 class HillierEnergyLevel(t.NamedTuple):
     """One energy level read from a CMFGEN oscillator file."""
 
@@ -300,15 +298,14 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
         if config[-1] == "o":
             return (-1, -1, 1)
         return (-1, -1, -1)
-    # the whole parse is guarded: a malformed name can fail at the int() or at either index,
-    # and any of those means the term is simply unreadable
+    # a malformed name can fail at the int() or at either index, and any of those just means
+    # the term is unreadable
     try:  # ruff: ignore[too-many-statements-in-try-clause]
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
         if lposition + 1 > len(config) - 1:
-            # No 'e'/'o' suffix to read the parity from. CMFGEN writes its merged high-l levels
-            # this way, with the orbital letter repeated as the term symbol (2s2_13w_2W,
-            # 2s2_2p3(4So)5z_5Z), so the term letter is a merge marker rather than a real L.
-            # Sum l over the occupied orbitals instead of assuming the term is even.
+            # No 'e'/'o' suffix to give the parity. CMFGEN writes its merged high-l levels this
+            # way, repeating the orbital letter as the term symbol (2s2_13w_2W, 2s2_2p3(4So)5z_5Z),
+            # so sum l over the occupied orbitals instead of assuming an even term.
             parity = artisatomic.get_parity_from_config(config)
         elif config[lposition + 1] == "o":
             parity = 1
@@ -570,8 +567,8 @@ def read_phixs_tables(
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     lambdaangstroms: list[float] = dfenergy_levels["lambdaangstrom"].to_list()
 
-    # first level index of each name, with and without the [J] suffix: the cross-section tables are
-    # matched to levels by name, and a scan of the level list per table would be O(levels x tables)
+    # first level index of each name, with and without the [J] suffix: tables are matched to levels
+    # by name, and rescanning the level list per table would be O(levels x tables)
     firstlevelindex_of_levelname: dict[str, int] = {}
     firstlevelindex_of_levelnamenoJ: dict[str, int] = {}
     for levelindex, levelname in enumerate(levelnames):
@@ -581,13 +578,12 @@ def read_phixs_tables(
     # this gets partially overwritten anyway
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     photoionization_thresholds_ev = np.full(levelcount, np.nan)
-    # None means "no photoionisation data for this level". get_photoiontargetfractions() relies on
-    # this to tell those levels apart from levels that do have a cross-section table, so it must
-    # not be initialised to empty lists.
+    # None means "no photoionisation data for this level", which get_photoiontargetfractions()
+    # relies on, so this must not be initialised to empty lists
     photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None] * levelcount
 
-    # charge of the ion left behind by the photoionisation, i.e. CMFGEN's ZION (= ZXzV, which it
-    # reads from the oscillator file, where it equals the ionisation stage for every ion here)
+    # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file, which
+    # equals the ionisation stage for every ion here)
     zion = ion_stage
     photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     phixstables = [{} for _ in photfilenames]
@@ -650,15 +646,14 @@ def read_phixs_tables(
                     row[-3:]
                 ) == "!Configuration name [*]":
                     lowerlevelname = row[0]
-                    # with J splitting, the name (including any [J] suffix) maps to exactly one
-                    # level, so it must be kept intact. Without J splitting, strip the [J] suffix
-                    # so the table applies to all levels sharing the configuration
+                    # with J splitting the name (including any [J] suffix) maps to exactly one
+                    # level; without it, strip the suffix so the table covers the configuration
                     if not j_splitting_on and "[" in lowerlevelname:
                         lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
-                    # the zero-based index of the first matching level (without J splitting,
-                    # several matches may differ by J values); no match keeps the old default of 0
+                    # first matching level (without J splitting, several may differ by J);
+                    # no match keeps the old default of 0
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
@@ -668,10 +663,9 @@ def read_phixs_tables(
                     # print(f"Reading level {lowerlevelindex} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
-                    # CMFGEN's ZION comes from the oscillator file, not from here: RDPHOT_GEN_V2
-                    # never reads this field. The two disagree for 29 files in the shipped
-                    # database, so keep using ion_stage (which matches the oscillator value for
-                    # every ion in ions_data) and only report the discrepancy.
+                    # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
+                    # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
+                    # matches the oscillator value for every ion in ions_data) and just report it.
                     zion_from_photfile = int(float(row[0]))
                     if zion_from_photfile != ion_stage:
                         artisatomic.log_and_print(
@@ -872,10 +866,8 @@ def read_phixs_tables(
                         phixs_type_levels[crosssectiontype].append(lowerlevelname)
 
                 if len(row) == 0:
-                    # For the tabulated types the array is preallocated to the declared row count,
-                    # so a short table leaves trailing zeros behind. Compare the number of points
-                    # actually read instead. (The previous check tested `targetlevelname in
-                    # <2-D float ndarray>`, which is always False, so it never ran.)
+                    # for the tabulated types the array is preallocated to the declared row
+                    # count, so a short table leaves trailing zeros: compare the points read
                     if (
                         crosssectiontype in {20, 21, 22}
                         and lowerlevelname
@@ -921,10 +913,9 @@ def read_phixs_tables(
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
             except IndexError:
-                # The cross section is zero everywhere on the output grid, so the level is dropped
-                # and gets no photoionization at all. For a type-8 (offset) cross section this
-                # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
-                # nu/nu_edge grid that reduce_phixs_tables() samples.
+                # The cross section is zero everywhere on the output grid, so the level gets no
+                # photoionization. For type 8 (offset) this happens when the offset edge
+                # nu_edge + nu_o lies beyond the grid that reduce_phixs_tables() samples.
                 num_levelnames_with_zero_crosssection += 1
                 artisatomic.log_and_print(
                     flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
@@ -987,9 +978,8 @@ def read_phixs_tables(
             # reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
             reduced_phixs_dict[lowerlevelname] = reduced_phixstable  # / (max_factor / factor_sum)
 
-    # now the non-J-split cross sections are mapped onto J-split levels. Without J splitting a
-    # cross-section table matches every level sharing the configuration, so index the level list by
-    # match name once rather than rescanning it for each table.
+    # map the non-J-split cross sections onto J-split levels. A table matches every level sharing
+    # the configuration, so index the level list by match name once rather than rescanning it.
     levelindices_of_matchname: defaultdict[str, list[int]] = defaultdict(list)
     for levelindex, levelname in enumerate(levelnames):
         levelindices_of_matchname[levelname if j_splitting_on else levelname.split("[")[0]].append(levelindex)
@@ -997,9 +987,9 @@ def read_phixs_tables(
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
         for levelindex in levelindices_of_matchname[lowerlevelname_a]:
             photoionization_crosssections[levelindex] = phixstable
-            # .get() rather than the defaultdict's __getitem__: a level whose target factors
-            # all came out zero is absent here, and inserting an empty list for it would look
-            # like "has data, no targets" instead of "no data" to get_photoiontargetfractions()
+            # .get() rather than __getitem__: a level whose target factors all came out zero is
+            # absent, and an empty list would look like "has data, no targets" to
+            # get_photoiontargetfractions()
             photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
                 lowerlevelname_a
             )
@@ -1104,9 +1094,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # energy / (E_o + E_threshold), i.e. U measured from the offset edge rather than the true edge
         u_offset = thresholdenergyev * u_grid / (e_o_ev + thresholdenergyev)
 
-        # CMFGEN interpolates log10(cross section) linearly in log10(U), and the tabulated U grid is
-        # geometric, so this reproduces its RJ = LOG10(U) / L_DEL_U indexing.
-        # u_offset <= u_grid for e_o_ev >= 0, so we never need to extrapolate past the table end.
+        # CMFGEN interpolates log10(cross section) linearly in log10(U) on a geometric U grid,
+        # reproducing its RJ = LOG10(U) / L_DEL_U indexing. u_offset <= u_grid for e_o_ev >= 0,
+        # so the table end is never extrapolated past.
         with np.errstate(divide="ignore"):
             log_sigma = np.log10(arr_sigma_summed_over_l)
         arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_grid), log_sigma) * scale_factor
@@ -1271,8 +1261,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
         except KeyError:
             level_ids_of_level_name[levelnamenoJ] = [levelid]
 
-    # total statistical weight of each term, used to share a term-resolved collision strength over
-    # its J levels. Depends only on the level list, so build it once rather than per input row.
+    # total statistical weight per term, for sharing a term-resolved collision strength over its
+    # J levels. Depends only on the level list, so build it once.
     g_sum_of_level_name = {
         levelname: sum(gvalues[levelid] for levelid in levelids)
         for levelname, levelids in level_ids_of_level_name.items()
@@ -1346,8 +1336,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
-                # every level lookup below can raise KeyError for a name that is not in the
-                # level list, so the whole block is guarded rather than each lookup
+                # any level lookup below can raise KeyError for a name not in the level list,
+                # so guard the whole block rather than each lookup
                 try:  # ruff: ignore[too-many-statements-in-try-clause]
                     if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
                         artisatomic.log_and_print(
@@ -1369,15 +1359,11 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                             if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
                                 upsilondict[id_upper, id_upper2] = -2.0
 
-                    # When the collision data is given between LS terms but the level list is
-                    # J-split, the term effective collision strength is shared over the J levels
-                    # of both terms in proportion to their statistical weights:
+                    # A term-resolved collision strength is shared over the J levels of both
+                    # terms in proportion to their statistical weights:
                     #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)
-                    # so that sum_ij upsilon_ij = upsilon_term. That invariant is what makes the
-                    # total term-to-term rate come out right, because ARTIS forms the collisional
-                    # excitation rate coefficient as proportional to upsilon_ij / g_i.
-                    # Both sums are over the complete term, so each pair keeps its correct value
-                    # regardless of which pairs happen to be representable as lower id < upper id.
+                    # so that sum_ij upsilon_ij = upsilon_term, which is what makes the total
+                    # term-to-term rate right (ARTIS builds the rate from upsilon_ij / g_i).
                     lower_g_sum = g_sum_of_level_name[namefrom]
                     upper_g_sum = g_sum_of_level_name[nameto]
 
@@ -1389,9 +1375,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                             upsilonscaled = (
                                 upsilon * (gvalues[id_lower] / lower_g_sum) * (gvalues[id_upper] / upper_g_sum)
                             )
-                            # upsilon is symmetric, and the output wants lower id < upper id. The
-                            # two terms' J levels can interleave in energy, so order the key here
-                            # rather than dropping the pairs that come out the wrong way round.
+                            # upsilon is symmetric and the output wants lower id < upper id; the
+                            # terms' J levels can interleave, so order the key rather than
+                            # dropping the pairs that come out reversed
                             key = (min(id_lower, id_upper), max(id_lower, id_upper))
                             if key in upsilondict and upsilondict[key] >= 0.0:
                                 artisatomic.log_and_print(
@@ -1493,8 +1479,8 @@ def read_hyd_phixsdata():
     get_hydrogenic_*_phixstable(). Thresholds are taken from the H I level list, which is
     therefore required to be indexed by principal quantum number.
     """
-    # the cached (2l+1)-weighted sums are built from the tables filled in below, so a reload
-    # (repeated calls happen in the tests) must not leave sums computed from the previous tables
+    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload (the
+    # tests call this repeatedly) must not leave sums from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
     with open(os.devnull, "w", encoding="utf-8") as devnull:

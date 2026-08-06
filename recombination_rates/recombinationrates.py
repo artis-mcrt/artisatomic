@@ -64,9 +64,9 @@ for ionindex in range(4):
                     ylist.append(float(row[9]) * weightfactor)
 
                 ylistSS82.append(Arad[ionindex] * (T / 1e4) ** -Xrad[ionindex])
-                # Shull & van Steenberg (1982) dielectronic rate: A_di * T**(-3/2) * exp(-T0/T) *
-                # (1 + B_di * exp(-T1/T)). NB ** binds tighter than /, so T**-3.0 / 2.0 would be
-                # T**-3 / 2, which is ~2e6 times too small at T = 1e4 K.
+                # Shull & van Steenberg (1982) dielectronic rate: A_di * T**(-3/2) * exp(-T0/T)
+                # * (1 + B_di * exp(-T1/T)). NB ** binds tighter than /, so T**-3.0 / 2.0 would
+                # be ~2e6 times too small at T = 1e4 K.
                 alphadSS82 = (
                     Adi[ionindex]
                     * (T**-1.5)

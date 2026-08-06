@@ -58,9 +58,9 @@ def test_get_parity_from_config():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
-    # CMFGEN packs the high-l levels of a shell into one level whose orbital letter is a merge
-    # marker, not a real l: '5z' would be l=22 and '13w' l=19, both impossible for their n. Such a
-    # level spans several l of both parities, so only the real orbitals decide the parity.
+    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
+    # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
+    # the real orbitals decide the parity.
     assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
@@ -224,9 +224,8 @@ def test_hydrogenic_phixs_effective_charge_scaling():
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
-            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and the gaunt factor at
-            # threshold depends only on n, so the ratio to the n=1 value is exactly n / Z**2
-            # once the n-dependence of g_bf is divided out by comparing at the same n.
+            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
+            # depends only on n, so comparing at the same n leaves a ratio of exactly n / Z**2
             same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 

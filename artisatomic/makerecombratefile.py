@@ -134,9 +134,8 @@ def main():
                     arr_rrc = ion.RrRate["rate"]
                     ion.drRate()
                     arr_drc = ion.DrRate["rate"]
-                    # the third column is the total recombination rate, matching the RRC(total)
-                    # column used for the Nahar files above, so dielectronic recombination must be
-                    # included rather than computed and discarded
+                    # the third column is the total recombination rate, matching RRC(total) used
+                    # for the Nahar files above, so dielectronic recombination must be included
                     frecombrates.writelines(
                         f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
                     )
