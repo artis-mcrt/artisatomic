@@ -35,7 +35,6 @@ from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.manual_matches import hillier_name_replacements
-from artisatomic.manual_matches import nahar_configuration_replacements
 
 # import artisatomic.readlisbondata as readlisbondata
 
@@ -1227,37 +1226,14 @@ def write_adata(
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
+    # every reader names its levels; the comment is that name, with the Hillier display
+    # replacements applied here rather than in the reader, where the name is the transition key
     has_levelname = "levelname" in dfenergylevels.columns
-    has_naharindex = "indexinsymmetry" in dfenergylevels.columns
-    # the Nahar annotation below reads these columns unconditionally; checking up front turns a
-    # malformed frame into a clean failure instead of a partially written adata.txt
-    if has_naharindex:
-        missingcolumns = {"twosplusone", "l", "parity", "naharconfiguration"} - set(dfenergylevels.columns)
-        if missingcolumns:
-            msg = (
-                f"Level table for Z={atomic_number} ion_stage={ion_stage} has an indexinsymmetry column but is"
-                f" missing {', '.join(sorted(missingcolumns))}, which the Nahar level comment needs"
-            )
-            raise ValueError(msg)
 
     for energylevel in dfenergylevels.iter_rows(named=True):
-        transitioncount = transition_count_of_level_name.get(energylevel["levelname"], 0) if has_levelname else 0
-
-        commentparts = []
-        if has_levelname:
-            hlevelname = energylevel["levelname"]
-            commentparts.append(hillier_name_replacements.get(hlevelname, hlevelname))
-
-        if has_naharindex and energylevel["indexinsymmetry"] >= 0:
-            config = energylevel["naharconfiguration"]
-            if config.strip() in nahar_configuration_replacements:
-                config += f" replaced by {nahar_configuration_replacements[config.strip()]}"
-            commentparts.append(
-                f"Nahar: {energylevel['twosplusone']:d}{lchars[energylevel['l']]:}{['e', 'o'][energylevel['parity']]:} index"
-                f" {energylevel['indexinsymmetry']:} '{config}'"
-            )
-
-        level_comment = " ".join(commentparts)
+        levelname = energylevel["levelname"] if has_levelname else ""
+        transitioncount = transition_count_of_level_name.get(levelname, 0)
+        level_comment = hillier_name_replacements.get(levelname, levelname)
 
         # level ids are zero-based in memory, but the output format numbers them from one
         fatommodels.write(

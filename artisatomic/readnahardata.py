@@ -8,6 +8,7 @@ import numpy.typing as npt
 import polars as pl
 
 import artisatomic
+from artisatomic.manual_matches import nahar_configuration_replacements
 
 ryd_to_ev = 13.605693122994232
 
@@ -28,6 +29,9 @@ class NaharCoreState(t.NamedTuple):
 
 
 class NaharEnergyLevel(t.NamedTuple):
+    # Nahar levels have no spectroscopic name of their own, so this is built from the level's
+    # symmetry and configuration; write_adata() writes it as the level comment in adata.txt
+    levelname: str
     indexinsymmetry: int
     # "T" for a valence electron state, "C" for an equivalent electron state
     TC: str
@@ -220,8 +224,23 @@ def read_nahar_energy_level_file(
                         (nahar_ionization_potential_rydberg + energyreltoionpotrydberg) * ryd_to_ev / hc_in_ev_cm
                     )
 
+                    # the spectroscopic table covers only the bound states, so the levels above the
+                    # ionization threshold have no known configuration
+                    naharconfiguration = nahar_configurations.get(
+                        (twosplusone, l_val, parity, indexinsymmetry), "UNKNOWN CONFIG"
+                    )
+                    displayconfiguration = naharconfiguration
+                    if displayconfiguration.strip() in nahar_configuration_replacements:
+                        displayconfiguration += (
+                            f" replaced by {nahar_configuration_replacements[displayconfiguration.strip()]}"
+                        )
+
                     nahar_energy_levels.append(
                         NaharEnergyLevel(
+                            levelname=(
+                                f"Nahar: {twosplusone:d}{lchars[l_val]}{['e', 'o'][parity]}"
+                                f" index {indexinsymmetry} '{displayconfiguration}'"
+                            ),
                             indexinsymmetry=indexinsymmetry,
                             TC=TC,
                             corestateid=nahar_core_state_id,
@@ -233,11 +252,7 @@ def read_nahar_energy_level_file(
                             parity=parity,
                             energyabovegsinpercm=energyabovegsinpercm,
                             g=twosplusone * (2 * l_val + 1),
-                            # the spectroscopic table covers only the bound states, so the levels
-                            # above the ionization threshold have no known configuration
-                            naharconfiguration=nahar_configurations.get(
-                                (twosplusone, l_val, parity, indexinsymmetry), "UNKNOWN CONFIG"
-                            ),
+                            naharconfiguration=naharconfiguration,
                         )
                     )
 

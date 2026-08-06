@@ -575,10 +575,11 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
     args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
     dflevels, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
 
-    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else
-    assert dflevels.select("indexinsymmetry", "naharconfiguration").rows() == [
-        (1, "UNKNOWN CONFIG"),
-        (2, "3d54s  (7S ) 6s  b8S "),
+    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else, and the
+    # reader builds each level's adata.txt name from its symmetry and configuration
+    assert dflevels.select("indexinsymmetry", "naharconfiguration", "levelname").rows() == [
+        (1, "UNKNOWN CONFIG", "Nahar: 8Se index 1 'UNKNOWN CONFIG'"),
+        (2, "3d54s  (7S ) 6s  b8S ", "Nahar: 8Se index 2 '3d54s  (7S ) 6s  b8S '"),
     ]
 
     # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
@@ -589,10 +590,12 @@ def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
 
 
 def test_write_adata_level_comment():
-    """Level comments carry no padding: the name, then a Nahar annotation where there is one.
+    """The level comment is the level's name, with no padding.
 
     artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
-    not whitespace, so any padding written here ends up inside the level name it reports.
+    not whitespace, so any padding written here ends up inside the level name it reports. The
+    Hillier display replacements are applied here rather than in the reader, where the name is the
+    key that transitions are matched on.
     """
     dfhillier = leveltuples_to_pldataframe(
         pl.DataFrame(
@@ -612,25 +615,16 @@ def test_write_adata_level_comment():
     assert hillier_line.endswith(" someion_gs")
     assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # a Nahar level has no name, so the annotation is the whole comment
+    # a Nahar level's name is the annotation its reader built, and is written unchanged
+    naharlevelname = "Nahar: 3Pe index 1 '2s22p2'"
     dfnahar = leveltuples_to_pldataframe(
-        pl.DataFrame(
-            {
-                "energyabovegsinpercm": [0.0],
-                "g": [9.0],
-                "twosplusone": [3],
-                "l": [1],
-                "parity": [0],
-                "indexinsymmetry": [1],
-                "naharconfiguration": ["2s22p2"],
-            }
-        )
+        pl.DataFrame({"levelname": [naharlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
     )
     buf = io.StringIO()
     write_adata(buf, 8, 1, dfnahar, 13.6, {}, io.StringIO())
     nahar_line = buf.getvalue().splitlines()[1]
-    assert nahar_line.endswith(" Nahar: 3Pe index 1 '2s22p2'")
-    assert nahar_line.split(maxsplit=4)[4] == "Nahar: 3Pe index 1 '2s22p2'"
+    assert nahar_line.endswith(" " + naharlevelname)
+    assert nahar_line.split(maxsplit=4)[4] == naharlevelname
 
 
 def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
