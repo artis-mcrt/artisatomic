@@ -1,3 +1,5 @@
+"""Read ground states only, from the NIST ground-state table."""
+
 import os.path
 import typing as t
 from collections import defaultdict
@@ -11,6 +13,8 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 class EnergyLevel(t.NamedTuple):
+    """A ground state read from the NIST table."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float

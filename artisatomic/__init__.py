@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 # PYTHON_ARGCOMPLETE_OK
+"""Build an ARTIS atomic database from published atomic data sets.
+
+Each data source has its own read*.py module; this package selects a handler per ion, calls it,
+and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2.txt.
+"""
+
 import argparse
 import contextlib
 import glob
@@ -69,7 +75,7 @@ roman_numerals = (
 
 
 def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
-    """The ions to process and the handler to read each one with.
+    """Get the ions to process and the handler to read each one with.
 
     Read from artisatomicionhandlers.json when that file exists, so a run can be repeated
     exactly; otherwise built from the hard-coded selection below plus whatever the readers'
@@ -344,7 +350,7 @@ class IonData(t.NamedTuple):
 
 
 def get_default_handler(atomic_number: int, ion_stage: int) -> str:
-    """The data source to use for an ion when the handler list does not name one."""
+    """Get the data source to use for an ion when the handler list does not name one."""
     if atomic_number == 2 and ion_stage == 3:
         return "boyle"
     if USE_QUB_COBALT and atomic_number == 27:
@@ -699,8 +705,7 @@ def reduce_phixs_tables[KeyType](
     nphixspoints: int,
     phixsnuincrement: float,
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
-    """Receives a dictionary, with each item being a 2D array of energy and cross section points
-    Returns a dictionary with the items having been downsampled into a 1D array.
+    """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
 
@@ -933,7 +938,7 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         instr = instr[:-1]
 
     def is_two_digit_n(strn: str) -> bool:
-        """Are these two digits a principal quantum number, rather than one digit of something else?
+        """Test whether two digits are a principal quantum number, not one digit of something else.
 
         n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
         '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.

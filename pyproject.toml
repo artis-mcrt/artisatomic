@@ -139,7 +139,6 @@ ignore = [
     "C901",    # complex-structure
     "COM812",  # missing-trailing-comma
     "CPY001",  # missing-copyright-notice
-    "D",
     "DOC201",  # docstring-missing-returns
     "DOC402",  # docstring-missing-yields
     "DOC501",  # docstring-missing-exception
@@ -198,6 +197,11 @@ unfixable = [
     "TC005",  # empty-type-checking-block
     "F401",
 ]
+
+[tool.ruff.lint.pydocstyle]
+# plain summary-then-prose docstrings, without the mandatory Args/Returns sections that the
+# google and numpy conventions enforce
+convention = "pep257"
 
 [tool.ruff.lint.isort]
 force-single-line = true

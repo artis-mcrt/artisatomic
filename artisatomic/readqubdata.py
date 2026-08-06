@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Read levels, transitions and collision strengths from the QUB (Queen's University Belfast) data."""
+
 import os
 import typing as t
 from collections import defaultdict
@@ -28,6 +30,8 @@ lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
 class QUBEnergyLevel(t.NamedTuple):
+    """One energy level of a QUB calculation."""
+
     levelname: str
     qub_id: int
     twosplusone: int

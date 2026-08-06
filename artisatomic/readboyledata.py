@@ -1,3 +1,5 @@
+"""Read helium levels and transitions from the Boyle AOIFE data set."""
+
 import os.path
 from collections import defaultdict
 from collections import namedtuple

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Download ENDF decay data and write the gamma spectra used by ARTIS."""
+
 import io
 import math
 from pathlib import Path

@@ -1,3 +1,5 @@
+"""Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
+
 import math
 import os
 import sys
@@ -26,6 +28,8 @@ hillier_rowformat_noheader = "levelname g energyabovegsinpercm freqtentothe15hz 
 # read from an oscillator file gets the same frame. parity is not in the file: it is read out of the
 # level name, and decides which transitions are forbidden.
 class HillierEnergyLevel(t.NamedTuple):
+    """One energy level read from a CMFGEN oscillator file."""
+
     levelname: str
     g: float
     energyabovegsinpercm: float
@@ -35,6 +39,8 @@ class HillierEnergyLevel(t.NamedTuple):
 
 
 class HillierTransition(t.NamedTuple):
+    """One bound-bound transition read from a CMFGEN oscillator file, keyed by level name."""
+
     namefrom: str
     nameto: str
     f: float

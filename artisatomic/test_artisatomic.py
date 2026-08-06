@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Tests for the artisatomic readers, parsers and output writers."""
+
 import io
 import typing as t
 
@@ -24,11 +26,13 @@ from artisatomic import write_adata
 
 
 def test_reduce_configuration():
+    """Configurations normalise to a comparable form, dropping the parent term and any J value."""
     assert readnahardata.reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
     assert readnahardata.reduce_configuration("3d6_3P2e") == "3d6_3Pe"
 
 
 def test_interpret_term():
+    """LS terms are read from level names, reporting unknown rather than raising on unreadable ones."""
     assert readhillierdata.get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
     assert readhillierdata.get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
@@ -38,6 +42,7 @@ def test_interpret_term():
 
 
 def test_get_parity_from_config():
+    """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
     from artisatomic import get_parity_from_config
 
     # sum of l over the occupied orbitals, mod 2
@@ -61,6 +66,7 @@ def test_get_parity_from_config():
 
 
 def test_interpret_configuration():
+    """Level names split into orbitals and term, including the ambiguous two-digit n and occupation cases."""
     assert interpret_configuration("3d7(4F)6d_5Pbe") == (["3d7", "(4F)", "6d"], 5, 1, 2, -1)
     assert interpret_configuration("3d6(5D)6d4Ge[9/2]") == (["3d6", "(5D)", "6d"], 4, 4, 0, -1)
     assert interpret_configuration("3d6(3G)4s4p_w5Go[4]") == (["3d6", "(3G)", "4s", "4p"], 5, 4, 1, 4)
@@ -95,6 +101,7 @@ def test_interpret_configuration():
 
 
 def test_hydrogenic_phixs():
+    """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
     ryd_to_ev = rhd.ryd_to_ev
 
     rhd.read_hyd_phixsdata()
@@ -154,7 +161,6 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
-
     rhd.read_hyd_phixsdata()
 
     h_in_ev_seconds = rhd.h_in_ev_seconds
@@ -347,6 +353,7 @@ def test_read_coldata_term_to_j_redistribution():
 
 
 def test_add_handler_if_not_set():
+    """Adding a handler returns a new list and never overrides an ion that is already present."""
     ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
 
     # adding an ion for a new element must not modify the input list
@@ -370,6 +377,7 @@ def test_add_handler_if_not_set():
 
 
 def test_split_element_ionstage_str():
+    """'FeII' splits into element and ion stage, including the symbols made only of Roman numeral letters."""
     from artisatomic import split_element_ionstage_str
 
     assert split_element_ionstage_str("FeII") == (26, 2)
@@ -390,6 +398,7 @@ def test_split_element_ionstage_str():
 
 
 def test_get_default_handler():
+    """Each element falls to the data source configured for it."""
     assert get_default_handler(2, 3) == "boyle"
     assert get_default_handler(26, 1) == "cmfgen"
     assert get_default_handler(56, 2) == "cmfgen"
@@ -404,6 +413,7 @@ def test_get_default_handler():
 
 
 def test_hillier_extend_ion_list():
+    """The CMFGEN ion list honours the maximum ion stage and the hydrogen exclusion."""
     result = readhillierdata.extend_ion_list([], maxionstage=1, include_hydrogen=False)
     assert (2, [(1, "cmfgen")]) in result
     assert (26, [(1, "cmfgen")]) in result
@@ -412,6 +422,7 @@ def test_hillier_extend_ion_list():
 
 
 def test_reduce_phixs_tables_worker():
+    """Downsampling a cross-section table preserves the recombination rate it was weighted for."""
     nphixspoints = 100
     phixsnuincrement = 0.03
     temperature = 6000.0
@@ -457,6 +468,7 @@ def test_reduce_phixs_tables_worker():
 
 
 def test_read_adf04():
+    """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
     ionization_energy_ev, energylevels, upsilondict = readqubdata.read_adf04(
         (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
@@ -473,6 +485,7 @@ def test_read_adf04():
 
 
 def test_read_nahar_energy_level_file_missing():
+    """A missing Nahar file is logged and returned as empty data, not raised."""
     # a missing file should be logged and returned as empty data, not crash
     flog = io.StringIO()
     (
@@ -525,6 +538,7 @@ Lines - Ne number of lines: Index, T(valence electron state)/C(equivalent
 
 @pytest.fixture
 def nahar_en_ls_path(tmp_path):
+    """Write the cut-down Nahar energy file to a temporary path."""
     path = tmp_path / "fe2.en.ls.txt"
     path.write_text(NAHAR_EN_LS_FIXTURE)
     return path
@@ -567,8 +581,11 @@ def test_read_nahar_energy_level_file(nahar_en_ls_path):
 
 
 def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
-    # the spectroscopic table covers only the bound states, so levels above the ionization
-    # threshold have no configuration and must be labelled as such rather than left blank
+    """Levels carry their configuration, and those above the threshold are labelled unknown.
+
+    The spectroscopic table covers only the bound states, so a level above the ionization
+    threshold has no configuration and must say so rather than be left blank.
+    """
     import argparse
 
     flog = io.StringIO()
@@ -632,8 +649,11 @@ def test_write_adata_level_comment():
 
 
 def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
-    # a numeric second column means the row is not in the format the parser assumes, so the
-    # remaining columns cannot be trusted: fail loudly rather than reading them from the wrong place
+    """A numeric second column is rejected rather than parsed from the wrong positions.
+
+    It means the row is not in the format the parser assumes, so the columns after it cannot be
+    trusted.
+    """
     nahar_en_ls_path.write_text(NAHAR_EN_LS_FIXTURE.replace("    1  T  2  5 0", "    1  9  2  5 0"))
 
     with pytest.raises(ValueError, match="Expected 'T' or 'C'"):
@@ -641,6 +661,7 @@ def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
 
 
 def test_nahar_get_photoiontargetfractions():
+    """A level's photoionisation targets resolve to upper-ion level ids, falling back to the ground state."""
     dflower = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [9.0], "levelname": ["gs"]})
     dfupper = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [10.0], "levelname": ["gs2"]})
     nahar_core_states = [readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
@@ -649,6 +670,7 @@ def test_nahar_get_photoiontargetfractions():
 
 
 def test_get_level_valence_n():
+    """Each reader's level names yield the valence electron's principal quantum number."""
     # each handler has its own level-name format and parser
     assert readkuruczdata.get_level_valence_n("s5p  3P,enpercm=14276.381,j=0.0") == 5
     assert readtanakajpltdata.get_level_valence_n("2,even,{  4d- 3  4d+ 1  5s+ 1 }") == 5

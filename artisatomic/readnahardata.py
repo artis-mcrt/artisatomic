@@ -1,3 +1,5 @@
+"""Read levels, configurations and photoionization cross sections from Nahar's NORAD data."""
+
 import os
 import sys
 import typing as t
@@ -21,6 +23,8 @@ lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
 class NaharCoreState(t.NamedTuple):
+    """One target/core state of the wavefunction expansion, i.e. a state of the upper ion."""
+
     nahar_core_state_id: int
     configuration: str
     term: str
@@ -28,6 +32,8 @@ class NaharCoreState(t.NamedTuple):
 
 
 class NaharEnergyLevel(t.NamedTuple):
+    """One energy level read from a Nahar .en.ls.txt file."""
+
     # Nahar levels have no spectroscopic name of their own, so this is built from the level's
     # symmetry and configuration; write_adata() writes it as the level comment in adata.txt
     levelname: str
@@ -446,7 +452,8 @@ def reduce_configuration(instr: str) -> str:
 
 
 def remove_bracketed_part(instr: str) -> str:
-    """Operates on a string by removing anything between parentheses (including the parentheses)
+    """Remove anything between parentheses, and the parentheses themselves.
+
     e.g. remove_bracketed_part('AB(CD)EF') = 'ABEF'.
     """
     outstr = ""
@@ -470,7 +477,7 @@ def get_naharphotoion_upperlevelids(
     upper_level_ids_of_core_state_id,
     flog,
 ):
-    """Returns a list of upper level id numbers for a given energy level's photoionisation processes."""
+    """Get the upper level id numbers for a given energy level's photoionisation processes."""
     # core_state_id = int(energy_level.corestateid)
     core_state_id = 1  # temporary fix
     if core_state_id > 0 and core_state_id <= len(nahar_core_states):

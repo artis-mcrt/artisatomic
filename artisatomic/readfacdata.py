@@ -1,3 +1,5 @@
+"""Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data."""
+
 import re
 import typing as t
 from collections import defaultdict
@@ -68,7 +70,7 @@ def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
-    """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
+    """Get a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
@@ -128,7 +130,7 @@ def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
 
 
 def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
-    """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
+    """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
@@ -170,6 +172,8 @@ def extend_ion_list(ion_handlers):
 
 
 class FACEnergyLevel(t.NamedTuple):
+    """One energy level of an FAC calculation."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -213,6 +217,8 @@ def read_levels_data(dflevels):
 
 
 class FACTransition(t.NamedTuple):
+    """One bound-bound transition of an FAC calculation, keyed by zero-based level id."""
+
     lowerlevel: int
     upperlevel: int
     A: float

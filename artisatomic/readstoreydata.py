@@ -1,3 +1,5 @@
+"""Read Co II effective collision strengths from Storey et al. (2016)."""
+
 import artisatomic
 
 

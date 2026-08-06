@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
+
 import typing as t
 from pathlib import Path
 
@@ -34,6 +36,8 @@ def extend_ion_list(ion_handlers, calibrated=True):
 
 
 class FloersEnergyLevel(t.NamedTuple):
+    """One energy level of the Floers+25 data set."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float

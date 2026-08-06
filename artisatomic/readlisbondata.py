@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Lisbon data set. Not currently wired into the dispatch."""
+
 from collections import defaultdict
 from collections import namedtuple
 
@@ -9,10 +11,10 @@ hc_in_ev_cm = 0.0001239841984332003
 
 
 class LisbonReader:
-    """Copied from Andreas Floers code in git.gsi.de:nucastro/opacities.git
-    Class for extracting levels and lines from the Lisbon Atomic Group.
+    """Extract levels and lines from the Lisbon Atomic Group data.
 
-    Mimics the GFALLReader class.
+    Copied from Andreas Floers' code in git.gsi.de:nucastro/opacities.git, and mimics the
+    GFALLReader class.
 
     Attributes
     ----------
@@ -22,7 +24,9 @@ class LisbonReader:
     """
 
     def __init__(self, data, priority=10) -> None:
-        """Parameters
+        """Store the Lisbon data and its priority.
+
+        Parameters
         ----------
         data : dict
             Dictionary containing one dictionary per species with
@@ -35,7 +39,7 @@ class LisbonReader:
         self._get_levels_lines(data)
 
     def _get_levels_lines(self, data):
-        """Generates `levels` and `lines` DataFrames.
+        """Generate the `levels` and `lines` DataFrames.
 
         Parameters
         ----------

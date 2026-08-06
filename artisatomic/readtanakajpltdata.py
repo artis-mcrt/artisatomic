@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
+
 from pathlib import Path
 
 import pandas as pd

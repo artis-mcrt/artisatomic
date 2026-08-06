@@ -1,3 +1,5 @@
+"""Read levels and transitions from the Kurucz gfall line lists."""
+
 import os
 import re
 import typing as t

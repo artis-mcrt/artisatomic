@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # import itertools
+"""Write recombrates.txt from the Nahar total recombination rate files."""
+
 import glob
 import sys
 from collections import namedtuple

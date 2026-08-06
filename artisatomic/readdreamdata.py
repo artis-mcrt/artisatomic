@@ -1,3 +1,5 @@
+"""Read levels and transitions from the DREAM database of lanthanides and actinides."""
+
 import os.path
 from collections import defaultdict
 from collections import namedtuple
