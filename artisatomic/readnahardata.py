@@ -8,7 +8,6 @@ import numpy.typing as npt
 import polars as pl
 
 import artisatomic
-from artisatomic.manual_matches import nahar_configuration_replacements
 
 ryd_to_ev = 13.605693122994232
 
@@ -229,17 +228,11 @@ def read_nahar_energy_level_file(
                     naharconfiguration = nahar_configurations.get(
                         (twosplusone, l_val, parity, indexinsymmetry), "UNKNOWN CONFIG"
                     )
-                    displayconfiguration = naharconfiguration
-                    if displayconfiguration.strip() in nahar_configuration_replacements:
-                        displayconfiguration += (
-                            f" replaced by {nahar_configuration_replacements[displayconfiguration.strip()]}"
-                        )
-
                     nahar_energy_levels.append(
                         NaharEnergyLevel(
                             levelname=(
                                 f"Nahar: {twosplusone:d}{lchars[l_val]}{['e', 'o'][parity]}"
-                                f" index {indexinsymmetry} '{displayconfiguration}'"
+                                f" index {indexinsymmetry} '{naharconfiguration}'"
                             ),
                             indexinsymmetry=indexinsymmetry,
                             TC=TC,
