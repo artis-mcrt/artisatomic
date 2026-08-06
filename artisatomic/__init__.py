@@ -89,7 +89,7 @@ def get_ion_handlers() -> list[tuple[int, list[int | tuple[int, str]]]]:
 
     # include everything we have data for
     # ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=False)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=True)
     # ion_handlers = readdreamdata.extend_ion_list(ion_handlers)
     # ion_handlers = readfacdata.extend_ion_list(ion_handlers)
     ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
