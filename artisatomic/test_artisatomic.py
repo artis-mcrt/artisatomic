@@ -352,7 +352,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
 def test_write_phixs_data_with_no_phixs_arrays():
     """A reader that found no photoionization data must not make write_phixs_data() index off the end.
 
-    write_output_files() fills a target list for every level whenever the reader supplied none, and
+    resolve_photoion_targetfractions() fills a target list for every level whenever the reader supplied none, and
     readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
     reader also left the cross-section and threshold arrays empty, the level ids from those target
     lists have nothing behind them.

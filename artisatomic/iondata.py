@@ -186,3 +186,25 @@ def read_ion_data(
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
     )
+
+
+def resolve_photoion_targetfractions(iondatalist: list[IonData], args: argparse.Namespace) -> list[IonData]:
+    """Fill in the photoionisation target fractions of each ion whose reader supplied none.
+
+    An ion's targets are levels of the next ion up, so the fractions can only be resolved once
+    the whole element has been read. The top ion has no upper ion to photoionise to and is left
+    alone, as is any ion whose reader already gave per-level fractions.
+    """
+    if args.nophixs:
+        return iondatalist
+
+    return [
+        iondata
+        if i == len(iondatalist) - 1 or iondata.photoionization_targetfractions
+        else iondata._replace(
+            photoionization_targetfractions=readhillierdata.get_photoiontargetfractions(
+                iondata.dfenergylevels, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
+            )
+        )
+        for i, iondata in enumerate(iondatalist)
+    ]

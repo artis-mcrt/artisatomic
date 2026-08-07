@@ -8,7 +8,6 @@ import numpy as np
 import numpy.typing as npt
 import polars as pl
 
-from artisatomic import readhillierdata
 from artisatomic.base import atomic_weights
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
@@ -73,8 +72,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
-    Takes the element's ions together because an ion's photoionisation targets are levels of the
-    next ion up, so the target fractions can only be resolved once both are in hand.
+    Every non-top ion's photoionization_targetfractions must already be filled in (see
+    resolve_photoion_targetfractions() in iondata).
     """
     for i, iondata in enumerate(iondatalist):
         ion_stage = iondata.ion_stage
@@ -160,19 +159,13 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             )
 
         if i < len(iondatalist) - 1 and not args.nophixs:  # ignore the top ion
-            photoionization_targetfractions = iondata.photoionization_targetfractions
-            if len(photoionization_targetfractions) < 1:
-                photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
-                    dfenergylevels_ion, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
-                )
-
             with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
                 write_phixs_data(
                     fphixs,
                     atomic_number,
                     ion_stage,
                     iondata.photoionization_crosssections,
-                    photoionization_targetfractions,
+                    iondata.photoionization_targetfractions,
                     iondata.photoionization_thresholds_ev,
                     args,
                     flog,
