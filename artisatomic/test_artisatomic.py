@@ -350,6 +350,24 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         assert sum(1 for targets in targetfractions if targets) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
+    # the limit bounds the levels considered, not the tables produced: an unbound level inside it
+    # is skipped but still counts, so asking for 3 here yields only the one bound level below them
+    unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
+    dflevels_partly_unbound = dflevels.with_columns(
+        energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
+    )
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=3
+    )
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_partly_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+    assert np.count_nonzero(~np.isnan(thresholds)) == 1
+
 
 def test_write_phixs_data_with_no_phixs_arrays():
     """A reader that found no photoionization data must not make write_phixs_data() index off the end.

@@ -223,9 +223,8 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
 def nonnegative_int(value: str) -> int:
     """Argparse type for an option that counts things, where a negative value is always a mistake.
 
-    Raises:
-        argparse.ArgumentTypeError: if the value is negative, so that a typo such as -1 is
-            reported instead of being taken as "off".
+    Raises ArgumentTypeError below zero, so that a typo such as -1 is reported instead of being
+    taken as "off".
     """
     intvalue = int(value)
     if intvalue < 0:
@@ -279,11 +278,13 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
             type=nonnegative_int,
             default=100,
             help=(
-                "Estimate hydrogenic cross sections for this many of the lowest levels of any ion"
-                " whose handler supplied none at all, or 0 to disable. Negative values are"
-                " rejected. An ion with even one cross section from its data source is left"
-                " untouched, so this never replaces or extends measured data. Excludes the top"
-                " ion, which has no upper ion to photoionise to."
+                "Consider this many of the lowest levels of any ion whose handler supplied no"
+                " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
+                " Negative values are rejected. Fewer tables than this can result, because a level"
+                " at or above the ionization energy is skipped but still counts towards the limit."
+                " An ion with even one cross section from its data source is left untouched, so"
+                " this never replaces or extends measured data. Excludes the top ion, which has no"
+                " upper ion to photoionise to."
             ),
         )
 
@@ -649,7 +650,8 @@ def match_hydrogenic_phixs(
     Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
     the lowest -nlevels_hydrogenic_for_unknown_phixs levels, scaled to that level's own ionisation
     threshold, with the upper ion's ground state as the only target. That option defaults to 100,
-    so this is on unless it is set to 0.
+    so this is on unless it is set to 0. It bounds the levels considered rather than the tables
+    produced: a level at or above the ionization energy is skipped but still counts towards it.
 
     The caller only reaches this for an ion whose handler returned no cross sections at all, so
     real data is never replaced or extended by an estimate. The granularity is the whole ion: an
