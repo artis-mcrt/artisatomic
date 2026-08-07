@@ -260,13 +260,15 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
         )
 
         parser.add_argument(
-            "--use_hydrogenic_for_unknown_phixs",
-            action="store_true",
+            "-nlevels_hydrogenic_for_unknown_phixs",
+            type=int,
+            default=100,
             help=(
-                "Estimate hydrogenic cross sections for ions whose handler supplied none at all."
-                " An ion with even one cross section from its data source is left untouched, so"
-                " this never replaces or extends measured data. Excludes the top ion, which has no"
-                " upper ion to photoionise to."
+                "Estimate hydrogenic cross sections for this many of the lowest levels of any ion"
+                " whose handler supplied none at all, or 0 to disable. An ion with even one cross"
+                " section from its data source is left untouched, so this never replaces or"
+                " extends measured data. Excludes the top ion, which has no upper ion to"
+                " photoionise to."
             ),
         )
 
@@ -514,7 +516,7 @@ def read_ion_data(
         not is_top_ion
         and not args.nophixs
         and len(photoionization_crosssections) == 0
-        and args.use_hydrogenic_for_unknown_phixs
+        and args.nlevels_hydrogenic_for_unknown_phixs > 0
     ):
         (
             photoionization_crosssections,
@@ -630,8 +632,9 @@ def match_hydrogenic_phixs(
     """Estimate photoionization cross sections for a data set that supplies none.
 
     Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
-    the lowest levels, scaled to that level's own ionisation threshold, with the upper ion's ground
-    state as the only target. Enabled by --use_hydrogenic_for_unknown_phixs.
+    the lowest -nlevels_hydrogenic_for_unknown_phixs levels, scaled to that level's own ionisation
+    threshold, with the upper ion's ground state as the only target. That option defaults to 100,
+    so this is on unless it is set to 0.
 
     The caller only reaches this for an ion whose handler returned no cross sections at all, so
     real data is never replaced or extended by an estimate. The granularity is the whole ion: an
@@ -660,8 +663,7 @@ def match_hydrogenic_phixs(
     photoionization_thresholds_ev = np.full(energy_levels.height, np.nan)
     phixstables = {}
     for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
-        if levelindex >= 100:
-            # limit levels with hydrogenic photoionization cross sections
+        if levelindex >= args.nlevels_hydrogenic_for_unknown_phixs:
             break
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
