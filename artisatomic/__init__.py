@@ -21,6 +21,7 @@ from artisatomic import readfacdata as readfacdata
 from artisatomic import readfloers25data as readfloers25data
 from artisatomic import readhillierdata as readhillierdata
 from artisatomic import readkuruczdata as readkuruczdata
+from artisatomic import readlisbondata as readlisbondata
 from artisatomic import readqubdata as readqubdata
 from artisatomic import readtanakajpltdata as readtanakajpltdata
 from artisatomic.base import atomic_weights as atomic_weights

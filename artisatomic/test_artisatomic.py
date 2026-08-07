@@ -686,6 +686,26 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
+def test_parent_elevel_zero_normalisation_is_anchored():
+    r"""Only a parent level that IS 0.0 may be renamed to 0, not one that merely contains it.
+
+    polars' str.replace() takes a pattern and matches anywhere in the value, so a bare "0.0" also
+    rewrote "10.05" to "105" and "100.0" to "100", moving those levels into the wrong group_by
+    bucket in download_gammaspec_betaminus_alpha. literal=True does not help: "0.0" really is a
+    substring of "10.05". Anchoring with ^...$ is what confines it to the whole value.
+    """
+    parent_elevels = ["0.0", "0", "10.05", "100.0", "1234.5", "0.05"]
+    normalised = (
+        pl.DataFrame({"parent_elevel": parent_elevels})
+        .with_columns(pl.col("parent_elevel").str.replace(r"^0\.0$", "0"))["parent_elevel"]
+        .to_list()
+    )
+
+    # the ground state, however it is spelled, collapses to one group; nothing else moves
+    assert normalised == ["0", "0", "10.05", "100.0", "1234.5", "0.05"]
+    assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
+
+
 def test_split_element_ionstage_str():
     """'FeII' splits into element and ion stage, including the symbols made only of Roman numeral letters."""
     from artisatomic import split_element_ionstage_str

@@ -109,7 +109,11 @@ def main():
                 newcols.append(colname)
             dfnuclide.columns = newcols
             dfnuclide = dfnuclide.with_columns(pl.col(pl.Utf8).str.strip_chars()).with_columns(
-                pl.col("parent_elevel").str.replace("0.0", "0"),
+                # anchored, so only a level that IS 0.0 is renamed: str.replace() takes a pattern
+                # and matches anywhere, so a bare "0.0" also rewrote "10.05" to "105" and
+                # "100.0" to "100", silently moving those levels to the wrong group below.
+                # The point is only to keep "0" and "0.0" from forming two ground-state groups.
+                pl.col("parent_elevel").str.replace(r"^0\.0$", "0"),
                 pl.col("radiationenergy_kev").cast(pl.Float64),
                 pl.col("intensity").cast(pl.Float64),
                 pl.col("halflife_s").cast(pl.Float64),
