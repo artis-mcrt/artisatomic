@@ -44,16 +44,16 @@ class LisbonReader:
         ----------
         data : dict
             Dictionary containing one dictionary per species with
-            keys `levels` and `lines`.
+            keys `atomic_number`, `ion_charge`, `levels` and `lines`.
         """
-        # carsus is an optional extra that is not a declared dependency of this package
-        from carsus.util import parse_selected_species  # ruff: ignore[unsorted-imports] # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
-
         lvl_list = []
         lns_list = []
-        for ion, parser in data.items():
-            atomic_number = parse_selected_species(ion)[0][0]
-            ion_charge = parse_selected_species(ion)[0][1]
+        # the caller already knows the element and charge, so they are passed in rather than
+        # formatted into the key and parsed back out with carsus.util.parse_selected_species(),
+        # which made an undeclared optional dependency a hard requirement of this reader
+        for parser in data.values():
+            atomic_number = parser["atomic_number"]
+            ion_charge = parser["ion_charge"]
             levels_data = pd.read_csv(parser["levels"], skiprows=8, index_col=0)
             levels = pd.DataFrame()
             levels["energy"] = levels_data["Energy[cm^-1]"]
@@ -82,6 +82,7 @@ class LisbonReader:
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
         levels = pd.concat(lvl_list)
+        # pd.concat() of the untyped list above narrows to Never, so pyright reads this as dead
         lines = pd.concat(lns_list)  # pyright: ignore[reportUnreachable]
         self.levels = levels
         self.lines = lines
@@ -95,34 +96,51 @@ def get_levelname(row):
 def read_levels_data(dflevels):
     """Convert the Lisbon level table to level tuples, sorted by energy.
 
+    Also returns the map from the file's level index to the zero-based level id, which
+    read_lines_data() needs because sorting by energy reorders the levels.
+
+    The lines name their levels POSITIONALLY: LisbonReader reads their energies with
+    levels.iloc[lines["level_index_lower"]], which is a position in the file-ordered frame, not an
+    index label. So the map is keyed by that position, which reset_index() below makes explicit
+    rather than relying on the levels CSV happening to be numbered from zero.
+
     Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
     transitions forbidden: this data set does not supply parities.
     """
-    energy_levels = []
+    # sort first, so that the ids handed out below are the ones the levels keep. The index is
+    # reset to the row position beforehand, so sorting leaves each level carrying its file position
+    dflevels = dflevels.reset_index(drop=True).sort_values(by="energy", kind="stable")
 
-    for index, row in dflevels.iterrows():
-        parity = -index  # give a unique parity so that all transitions are permitted
-        energyabovegsinpercm = float(row.energy)
-        g = 2 * row.j + 1
-        newlevel = EnergyLevelTuple(
-            levelname=get_levelname(row), parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
+    energy_levels = [
+        EnergyLevelTuple(
+            levelname=get_levelname(row),
+            parity=-levelid,  # give a unique parity so that all transitions are permitted
+            g=2 * row.j + 1,
+            energyabovegsinpercm=float(row.energy),
         )
-        energy_levels.append(newlevel)
+        for levelid, (_fileposition, row) in enumerate(dflevels.iterrows())
+    ]
 
-    energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
-
-    return energy_levels
+    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
 
 
-def read_lines_data(energy_levels, dflines):
+def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
+
+    The lines name their levels by position in the levels file, and read_levels_data() sorted the
+    levels by energy, so every one is mapped through levelid_of_fileindex rather than used
+    directly. A line naming a level that does not exist is an error, not something to skip.
 
     Returns the transitions and the number of them touching each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for (lowerlevel, upperlevel), row in dflines.iterrows():
+    for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
+        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+            fileindex_lower, fileindex_upper, levelid_of_fileindex, "the Lisbon transitions file"
+        )
+
         transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
@@ -181,6 +199,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     lisbon_data = {
         f"{elsym} {ion_charge}": {
+            "atomic_number": atomic_number,
+            "ion_charge": ion_charge,
             "levels": str(iondir / f"{elsym}{ion_stage_roman}_Levels.csv"),
             "lines": str(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"),
         }
@@ -189,12 +209,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     lisbon_reader = LisbonReader(lisbon_data)
 
     dflevels = lisbon_reader.levels.loc[atomic_number, ion_charge]
-    energy_levels = read_levels_data(dflevels)
+    # the map associates source file level indices with energy-sorted level ids (0 indexed)
+    energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
     dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     ionization_energy_in_ev = -1
 

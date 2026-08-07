@@ -14,7 +14,9 @@ import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
-atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
+# estimate unknown atomic mass as Z / 0.45. Only the mass column: a row-wise fillna() filled every
+# column with it, including the densities and radii, which are not masses and are not read here.
+atomicdata["mass"] = atomicdata["mass"].fillna(atomicdata["number"] / 0.45)
 elsymbols = ["n", *list(atomicdata["symbol"].values)]
 atomic_weights = ["n", *list(atomicdata["mass"].values)]
 
@@ -91,6 +93,55 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
         raise ValueError(msg)
 
     return dflevels
+
+
+def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> dict[int, int]:
+    """Map each level's index in its source file to its zero-based level id.
+
+    Readers whose level list is re-sorted by energy need this, because their transitions still
+    name their levels by the file's numbering. Pass the file indices in the sorted level order,
+    i.e. fileindices[n] is the file index of the level that ended up at level id n.
+
+    A duplicated file index would overwrite its entry and misroute every transition referencing
+    it, so that is rejected here rather than surfacing as a transition on the wrong level.
+    """
+    fileindices = list(fileindices)
+    levelid_of_fileindex = {int(fileindex): levelid for levelid, fileindex in enumerate(fileindices)}
+
+    # not an assert: input validation must survive python -O
+    if len(levelid_of_fileindex) != len(fileindices):
+        msg = (
+            f"Duplicate level indices in {sourcename}: {len(fileindices)} levels but only"
+            f" {len(levelid_of_fileindex)} unique indices"
+        )
+        raise ValueError(msg)
+
+    return levelid_of_fileindex
+
+
+def resolve_transition_levelids(
+    fileindex_lower: t.Any, fileindex_upper: t.Any, levelid_of_fileindex: dict[int, int], sourcename: str
+) -> tuple[int, int]:
+    """Resolve one transition's file-numbered levels to zero-based level ids, lower id first.
+
+    Raises rather than skipping an index that names no level: a reader whose transition and level
+    files disagree about the numbering (0- vs 1-based, say) would otherwise drop every transition
+    and write a silently empty ion instead of failing.
+    """
+    try:
+        lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
+        upperlevel = levelid_of_fileindex[int(fileindex_upper)]
+    except KeyError as exc:
+        msg = (
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]},"
+            f" which is not one of the {len(levelid_of_fileindex)} levels read. The transition and level files"
+            " may disagree about the level numbering."
+        )
+        raise ValueError(msg) from exc
+
+    # the levels were re-sorted by energy, so a transition can name them either way round.
+    # transitiondata.txt is written with the lower id first.
+    return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
 
 
 def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:

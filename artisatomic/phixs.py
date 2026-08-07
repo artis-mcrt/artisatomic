@@ -141,8 +141,9 @@ def reduce_phixs_tables_worker(
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
 
-    # table says zero threshold, so avoid divide by zero
-    if tablein[0][0] == 0.0:
+    # an empty table has no threshold to scale the grid by, and a zero threshold would divide by
+    # zero, so both mean "no cross section" rather than an index error on tablein[0]
+    if len(tablein) == 0 or tablein[0][0] == 0.0:
         return np.zeros(nphixspoints)
 
     threshold_old_ryd = tablein[0][0]
