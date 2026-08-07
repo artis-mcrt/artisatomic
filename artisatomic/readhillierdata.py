@@ -11,10 +11,14 @@ from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import elsymbols
+from artisatomic.base import h_in_ev_seconds
+from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import ryd_to_ev
+from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
 
@@ -226,14 +230,6 @@ elsymboltohilliercode = {
     "Ba": "BAR",
 }
 
-ryd_to_ev = 13.605693122994232
-hc_in_ev_cm = 0.0001239841984332003
-hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
-PYDIR = Path(__file__).parent.absolute()
-atomicdata = pd.read_csv(os.path.join(PYDIR, "atomic_properties.txt"), sep=r"\s+", comment="#")
-elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
 # hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
@@ -1598,7 +1594,7 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     maxionstage: int | None = None,
     include_hydrogen: bool | None = False,
 ):

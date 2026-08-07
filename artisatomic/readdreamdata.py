@@ -14,7 +14,6 @@ dreamdatapath = Path(
     os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
 )
 dreamdata: pd.DataFrame | None = None
-hc_in_ev_cm = 0.0001239841984332003
 
 
 def init_dreamdata():

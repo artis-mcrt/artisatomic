@@ -15,9 +15,6 @@ except ModuleNotFoundError:
     aoife_dataset = None
 
 
-hc_in_ev_cm = 0.0001239841984332003
-
-
 def read_ionization_data(atomic_number, ion_stage):
     """Ionization energy in eV of one ion, from the AOIFE HDF5 file.
 

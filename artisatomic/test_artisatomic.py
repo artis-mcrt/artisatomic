@@ -9,7 +9,6 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
-from artisatomic import get_default_handler
 from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
@@ -20,18 +19,11 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
-from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 from artisatomic import write_phixs_data
-
-
-def test_reduce_configuration():
-    """Configurations normalise to a comparable form, dropping the parent term and any J value."""
-    assert readnahardata.reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
-    assert readnahardata.reduce_configuration("3d6_3P2e") == "3d6_3Pe"
 
 
 def test_interpret_term():
@@ -164,9 +156,10 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
+    from artisatomic.base import h_in_ev_seconds
+
     rhd.read_hyd_phixsdata()
 
-    h_in_ev_seconds = rhd.h_in_ev_seconds
     ryd_to_ev = rhd.ryd_to_ev
 
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
@@ -334,7 +327,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
             ion_handler="kurucz",
             args=args,
         )
-        assert sum(1 for targets in targetfractions if targets) == n_expected
+        assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
     # the limit bounds the levels considered, not the tables produced: an unbound level inside it
@@ -359,10 +352,10 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
 def test_write_phixs_data_with_no_phixs_arrays():
     """A reader that found no photoionization data must not make write_phixs_data() index off the end.
 
-    write_output_files() fills a target list for every level whenever the reader supplied none, and
-    readnahardata.get_photoiontargetfractions() always gives at least the ground state. If the
-    reader also left the cross-section and threshold arrays empty (no usable .ptpx tables), the
-    level ids from those target lists have nothing behind them.
+    resolve_photoion_targetfractions() fills a target list for every level whenever the reader supplied none, and
+    readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
+    reader also left the cross-section and threshold arrays empty, the level ids from those target
+    lists have nothing behind them.
     """
     import argparse
 
@@ -383,6 +376,101 @@ def test_write_phixs_data_with_no_phixs_arrays():
 
     assert not fphixs.getvalue()
     assert "Writing 0 phixs tables" in flog.getvalue()
+
+
+def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
+    """Build a minimal single-level IonData for the target-fraction resolver tests."""
+    from artisatomic.iondata import IonData
+
+    return IonData(
+        ion_stage=ion_stage,
+        handler="cmfgen",
+        is_top_ion=is_top_ion,
+        ionization_energy_ev=10.0,
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0],
+                "energyabovegsinpercm": [0.0],
+                "g": [9.0],
+                "levelname": [f"gs{ion_stage}"],
+            }
+        ),
+        dftransitions=pl.DataFrame(),
+        transition_count_of_level_name={},
+        upsilondict={},
+        hillier_photoion_targetconfigs=targetconfigs,
+        photoionization_crosssections=np.empty((0, 100)),
+        photoionization_targetfractions=targetfractions if targetfractions is not None else [],
+        photoionization_thresholds_ev=np.empty(0),
+    )
+
+
+def test_resolve_photoion_targetfractions():
+    """Each non-top ion gets its targets resolved against the next ion up; the top ion gets none."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # the lower ion names the upper ion's ground state as its only target configuration
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
+    upper = make_iondata(2, is_top_ion=True)
+    resolve_photoion_targetfractions([lower, upper])
+
+    assert lower.photoionization_targetfractions == [[(0, 1.0)]]
+    # the top ion has no upper ion to photoionise to, so it is left exactly as it was read
+    assert upper.photoionization_targetfractions == []
+
+
+def test_resolve_photoion_targetfractions_keeps_reader_supplied():
+    """An ion whose reader already gave per-level fractions (e.g. the hydrogenic estimate) keeps them."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # a target list the Hillier resolver would never produce, so an overwrite would be visible
+    supplied = [[(7, 1.0)]]
+    lower = make_iondata(1, is_top_ion=False, targetfractions=supplied, targetconfigs=[[("gs2", 1.0)]])
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)])
+
+    assert lower.photoionization_targetfractions == supplied
+
+
+def test_resolve_photoion_targetfractions_rejects_misordered_ions():
+    """A list that is not one element's ions in ascending order is rejected rather than resolved.
+
+    Each ion is resolved against the next entry as its upper ion, so a top ion anywhere but last
+    means the levels being matched belong to the wrong ion.
+    """
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
+
+    # a list whose last ion is not the top ion is missing the upper ion the last entry needs
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
+
+
+def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
+    """Writing an ion that still needs resolving must fail loudly, not drop its cross sections.
+
+    write_output_files() no longer resolves target fractions itself, so an ion with cross sections
+    but no targets would have every one of its tables silently skipped by write_phixs_data().
+    """
+    import argparse
+
+    from artisatomic.output import write_output_files
+
+    (tmp_path / "logs").mkdir()
+    tmpargs = argparse.Namespace(
+        output_folder=str(
+            tmp_path,
+        ),
+        output_folder_logs="logs",
+        nophixs=False,
+        nphixspoints=100,
+    )
+    lower = make_iondata(1, is_top_ion=False)
+    lower.photoionization_crosssections = np.zeros((1, 100))
+
+    with pytest.raises(ValueError, match="call resolve_photoion_targetfractions"):
+        write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -438,26 +526,41 @@ def test_read_coldata_term_to_j_redistribution():
 
 def test_add_handler_if_not_set():
     """Adding a handler returns a new list and never overrides an ion that is already present."""
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+    unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
-    # adding an ion for a new element must not modify the input list
+    # add an ion for a new element
     result = add_handler_if_not_set(ion_handlers, 58, 1, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2]), (58, [(1, "dream")])]
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
     # add an ion to an existing element
     result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2, (3, "dream")])]
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
-    # an already-present ion stage is not replaced or duplicated
+    # an already-present ion stage keeps the handler it was given, whatever the new one says
     result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
-    assert result == [(26, [1, 2])]
+    assert result == unchanged
 
-    # ion stages with handlers can be given as tuples or lists (e.g. loaded from JSON)
-    ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # the calls return a new list each time, so none of them touched the one they were given
+    assert ion_handlers == unchanged
+
+    # ion stages can be given as tuples or lists (e.g. straight from json.load())
+    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
+
+
+def test_parse_ion_handlers():
+    """The JSON form becomes tuples, and an ion that names no handler is rejected."""
+    from artisatomic import parse_ion_handlers
+
+    # json.load() gives nested lists; every ion must come back as an (ion_stage, handler) tuple
+    assert parse_ion_handlers([[26, [[1, "cmfgen"], [2, "cmfgen"]]]]) == [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+
+    # a bare ion stage is a leftover from when the handler was optional. It must be named as such
+    # here, rather than failing later where neither the element nor the file would be mentioned.
+    with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
+        parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
 def test_split_element_ionstage_str():
@@ -479,21 +582,6 @@ def test_split_element_ionstage_str():
 
     with pytest.raises(ValueError, match="Could not split"):
         split_element_ionstage_str("NotAnIon")
-
-
-def test_get_default_handler():
-    """Each element falls to the data source configured for it."""
-    assert get_default_handler(2, 3) == "boyle"
-    assert get_default_handler(26, 1) == "cmfgen"
-    assert get_default_handler(56, 2) == "cmfgen"
-    assert get_default_handler(38, 1) == "qub_data"
-    # QUB calculations take precedence over DREAM for W, Pt, and Au ion stages 1-3
-    assert get_default_handler(74, 1) == "qub_data"
-    assert get_default_handler(78, 3) == "qub_data"
-    assert get_default_handler(79, 2) == "qub_data"
-    assert get_default_handler(74, 4) == "dream"
-    assert get_default_handler(60, 2) == "dream"
-    assert get_default_handler(45, 1) == "kurucz"
 
 
 def test_hillier_extend_ion_list():
@@ -568,131 +656,6 @@ def test_read_adf04():
     assert level1.parity == 0
 
 
-def test_read_nahar_energy_level_file_missing():
-    """A missing Nahar file is logged and returned as empty data, not raised."""
-    flog = io.StringIO()
-    (
-        nahar_energy_levels,
-        nahar_core_states,
-        nahar_configurations,
-        nahar_ionization_potential_rydberg,
-    ) = readnahardata.read_nahar_energy_level_file("does/not/exist.en.ls.txt", 26, 2, flog)
-    assert nahar_energy_levels == []
-    assert nahar_core_states == []
-    assert nahar_configurations == {}
-    assert nahar_ionization_potential_rydberg == -1.0
-    assert "does not exist" in flog.getvalue()
-
-
-# a cut-down .en.ls.txt: two core states, one spectroscopic row, and one table iii symmetry.
-# Column positions matter to the parser, so the rows are copied from a real Nahar file.
-NAHAR_EN_LS_FIXTURE = """\
- i) Table of target/core states in the wavefunction expansion
-
- Z = 26, no of target/core electrons= 24
-
- no of target/core states in WF = 2
-
- target states and energies:
-
-  1  3d6      5D    0.00000E+00
-  2  3d54s    7S    2.74191E-01
-
-ii) Table of bound (negative) state energies (with spectroscopic notation)
-
- Ion ground state = 60202400.0000, Eo(Ry) = -1.1782E+00 =-IP
-
- 3d54s  (7S ) 6s  b8S        -0.00097
-
-iii) Table of complete set (both negative and positive) of energies
-
-Lines - Ne number of lines: Index, T(valence electron state)/C(equivalent
-     electron state), Core state number, n, l, energy (Ry)
-
-------------------------------------------------------
-   26   24    E
-    8    0    0    2
-    2  2.741910E-01
-    1  T  2  5 0  -2.42474E-01
-    2  C  1  6 0  -9.72970E-04
-    0    0    0    0
-"""
-
-
-@pytest.fixture
-def nahar_en_ls_path(tmp_path):
-    """Write the cut-down Nahar energy file to a temporary path."""
-    path = tmp_path / "fe2.en.ls.txt"
-    path.write_text(NAHAR_EN_LS_FIXTURE)
-    return path
-
-
-def test_read_nahar_energy_level_file(nahar_en_ls_path):
-    """The second column of a table iii row is a T/C letter, not a number.
-
-    Misreading it shifts the core state, n, l and energy that follow it, so the parsed values are
-    checked column by column rather than only for the absence of an exception.
-    """
-    flog = io.StringIO()
-    (
-        nahar_energy_levels,
-        nahar_core_states,
-        nahar_configurations,
-        nahar_ionization_potential_rydberg,
-    ) = readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, flog)
-
-    assert nahar_ionization_potential_rydberg == pytest.approx(1.1782)
-    assert nahar_core_states == [
-        readnahardata.NaharCoreState(1, "3d6", "5D", 0.0),
-        readnahardata.NaharCoreState(2, "3d54s", "7S", 0.274191),
-    ]
-    # keyed by (2S+1, L, parity, index in symmetry); 'b' is the second even-parity seniority
-    assert nahar_configurations == {(8, 0, 0, 2): "3d54s  (7S ) 6s  b8S "}
-
-    assert len(nahar_energy_levels) == 2
-    valence, equivalent = nahar_energy_levels
-    assert (valence.TC, valence.corestateid, valence.elecn, valence.elecl) == ("T", 2, 5, 0)
-    assert (equivalent.TC, equivalent.corestateid, equivalent.elecn, equivalent.elecl) == ("C", 1, 6, 0)
-
-    # the symmetry line gives 2S+1 = 8, L = 0, even parity, so g = 8 * (2 * 0 + 1)
-    assert (valence.twosplusone, valence.l, valence.parity, valence.g) == (8, 0, 0, 8)
-
-    # energies are quoted relative to the ionization potential
-    assert valence.energyreltoionpotrydberg == pytest.approx(-0.242474)
-    expected_percm = (1.1782 - 0.242474) * readnahardata.ryd_to_ev / readnahardata.hc_in_ev_cm
-    assert valence.energyabovegsinpercm == pytest.approx(expected_percm)
-
-
-def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
-    """Levels carry their configuration, and those above the threshold are labelled unknown.
-
-    The spectroscopic table covers only the bound states, so a level above the ionization
-    threshold has no configuration and must say so rather than be left blank.
-    """
-    import argparse
-
-    flog = io.StringIO()
-    nahar_energy_levels, _cores, _configs, _ip = readnahardata.read_nahar_energy_level_file(
-        str(nahar_en_ls_path), 26, 2, flog
-    )
-
-    args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
-    dflevels, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
-
-    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else, and the
-    # reader builds each level's adata.txt name from its symmetry and configuration
-    assert dflevels.select("indexinsymmetry", "naharconfiguration", "levelname").rows() == [
-        (1, "UNKNOWN CONFIG", "Nahar: 8Se index 1 'UNKNOWN CONFIG'"),
-        (2, "3d54s  (7S ) 6s  b8S ", "Nahar: 8Se index 2 '3d54s  (7S ) 6s  b8S '"),
-    ]
-
-    # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
-    # columns write_adata() and the energy sort need, not a column-less frame that crashes later
-    dfempty, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs([], {}, {}, args, flog)
-    assert dfempty.height == 0
-    assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
-
-
 def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 
@@ -719,37 +682,17 @@ def test_write_adata_level_comment():
     assert hillier_line.endswith(" someion_gs")
     assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # a Nahar level's name is the annotation its reader built, and is written unchanged
-    naharlevelname = "Nahar: 3Pe index 1 '2s22p2'"
-    dfnahar = leveltuples_to_pldataframe(
-        pl.DataFrame({"levelname": [naharlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
+    # a level name containing spaces is written unchanged, and reads back as everything after
+    # the fourth field
+    spacedlevelname = "3Pe index 1 '2s22p2'"
+    dfspaced = leveltuples_to_pldataframe(
+        pl.DataFrame({"levelname": [spacedlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
     )
     buf = io.StringIO()
-    write_adata(buf, 8, 1, dfnahar, 13.6, {}, io.StringIO())
-    nahar_line = buf.getvalue().splitlines()[1]
-    assert nahar_line.endswith(" " + naharlevelname)
-    assert nahar_line.split(maxsplit=4)[4] == naharlevelname
-
-
-def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
-    """A numeric second column is rejected rather than parsed from the wrong positions.
-
-    It means the row is not in the format the parser assumes, so the columns after it cannot be
-    trusted.
-    """
-    nahar_en_ls_path.write_text(NAHAR_EN_LS_FIXTURE.replace("    1  T  2  5 0", "    1  9  2  5 0"))
-
-    with pytest.raises(ValueError, match="Expected 'T' or 'C'"):
-        readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, io.StringIO())
-
-
-def test_nahar_get_photoiontargetfractions():
-    """A level's photoionisation targets resolve to upper-ion level ids, falling back to the ground state."""
-    dflower = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [9.0], "levelname": ["gs"]})
-    dfupper = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [10.0], "levelname": ["gs2"]})
-    nahar_core_states = [readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
-    targetlist = readnahardata.get_photoiontargetfractions(dflower, dfupper, nahar_core_states, {}, io.StringIO())
-    assert targetlist[0] == [(0, 1.0)]  # the upper ion's ground state
+    write_adata(buf, 8, 1, dfspaced, 13.6, {}, io.StringIO())
+    spaced_line = buf.getvalue().splitlines()[1]
+    assert spaced_line.endswith(" " + spacedlevelname)
+    assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
 def test_get_level_valence_n():

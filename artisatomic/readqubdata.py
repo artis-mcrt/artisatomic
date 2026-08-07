@@ -14,6 +14,8 @@ import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
+from artisatomic.levelnames import lchars
 
 tyndall_co3_path = (
     Path(__file__).parent.resolve()
@@ -21,13 +23,6 @@ tyndall_co3_path = (
     / "atomic-data-qub"
     / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
 ).resolve()
-
-ryd_to_ev = 13.605693122994232
-
-hc_in_ev_cm = 0.0001239841984332003
-hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
 class QUBEnergyLevel(t.NamedTuple):
@@ -44,37 +39,6 @@ class QUBEnergyLevel(t.NamedTuple):
 
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
-
-# the ions get_default_handler() picks "qub_data" for. Nd II (60, 2) has an adf04 file and is read
-# when the handler is set explicitly, but is deliberately not the default.
-default_handler_ions = frozenset(
-    {
-        (38, 1),
-        (38, 2),
-        (38, 3),
-        (38, 4),
-        (38, 5),
-        (39, 2),
-        (39, 3),
-        (40, 1),
-        (40, 2),
-        (40, 3),
-        (52, 1),
-        (52, 2),
-        (52, 3),
-        (52, 4),
-        (52, 5),
-        (74, 1),
-        (74, 2),
-        (74, 3),
-        (78, 1),
-        (78, 2),
-        (78, 3),
-        (79, 1),
-        (79, 2),
-        (79, 3),
-    }
-)
 
 
 def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
