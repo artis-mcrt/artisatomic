@@ -178,30 +178,23 @@ def read_levels_data(dflevels):
     Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
     needs because sorting by energy reorders the levels.
     """
-    energy_levels = []
-    ilev_enlevelindex_map = {}
+    # astype(float) first: the level order is now the frame's order alone, and sorting a column
+    # that arrived as strings (pd.read_fwf can yield those) would order it lexicographically
+    dflevels = dflevels.astype({"energypercm": float}).sort_values(by="energypercm", ignore_index=True)
 
-    dflevels = dflevels.sort_values(by="energypercm", ignore_index=True)
-    for index, row in dflevels.iterrows():
-        ilev_enlevelindex_map[int(row["Ilev"])] = index
-
+    energy_levels = [
         # Config is not unique (levels of one configuration differ in J), so append the FAC level
         # index. The configuration stays first, for get_level_valence_n() and the adata.txt comment.
-        newlevel = FACEnergyLevel(
+        FACEnergyLevel(
             levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
             parity=row["P"],
             g=row["g"],
             energyabovegsinpercm=float(row["energypercm"]),
         )
-        energy_levels.append(newlevel)
+        for _index, row in dflevels.iterrows()
+    ]
 
-    # a duplicated Ilev would overwrite its map entry and misroute every transition referencing
-    # it. Not an assert: input validation must survive python -O.
-    if len(ilev_enlevelindex_map) != len(energy_levels):
-        msg = f"Duplicate Ilev values in FAC levels file: {len(energy_levels)} rows but only {len(ilev_enlevelindex_map)} unique Ilev"
-        raise ValueError(msg)
-
-    return energy_levels, ilev_enlevelindex_map
+    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
 
 
 class FACTransition(t.NamedTuple):
@@ -216,19 +209,19 @@ class FACTransition(t.NamedTuple):
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
     """Convert FAC lines to transitions referencing zero-based level ids.
 
-    Lines referencing an Ilev with no level are skipped. Returns the transitions and the number
-    of them touching each level name.
+    A line naming an Ilev with no level is an error rather than something to skip, and the two
+    levels are ordered lower id first. Returns the transitions and the number of them touching
+    each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
     for _, row in dflines.iterrows():
-        try:
-            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])]
-            upperlevel = ilev_enlevelindex_map[int(row["Upper"])]
-        except KeyError:
-            continue
-        assert lowerlevel < upperlevel
+        # not an assert: this decides which levels a transition is written between, so it must
+        # survive python -O, and it names the offending Ilev values rather than just failing
+        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+            row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
+        )
 
         transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
 

@@ -229,21 +229,26 @@ def write_transition_data(
     """
     log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
+    # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
+    # transition. Checked over the whole frame before the header goes out, so a bad row fails
+    # before anything is written rather than leaving a block whose count overstates its rows.
+    # Not an assert: this guards written output and must survive python -O.
+    if not dftransitions_ion.is_empty():
+        misordered = dftransitions_ion.filter(pl.col("lowerlevel") >= pl.col("upperlevel"))
+        if not misordered.is_empty():
+            levelid_lower, levelid_upper = misordered.select("lowerlevel", "upperlevel").row(0)
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that are not"
+                f" ordered with the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
+            )
+            raise ValueError(msg)
+
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
         for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
             ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
         ].iter_rows():
-            # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
-            # transition. Not an assert: this guards written output and must survive python -O.
-            if levelid_lower >= levelid_upper:
-                msg = (
-                    f"Z={atomic_number} ion_stage={ion_stage} transition {levelid_lower} -> {levelid_upper}"
-                    " is not ordered with the lower level id first"
-                )
-                raise ValueError(msg)
-
             # level ids are zero-based in memory, but the output format numbers them from one
             ftransitiondata.write(
                 f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
@@ -305,7 +310,10 @@ def write_phixs_data(
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
-    if len(photoionization_crosssections) >= 1 and photoionization_crosssections[0][0] == 0.0:
+    # only for a ground state that is actually being written: a level with no targets, or none
+    # left after the threshold filter, is deliberately skipped (match_hydrogenic_phixs does this
+    # for a ground state at or above the ionization energy), and that is not an error
+    if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
         msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)

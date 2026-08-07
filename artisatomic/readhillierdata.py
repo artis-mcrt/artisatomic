@@ -599,12 +599,19 @@ def read_phixs_tables(
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
+    # the target whose table is the one kept in reduced_phixs_dict, so the normalisation below can
+    # divide by that target's fraction and recover the level's total cross section, plus that
+    # table's threshold cross section, which is what decides between competing targets
+    kepttarget_of_levelname: dict[str, str] = {}
+    keptthreshold_of_levelname: dict[str, float] = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
     num_levelnames_with_zero_crosssection = 0
 
     j_splitting_on = False  # hopefully this is either on or off for all photoion files associated with a given ion
 
-    phixs_type_levels = defaultdict(list)
+    # sets, not lists: only the distinct level count per type is reported, and a list needed a
+    # linear scan per record to dedupe, which is quadratic in the level count of the ion
+    phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
         if not photfilename:
@@ -854,8 +861,7 @@ def read_phixs_tables(
 
                 if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
                     crosssectiontype = int(row[0])
-                    if lowerlevelname not in phixs_type_levels[crosssectiontype]:
-                        phixs_type_levels[crosssectiontype].append(lowerlevelname)
+                    phixs_type_levels[crosssectiontype].add(lowerlevelname)
 
                 if len(row) == 0:
                     # for the tabulated types the array is preallocated to the declared row
@@ -904,18 +910,21 @@ def read_phixs_tables(
 
                 # Every ion with more than one photoionisation file has one file per final state of
                 # the upper ion, and a level is usually present in all of them, so a second table
-                # for a level is the normal multi-target case rather than an error. Both targets
-                # are recorded above; the first file's table is the one kept. Keeping instead the
-                # table with the largest threshold cross section (and rescaling it by that
-                # target's fraction, see below) would be the better approximation.
-                if lowerlevelname not in reduced_phixs_dict:
-                    reduced_phixs_dict[lowerlevelname] = reduced_phixstable
-                else:
+                # for a level is the normal multi-target case rather than an error. Every target is
+                # recorded above; only one table can be written per level, so keep the one with the
+                # largest threshold cross section. The normalisation below divides it by that
+                # target's fraction, recovering the level's total rather than one target's share.
+                if lowerlevelname in reduced_phixs_dict:
                     artisatomic.log_and_print(
                         flog,
-                        f"WARNING: {lowerlevelname} has a cross section table in more than one photoionisation"
-                        f" file. Keeping the first and ignoring the one for target {phixstargets[filenum]}.",
+                        f"{lowerlevelname} has a cross section table in more than one photoionisation file."
+                        f" Target {phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb at threshold against"
+                        f" {keptthreshold_of_levelname[lowerlevelname]:.4e} Mb for {kepttarget_of_levelname[lowerlevelname]}.",
                     )
+                if phixs_at_threshold > keptthreshold_of_levelname.get(lowerlevelname, 0.0):
+                    reduced_phixs_dict[lowerlevelname] = reduced_phixstable
+                    kepttarget_of_levelname[lowerlevelname] = phixstargets[filenum]
+                    keptthreshold_of_levelname[lowerlevelname] = phixs_at_threshold
 
     # summarised once for the ion, not once per photoionisation file: the counts below accumulate
     # over every file, so logging them inside that loop repeated them with partial totals
@@ -945,7 +954,7 @@ def read_phixs_tables(
 
     # normalise the target factors into fractions
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
-    for lowerlevelname in reduced_phixs_dict:
+    for lowerlevelname, reduced_phixstable in reduced_phixs_dict.items():
         target_configfactors_nofilter = phixs_targetconfigfactors_of_levelname[lowerlevelname]
         # the factors are arbitrary and need to be normalised into fractions
 
@@ -971,10 +980,19 @@ def read_phixs_tables(
                 target_fraction = target_factor / factor_sum
                 phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
-            # NOT rescaled: the kept table is the one target's cross section, but it is written as
-            # the level's total and then split over every target by these fractions. Where a level
-            # has several targets it should be divided by the kept target's fraction first (as
-            # readqubdata does with max_fraction), which would raise it by 1 / fraction.
+            # The kept table is one target's cross section, but write_phixs_data() writes it as the
+            # level's total and splits it over every target by the fractions above, so divide by
+            # the kept target's own fraction first. Without this a level whose kept target holds
+            # 50% would have both targets' rates halved. readqubdata does the same with
+            # max_fraction. The kept target has the largest factor, so it is never below the 1% cut
+            # and .get() only misses if its factor was zero, where there is nothing to rescale.
+            kept_fraction = dict(phixs_targetconfigfractions_of_levelname[lowerlevelname]).get(
+                kepttarget_of_levelname[lowerlevelname]
+            )
+            # not in-place: reduce_phixs_tables() hands out these arrays and they must not be
+            # mutated behind the caller's back
+            if kept_fraction:
+                reduced_phixs_dict[lowerlevelname] = reduced_phixstable / kept_fraction
 
     # map the non-J-split cross sections onto J-split levels. A table matches every level sharing
     # the configuration, so index the level list by match name once rather than rescanning it.

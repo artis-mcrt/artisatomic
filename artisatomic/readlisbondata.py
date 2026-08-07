@@ -98,44 +98,37 @@ def read_levels_data(dflevels):
     Also returns the map from the file's level index to the zero-based level id, which
     read_lines_data() needs because sorting by energy reorders the levels.
 
+    The lines name their levels POSITIONALLY: LisbonReader reads their energies with
+    levels.iloc[lines["level_index_lower"]], which is a position in the file-ordered frame, not an
+    index label. So the map is keyed by that position, which reset_index() below makes explicit
+    rather than relying on the levels CSV happening to be numbered from zero.
+
     Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
     transitions forbidden: this data set does not supply parities.
     """
-    # sort first, so that the ids handed out below are the ones the levels keep
-    dflevels = dflevels.sort_values(by="energy", kind="stable")
+    # sort first, so that the ids handed out below are the ones the levels keep. The index is
+    # reset to the row position beforehand, so sorting leaves each level carrying its file position
+    dflevels = dflevels.reset_index(drop=True).sort_values(by="energy", kind="stable")
 
-    energy_levels = []
-    levelid_of_fileindex = {}
-
-    for levelid, (fileindex, row) in enumerate(dflevels.iterrows()):
-        levelid_of_fileindex[int(fileindex)] = levelid
-        energy_levels.append(
-            EnergyLevelTuple(
-                levelname=get_levelname(row),
-                parity=-levelid,  # give a unique parity so that all transitions are permitted
-                g=2 * row.j + 1,
-                energyabovegsinpercm=float(row.energy),
-            )
+    energy_levels = [
+        EnergyLevelTuple(
+            levelname=get_levelname(row),
+            parity=-levelid,  # give a unique parity so that all transitions are permitted
+            g=2 * row.j + 1,
+            energyabovegsinpercm=float(row.energy),
         )
+        for levelid, (_fileposition, row) in enumerate(dflevels.iterrows())
+    ]
 
-    # a duplicated file index would overwrite its map entry and misroute every transition
-    # referencing it. Not an assert: input validation must survive python -O.
-    if len(levelid_of_fileindex) != len(energy_levels):
-        msg = (
-            f"Duplicate level indices in Lisbon levels file: {len(energy_levels)} rows but only"
-            f" {len(levelid_of_fileindex)} unique indices"
-        )
-        raise ValueError(msg)
-
-    return energy_levels, levelid_of_fileindex
+    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
 
 
 def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
-    The lines name their levels by the file's own index, and read_levels_data() sorted the levels
-    by energy, so every index is mapped through levelid_of_fileindex rather than used directly.
-    Lines referencing an index with no level are skipped.
+    The lines name their levels by position in the levels file, and read_levels_data() sorted the
+    levels by energy, so every one is mapped through levelid_of_fileindex rather than used
+    directly. A line naming a level that does not exist is an error, not something to skip.
 
     Returns the transitions and the number of them touching each level name.
     """
@@ -143,16 +136,9 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     transition_count_of_level_name = defaultdict(int)
 
     for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
-        try:
-            lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
-            upperlevel = levelid_of_fileindex[int(fileindex_upper)]
-        except KeyError:
-            continue
-
-        # the file's ordering is by index, not by energy, so a line can name its levels either
-        # way round. transitiondata.txt is written with the lower id first.
-        if lowerlevel > upperlevel:
-            lowerlevel, upperlevel = upperlevel, lowerlevel
+        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+            fileindex_lower, fileindex_upper, levelid_of_fileindex, "the Lisbon transitions file"
+        )
 
         transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
