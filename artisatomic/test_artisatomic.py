@@ -327,7 +327,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
             ion_handler="kurucz",
             args=args,
         )
-        assert sum(1 for targets in targetfractions if targets) == n_expected
+        assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
     # the limit bounds the levels considered, not the tables produced: an unbound level inside it
@@ -521,7 +521,8 @@ def test_read_coldata_term_to_j_redistribution():
 
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
-    assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+    # pyrefly: ignore [unnecessary-type-conversion]
+    assert sum(bool(v > 0.0) for v in upsilondict_fe2.values()) == 10601
 
 
 def test_add_handler_if_not_set():
