@@ -488,7 +488,12 @@ def read_levels_and_transitions(
             linesplitdash = line.split("-")
             row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
 
-            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and all(map(artisatomic.isfloat, row[2:4])):
+            # the two isfloat() calls are spelled out rather than all(map(...)) over a slice: this
+            # runs for every transition line of every ion (2.6M for the cmfgen set), where
+            # building a slice, a map object and an all() call per line is most of the test
+            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and (
+                artisatomic.isfloat(row[2]) and artisatomic.isfloat(row[3])
+            ):
                 try:
                     lambda_value = float(row[4])
                 except ValueError:
@@ -633,7 +638,12 @@ def read_phixs_tables(
             for line in fhillierphot:
                 row = line.split()
 
-                if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
+                # Every marker below is a trailing "!..." comment, so a line with no '!' at all
+                # cannot match any of them. 94% of a phot file is two-column cross-section data,
+                # and testing that once here skips seven " ".join() calls per such line.
+                has_marker = "!" in line
+
+                if has_marker and len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
                     # this is not used because the upper ion's levels are not known at this time
                     targetlevelname = row[0]
                     artisatomic.log_and_print(flog, "Photoionisation target: " + targetlevelname)
@@ -645,7 +655,7 @@ def read_phixs_tables(
                         sys.exit(1)
                     phixstargets[filenum] = targetlevelname
 
-                if len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
+                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
                     if row[0].lower() == "true":
                         j_splitting_on = True
                         artisatomic.log_and_print(flog, "File specifies J-splitting enabled")
@@ -658,9 +668,10 @@ def read_phixs_tables(
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit(1)
 
-                if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
-                    row[-3:]
-                ) == "!Configuration name [*]":
+                if has_marker and (
+                    (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name")
+                    or " ".join(row[-3:]) == "!Configuration name [*]"
+                ):
                     lowerlevelname = row[0]
                     # with J splitting the name (including any [J] suffix) maps to exactly one
                     # level; without it, strip the suffix so the table covers the configuration
@@ -682,7 +693,7 @@ def read_phixs_tables(
                         print("ERROR: no upper level name")
                         sys.exit(1)
 
-                if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
+                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
                     # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
                     # matches the oscillator value for every ion in ions_data) and just report it.
@@ -694,15 +705,22 @@ def read_phixs_tables(
                             f" which disagrees with ion_stage {ion_stage}",
                         )
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
+                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
                     numpointsexpected = int(row[0])
                     pointnumber = 0
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit" and row[0] != "Megabarns":
+                if (
+                    has_marker
+                    and len(row) >= 2
+                    and " ".join(row[1:]) == "!Cross-section unit"
+                    and row[0] != "Megabarns"
+                ):
                     print(f"Wrong cross-section unit: {row[0]}")
                     sys.exit(1)
 
-                row_is_all_floats = all(map(artisatomic.isfloat, row))
+                # a line carrying a "!..." marker has text in it, so it can never be all floats.
+                # Short-circuiting on that skips the parse attempt on every header line.
+                row_is_all_floats = not has_marker and all(map(artisatomic.isfloat, row))
                 if crosssectiontype == 0:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -858,7 +876,7 @@ def read_phixs_tables(
                     lowerlevelname = ""
                     numpointsexpected = 0
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
+                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
                     crosssectiontype = int(row[0])
                     phixs_type_levels[crosssectiontype].add(lowerlevelname)
 

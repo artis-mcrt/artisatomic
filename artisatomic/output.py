@@ -357,8 +357,9 @@ def write_phixs_data(
                 )
                 raise ValueError(msg)
 
-        for crosssection in photoionization_crosssections[lowerlevelid]:
-            fphixs.write(f"{crosssection:16.8E}\n")
+        # one writelines() per table rather than a write() per point: nphixspoints lines per level,
+        # 1.5M of them for the cmfgen set
+        fphixs.writelines(f"{crosssection:16.8E}\n" for crosssection in photoionization_crosssections[lowerlevelid])
 
     if skipped_no_threshold > 0:
         log_and_print(
