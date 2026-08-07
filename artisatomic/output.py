@@ -1,7 +1,6 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -236,7 +235,14 @@ def write_transition_data(
         for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
             ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
         ].iter_rows():
-            assert levelid_lower < levelid_upper
+            # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
+            # transition. Not an assert: this guards written output and must survive python -O.
+            if levelid_lower >= levelid_upper:
+                msg = (
+                    f"Z={atomic_number} ion_stage={ion_stage} transition {levelid_lower} -> {levelid_upper}"
+                    " is not ordered with the lower level id first"
+                )
+                raise ValueError(msg)
 
             # level ids are zero-based in memory, but the output format numbers them from one
             ftransitiondata.write(
@@ -300,8 +306,9 @@ def write_phixs_data(
     )
 
     if len(photoionization_crosssections) >= 1 and photoionization_crosssections[0][0] == 0.0:
-        log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
-        sys.exit()
+        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
+        log_and_print(flog, f"ERROR: {msg}")
+        raise ValueError(msg)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
@@ -324,10 +331,11 @@ def write_phixs_data(
                 fphixs.write(f"{upperionlevelid + 1:8d}{targetprobability:12f}\n")
                 probability_sum += targetprobability
             if abs(probability_sum - 1.0) > 0.00001:
-                print(f"STOP! phixs fractions sum to {probability_sum:.5f} != 1.0")
-                print(targetlist)
-                print(f"level id {lowerlevelid}")
-                sys.exit()
+                msg = (
+                    f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
+                    f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
+                )
+                raise ValueError(msg)
 
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
@@ -353,9 +361,19 @@ def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]],
             if listions_nohandlers:
                 ion_stage_min = min(listions_nohandlers)
                 ion_stage_max = max(listions_nohandlers)
-                assert all(ion_stage in listions_nohandlers for ion_stage in range(ion_stage_min, ion_stage_max + 1)), (
-                    f"Missing ion stages for Z={atomic_number} between {ion_stage_min} and {ion_stage_max}"
-                )
+                # the file gives only the range, so a gap in it would silently claim ions that were
+                # never written. Not an assert: this guards written output and must survive -O.
+                missing = [
+                    ion_stage
+                    for ion_stage in range(ion_stage_min, ion_stage_max + 1)
+                    if ion_stage not in listions_nohandlers
+                ]
+                if missing:
+                    msg = (
+                        f"Missing ion stages {missing} for Z={atomic_number} between {ion_stage_min}"
+                        f" and {ion_stage_max}"
+                    )
+                    raise ValueError(msg)
                 nions = ion_stage_max - ion_stage_min + 1
 
             fcomp.write(

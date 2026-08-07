@@ -95,34 +95,65 @@ def get_levelname(row):
 def read_levels_data(dflevels):
     """Convert the Lisbon level table to level tuples, sorted by energy.
 
+    Also returns the map from the file's level index to the zero-based level id, which
+    read_lines_data() needs because sorting by energy reorders the levels.
+
     Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
     transitions forbidden: this data set does not supply parities.
     """
+    # sort first, so that the ids handed out below are the ones the levels keep
+    dflevels = dflevels.sort_values(by="energy", kind="stable")
+
     energy_levels = []
+    levelid_of_fileindex = {}
 
-    for index, row in dflevels.iterrows():
-        parity = -index  # give a unique parity so that all transitions are permitted
-        energyabovegsinpercm = float(row.energy)
-        g = 2 * row.j + 1
-        newlevel = EnergyLevelTuple(
-            levelname=get_levelname(row), parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
+    for levelid, (fileindex, row) in enumerate(dflevels.iterrows()):
+        levelid_of_fileindex[int(fileindex)] = levelid
+        energy_levels.append(
+            EnergyLevelTuple(
+                levelname=get_levelname(row),
+                parity=-levelid,  # give a unique parity so that all transitions are permitted
+                g=2 * row.j + 1,
+                energyabovegsinpercm=float(row.energy),
+            )
         )
-        energy_levels.append(newlevel)
 
-    energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
+    # a duplicated file index would overwrite its map entry and misroute every transition
+    # referencing it. Not an assert: input validation must survive python -O.
+    if len(levelid_of_fileindex) != len(energy_levels):
+        msg = (
+            f"Duplicate level indices in Lisbon levels file: {len(energy_levels)} rows but only"
+            f" {len(levelid_of_fileindex)} unique indices"
+        )
+        raise ValueError(msg)
 
-    return energy_levels
+    return energy_levels, levelid_of_fileindex
 
 
-def read_lines_data(energy_levels, dflines):
+def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
+
+    The lines name their levels by the file's own index, and read_levels_data() sorted the levels
+    by energy, so every index is mapped through levelid_of_fileindex rather than used directly.
+    Lines referencing an index with no level are skipped.
 
     Returns the transitions and the number of them touching each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for (lowerlevel, upperlevel), row in dflines.iterrows():
+    for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
+        try:
+            lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
+            upperlevel = levelid_of_fileindex[int(fileindex_upper)]
+        except KeyError:
+            continue
+
+        # the file's ordering is by index, not by energy, so a line can name its levels either
+        # way round. transitiondata.txt is written with the lower id first.
+        if lowerlevel > upperlevel:
+            lowerlevel, upperlevel = upperlevel, lowerlevel
+
         transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
@@ -189,12 +220,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     lisbon_reader = LisbonReader(lisbon_data)
 
     dflevels = lisbon_reader.levels.loc[atomic_number, ion_charge]
-    energy_levels = read_levels_data(dflevels)
+    # the map associates source file level indices with energy-sorted level ids (0 indexed)
+    energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
     dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     ionization_energy_in_ev = -1
 

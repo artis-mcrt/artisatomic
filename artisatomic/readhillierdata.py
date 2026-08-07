@@ -473,7 +473,7 @@ def read_levels_and_transitions(
                         flog,
                         f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
                     )
-                    sys.exit()
+                    sys.exit(1)
 
             if line.lstrip().startswith("Oscillator strengths") and len(levelrows) > 0:
                 break
@@ -633,10 +633,10 @@ def read_phixs_tables(
                     artisatomic.log_and_print(flog, "Photoionisation target: " + targetlevelname)
                     if "[" in targetlevelname:
                         print("STOP! target level contains a bracket (is J-split?)")
-                        sys.exit()
+                        sys.exit(1)
                     if targetlevelname in phixstargets:
                         print("STOP! Multiple phixs files for the same target configuration")
-                        sys.exit()
+                        sys.exit(1)
                     phixstargets[filenum] = targetlevelname
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
@@ -646,11 +646,11 @@ def read_phixs_tables(
                     elif row[0].lower() == "false":
                         if j_splitting_on:
                             print("STOP! J-splitting disabled here, but was previously enabled for this ion")
-                            sys.exit()
+                            sys.exit(1)
                         j_splitting_on = False
                     else:
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
-                        sys.exit()
+                        sys.exit(1)
 
                 if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
                     row[-3:]
@@ -662,14 +662,19 @@ def read_phixs_tables(
                         lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
-                    # first matching level (without J splitting, several may differ by J);
-                    # no match keeps the old default of 0
+                    # first matching level (without J splitting, several may differ by J). A name
+                    # with no matching level falls back to index 0, so its fit is evaluated at the
+                    # ground state's threshold wavelength, but that table is never used: the
+                    # levelindices_of_matchname mapping at the end of this function is keyed the
+                    # same way, so it finds no level for the name and drops the table. The phot
+                    # files routinely cover levels the oscillator file does not (1145 of them for
+                    # Co II), which is why this is a silent fallback rather than an error.
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
                     if not targetlevelname:
                         print("ERROR: no upper level name")
-                        sys.exit()
+                        sys.exit(1)
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
@@ -689,7 +694,7 @@ def read_phixs_tables(
 
                 if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit" and row[0] != "Megabarns":
                     print(f"Wrong cross-section unit: {row[0]}")
-                    sys.exit()
+                    sys.exit(1)
 
                 row_is_all_floats = all(map(artisatomic.isfloat, row))
                 if crosssectiontype == 0:
@@ -698,7 +703,7 @@ def read_phixs_tables(
 
                         if fitcoefficients[-1] != 0.0:
                             print("ERROR: Cross section type 0 has non-zero number after it")
-                            sys.exit()
+                            sys.exit(1)
 
                 elif crosssectiontype == 1:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -837,7 +842,7 @@ def read_phixs_tables(
                                     f"with energy {prevenergy} followed by {curenergy}"
                                 )
                                 print(phixstables[filenum][lowerlevelname])
-                                sys.exit()
+                                sys.exit(1)
                         pointnumber += 1
 
                 elif crosssectiontype != -1:
@@ -869,24 +874,10 @@ def read_phixs_tables(
                             f"A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname},"
                             f" crosssectiontype={crosssectiontype}"
                         )
-                        sys.exit()
+                        sys.exit(1)
                     lowerlevelname = ""
                     crosssectiontype = -1
                     numpointsexpected = 0
-
-        for crosssectiontype in sorted(phixs_type_levels.keys()):
-            if crosssectiontype in unknown_phixs_types:
-                artisatomic.log_and_print(
-                    flog,
-                    f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
-                    f" {crosssectiontype}: {phixs_type_labels[crosssectiontype]}",
-                )
-            else:
-                artisatomic.log_and_print(
-                    flog,
-                    f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
-                    f" {phixs_type_labels[crosssectiontype]}",
-                )
 
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
@@ -911,16 +902,39 @@ def read_phixs_tables(
                     )
                 )
 
-                # add the new phixs table, or replace the
-                # existing one if this target has a larger threshold cross section
-                # if lowerlevelname not in reduced_phixs_dict or \
-                #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
-                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]  # ruff: ignore[commented-out-code]
+                # Every ion with more than one photoionisation file has one file per final state of
+                # the upper ion, and a level is usually present in all of them, so a second table
+                # for a level is the normal multi-target case rather than an error. Both targets
+                # are recorded above; the first file's table is the one kept. Keeping instead the
+                # table with the largest threshold cross section (and rescaling it by that
+                # target's fraction, see below) would be the better approximation.
                 if lowerlevelname not in reduced_phixs_dict:
                     reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 else:
-                    msg = f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}"
-                    raise ValueError(msg)
+                    artisatomic.log_and_print(
+                        flog,
+                        f"WARNING: {lowerlevelname} has a cross section table in more than one photoionisation"
+                        f" file. Keeping the first and ignoring the one for target {phixstargets[filenum]}.",
+                    )
+
+    # summarised once for the ion, not once per photoionisation file: the counts below accumulate
+    # over every file, so logging them inside that loop repeated them with partial totals
+    for crosssectiontype in sorted(phixs_type_levels.keys()):
+        # .get(): the branch below fires for exactly the types this parser does not handle, which
+        # are the ones least likely to have a label, so indexing would fail while reporting them
+        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
+        if crosssectiontype in unknown_phixs_types:
+            artisatomic.log_and_print(
+                flog,
+                f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
+                f" {crosssectiontype}: {typelabel}",
+            )
+        else:
+            artisatomic.log_and_print(
+                flog,
+                f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
+                f" {typelabel}",
+            )
 
     if num_levelnames_with_zero_crosssection > 0:
         artisatomic.log_and_print(
@@ -929,9 +943,9 @@ def read_phixs_tables(
             " everywhere on the output energy grid, so those levels get no photoionization",
         )
 
-    # normalise the target factors and scale the phixs table
+    # normalise the target factors into fractions
     phixs_targetconfigfractions_of_levelname = defaultdict(list)
-    for lowerlevelname, reduced_phixstable in reduced_phixs_dict.items():
+    for lowerlevelname in reduced_phixs_dict:
         target_configfactors_nofilter = phixs_targetconfigfactors_of_levelname[lowerlevelname]
         # the factors are arbitrary and need to be normalised into fractions
 
@@ -957,8 +971,10 @@ def read_phixs_tables(
                 target_fraction = target_factor / factor_sum
                 phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
-            # e.g. if the target (non-J-split) with the highest fraction has 50%, the cross sections need to be multiplied by two
-            reduced_phixs_dict[lowerlevelname] = reduced_phixstable
+            # NOT rescaled: the kept table is the one target's cross section, but it is written as
+            # the level's total and then split over every target by these fractions. Where a level
+            # has several targets it should be divided by the kept target's fraction first (as
+            # readqubdata does with max_fraction), which would raise it by 1 / fraction.
 
     # map the non-J-split cross sections onto J-split levels. A table matches every level sharing
     # the configuration, so index the level list by match name once rather than rescanning it.
@@ -1036,7 +1052,7 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
     for l in range(l_start, l_end + 1):
         if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             print("TABLE MISMATCH")
-            sys.exit()
+            sys.exit(1)
         arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
 
     return arr_sigma_summed_over_l
@@ -1314,7 +1330,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     num_expected_t_values = int(row[0])
                 elif row_two_to_end == "!Scaling factor for OMEGA (non-file values)" and float(row[0]) != 1.0:
                     artisatomic.log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
-                    sys.exit()
+                    sys.exit(1)
 
             if header_row != []:
                 namefromnameto = "".join(row[:-num_expected_t_values])
@@ -1392,7 +1408,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
         print(
             f"ERROR: file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
         )
-        sys.exit()
+        sys.exit(1)
     elif coll_lines_in > number_expected_transitions:
         artisatomic.log_and_print(
             flog,
@@ -1525,7 +1541,7 @@ def read_hyd_phixsdata():
                         f"ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found"
                         f" {len(xs_values)}"
                     )
-                    sys.exit()
+                    sys.exit(1)
 
             hyd_phixs_energygrid_ryd[n, l] = np.array(
                 [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
@@ -1569,7 +1585,7 @@ def read_hyd_phixsdata():
                     break
                 if len(gaunt_values) > num_points:
                     print(f"ERROR: too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}")
-                    sys.exit()
+                    sys.exit(1)
 
             hyd_gaunt_energygrid_ryd[n] = [
                 e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)

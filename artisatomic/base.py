@@ -14,7 +14,9 @@ import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
-atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
+# estimate unknown atomic mass as Z / 0.45. Only the mass column: a row-wise fillna() filled every
+# column with it, including the densities and radii, which are not masses and are not read here.
+atomicdata["mass"] = atomicdata["mass"].fillna(atomicdata["number"] / 0.45)
 elsymbols = ["n", *list(atomicdata["symbol"].values)]
 atomic_weights = ["n", *list(atomicdata["mass"].values)]
 

@@ -173,7 +173,7 @@ class FACEnergyLevel(t.NamedTuple):
 
 
 def read_levels_data(dflevels):
-    """Convert the FAC level table to level tuples, sorted by energy.
+    """Convert the FAC level table to level tuples, in the energy order of the sorted frame.
 
     Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
     needs because sorting by energy reorders the levels.
@@ -194,8 +194,6 @@ def read_levels_data(dflevels):
             energyabovegsinpercm=float(row["energypercm"]),
         )
         energy_levels.append(newlevel)
-
-    energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
 
     # a duplicated Ilev would overwrite its map entry and misroute every transition referencing
     # it. Not an assert: input validation must survive python -O.

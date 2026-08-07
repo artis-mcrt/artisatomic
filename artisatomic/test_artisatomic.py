@@ -473,6 +473,39 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
         write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
+def test_read_phixs_tables_multiple_photoionisation_files():
+    """A level with a cross-section table in more than one phot file must not abort the read.
+
+    Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
+    state of the upper ion, and a level is normally present in all of them: O I's phot_nosm_A and
+    phot_nosm_B share all 107 of their configuration names. Treating the second table as an error
+    made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV) unreadable, and none of
+    them is in the tests/ matrix, which is Fe/Co/Ni only.
+    """
+    import argparse
+    import contextlib
+
+    rhd.read_hyd_phixsdata()
+
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _, _ = rhd.read_levels_and_transitions(8, 1, flog)
+        crosssections, targetconfigs, _thresholds = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+
+    assert len(ions_data_photfilenames := readhillierdata.ions_data[8, 1].photfilenames) > 1, (
+        f"O I is expected to have several phot files, got {ions_data_photfilenames}"
+    )
+
+    # the duplicates are reported rather than raised, and the level keeps the first file's table
+    assert "has a cross section table in more than one photoionisation file" in flog.getvalue()
+
+    # both files' targets are recorded, so some levels come out with more than one
+    assert sum(1 for targets in targetconfigs if targets and len(targets) > 1) > 0
+    # and every level that was read has a table, not just the ones from the first file
+    assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
+
+
 def test_read_coldata_term_to_j_redistribution():
     """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
 
@@ -522,6 +555,53 @@ def test_read_coldata_term_to_j_redistribution():
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
+def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
+    """Lisbon lines name their levels by file index, and the level list is re-sorted by energy.
+
+    Indexing the sorted list with the file's own index attaches every transition to the wrong pair
+    of levels whenever the source CSV is not already in energy order, which is what the map
+    returned by read_levels_data() (as in readfacdata) is for.
+    """
+    import pandas as pd
+
+    from artisatomic import readlisbondata
+
+    # deliberately not in energy order: file index 0 is the HIGHEST level, 2 the ground state
+    dflevels = pd.DataFrame(
+        {"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]}, index=[0, 1, 2]
+    )
+
+    energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(dflevels)
+
+    # levels come back in ascending energy, so the file's order is exactly reversed
+    assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 5000.0]
+    assert levelid_of_fileindex == {2: 0, 1: 1, 0: 2}
+    # the unique parity sentinel keeps all transitions permitted
+    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+
+    # one line from the file's level 2 (the ground state) to its level 0 (the top level)
+    dflines = pd.DataFrame(
+        {"A": [1.5e8]},
+        index=pd.MultiIndex.from_tuples([(2, 0)], names=["level_index_lower", "level_index_upper"]),
+    )
+    transitions, transition_count_of_level_name = readlisbondata.read_lines_data(
+        energy_levels, dflines, levelid_of_fileindex
+    )
+
+    # ...which is level id 0 -> 2 after the sort, written with the lower id first
+    assert len(transitions) == 1
+    assert (transitions[0].lowerlevel, transitions[0].upperlevel) == (0, 2)
+    assert transitions[0].A == 1.5e8
+    assert transition_count_of_level_name == {energy_levels[0].levelname: 1, energy_levels[2].levelname: 1}
+
+    # a line naming a level index the level table does not have is skipped, not misattached
+    dflines_unknown = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
+    )
+    assert readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex) == ([], {})
 
 
 def test_add_handler_if_not_set():
