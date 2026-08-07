@@ -44,16 +44,16 @@ class LisbonReader:
         ----------
         data : dict
             Dictionary containing one dictionary per species with
-            keys `levels` and `lines`.
+            keys `atomic_number`, `ion_charge`, `levels` and `lines`.
         """
-        # carsus is an optional extra that is not a declared dependency of this package
-        from carsus.util import parse_selected_species  # ruff: ignore[unsorted-imports] # ty:ignore[unresolved-import] # pyright: ignore[reportMissingImports] # pyrefly: ignore[missing-import]
-
         lvl_list = []
         lns_list = []
-        for ion, parser in data.items():
-            atomic_number = parse_selected_species(ion)[0][0]
-            ion_charge = parse_selected_species(ion)[0][1]
+        # the caller already knows the element and charge, so they are passed in rather than
+        # formatted into the key and parsed back out with carsus.util.parse_selected_species(),
+        # which made an undeclared optional dependency a hard requirement of this reader
+        for parser in data.values():
+            atomic_number = parser["atomic_number"]
+            ion_charge = parser["ion_charge"]
             levels_data = pd.read_csv(parser["levels"], skiprows=8, index_col=0)
             levels = pd.DataFrame()
             levels["energy"] = levels_data["Energy[cm^-1]"]
@@ -82,6 +82,7 @@ class LisbonReader:
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
         levels = pd.concat(lvl_list)
+        # pd.concat() of the untyped list above narrows to Never, so pyright reads this as dead
         lines = pd.concat(lns_list)  # pyright: ignore[reportUnreachable]
         self.levels = levels
         self.lines = lines
@@ -198,6 +199,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     lisbon_data = {
         f"{elsym} {ion_charge}": {
+            "atomic_number": atomic_number,
+            "ion_charge": ion_charge,
             "levels": str(iondir / f"{elsym}{ion_stage_roman}_Levels.csv"),
             "lines": str(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"),
         }
