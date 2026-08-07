@@ -27,6 +27,7 @@ from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
@@ -81,6 +82,7 @@ __all__ = [
     "get_nist_ionization_energies_ev",
     "get_parity_from_config",
     "groundstatesonlynist",
+    "h_in_ev_seconds",
     "hc_in_ev_angstrom",
     "hc_in_ev_cm",
     "interpret_configuration",
@@ -115,17 +117,6 @@ __all__ = [
     "write_transition_data",
     "xopen_check_extension",
 ]
-
-
-def __getattr__(name: str) -> float:
-    """Resolve artisatomic.h_in_ev_seconds lazily, so importing the package does not import artistools."""
-    if name == "h_in_ev_seconds":
-        from artistools.constants import h_ev_s
-
-        return h_ev_s
-    msg = f"module {__name__!r} has no attribute {name!r}"
-    raise AttributeError(msg)
-
 
 if __name__ == "__main__":
     main()
