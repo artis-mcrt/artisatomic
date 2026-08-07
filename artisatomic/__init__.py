@@ -48,9 +48,8 @@ from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.iondata import simple_handler_readers
 from artisatomic.ionhandlers import add_handler_if_not_set
 from artisatomic.ionhandlers import drop_handlers
-from artisatomic.ionhandlers import get_default_handler
 from artisatomic.ionhandlers import get_ion_handlers
-from artisatomic.ionhandlers import get_ion_stage
+from artisatomic.ionhandlers import parse_ion_handlers
 from artisatomic.ionhandlers import sort_ion_handlers
 from artisatomic.levelnames import get_parity_from_config
 from artisatomic.levelnames import interpret_configuration
@@ -77,9 +76,7 @@ __all__ = [
     "elsymbols",
     "empty_transitions_schema",
     "find_file_check_extension",
-    "get_default_handler",
     "get_ion_handlers",
-    "get_ion_stage",
     "get_nist_ionization_energies_ev",
     "get_parity_from_config",
     "groundstatesonlynist",
@@ -93,6 +90,7 @@ __all__ = [
     "main",
     "match_hydrogenic_phixs",
     "parallel_map",
+    "parse_ion_handlers",
     "path_for_log",
     "process_files",
     "read_ion_data",

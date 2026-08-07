@@ -25,7 +25,6 @@ from artisatomic.base import ion_log_path
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
-from artisatomic.ionhandlers import get_default_handler
 from artisatomic.phixs import match_hydrogenic_phixs
 
 # import artisatomic.readlisbondata as readlisbondata
@@ -80,14 +79,13 @@ simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
 
 
 def read_ion_data(
-    atomic_number: int, ion_stage_entry: int | tuple[int, str], is_top_ion: bool, args: argparse.Namespace
+    atomic_number: int, ion_stage_entry: tuple[int, str], is_top_ion: bool, args: argparse.Namespace
 ) -> IonData:
-    """Read a single ion's data from its source dataset."""
-    if isinstance(ion_stage_entry, int):
-        ion_stage = ion_stage_entry
-        handler = get_default_handler(atomic_number, ion_stage)
-    else:
-        ion_stage, handler = ion_stage_entry
+    """Read a single ion's data from its source dataset.
+
+    Every ion names the handler that reads it; there is no default per element.
+    """
+    ion_stage, handler = ion_stage_entry
 
     ionization_energy_ev = 0.0
     transition_count_of_level_name: dict[str, int] = {}

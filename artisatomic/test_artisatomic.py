@@ -9,7 +9,6 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
-from artisatomic import get_default_handler
 from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
@@ -527,26 +526,40 @@ def test_read_coldata_term_to_j_redistribution():
 
 def test_add_handler_if_not_set():
     """Adding a handler returns a new list and never overrides an ion that is already present."""
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+    unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
     # adding an ion for a new element must not modify the input list
     result = add_handler_if_not_set(ion_handlers, 58, 1, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2]), (58, [(1, "dream")])]
+    assert ion_handlers == unchanged
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
     # add an ion to an existing element
     result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2, (3, "dream")])]
+    assert ion_handlers == unchanged
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
-    # an already-present ion stage is not replaced or duplicated
+    # an already-present ion stage keeps the handler it was given, whatever the new one says
     result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
-    assert result == [(26, [1, 2])]
+    assert result == unchanged
 
-    # ion stages with handlers can be given as tuples or lists (e.g. loaded from JSON)
-    ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # ion stages can be given as tuples or lists (e.g. straight from json.load())
+    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
+
+
+def test_parse_ion_handlers():
+    """The JSON form becomes tuples, and an ion that names no handler is rejected."""
+    from artisatomic import parse_ion_handlers
+
+    # json.load() gives nested lists; every ion must come back as an (ion_stage, handler) tuple
+    assert parse_ion_handlers([[26, [[1, "cmfgen"], [2, "cmfgen"]]]]) == [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+
+    # a bare ion stage is a leftover from when the handler was optional. It must be named as such
+    # here, rather than failing later where neither the element nor the file would be mentioned.
+    with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
+        parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
 def test_split_element_ionstage_str():
@@ -568,21 +581,6 @@ def test_split_element_ionstage_str():
 
     with pytest.raises(ValueError, match="Could not split"):
         split_element_ionstage_str("NotAnIon")
-
-
-def test_get_default_handler():
-    """Each element falls to the data source configured for it."""
-    assert get_default_handler(2, 3) == "boyle"
-    assert get_default_handler(26, 1) == "cmfgen"
-    assert get_default_handler(56, 2) == "cmfgen"
-    assert get_default_handler(38, 1) == "qub_data"
-    # QUB calculations take precedence over DREAM for W, Pt, and Au ion stages 1-3
-    assert get_default_handler(74, 1) == "qub_data"
-    assert get_default_handler(78, 3) == "qub_data"
-    assert get_default_handler(79, 2) == "qub_data"
-    assert get_default_handler(74, 4) == "dream"
-    assert get_default_handler(60, 2) == "dream"
-    assert get_default_handler(45, 1) == "kurucz"
 
 
 def test_hillier_extend_ion_list():

@@ -109,7 +109,7 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     process_files(ion_handlers, args)
 
 
-def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace) -> None:
+def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Read every configured ion and append it to the output files, one element at a time.
 
     Ion stages are processed in ascending order so that each ion's photoionisation targets, which

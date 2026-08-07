@@ -338,9 +338,7 @@ def write_phixs_data(
         )
 
 
-def write_compositionfile(
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], args: argparse.Namespace
-) -> None:
+def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Write compositiondata.txt, listing each element's contiguous range of ion stages."""
     print("Writing compositiondata.txt")
     with open(os.path.join(args.output_folder, "compositiondata.txt"), "w", encoding="utf-8") as fcomp:

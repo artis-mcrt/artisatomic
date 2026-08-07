@@ -1594,7 +1594,7 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     maxionstage: int | None = None,
     include_hydrogen: bool | None = False,
 ):
