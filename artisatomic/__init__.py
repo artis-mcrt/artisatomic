@@ -220,6 +220,21 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     return dflevels
 
 
+def nonnegative_int(value: str) -> int:
+    """Argparse type for an option that counts things, where a negative value is always a mistake.
+
+    Raises:
+        argparse.ArgumentTypeError: if the value is negative, so that a typo such as -1 is
+            reported instead of being taken as "off".
+    """
+    intvalue = int(value)
+    if intvalue < 0:
+        msg = f"expected a non-negative integer, got {value}"
+        raise argparse.ArgumentTypeError(msg)
+
+    return intvalue
+
+
 def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
     """Write an ARTIS atomic database from the configured ions and handlers."""
     if args is None:
@@ -261,14 +276,14 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
 
         parser.add_argument(
             "-nlevels_hydrogenic_for_unknown_phixs",
-            type=int,
+            type=nonnegative_int,
             default=100,
             help=(
                 "Estimate hydrogenic cross sections for this many of the lowest levels of any ion"
-                " whose handler supplied none at all, or 0 to disable. An ion with even one cross"
-                " section from its data source is left untouched, so this never replaces or"
-                " extends measured data. Excludes the top ion, which has no upper ion to"
-                " photoionise to."
+                " whose handler supplied none at all, or 0 to disable. Negative values are"
+                " rejected. An ion with even one cross section from its data source is left"
+                " untouched, so this never replaces or extends measured data. Excludes the top"
+                " ion, which has no upper ion to photoionise to."
             ),
         )
 
