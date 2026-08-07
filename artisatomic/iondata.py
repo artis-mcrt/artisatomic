@@ -87,7 +87,8 @@ def read_ion_data(
     """
     ion_stage, handler = ion_stage_entry
 
-    ionization_energy_ev = 0.0
+    # no default for ionization_energy_ev: every handler branch below sets it, and an unknown
+    # handler raises, so a branch that forgets should fail rather than write a 0 eV threshold
     transition_count_of_level_name: dict[str, int] = {}
     upsilondict: dict[tuple[int, int], float] = {}
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None

@@ -292,7 +292,7 @@ def write_phixs_data(
     ]
     skipped_no_threshold = len(levelids_with_targets) - len(levelids_to_write)
 
-    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata2.txt'")
+    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
     flog.write(
         f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"

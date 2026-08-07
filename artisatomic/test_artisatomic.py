@@ -529,19 +529,20 @@ def test_add_handler_if_not_set():
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
     unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
-    # adding an ion for a new element must not modify the input list
+    # add an ion for a new element
     result = add_handler_if_not_set(ion_handlers, 58, 1, "dream")
-    assert ion_handlers == unchanged
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
     # add an ion to an existing element
     result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
-    assert ion_handlers == unchanged
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
     # an already-present ion stage keeps the handler it was given, whatever the new one says
     result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
     assert result == unchanged
+
+    # the calls return a new list each time, so none of them touched the one they were given
+    assert ion_handlers == unchanged
 
     # ion stages can be given as tuples or lists (e.g. straight from json.load())
     ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
