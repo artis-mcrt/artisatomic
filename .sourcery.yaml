@@ -28,6 +28,8 @@ rule_settings:
         - extract-duplicate-method
         - code_clarification
         - low-code-quality
+        - no-loop-in-tests
+        - no-conditionals-in-tests
     rule_types:
         - refactoring
         - suggestion
