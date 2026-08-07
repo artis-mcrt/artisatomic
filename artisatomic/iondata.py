@@ -1,8 +1,10 @@
 """Read a single ion's levels, transitions, and photoionisation data from its source dataset."""
 
 import argparse
+import itertools
 import typing as t
 from collections.abc import Callable
+from dataclasses import dataclass
 
 import numpy as np
 import numpy.typing as npt
@@ -28,8 +30,13 @@ from artisatomic.phixs import match_hydrogenic_phixs
 # import artisatomic.readlisbondata as readlisbondata
 
 
-class IonData(t.NamedTuple):
-    """Levels, transitions, and photoionisation data for a single ion, read from one of the source datasets."""
+@dataclass(slots=True)
+class IonData:
+    """Levels, transitions, and photoionisation data for a single ion, read from one of the source datasets.
+
+    A dataclass rather than a NamedTuple because resolve_photoion_targetfractions() fills in the
+    target fractions after the whole element has been read.
+    """
 
     ion_stage: int
     handler: str
@@ -182,23 +189,18 @@ def read_ion_data(
     )
 
 
-def resolve_photoion_targetfractions(iondatalist: list[IonData], args: argparse.Namespace) -> list[IonData]:
+def resolve_photoion_targetfractions(iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
     An ion's targets are levels of the next ion up, so the fractions can only be resolved once
-    the whole element has been read. The top ion has no upper ion to photoionise to and is left
-    alone, as is any ion whose reader already gave per-level fractions.
+    the whole element has been read, and pairwise() leaves the top ion alone: it has no upper ion
+    to photoionise to. An ion whose reader already gave per-level fractions keeps them.
     """
     if args.nophixs:
-        return iondatalist
+        return
 
-    return [
-        iondata
-        if i == len(iondatalist) - 1 or iondata.photoionization_targetfractions
-        else iondata._replace(
-            photoionization_targetfractions=readhillierdata.get_photoiontargetfractions(
-                iondata.dfenergylevels, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
+    for iondata, upperiondata in itertools.pairwise(iondatalist):
+        if not iondata.photoionization_targetfractions:
+            iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
+                iondata.dfenergylevels, upperiondata.dfenergylevels, iondata.hillier_photoion_targetconfigs
             )
-        )
-        for i, iondata in enumerate(iondatalist)
-    ]

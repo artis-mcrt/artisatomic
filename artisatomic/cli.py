@@ -125,7 +125,7 @@ def process_files(ion_handlers: list[tuple[int, list[int | tuple[int, str]]]], a
             for i, ion_stage_entry in enumerate(listions)
         ]
 
-        iondatalist = resolve_photoion_targetfractions(iondatalist, args)
+        resolve_photoion_targetfractions(iondatalist, args)
         write_output_files(atomic_number, iondatalist, args)
 
 
