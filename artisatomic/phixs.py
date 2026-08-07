@@ -1,13 +1,10 @@
 """Downsample photoionization cross-section tables and estimate hydrogenic ones where none exist."""
 
-import math
 from functools import partial
 
 import numpy as np
 import numpy.typing as npt
 import polars as pl
-from scipy import integrate  # pyright: ignore[reportMissingTypeStubs]
-from scipy import interpolate  # pyright: ignore[reportMissingTypeStubs]
 
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
@@ -132,12 +129,7 @@ def reduce_phixs_tables_worker(
     """
     ryd_to_hz = 3289841960250880.5
     h_over_kb_in_K_sec = 4.799243073366221e-11
-
-    def integrand(nu):
-        """Weight for averaging the cross section: proportional to the recombination rate."""
-        return (nu**2) * math.exp(-h_over_kb_in_K_sec * nu / optimaltemperature)
-
-    integrand_vec = np.vectorize(integrand)
+    minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
 
@@ -147,69 +139,81 @@ def reduce_phixs_tables_worker(
         return np.zeros(nphixspoints)
 
     threshold_old_ryd = tablein[0][0]
-    # tablein is an array of pairs (energy, phixs cross section)
+    # tablein is an array of pairs (energy, phixs cross section). Split once: the loop below reads
+    # both columns per output point, and a strided view of a 2D array is re-sliced every time.
+    tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
+    tablein_sigma = np.ascontiguousarray(tablein[:, 1])
+    table_energy_last = tablein_energyryd[-1]
+    table_sigma_last = tablein_sigma[-1]
 
     arr_sigma_out = np.empty(nphixspoints)
     # x is nu/nu_edge
 
-    sigma_interp = interpolate.interp1d(tablein[:, 0], tablein[:, 1], kind="linear", assume_sorted=True)
+    # the interval edges depend only on the grid, so compute all of them at once
+    arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
+    arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
+    # the table is sorted by energy (interp1d was called with assume_sorted), so each interval's
+    # slice can be bisected rather than rebuilding a boolean mask over the whole column per point
+    arr_startindex = np.searchsorted(tablein_energyryd, arr_enlow, side="left")
+    arr_endindex = np.searchsorted(tablein_energyryd, arr_enhigh, side="right")
 
-    for i, _ in enumerate(xgrid[:-1]):
-        iprevious = max(i - 1, 0)
-        enlow = 0.5 * (xgrid[iprevious] + xgrid[i]) * threshold_old_ryd
-        enhigh = 0.5 * (xgrid[i] + xgrid[i + 1]) * threshold_old_ryd
+    for i in range(nphixspoints):
+        enlow = arr_enlow[i]
+        enhigh = arr_enhigh[i]
 
         # start of interval interpolated point, input data points, and end of interval interpolated point
-        samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
+        sample_energyryd = tablein_energyryd[arr_startindex[i] : arr_endindex[i]]
+        sample_sigma = tablein_sigma[arr_startindex[i] : arr_endindex[i]]
 
-        if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:
-            if i == 0 and len(samples_in_interval) != 0:
+        if len(sample_energyryd) == 0 or ((sample_energyryd[0] - enlow) / enlow) > 1e-20:
+            if i == 0 and len(sample_energyryd) != 0:
                 print(
-                    f"adding first point {enlow:.4e} {samples_in_interval[0, 0]:.4e} {(samples_in_interval[0, 0] - enlow) / enlow:.4e}"
+                    f"adding first point {enlow:.4e} {sample_energyryd[0]:.4e} {(sample_energyryd[0] - enlow) / enlow:.4e}"
                 )
-            if enlow <= tablein[-1][0]:
-                new_crosssection = sigma_interp(enlow)
+            if enlow <= table_energy_last:
+                # np.interp, not scipy's interp1d: identical linear interpolation (verified
+                # bit-for-bit) without a scipy call per interval edge
+                new_crosssection = np.interp(enlow, tablein_energyryd, tablein_sigma)
                 if new_crosssection < 0:
                     print("negative extrap")
             else:
                 # assume power law decay after last point
-                new_crosssection = tablein[-1][1] * (tablein[-1][0] / enlow) ** 3
-            samples_in_interval = np.vstack([[enlow, new_crosssection], samples_in_interval])
+                new_crosssection = table_sigma_last * (table_energy_last / enlow) ** 3
+            sample_energyryd = np.concatenate(([enlow], sample_energyryd))
+            sample_sigma = np.concatenate(([new_crosssection], sample_sigma))
 
-        if (
-            len(samples_in_interval) == 0
-            or ((enhigh - samples_in_interval[-1, 0]) / samples_in_interval[-1, 0]) > 1e-20
-        ):
-            if enhigh <= tablein[-1][0]:
-                new_crosssection = sigma_interp(enhigh)
+        if ((enhigh - sample_energyryd[-1]) / sample_energyryd[-1]) > 1e-20:
+            if enhigh <= table_energy_last:
+                new_crosssection = np.interp(enhigh, tablein_energyryd, tablein_sigma)
                 if new_crosssection < 0:
                     print("negative extrap")
             else:
                 new_crosssection = (
-                    tablein[-1][1] * (tablein[-1][0] / enhigh) ** 3
+                    table_sigma_last * (table_energy_last / enhigh) ** 3
                 )  # assume power law decay after last point
 
-            samples_in_interval = np.vstack([samples_in_interval, [enhigh, new_crosssection]])
+            sample_energyryd = np.concatenate((sample_energyryd, [enhigh]))
+            sample_sigma = np.concatenate((sample_sigma, [new_crosssection]))
 
-        nsamples = len(samples_in_interval)
+        nsamples = len(sample_energyryd)
 
-        if nsamples >= 50 or enlow > tablein[-1][0]:
-            arr_energyryd = samples_in_interval[:, 0]
-            arr_sigma_megabarns = samples_in_interval[:, 1]
+        if nsamples >= 50 or enlow > table_energy_last:
+            arr_energyryd = sample_energyryd
+            arr_sigma_megabarns = sample_sigma
         else:
             nsteps = 50  # was 500
             arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
-            arr_sigma_megabarns = np.interp(arr_energyryd, tablein[:, 0], tablein[:, 1])
-        assert isinstance(arr_sigma_megabarns, np.ndarray)
+            arr_sigma_megabarns = np.interp(arr_energyryd, tablein_energyryd, tablein_sigma)
 
-        integrand_vals = integrand_vec(arr_energyryd * ryd_to_hz)
+        # the recombination-rate weight nu^2 exp(-h nu / k T), evaluated over the whole interval at
+        # once. np.vectorize() called math.exp() once per sample, which dominated this function.
+        arr_nu = arr_energyryd * ryd_to_hz
+        integrand_vals = arr_nu**2 * np.exp(minus_h_over_kb_t * arr_nu)
         if np.any(integrand_vals):
-            sigma_integrand_vals = [
-                sigma * integrand_val for sigma, integrand_val in zip(arr_sigma_megabarns, integrand_vals, strict=True)
-            ]
+            sigma_integrand_vals = arr_sigma_megabarns * integrand_vals
 
-            integralnosigma = integrate.trapezoid(integrand_vals, arr_energyryd)
-            integralwithsigma = integrate.trapezoid(sigma_integrand_vals, arr_energyryd)
+            integralnosigma = np.trapezoid(integrand_vals, arr_energyryd)
+            integralwithsigma = np.trapezoid(sigma_integrand_vals, arr_energyryd)
 
         else:
             integralnosigma = 1.0
@@ -221,7 +225,7 @@ def reduce_phixs_tables_worker(
             arr_sigma_out[i] = 0.0
         else:
             print("Math error: ", i, nsamples, integralwithsigma, integralnosigma)
-            print(samples_in_interval)
+            print(np.column_stack([sample_energyryd, sample_sigma]))
             arr_sigma_out[i] = 0.0
 
     return arr_sigma_out

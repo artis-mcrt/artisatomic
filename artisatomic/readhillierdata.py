@@ -1,6 +1,5 @@
 """Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
 
-import math
 import os
 import sys
 import typing as t
@@ -1025,36 +1024,36 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     so the cross section is zero until the offset threshold.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, c in enumerate(energygrid):
-        energy_div_threshold = 1 + 20 * (c**2)
+    energy_div_threshold = 1 + 20 * (energygrid**2)
 
-        if nu_o is None:
-            threshold_div_energy = energy_div_threshold**-1
-            crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy**s)
-        else:
-            # type 7
-            # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
-            # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
-            #                       Offset was being added to the current frequency instead
-            #                       of the ionization edge.
+    if nu_o is None:
+        threshold_div_energy = energy_div_threshold**-1
+        crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy**s)
+    else:
+        # type 7
+        # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
+        # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
+        #                       Offset was being added to the current frequency instead
+        #                       of the ionization edge.
 
-            threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
-            offset_threshold_div_energy = (energy_div_threshold**-1) * (
-                1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
-            )
+        threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
+        offset_threshold_div_energy = (energy_div_threshold**-1) * (
+            1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
+        )
 
-            crosssection = (
-                sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s
-                if offset_threshold_div_energy < 1.0
-                else 0.0
-            )
+        # the cross section is zero until the offset edge is reached. np.where evaluates both
+        # arms, which is safe here: the ratio is positive everywhere, so the discarded arm has
+        # no domain error to raise.
+        crosssection = np.where(
+            offset_threshold_div_energy < 1.0,
+            sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s,
+            0.0,
+        )
 
-        phixstable[index] = energy_div_threshold * thresholdenergyryd, crosssection
-    return phixstable
+    return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
 
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
@@ -1139,25 +1138,22 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
     already accounts for the effective charge, so the result must not be rescaled by the caller.
     """
-    energygrid = hyd_gaunt_energygrid_ryd[n]
-    phixstable = np.empty((len(energygrid), 2))
+    energygrid = np.asarray(hyd_gaunt_energygrid_ryd[n])
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
     scale_factor = 7.91 / thresholdenergyryd / n
 
-    for index, energy_ryd in enumerate(energygrid):
-        energydivthreshold = energy_ryd / energygrid[0]
+    energydivthreshold = energygrid / energygrid[0]
 
-        crosssection = (
-            scale_factor * hyd_gaunt_factor[n][index] / energydivthreshold**3 if energydivthreshold > 0 else 0.0
-        )
+    crosssection = np.where(
+        energydivthreshold > 0,
+        scale_factor * np.asarray(hyd_gaunt_factor[n]) / energydivthreshold**3,
+        0.0,
+    )
 
-        phixstable[index][0] = energydivthreshold * thresholdenergyryd  # / ryd_to_ev
-        phixstable[index][1] = crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 # Peach, Saraph, and Seaton (1988)
@@ -1167,23 +1163,19 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     Returns (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, cb in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (cb**2)
-        u = energydivthreshold
+    energydivthreshold = 1 + 20 * (energygrid**2)
+    u = energydivthreshold
 
-        x = math.log10(min(u, e))
+    x = np.log10(np.minimum(u, e))
 
-        crosssection = 10 ** (a + x * (b + x * (c + x * d)))
-        if u > e:
-            crosssection *= (e / u) ** 2
+    crosssection = 10 ** (a + x * (b + x * (c + x * d)))
+    # above the break the fit is continued with a 1/u^2 tail
+    crosssection = np.where(u > e, crosssection * (e / u) ** 2, crosssection)
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 # only applies to helium
@@ -1196,20 +1188,16 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
     below the break at e, a straight line above it.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, c_en in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c_en**2)
+    energydivthreshold = 1 + 20 * (energygrid**2)
 
-        x = math.log10(energydivthreshold)
+    x = np.log10(energydivthreshold)
 
-        crosssection = 10 ** (((d * x + c) * x + b) * x + a) if x < e else 10 ** (f + g * x)
+    crosssection = np.where(x < e, 10 ** (((d * x + c) * x + b) * x + a), 10 ** (f + g * x))
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
@@ -1221,29 +1209,27 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     eV divided by E_0, and each shell after the first is gated on FREQ >= EV_TO_HZ * E_th_eV.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    for index, c in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c**2)
-        energy_ev = energydivthreshold * thresholdenergyev
+    energydivthreshold = 1 + 20 * (energygrid**2)
+    energy_ev = energydivthreshold * thresholdenergyev
 
-        crosssection = 0.0
-        for shellnum, params in enumerate(fitcoefficients):
-            # the first shell starts at the level's own ionization edge, later (inner) shells
-            # only contribute above their own threshold
-            if shellnum > 0 and energy_ev < params.E_th_eV:
-                continue
-            y = energy_ev / params.E_0
-            P = params.P
-            Q = 5.5 + params.l - 0.5 * params.P
-            y_a = params.y_a
-            y_w = params.y_w
-            crosssection += params.sigma_0 * ((y - 1) ** 2 + y_w**2) * (y**-Q) * ((1 + math.sqrt(y / y_a)) ** -P)
+    crosssection = np.zeros(len(energygrid))
+    for shellnum, params in enumerate(fitcoefficients):
+        y = energy_ev / params.E_0
+        P = params.P
+        Q = 5.5 + params.l - 0.5 * params.P
+        y_a = params.y_a
+        y_w = params.y_w
+        shellcrosssection = params.sigma_0 * ((y - 1) ** 2 + y_w**2) * (y**-Q) * ((1 + np.sqrt(y / y_a)) ** -P)
+        # the first shell starts at the level's own ionization edge, later (inner) shells
+        # only contribute above their own threshold
+        if shellnum > 0:
+            shellcrosssection = np.where(energy_ev < params.E_th_eV, 0.0, shellcrosssection)
+        crosssection += shellcrosssection
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):

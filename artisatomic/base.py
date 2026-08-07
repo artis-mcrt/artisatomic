@@ -1,6 +1,7 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import contextlib
+import itertools
 import multiprocessing as mp
 import sys
 import typing as t
@@ -169,9 +170,14 @@ def path_for_log(filepath: str | Path) -> str:
 
 
 def isfloat(value: t.Any) -> bool:
-    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3)."""
+    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3).
+
+    Called once per field of every line of the CMFGEN oscillator files (5.3M times for the cmfgen
+    test set), so the replace() is done only when there is a D to replace rather than allocating
+    a copy of every field.
+    """
     try:
-        float(value.replace("D", "E"))
+        float(value.replace("D", "E") if "D" in value else value)
     except ValueError:
         return False
 
@@ -235,15 +241,29 @@ def parallel_map[ResultType](
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
+    # materialise so the work can be sized: the chunk size and the serial cutoff below both need
+    # a length, and the callers pass views and generators
+    lists = [list(iterable) for iterable in iterables]
+    nitems = min((len(x) for x in lists), default=0)
+
+    # Spawning a process pool costs a few hundred ms, because "spawn" makes every worker re-import
+    # the package. That dwarfs a handful of cross-section tables (readqubdata reduces four at a
+    # time), so do small batches in this process.
+    if nitems <= 32:
+        return list(itertools.starmap(fn, zip(*lists, strict=True)))
+
     if use_multiprocessing:
         mp.set_start_method("spawn", force=True)
         from tqdm.contrib.concurrent import process_map
 
-        results = process_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        # without this, items are handed to the workers one at a time and the IPC per item costs
+        # more than the work; tqdm warns about it above 1000 items
+        kwargs.setdefault("chunksize", max(1, nitems // (mp.cpu_count() * 4)))
+        results = process_map(fn, *lists, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results
