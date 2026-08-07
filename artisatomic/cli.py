@@ -3,9 +3,7 @@
 """Command-line entry point: build an ARTIS atomic database from the configured ions and handlers."""
 
 import argparse
-import glob
 import json
-import os
 import typing as t
 from collections.abc import Sequence
 from pathlib import Path
@@ -90,17 +88,16 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     assert len(ion_handlers) > 0
     readhillierdata.read_hyd_phixsdata()
 
-    os.makedirs(args.output_folder, exist_ok=True)
+    Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 
     log_folder = Path(args.output_folder) / args.output_folder_logs
     if log_folder.exists():
         # delete any existing log files
-        logfiles = glob.glob(os.path.join(log_folder, "*.txt"))
-        for logfile in logfiles:
-            Path(logfile).unlink(missing_ok=True)
+        for logfile in sorted(log_folder.glob("*.txt")):
+            logfile.unlink(missing_ok=True)
             print("deleting", logfile)
     else:
-        os.makedirs(log_folder, exist_ok=True)
+        Path(log_folder).mkdir(exist_ok=True, parents=True)
 
     with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)

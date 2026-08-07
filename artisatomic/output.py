@@ -1,7 +1,6 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -21,10 +20,11 @@ from artisatomic.ionhandlers import drop_handlers
 
 def clear_files(args: argparse.Namespace) -> None:
     """Truncate the output files and write the phixs header, which the ions are appended to."""
+    outdir = Path(args.output_folder)
     with (
-        open(os.path.join(args.output_folder, "adata.txt"), "w", encoding="utf-8"),
-        open(os.path.join(args.output_folder, "transitiondata.txt"), "w", encoding="utf-8"),
-        open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "w", encoding="utf-8") as fphixs,
+        (outdir / "adata.txt").open("w", encoding="utf-8"),
+        (outdir / "transitiondata.txt").open("w", encoding="utf-8"),
+        (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs,
     ):
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
@@ -78,7 +78,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
     resolve_photoion_targetfractions() (in iondata), which this does not call itself. Writing an
     ion that still needs resolving would silently drop its cross sections, so that is rejected.
     """
-    log_folder = Path(args.output_folder, args.output_folder_logs)
+    outdir = Path(args.output_folder)
+    log_folder = outdir / args.output_folder_logs
 
     for iondata in iondatalist:
         ion_stage = iondata.ion_stage
@@ -135,7 +136,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     .alias("coll_str")
                 )
 
-            with open(os.path.join(args.output_folder, "adata.txt"), "a", encoding="utf-8") as fatommodels:
+            with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
                 write_adata(
                     fatommodels,
                     atomic_number,
@@ -151,7 +152,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 if dftransitions_ion.is_empty()
                 else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
             )
-            with open(os.path.join(args.output_folder, "transitiondata.txt"), "a", encoding="utf-8") as ftransitiondata:
+            with (outdir / "transitiondata.txt").open("a", encoding="utf-8") as ftransitiondata:
                 write_transition_data(
                     ftransitiondata,
                     atomic_number,
@@ -171,7 +172,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     )
                     raise ValueError(msg)
 
-                with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
+                with (outdir / "phixsdata_v2.txt").open("a", encoding="utf-8") as fphixs:
                     write_phixs_data(
                         fphixs,
                         atomic_number,
@@ -341,7 +342,7 @@ def write_phixs_data(
 def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Write compositiondata.txt, listing each element's contiguous range of ion stages."""
     print("Writing compositiondata.txt")
-    with open(os.path.join(args.output_folder, "compositiondata.txt"), "w", encoding="utf-8") as fcomp:
+    with (Path(args.output_folder) / "compositiondata.txt").open("w", encoding="utf-8") as fcomp:
         fcomp.write(f"{len(ion_handlers):d}\n")
         fcomp.write("0\n0\n")
         for atomic_number, listions in ion_handlers:

@@ -84,14 +84,12 @@ def main():
                 continue
 
             textdata = textdata.replace("**********", "0.")
-            # print(textdata)
             # match
 
             startindex = textdata.find("<pre>") + len("<pre>")
             endindex = textdata.rfind("</pre>")
             strtable = textdata[startindex:endindex].strip()
             strheader = strtable.strip().split("\n")[0].strip()
-            # print(strheader)
             assert (
                 strheader
                 == "A  	Element	Z  	N  	Par. Elevel	Unc. 	JPi       	Dec Mode	T1/2 (txt)    	T1/2 (num)       "

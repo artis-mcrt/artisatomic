@@ -1,6 +1,5 @@
 """Read ground states only, from the NIST ground-state table."""
 
-import os.path
 import typing as t
 from collections import defaultdict
 from pathlib import Path
@@ -19,9 +18,7 @@ class EnergyLevel(t.NamedTuple):
     parity: float
 
 
-datafilepath = Path(
-    os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-groundstatesonlynist", "groundstates.dat"
-)
+datafilepath = Path(Path(Path(__file__).resolve()).parent, "..", "atomic-data-groundstatesonlynist", "groundstates.dat")
 
 
 def read_ground_levels(atomic_number, ion_stage, flog):

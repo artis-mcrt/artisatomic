@@ -65,6 +65,3 @@ from artisatomic.output import write_transition_data as write_transition_data
 from artisatomic.phixs import match_hydrogenic_phixs as match_hydrogenic_phixs
 from artisatomic.phixs import reduce_phixs_tables as reduce_phixs_tables
 from artisatomic.phixs import reduce_phixs_tables_worker as reduce_phixs_tables_worker
-
-if __name__ == "__main__":
-    main()

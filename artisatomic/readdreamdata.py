@@ -1,8 +1,7 @@
 """Read levels and transitions from the DREAM database of lanthanides and actinides."""
 
-import os.path
+import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
 import pandas as pd
@@ -11,9 +10,27 @@ import artisatomic
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = Path(
-    os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
+    Path(Path(__file__).resolve()).parent, "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
 )
 dreamdata: pd.DataFrame | None = None
+
+
+class DreamEnergyLevelRow(t.NamedTuple):
+    """One DREAM energy level."""
+
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: int
+
+
+class TransitionTuple(t.NamedTuple):
+    """One DREAM bound-bound transition."""
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    coll_str: float
 
 
 def init_dreamdata():
@@ -45,17 +62,13 @@ def energytuplefromrow(row, prefix):
     statistical weight that identify it, which is what read_levels_data() deduplicates on.
     """
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
-    dream_energy_level_row = namedtuple("dream_energy_level_row", "levelname energyabovegsinpercm g parity")
 
     parity = 1 if leveltype == "(o)" else 0
     paritystr = "odd" if parity == 1 else "even"
     energyabovegsinpercm = float(energy)
 
     levelname = f"enpercm={energy},{paritystr},g={g}"
-    newlevel = dream_energy_level_row(
-        levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
-    )
-    return newlevel
+    return DreamEnergyLevelRow(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
 
 
 def read_levels_data(dflines):
@@ -67,9 +80,7 @@ def read_levels_data(dflines):
     energy_levels = []
 
     for prefix in ["Lower", "Upper"]:
-        for index, row in dflines.drop_duplicates(
-            subset=[prefix + "_Type", prefix + "_Level", prefix + "_g"]
-        ).iterrows():
+        for _, row in dflines.drop_duplicates(subset=[prefix + "_Type", prefix + "_Level", prefix + "_g"]).iterrows():
             leveltuple = energytuplefromrow(row, prefix)
             if leveltuple not in energy_levels:
                 energy_levels.append(leveltuple)
@@ -86,15 +97,13 @@ def read_lines_data(dfiondata, energy_levels):
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
 
-    for index, row in dfiondata.iterrows():
+    for _, row in dfiondata.iterrows():
         lowerindex = row["Lower_index"]
         upperindex = row["Upper_index"]
         A = row["gA"] / row["Upper_g"]  # TODO: is this correct?
-        transtuple = transitiontuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=-1)
+        transtuple = TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=-1)
 
-        # print(line)
         transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1
         transition_count_of_level_name[energy_levels[upperindex].levelname] += 1
 
@@ -110,22 +119,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     charge = ion_stage - 1
     dfiondata = dreamdata.loc[atomic_number, charge]  # ty:ignore[possibly-missing-attribute]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
-    print(dfiondata)
-
-    # from nistasd import NISTLines
-    #
-    # nist = NISTLines(spectrum='Ce')
-    # energy_levels = nist.get_energy_level_data()
-    # print("energy_levels.keys() = ", energy_levels['Ce I'])
-    # for ion_stage in energy_levels:
-    #     print("Number of energy levels: {0} for {1}".format(len(energy_levels[ion_stage]), ion_stage))
-    #     df = pd.DataFrame(energy_levels[ion_stage])
-    #     print(df)
 
     energy_levels = read_levels_data(dfiondata)
 
-    # for x in energy_levels:
-    #     print(x)
     def get_level_index(row, prefix):
         """Return the zero-based level id of the row's level."""
         leveltuple = energytuplefromrow(row, prefix)

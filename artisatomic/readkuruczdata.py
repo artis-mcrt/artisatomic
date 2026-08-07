@@ -136,7 +136,8 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
     )
     if gfall.select(pl.n_unique("z_dot_ioncharge")).collect().item() != 1:
-        raise ValueError(f"Expected exactly one unique ion in file {fname}, but found multiple")
+        msg = f"Expected exactly one unique ion in file {fname}, but found multiple"
+        raise ValueError(msg)
 
     return gfall
 
@@ -163,7 +164,8 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
         if path_gfall.is_file():
             return path_gfall
 
-    raise FileNotFoundError(f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}.")
+    msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
+    raise FileNotFoundError(msg)
 
 
 def read_levels_and_transitions(

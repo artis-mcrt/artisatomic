@@ -110,15 +110,12 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                     electron_config.insert(0, instr[startpos:])
                     instr = instr[:startpos]
                 else:
-                    # print('Unknown character ' + instr[-1])
                     instr = instr[:-1]
             elif instr[-1] in {"_", " "}:
                 instr = instr[:-1]
             else:
-                # print('Unknown character ' + instr[-1])
                 instr = instr[:-1]
 
-    # return '{0} {1}{2}{3} index {4}'.format(electron_config, term_twosplusone, lchars[term_l], ['e', 'o'][term_parity], indexinsymmetry)
     return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
 
 
