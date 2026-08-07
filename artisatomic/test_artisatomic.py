@@ -261,7 +261,9 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
+    )
 
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -298,6 +300,60 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
     assert targetfractions[0] == []
     assert np.all(crosssections[0] == 0.0)
+
+
+def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
+    """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
+    import argparse
+
+    rhd.read_hyd_phixsdata()
+
+    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    nlevels = 5
+    dflevels = pl.DataFrame(
+        {
+            "levelid": list(range(nlevels)),
+            # ascending, and all well below the ionization energy so none is skipped as unbound
+            "energyabovegsinpercm": [i * 1000.0 for i in range(nlevels)],
+            "g": [2.0] * nlevels,
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * nlevels,
+        }
+    )
+
+    for nlevels_option, n_expected in ((0, 0), (2, 2), (nlevels + 10, nlevels)):
+        args = argparse.Namespace(
+            nphixspoints=100,
+            phixsnuincrement=0.03,
+            optimaltemperature=6000,
+            nlevels_hydrogenic_for_unknown_phixs=nlevels_option,
+        )
+        _, targetfractions, thresholds = match_hydrogenic_phixs(
+            atomic_number=2,
+            energy_levels=dflevels,
+            ionization_energy_ev=ionization_energy_ev,
+            ion_handler="kurucz",
+            args=args,
+        )
+        assert sum(1 for targets in targetfractions if targets) == n_expected
+        assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
+
+    # the limit bounds the levels considered, not the tables produced: an unbound level inside it
+    # is skipped but still counts, so asking for 3 here yields only the one bound level below them
+    unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
+    dflevels_partly_unbound = dflevels.with_columns(
+        energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
+    )
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=3
+    )
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_partly_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+    assert np.count_nonzero(~np.isnan(thresholds)) == 1
 
 
 def test_write_phixs_data_with_no_phixs_arrays():

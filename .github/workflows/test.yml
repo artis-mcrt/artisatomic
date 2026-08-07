@@ -167,9 +167,7 @@ jobs:
             - name: Generate artis atomic data files
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  # extraargs.txt holds any per-test command line flags, so that a local run
-                  # reproduces the checksums with the same command CI uses
-                  uv run makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output $(cat tests/${{ matrix.testname }}/extraargs.txt)
+                  uv run makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
