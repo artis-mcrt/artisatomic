@@ -14,7 +14,6 @@ output.txt
 
 *.nosync
 
-recombination_rates/phixs.pdf
 .DS_Store
 .idea
 .tags*

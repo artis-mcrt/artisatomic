@@ -20,18 +20,11 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
-from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 from artisatomic import write_phixs_data
-
-
-def test_reduce_configuration():
-    """Configurations normalise to a comparable form, dropping the parent term and any J value."""
-    assert readnahardata.reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
-    assert readnahardata.reduce_configuration("3d6_3P2e") == "3d6_3Pe"
 
 
 def test_interpret_term():
@@ -360,9 +353,9 @@ def test_write_phixs_data_with_no_phixs_arrays():
     """A reader that found no photoionization data must not make write_phixs_data() index off the end.
 
     write_output_files() fills a target list for every level whenever the reader supplied none, and
-    readnahardata.get_photoiontargetfractions() always gives at least the ground state. If the
-    reader also left the cross-section and threshold arrays empty (no usable .ptpx tables), the
-    level ids from those target lists have nothing behind them.
+    readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
+    reader also left the cross-section and threshold arrays empty, the level ids from those target
+    lists have nothing behind them.
     """
     import argparse
 
@@ -568,131 +561,6 @@ def test_read_adf04():
     assert level1.parity == 0
 
 
-def test_read_nahar_energy_level_file_missing():
-    """A missing Nahar file is logged and returned as empty data, not raised."""
-    flog = io.StringIO()
-    (
-        nahar_energy_levels,
-        nahar_core_states,
-        nahar_configurations,
-        nahar_ionization_potential_rydberg,
-    ) = readnahardata.read_nahar_energy_level_file("does/not/exist.en.ls.txt", 26, 2, flog)
-    assert nahar_energy_levels == []
-    assert nahar_core_states == []
-    assert nahar_configurations == {}
-    assert nahar_ionization_potential_rydberg == -1.0
-    assert "does not exist" in flog.getvalue()
-
-
-# a cut-down .en.ls.txt: two core states, one spectroscopic row, and one table iii symmetry.
-# Column positions matter to the parser, so the rows are copied from a real Nahar file.
-NAHAR_EN_LS_FIXTURE = """\
- i) Table of target/core states in the wavefunction expansion
-
- Z = 26, no of target/core electrons= 24
-
- no of target/core states in WF = 2
-
- target states and energies:
-
-  1  3d6      5D    0.00000E+00
-  2  3d54s    7S    2.74191E-01
-
-ii) Table of bound (negative) state energies (with spectroscopic notation)
-
- Ion ground state = 60202400.0000, Eo(Ry) = -1.1782E+00 =-IP
-
- 3d54s  (7S ) 6s  b8S        -0.00097
-
-iii) Table of complete set (both negative and positive) of energies
-
-Lines - Ne number of lines: Index, T(valence electron state)/C(equivalent
-     electron state), Core state number, n, l, energy (Ry)
-
-------------------------------------------------------
-   26   24    E
-    8    0    0    2
-    2  2.741910E-01
-    1  T  2  5 0  -2.42474E-01
-    2  C  1  6 0  -9.72970E-04
-    0    0    0    0
-"""
-
-
-@pytest.fixture
-def nahar_en_ls_path(tmp_path):
-    """Write the cut-down Nahar energy file to a temporary path."""
-    path = tmp_path / "fe2.en.ls.txt"
-    path.write_text(NAHAR_EN_LS_FIXTURE)
-    return path
-
-
-def test_read_nahar_energy_level_file(nahar_en_ls_path):
-    """The second column of a table iii row is a T/C letter, not a number.
-
-    Misreading it shifts the core state, n, l and energy that follow it, so the parsed values are
-    checked column by column rather than only for the absence of an exception.
-    """
-    flog = io.StringIO()
-    (
-        nahar_energy_levels,
-        nahar_core_states,
-        nahar_configurations,
-        nahar_ionization_potential_rydberg,
-    ) = readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, flog)
-
-    assert nahar_ionization_potential_rydberg == pytest.approx(1.1782)
-    assert nahar_core_states == [
-        readnahardata.NaharCoreState(1, "3d6", "5D", 0.0),
-        readnahardata.NaharCoreState(2, "3d54s", "7S", 0.274191),
-    ]
-    # keyed by (2S+1, L, parity, index in symmetry); 'b' is the second even-parity seniority
-    assert nahar_configurations == {(8, 0, 0, 2): "3d54s  (7S ) 6s  b8S "}
-
-    assert len(nahar_energy_levels) == 2
-    valence, equivalent = nahar_energy_levels
-    assert (valence.TC, valence.corestateid, valence.elecn, valence.elecl) == ("T", 2, 5, 0)
-    assert (equivalent.TC, equivalent.corestateid, equivalent.elecn, equivalent.elecl) == ("C", 1, 6, 0)
-
-    # the symmetry line gives 2S+1 = 8, L = 0, even parity, so g = 8 * (2 * 0 + 1)
-    assert (valence.twosplusone, valence.l, valence.parity, valence.g) == (8, 0, 0, 8)
-
-    # energies are quoted relative to the ionization potential
-    assert valence.energyreltoionpotrydberg == pytest.approx(-0.242474)
-    expected_percm = (1.1782 - 0.242474) * readnahardata.ryd_to_ev / readnahardata.hc_in_ev_cm
-    assert valence.energyabovegsinpercm == pytest.approx(expected_percm)
-
-
-def test_build_nahar_levels_attaches_configurations(nahar_en_ls_path):
-    """Levels carry their configuration, and those above the threshold are labelled unknown.
-
-    The spectroscopic table covers only the bound states, so a level above the ionization
-    threshold has no configuration and must say so rather than be left blank.
-    """
-    import argparse
-
-    flog = io.StringIO()
-    nahar_energy_levels, _cores, _configs, _ip = readnahardata.read_nahar_energy_level_file(
-        str(nahar_en_ls_path), 26, 2, flog
-    )
-
-    args = argparse.Namespace(nphixspoints=8, optimaltemperature=3000, phixsnuincrement=0.1, nophixs=False)
-    dflevels, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs(nahar_energy_levels, {}, {}, args, flog)
-
-    # the fixture's spectroscopic table names index 2 of the 8Se symmetry and nothing else, and the
-    # reader builds each level's adata.txt name from its symmetry and configuration
-    assert dflevels.select("indexinsymmetry", "naharconfiguration", "levelname").rows() == [
-        (1, "UNKNOWN CONFIG", "Nahar: 8Se index 1 'UNKNOWN CONFIG'"),
-        (2, "3d54s  (7S ) 6s  b8S ", "Nahar: 8Se index 2 '3d54s  (7S ) 6s  b8S '"),
-    ]
-
-    # an empty level list (e.g. the energy file is missing) must give a valid 0-level frame with the
-    # columns write_adata() and the energy sort need, not a column-less frame that crashes later
-    dfempty, _phixs, _thresholds = readnahardata.build_nahar_levels_and_phixs([], {}, {}, args, flog)
-    assert dfempty.height == 0
-    assert {"energyabovegsinpercm", "g", "indexinsymmetry", "naharconfiguration"} <= set(dfempty.columns)
-
-
 def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 
@@ -719,37 +587,17 @@ def test_write_adata_level_comment():
     assert hillier_line.endswith(" someion_gs")
     assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # a Nahar level's name is the annotation its reader built, and is written unchanged
-    naharlevelname = "Nahar: 3Pe index 1 '2s22p2'"
-    dfnahar = leveltuples_to_pldataframe(
-        pl.DataFrame({"levelname": [naharlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
+    # a level name containing spaces is written unchanged, and reads back as everything after
+    # the fourth field
+    spacedlevelname = "3Pe index 1 '2s22p2'"
+    dfspaced = leveltuples_to_pldataframe(
+        pl.DataFrame({"levelname": [spacedlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
     )
     buf = io.StringIO()
-    write_adata(buf, 8, 1, dfnahar, 13.6, {}, io.StringIO())
-    nahar_line = buf.getvalue().splitlines()[1]
-    assert nahar_line.endswith(" " + naharlevelname)
-    assert nahar_line.split(maxsplit=4)[4] == naharlevelname
-
-
-def test_read_nahar_energy_level_file_rejects_shifted_columns(nahar_en_ls_path):
-    """A numeric second column is rejected rather than parsed from the wrong positions.
-
-    It means the row is not in the format the parser assumes, so the columns after it cannot be
-    trusted.
-    """
-    nahar_en_ls_path.write_text(NAHAR_EN_LS_FIXTURE.replace("    1  T  2  5 0", "    1  9  2  5 0"))
-
-    with pytest.raises(ValueError, match="Expected 'T' or 'C'"):
-        readnahardata.read_nahar_energy_level_file(str(nahar_en_ls_path), 26, 2, io.StringIO())
-
-
-def test_nahar_get_photoiontargetfractions():
-    """A level's photoionisation targets resolve to upper-ion level ids, falling back to the ground state."""
-    dflower = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [9.0], "levelname": ["gs"]})
-    dfupper = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [10.0], "levelname": ["gs2"]})
-    nahar_core_states = [readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
-    targetlist = readnahardata.get_photoiontargetfractions(dflower, dfupper, nahar_core_states, {}, io.StringIO())
-    assert targetlist[0] == [(0, 1.0)]  # the upper ion's ground state
+    write_adata(buf, 8, 1, dfspaced, 13.6, {}, io.StringIO())
+    spaced_line = buf.getvalue().splitlines()[1]
+    assert spaced_line.endswith(" " + spacedlevelname)
+    assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
 def test_get_level_valence_n():

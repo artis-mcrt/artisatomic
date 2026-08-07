@@ -94,8 +94,7 @@ def reduce_phixs_tables[KeyType](
 
     Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
 
-    The key type is preserved: callers index the tables by level name, by Nahar state tuple, or
-    by level id.
+    The key type is preserved: callers index the tables by level name or by level id.
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
@@ -182,7 +181,7 @@ def reduce_phixs_tables_worker(
         enlow = 0.5 * (xgrid[iprevious] + xgrid[i]) * threshold_old_ryd
         enhigh = 0.5 * (xgrid[i] + xgrid[i + 1]) * threshold_old_ryd
 
-        # start of interval interpolated point, Nahar points, and end of interval interpolated point
+        # start of interval interpolated point, input data points, and end of interval interpolated point
         samples_in_interval = tablein[(enlow <= tablein[:, 0]) & (tablein[:, 0] <= enhigh)]
 
         if len(samples_in_interval) == 0 or ((samples_in_interval[0, 0] - enlow) / enlow) > 1e-20:

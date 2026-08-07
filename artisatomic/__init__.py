@@ -19,7 +19,6 @@ from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readkuruczdata
-from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import atomic_weights
@@ -101,7 +100,6 @@ __all__ = [
     "readfloers25data",
     "readhillierdata",
     "readkuruczdata",
-    "readnahardata",
     "readqubdata",
     "readtanakajpltdata",
     "reduce_phixs_tables",

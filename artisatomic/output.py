@@ -9,7 +9,6 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic import readhillierdata
-from artisatomic import readnahardata
 from artisatomic.base import atomic_weights
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
@@ -163,18 +162,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         if i < len(iondatalist) - 1 and not args.nophixs:  # ignore the top ion
             photoionization_targetfractions = iondata.photoionization_targetfractions
             if len(photoionization_targetfractions) < 1:
-                if len(iondata.nahar_core_states) > 0:
-                    photoionization_targetfractions = readnahardata.get_photoiontargetfractions(
-                        dfenergylevels_ion,
-                        iondatalist[i + 1].dfenergylevels,
-                        iondata.nahar_core_states,
-                        iondatalist[i + 1].nahar_configurations,
-                        flog,
-                    )
-                else:
-                    photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
-                        dfenergylevels_ion, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
-                    )
+                photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
+                    dfenergylevels_ion, iondatalist[i + 1].dfenergylevels, iondata.hillier_photoion_targetconfigs
+                )
 
             with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
                 write_phixs_data(

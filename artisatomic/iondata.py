@@ -16,16 +16,12 @@ from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readkuruczdata
-from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
-from artisatomic.base import empty_transitions_schema
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
-from artisatomic.base import path_for_log
 from artisatomic.base import roman_numerals
-from artisatomic.base import ryd_to_ev
 from artisatomic.ionhandlers import get_default_handler
 from artisatomic.phixs import match_hydrogenic_phixs
 
@@ -42,10 +38,6 @@ class IonData(t.NamedTuple):
     dftransitions: pl.DataFrame
     transition_count_of_level_name: dict[str, int]
     upsilondict: dict[tuple[int, int], float]
-    # core state id n is at index n - 1 ([] if unavailable)
-    nahar_core_states: list[readnahardata.NaharCoreState]
-    # keys are (2S+1, L, parity, index in symmetry), values are strings of electron configuration
-    nahar_configurations: dict[tuple[int, int, int, int], str]
     # None where a level has no photoionisation data (and None entirely if none was read)
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
@@ -89,8 +81,6 @@ def read_ion_data(
     ionization_energy_ev = 0.0
     transition_count_of_level_name: dict[str, int] = {}
     upsilondict: dict[tuple[int, int], float] = {}
-    nahar_core_states: list[readnahardata.NaharCoreState] = []
-    nahar_configurations: dict[tuple[int, int, int, int], str] = {}
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
     # empty until a handler below reads photoionisation data (and left empty for the top ion)
     photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
@@ -133,35 +123,6 @@ def read_ion_data(
                 ) = readqubdata.read_qub_photoionizations(
                     atomic_number, ion_stage, levelcount=len(energy_levels), args=args, flog=flog
                 )
-
-        elif handler == "nahar":
-            path_nahar_energy_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.en.ls.txt"
-            path_nahar_px_file = f"atomic-data-nahar/{elsymbols[atomic_number].lower()}{ion_stage:d}.ptpx.txt"
-            (
-                nahar_energy_levels,
-                nahar_core_states,
-                nahar_configurations,
-                nahar_ionization_potential_rydberg,
-            ) = readnahardata.read_nahar_energy_level_file(path_nahar_energy_file, atomic_number, ion_stage, flog)
-            ionization_energy_ev = nahar_ionization_potential_rydberg * ryd_to_ev
-
-            # keys are (2S+1, L, parity, indexinsymmetry), values are lists of
-            # (energy in Rydberg, cross section in Mb) tuples
-            nahar_phixs_tables: dict[tuple[int, int, int, int], npt.NDArray[np.float64]] = {}
-            thresholds_ev_dict: dict[tuple[int, int, int, int], float] = {}
-            if not is_top_ion:  # don't get cross sections for top ion
-                log_and_print(flog, f"Reading {path_for_log(path_nahar_px_file)}")
-                nahar_phixs_tables, thresholds_ev_dict = readnahardata.read_nahar_phixs_tables(
-                    path_nahar_px_file, atomic_number, ion_stage, args
-                )
-
-            (energy_levels, photoionization_crosssections, photoionization_thresholds_ev) = (
-                readnahardata.build_nahar_levels_and_phixs(
-                    nahar_energy_levels, nahar_phixs_tables, thresholds_ev_dict, args, flog
-                )
-            )
-            # the Nahar data set gives no bound-bound transitions
-            transitions = pl.DataFrame(schema=empty_transitions_schema)
 
         elif handler == "cmfgen":  # Hillier CMFGEN data only
             (
@@ -220,8 +181,6 @@ def read_ion_data(
         dftransitions=dftransitions,
         transition_count_of_level_name=transition_count_of_level_name,
         upsilondict=upsilondict,
-        nahar_core_states=nahar_core_states,
-        nahar_configurations=nahar_configurations,
         hillier_photoion_targetconfigs=hillier_photoion_targetconfigs,
         photoionization_crosssections=photoionization_crosssections,
         photoionization_targetfractions=photoionization_targetfractions,
