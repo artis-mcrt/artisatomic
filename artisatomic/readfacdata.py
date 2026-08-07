@@ -70,23 +70,19 @@ def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
     return levels_cFAC
 
 
-def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
+def GetLevels(filename: Path | str, ionization_energy_in_ev: float) -> pd.DataFrame:
     """Get a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
     filename : str
         Filename of cFAC ascii output for the energy levels
-
-    Z: int
-        Ion atomic number
     """
     headerlines: list[str] = []
-    with open(filename, encoding="utf-8") as f:
+    with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(10))
 
-    GState = headerlines[7][8:]
-    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    # headerlines[7] holds the ground state and headerlines[5] the ion charge; neither is needed here
     version_FAC = headerlines[0].split(" ")[0]
     print("FAC/cFAC: ", version_FAC)
     if version_FAC == "FAC":
@@ -94,7 +90,8 @@ def GetLevels(filename: Path | str, Z: int, ionization_energy_in_ev: float) -> p
     elif version_FAC == "cFAC":
         levels = GetLevels_cFAC(filename)
     else:
-        raise ValueError("No FAC-like code detected on output file")
+        msg = "No FAC-like code detected on output file"
+        raise ValueError(msg)
 
     levels = levels[levels["energypercm"] <= (ionization_energy_in_ev / hc)]
     assert isinstance(levels, pd.DataFrame)
@@ -129,23 +126,18 @@ def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
     return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
 
-def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
+def GetLines(filename: Path | str) -> pd.DataFrame:
     """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
     filename : str
         Filename of cFAC ascii output for the transitions
-
-    Z: int
-        Ion atomic number
     """
     headerlines: list[str] = []
-    with open(filename, encoding="utf-8") as f:
+    with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
-    GState = headerlines[8][8:]
-    Multi = headerlines[10][9:]
-    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge; none is needed here
     version_FAC = headerlines[0].split(" ")[0]
 
     if version_FAC == "FAC":
@@ -153,7 +145,8 @@ def GetLines(filename: Path | str, Z: int) -> pd.DataFrame:
     elif version_FAC == "cFAC":
         lines = GetLines_cFAC(filename)
     else:
-        raise ValueError("No FAC-like code detected on output file")
+        msg = "No FAC-like code detected on output file"
+        raise ValueError(msg)
 
     return lines
 
@@ -231,7 +224,7 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for index, row in dflines.iterrows():
+    for _, row in dflines.iterrows():
         try:
             lowerlevel = ilev_enlevelindex_map[int(row["Lower"])]
             upperlevel = ilev_enlevelindex_map[int(row["Upper"])]
@@ -251,7 +244,6 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the FAC data set, an early version of the Floers+25 calibrated data."""
-    # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
 
@@ -277,8 +269,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     assert Path(levels_file).exists()
-    dflevels = GetLevels(filename=levels_file, Z=atomic_number, ionization_energy_in_ev=ionization_energy_in_ev)
-    # print(dflevels)
+    dflevels = GetLevels(filename=levels_file, ionization_energy_in_ev=ionization_energy_in_ev)
 
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
@@ -286,7 +277,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     assert Path(lines_file).exists()
-    dflines = GetLines(filename=lines_file, Z=atomic_number)
+    dflines = GetLines(filename=lines_file)
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map)
 

@@ -1,11 +1,10 @@
 """Read helium levels and transitions from the Boyle AOIFE data set."""
 
-import os.path
+import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
-datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-helium-boyle", "aoife.hdf5")
+datafilepath = Path(Path(Path(__file__).resolve()).parent, "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
 try:
     import h5py  # pyright: ignore[reportMissingTypeStubs]
@@ -13,6 +12,32 @@ try:
     aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
 except ModuleNotFoundError:
     aoife_dataset = None
+
+
+class EnergyLevelRow(t.NamedTuple):
+    """One level of the AOIFE levels_data table, with the three derived fields appended."""
+
+    atomic_number: float
+    ion_number: float
+    level_number: float
+    energy: float
+    g: float
+    metastable: float
+    energyabovegsinpercm: float
+    parity: int
+    levelname: str
+
+
+class TransitionTuple(t.NamedTuple):
+    """One bound-bound transition of the AOIFE lines_data table."""
+
+    atomic_number: float
+    ion_stage: float
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    lambdaangstrom: float
+    coll_str: float
 
 
 def read_ionization_data(atomic_number, ion_stage):
@@ -45,17 +70,13 @@ def read_levels_data(atomic_number, ion_stage):
     assert aoife_dataset is not None
     levels_data = aoife_dataset["/levels_data"]
 
-    energy_level_row = namedtuple(
-        "energy_level_row",
-        "atomic_number ion_number level_number energy g metastable energyabovegsinpercm parity levelname",
-    )
-    energy_levels: list[energy_level_row] = []
+    energy_levels: list[EnergyLevelRow] = []
 
     for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
         _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
         # the six unpacked columns plus three more make up the nine fields, which the type
         # checkers cannot count through the star-unpacking
-        energy_level = energy_level_row(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments] # pyright: ignore[reportCallIssue]
+        energy_level = EnergyLevelRow(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments] # pyright: ignore[reportCallIssue]
 
         if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
             continue
@@ -76,9 +97,6 @@ def read_lines_data(atomic_number, ion_stage):
 
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transition_tuple = namedtuple(
-        "transition_tuple", "atomic_number ion_stage lowerlevel upperlevel A lambdaangstrom coll_str"
-    )
 
     for rowtuple in lines_data:  # pyright: ignore[reportGeneralTypeIssues]
         (
@@ -98,12 +116,11 @@ def read_lines_data(atomic_number, ion_stage):
 
         coll_str = -1  # TODO
         # the file's level numbers are already zero-based, matching the level ids used in memory
-        line = transition_tuple(
+        line = TransitionTuple(
             atomic_num, ion_number, int(level_number_lower), int(level_number_upper), A_ul, wavelength, coll_str
         )
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
-        # print(line)
         # must match the levelname format used in read_levels_data
         transition_count_of_level_name[f"level{int(level_number_lower):05d}"] += 1
         transition_count_of_level_name[f"level{int(level_number_upper):05d}"] += 1
@@ -116,13 +133,10 @@ def read_lines_data(atomic_number, ion_stage):
 def read_levels_and_transitions(atomic_number, ion_stage):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
-    # artisatomic.log_and_print(flog, 'Reading atomic-data-He')
     transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
-    # ionization_energy_in_ev = -1
 
     energy_levels = read_levels_data(atomic_number, ion_stage)
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels):d} levels')
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

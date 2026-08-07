@@ -5,7 +5,6 @@ import os
 import string
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +22,18 @@ tyndall_co3_path = (
     / "atomic-data-qub"
     / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
 ).resolve()
+
+
+class QUBTransitionRow(t.NamedTuple):
+    """One QUB bound-bound transition."""
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    nameto: str
+    namefrom: str
+    lambdaangstrom: float
+    coll_str: float
 
 
 class QUBEnergyLevel(t.NamedTuple):
@@ -202,10 +213,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     have their own file layouts. Also returns the effective collision strengths, so this reader
     supplies an upsilondict where most others leave it to be filled in elsewhere.
     """
-    qub_transition_row = namedtuple(
-        "qub_transition_row", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str"
-    )
-
     new_qub_calculations = {
         (38, 1),
         (38, 2),
@@ -273,7 +280,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         coll_str = -2.0
                     else:
                         coll_str = -1.0
-                    transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                    transition = QUBTransitionRow(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
                     qub_transitions.append(transition)
 
     elif (atomic_number == 27) and (ion_stage == 4):
@@ -353,7 +360,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         coll_str = -2.0
                     else:
                         coll_str = -1.0
-                    transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                    transition = QUBTransitionRow(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
                     qub_transitions.append(transition)
 
     else:

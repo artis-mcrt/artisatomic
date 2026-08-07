@@ -5,7 +5,6 @@ import os
 import sys
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from functools import cache
 from pathlib import Path
 
@@ -68,137 +67,144 @@ hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema
 
 
 # keys are (atomic number, ion stage)
-ion_files = namedtuple("ion_files", ["folder", "levelstransitionsfilename", "photfilenames", "coldatafilename"])
+class IonFiles(t.NamedTuple):
+    """The CMFGEN files holding one ion's levels, cross sections and collision data."""
+
+    folder: str
+    levelstransitionsfilename: str
+    photfilenames: list[str]
+    coldatafilename: str
+
 
 ions_data = {
     # H
-    (1, 1): ion_files("5dec96", "hi_osc.dat", ["hiphot.dat"], "hicol.dat"),
-    (1, 2): ion_files("", "", [""], ""),
+    (1, 1): IonFiles("5dec96", "hi_osc.dat", ["hiphot.dat"], "hicol.dat"),
+    (1, 2): IonFiles("", "", [""], ""),
     # He
-    (2, 1): ion_files("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
-    (2, 2): ion_files("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
+    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
+    (2, 2): IonFiles("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
     # C
-    (6, 1): ion_files("12dec04", "ci_split_osc", ["phot_smooth_50"], "cicol.dat"),
-    (6, 2): ion_files("30oct12", "c2osc_rev.dat", ["phot_sm_3000.dat"], "c2col.dat"),
-    (6, 3): ion_files(
+    (6, 1): IonFiles("12dec04", "ci_split_osc", ["phot_smooth_50"], "cicol.dat"),
+    (6, 2): IonFiles("30oct12", "c2osc_rev.dat", ["phot_sm_3000.dat"], "c2col.dat"),
+    (6, 3): IonFiles(
         "23dec04",
         "ciiiosc_st_split_big.dat",
         ["ciiiphot_sm_a_500.dat", "ciiiphot_sm_b_500.dat"],
         "ciiicol.dat",
     ),
-    (6, 4): ion_files("30oct12", "civosc_a12_split.dat", ["civphot_a12.dat"], "civcol.dat"),
+    (6, 4): IonFiles("30oct12", "civosc_a12_split.dat", ["civphot_a12.dat"], "civcol.dat"),
     # N
-    (7, 1): ion_files(
+    (7, 1): IonFiles(
         "12sep12",
         "ni_osc",
         ["niphot_a.dat", "niphot_b.dat", "niphot_c.dat", "niphot_d.dat"],
         "ni_col",
     ),
-    (7, 2): ion_files("23jan06", "fin_osc", ["phot_sm_3000"], "n2col.dat"),
-    (7, 3): ion_files("24mar07", "niiiosc_rev.dat", ["phot_sm_0_A.dat", "phot_sm_0_B.dat"], "niiicol.dat"),
+    (7, 2): IonFiles("23jan06", "fin_osc", ["phot_sm_3000"], "n2col.dat"),
+    (7, 3): IonFiles("24mar07", "niiiosc_rev.dat", ["phot_sm_0_A.dat", "phot_sm_0_B.dat"], "niiicol.dat"),
     # O
-    (8, 1): ion_files("20sep11", "oi_osc_mchf", ["phot_nosm_A", "phot_nosm_B"], "oi_col"),
-    (8, 2): ion_files("23mar05", "o2osc_fin.dat", ["phot_sm_3000.dat"], "o2col.dat"),
-    (8, 3): ion_files("15mar08", "oiiiosc", ["phot_sm_0"], "col_data_oiii_butler_2012.dat"),
-    (8, 4): ion_files("19nov07", "fin_osc", ["phot_sm_50_A", "phot_sm_50_B"], "col_oiv"),
+    (8, 1): IonFiles("20sep11", "oi_osc_mchf", ["phot_nosm_A", "phot_nosm_B"], "oi_col"),
+    (8, 2): IonFiles("23mar05", "o2osc_fin.dat", ["phot_sm_3000.dat"], "o2col.dat"),
+    (8, 3): IonFiles("15mar08", "oiiiosc", ["phot_sm_0"], "col_data_oiii_butler_2012.dat"),
+    (8, 4): IonFiles("19nov07", "fin_osc", ["phot_sm_50_A", "phot_sm_50_B"], "col_oiv"),
     # F
-    (9, 2): ion_files("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
-    (9, 3): ion_files("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""),
+    (9, 2): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
+    (9, 3): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""),
     # Ne
-    (10, 1): ion_files("9sep11", "fin_osc", ["fin_phot"], "col_guess"),
-    (10, 2): ion_files("19nov07", "fin_osc", ["phot_nosm"], "col_neii"),
-    (10, 3): ion_files("19nov07", "fin_osc", ["phot_nosm"], "col_neiii"),
-    (10, 4): ion_files("1dec99", "fin_osc.dat", ["phot_sm_3000.dat"], "col_data.dat"),
+    (10, 1): IonFiles("9sep11", "fin_osc", ["fin_phot"], "col_guess"),
+    (10, 2): IonFiles("19nov07", "fin_osc", ["phot_nosm"], "col_neii"),
+    (10, 3): IonFiles("19nov07", "fin_osc", ["phot_nosm"], "col_neiii"),
+    (10, 4): IonFiles("1dec99", "fin_osc.dat", ["phot_sm_3000.dat"], "col_data.dat"),
     # Na
-    (11, 1): ion_files("5aug97", "nai_osc_split.dat", ["nai_phot_a.dat"], "col_guess.dat"),
-    (11, 2): ion_files("15feb01", "na2_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (11, 3): ion_files("15feb01", "naiiiosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
-    (11, 4): ion_files("15feb01", "naivosc_rev.dat", ["phot_sm_3000.dat"], "col_data.dat"),
+    (11, 1): IonFiles("5aug97", "nai_osc_split.dat", ["nai_phot_a.dat"], "col_guess.dat"),
+    (11, 2): IonFiles("15feb01", "na2_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (11, 3): IonFiles("15feb01", "naiiiosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
+    (11, 4): IonFiles("15feb01", "naivosc_rev.dat", ["phot_sm_3000.dat"], "col_data.dat"),
     # Mg
-    (12, 1): ion_files("5aug97", "mgi_osc_split.dat", ["mgi_phot_a.dat"], "mgicol.dat"),
-    (12, 2): ion_files("30oct12", "mg2_osc_split.dat", ["mg2_phot_a.dat"], "mg2col.dat"),
-    (12, 3): ion_files("20jun01", "mgiiiosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
-    (12, 4): ion_files("20jun01", "mgivosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
+    (12, 1): IonFiles("5aug97", "mgi_osc_split.dat", ["mgi_phot_a.dat"], "mgicol.dat"),
+    (12, 2): IonFiles("30oct12", "mg2_osc_split.dat", ["mg2_phot_a.dat"], "mg2col.dat"),
+    (12, 3): IonFiles("20jun01", "mgiiiosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
+    (12, 4): IonFiles("20jun01", "mgivosc_rev.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
     # Al
-    (13, 1): ion_files("29jul10", "fin_osc", ["phot_smooth_0"], "col_data"),
-    (13, 2): ion_files("5aug97", "al2_osc_split.dat", ["al2_phot_a.dat"], "al2col.dat"),
-    (13, 3): ion_files("30oct12", "aliii_osc_split.dat", ["aliii_phot_a.dat"], "aliii_col_data.dat"),
-    (13, 4): ion_files("23oct02", "fin_osc", ["phot_sm_3000.dat"], "col_guess"),
+    (13, 1): IonFiles("29jul10", "fin_osc", ["phot_smooth_0"], "col_data"),
+    (13, 2): IonFiles("5aug97", "al2_osc_split.dat", ["al2_phot_a.dat"], "al2col.dat"),
+    (13, 3): IonFiles("30oct12", "aliii_osc_split.dat", ["aliii_phot_a.dat"], "aliii_col_data.dat"),
+    (13, 4): IonFiles("23oct02", "fin_osc", ["phot_sm_3000.dat"], "col_guess"),
     # Si
-    (14, 1): ion_files("23nov11", "SiI_OSC", ["SiI_PHOT_DATA"], "col_data"),
-    (14, 2): ion_files("30oct12", "si2_osc_nahar", ["phot_op.dat"], "si2_col"),
-    (14, 3): ion_files("5dec96b", "osc_op_split_rev.dat_1jun12", ["phot_op.dat"], "col_data"),
-    (14, 4): ion_files("30oct12", "osc_op_split.dat", ["phot_op.dat"], "col_data.dat"),
+    (14, 1): IonFiles("23nov11", "SiI_OSC", ["SiI_PHOT_DATA"], "col_data"),
+    (14, 2): IonFiles("30oct12", "si2_osc_nahar", ["phot_op.dat"], "si2_col"),
+    (14, 3): IonFiles("5dec96b", "osc_op_split_rev.dat_1jun12", ["phot_op.dat"], "col_data"),
+    (14, 4): IonFiles("30oct12", "osc_op_split.dat", ["phot_op.dat"], "col_data.dat"),
     # P (IV and V are the only ions in CMFGEN)
-    (15, 4): ion_files("15feb01", "pivosc_rev.dat", ["phot_data_a.dat", "phot_data_b.dat"], "col_guess.dat"),
-    (15, 5): ion_files("15feb01", "pvosc_rev.dat", ["phot_data.dat"], "col_guess.dat"),
+    (15, 4): IonFiles("15feb01", "pivosc_rev.dat", ["phot_data_a.dat", "phot_data_b.dat"], "col_guess.dat"),
+    (15, 5): IonFiles("15feb01", "pvosc_rev.dat", ["phot_data.dat"], "col_guess.dat"),
     # S
-    (16, 1): ion_files("24nov11", "SI_OSC", ["SI_PHOT_DATA"], "col_data"),
-    (16, 2): ion_files("30oct12", "s2_osc", ["phot_sm_3000"], "s2_col"),
-    (16, 3): ion_files("30oct12", "siiiosc_fin", ["phot_nosm"], "col_siii"),
-    (16, 4): ion_files("19nov07", "sivosc_fin", ["phot_nosm"], "col_siv"),
+    (16, 1): IonFiles("24nov11", "SI_OSC", ["SI_PHOT_DATA"], "col_data"),
+    (16, 2): IonFiles("30oct12", "s2_osc", ["phot_sm_3000"], "s2_col"),
+    (16, 3): IonFiles("30oct12", "siiiosc_fin", ["phot_nosm"], "col_siii"),
+    (16, 4): IonFiles("19nov07", "sivosc_fin", ["phot_nosm"], "col_siv"),
     # Cl (only ions IV to VII)
-    # (17, 4): ion_files("15feb01", "clivosc_fin.dat", ["phot_data.dat"], "col_data.dat"),
+    # (17, 4): IonFiles("15feb01", "clivosc_fin.dat", ["phot_data.dat"], "col_data.dat"),
     # Ar
-    (18, 1): ion_files("9sep11", "fin_osc", ["phot_nosm"], "col_guess"),
-    (18, 2): ion_files("9sep11", "fin_osc", ["phot_nosm"], "col_data"),
-    (18, 3): ion_files("19nov07", "fin_osc", ["phot_nosm"], "col_ariii"),
-    (18, 4): ion_files("1dec99", "fin_osc.dat", ["phot_sm_3000.dat"], "col_data.dat"),
+    (18, 1): IonFiles("9sep11", "fin_osc", ["phot_nosm"], "col_guess"),
+    (18, 2): IonFiles("9sep11", "fin_osc", ["phot_nosm"], "col_data"),
+    (18, 3): IonFiles("19nov07", "fin_osc", ["phot_nosm"], "col_ariii"),
+    (18, 4): IonFiles("1dec99", "fin_osc.dat", ["phot_sm_3000.dat"], "col_data.dat"),
     # K
-    # (19, 1): ion_files('4mar12', 'fin_osc', ['phot_ki'], 'COL_DATA'),
-    # (19, 2): ion_files('4mar12', 'fin_osc', ['phot_k2'], 'COL_DATA'),
+    # (19, 1): IonFiles('4mar12', 'fin_osc', ['phot_ki'], 'COL_DATA'),
+    # (19, 2): IonFiles('4mar12', 'fin_osc', ['phot_k2'], 'COL_DATA'),
     # Ca
-    (20, 1): ion_files("5aug97", "cai_osc_split.dat", ["cai_phot_a.dat"], "caicol.dat"),
-    (20, 2): ion_files("30oct12", "ca2_osc_split.dat", ["ca2_phot_a.dat"], "ca2col.dat"),
-    (20, 3): ion_files("10apr99", "osc_op_sp.dat", ["phot_smooth.dat"], "col_guess.dat"),
-    (20, 4): ion_files("10apr99", "osc_op_sp.dat", ["phot_smooth.dat"], "col_guess.dat"),
+    (20, 1): IonFiles("5aug97", "cai_osc_split.dat", ["cai_phot_a.dat"], "caicol.dat"),
+    (20, 2): IonFiles("30oct12", "ca2_osc_split.dat", ["ca2_phot_a.dat"], "ca2col.dat"),
+    (20, 3): IonFiles("10apr99", "osc_op_sp.dat", ["phot_smooth.dat"], "col_guess.dat"),
+    (20, 4): IonFiles("10apr99", "osc_op_sp.dat", ["phot_smooth.dat"], "col_guess.dat"),
     # Sc (only II and III are in CMFGEN)
-    (21, 2): ion_files("01jul13", "fin_osc", ["phot_nosm"], "col_data"),
-    (21, 3): ion_files("3dec12", "fin_osc", ["phot_nosm"], ""),
+    (21, 2): IonFiles("01jul13", "fin_osc", ["phot_nosm"], "col_data"),
+    (21, 3): IonFiles("3dec12", "fin_osc", ["phot_nosm"], ""),
     # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
-    (22, 2): ion_files("18oct00", "tkii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (22, 3): ion_files("18oct00", "tkiii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (22, 4): ion_files("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (22, 2): IonFiles("18oct00", "tkii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (22, 3): IonFiles("18oct00", "tkiii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
     # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): ion_files("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
+    # (23, 1): IonFiles("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
     # Cr
-    (24, 1): ion_files("10aug12", "cri_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (24, 2): ion_files("15aug12", "crii_osc.dat", ["phot_data.dat"], "col_data.dat"),
-    (24, 3): ion_files("18oct00", "criii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (24, 4): ion_files("18oct00", "criv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (24, 5): ion_files("18oct00", "crv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (24, 1): IonFiles("10aug12", "cri_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (24, 2): IonFiles("15aug12", "crii_osc.dat", ["phot_data.dat"], "col_data.dat"),
+    (24, 3): IonFiles("18oct00", "criii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (24, 4): IonFiles("18oct00", "criv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (24, 5): IonFiles("18oct00", "crv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
     # Mn (Mn I is not in CMFGEN)
-    (25, 2): ion_files("18oct00", "mnii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (25, 3): ion_files("18oct00", "mniii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (25, 4): ion_files("18oct00", "mniv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (25, 5): ion_files("18oct00", "mnv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (25, 2): IonFiles("18oct00", "mnii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (25, 3): IonFiles("18oct00", "mniii_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (25, 4): IonFiles("18oct00", "mniv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (25, 5): IonFiles("18oct00", "mnv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
     # Fe
-    (26, 1): ion_files("07sep16", "fei_osc", ["phot_smooth_3000"], "col_data"),
-    (26, 2): ion_files("10sep16", "fe2_osc", ["phot_op.dat"], "fe2_col.dat"),
-    (26, 3): ion_files("30oct12", "FeIII_OSC", ["phot_sm_3000.dat"], "col_data.dat"),
-    (26, 4): ion_files("18oct00", "feiv_osc_rev2.dat", ["phot_sm_3000.dat"], "col_data.dat"),
-    (26, 5): ion_files("18oct00", "fev_osc.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
-    # (26, 6): ion_files('18oct00', 'fevi_osc.dat', ['phot_sm_3000.dat'], 'col_data.dat'),
-    # (26, 7): ion_files('18oct00', 'fevii_osc.dat', ['phot_sm_3000.dat'], 'col_guess.dat'),
-    # (26, 8): ion_files('8may97', 'feviii_osc_kb_rk.dat', ['phot_sm_3000_rev.dat'], 'col_guess.dat'),
+    (26, 1): IonFiles("07sep16", "fei_osc", ["phot_smooth_3000"], "col_data"),
+    (26, 2): IonFiles("10sep16", "fe2_osc", ["phot_op.dat"], "fe2_col.dat"),
+    (26, 3): IonFiles("30oct12", "FeIII_OSC", ["phot_sm_3000.dat"], "col_data.dat"),
+    (26, 4): IonFiles("18oct00", "feiv_osc_rev2.dat", ["phot_sm_3000.dat"], "col_data.dat"),
+    (26, 5): IonFiles("18oct00", "fev_osc.dat", ["phot_sm_3000.dat"], "col_guess.dat"),
+    # (26, 6): IonFiles('18oct00', 'fevi_osc.dat', ['phot_sm_3000.dat'], 'col_data.dat'),
+    # (26, 7): IonFiles('18oct00', 'fevii_osc.dat', ['phot_sm_3000.dat'], 'col_guess.dat'),
+    # (26, 8): IonFiles('8may97', 'feviii_osc_kb_rk.dat', ['phot_sm_3000_rev.dat'], 'col_guess.dat'),
     # Co
-    (27, 2): ion_files("15nov11", "fin_osc_bound", ["phot_nosm"], "Co2_COL_DATA"),
-    (27, 3): ion_files("30oct12", "coiii_osc.dat", ["phot_nosm"], "col_data.dat"),
-    (27, 4): ion_files("4jan12", "coiv_osc.dat", ["phot_data"], "col_data.dat"),
-    # (27, 5): ion_files('18oct00', 'cov_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
-    # (27, 6): ion_files('18oct00', 'covi_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
-    # (27, 7): ion_files('18oct00', 'covii_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
+    (27, 2): IonFiles("15nov11", "fin_osc_bound", ["phot_nosm"], "Co2_COL_DATA"),
+    (27, 3): IonFiles("30oct12", "coiii_osc.dat", ["phot_nosm"], "col_data.dat"),
+    (27, 4): IonFiles("4jan12", "coiv_osc.dat", ["phot_data"], "col_data.dat"),
+    # (27, 5): IonFiles('18oct00', 'cov_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
+    # (27, 6): IonFiles('18oct00', 'covi_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
+    # (27, 7): IonFiles('18oct00', 'covii_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
     # Ni
-    (28, 2): ion_files("30oct12", "nkii_osc.dat", ["phot_data"], "col_data_bautista"),
-    # (28, 2): ion_files('30oct12', 'nkii_osc.dat', ['phot_data_crude'], 'col_data_bautista'),
-    (28, 3): ion_files("27aug12", "nkiii_osc.dat", ["phot_data.dat"], "col_data.dat"),
-    (28, 4): ion_files("18oct00", "nkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    (28, 5): ion_files("18oct00", "nkv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    # (28, 6): ion_files('18oct00', 'nkvi_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
-    # (28, 7): ion_files('18oct00', 'nkvii_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
+    (28, 2): IonFiles("30oct12", "nkii_osc.dat", ["phot_data"], "col_data_bautista"),
+    # (28, 2): IonFiles('30oct12', 'nkii_osc.dat', ['phot_data_crude'], 'col_data_bautista'),
+    (28, 3): IonFiles("27aug12", "nkiii_osc.dat", ["phot_data.dat"], "col_data.dat"),
+    (28, 4): IonFiles("18oct00", "nkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (28, 5): IonFiles("18oct00", "nkv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    # (28, 6): IonFiles('18oct00', 'nkvi_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
+    # (28, 7): IonFiles('18oct00', 'nkvii_osc.dat', ['phot_data.dat'], 'col_guess.dat'),
     # Cu, Zn and above are not in CMGFEN?
     # Ba
-    # (56, 2): ion_files('', 'fin_osc', ['phot_nosm'], 'col_data'),
+    # (56, 2): IonFiles('', 'fin_osc', ['phot_nosm'], 'col_data'),
 }
 
 elsymboltohilliercode = {
@@ -231,12 +237,21 @@ elsymboltohilliercode = {
 }
 
 
-# hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
-# hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
-
 atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltohilliercode.items()}
 
-vy95_phixsfitrow = namedtuple("vy95_phixsfitrow", ["n", "l", "E_th_eV", "E_0", "sigma_0", "y_a", "P", "y_w"])
+
+class VY95PhixsFitRow(t.NamedTuple):
+    """One Verner & Yakovlev (1995) analytic photoionization cross-section fit."""
+
+    n: int
+    l: int
+    E_th_eV: float
+    E_0: float
+    sigma_0: float
+    y_a: float
+    P: float
+    y_w: float
+
 
 # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns.
 # Stored as arrays because get_hydrogenic_nl_phixstable() is called once per level per ion.
@@ -315,7 +330,6 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
             twosplusone = -1
             l = -1
             parity = -1
-    #        sys.exit()
     except (IndexError, ValueError):
         twosplusone = -1
         l = -1
@@ -656,7 +670,6 @@ def read_phixs_tables(
                     if not targetlevelname:
                         print("ERROR: no upper level name")
                         sys.exit()
-                    # print(f"Reading level {lowerlevelindex} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
@@ -687,8 +700,6 @@ def read_phixs_tables(
                             print("ERROR: Cross section type 0 has non-zero number after it")
                             sys.exit()
 
-                        # phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
-
                 elif crosssectiontype == 1:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -698,7 +709,6 @@ def read_phixs_tables(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 2:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -713,7 +723,6 @@ def read_phixs_tables(
                                     lambda_angstrom, n, l_start, l_end
                                 )
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 3:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -728,10 +737,6 @@ def read_phixs_tables(
                             phixstables[filenum][lowerlevelname] = phixstable
 
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(lowerlevelname))
-                            # print(lowerlevelname)
-                            # print(phixstables[filenum][lowerlevelname][:10])
-                            # print(get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)[:10])
 
                 elif crosssectiontype == 5:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -743,8 +748,6 @@ def read_phixs_tables(
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # artisatomic.log_and_print(flog, 'Using OP project formula values for level {0}'.format(lowerlevelname))
-
                 elif crosssectiontype == 6:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -755,13 +758,6 @@ def read_phixs_tables(
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # print(lowerlevelname, "HUMMER")
-                            # print(fitcoefficients)
-                            # print(phixstables[lowerlevelname][::5])
-                            # print(phixstables[lowerlevelname][-10:])
-
-                            # artisatomic.log_and_print(flog, 'Using Hummer formula values for level {0}'.format(lowerlevelname))
-
                 elif crosssectiontype == 7:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -771,7 +767,6 @@ def read_phixs_tables(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 8:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -791,20 +786,18 @@ def read_phixs_tables(
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
                                     lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion
                                 )
-                                # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                 elif crosssectiontype == 9:
                     if len(row) == 8 and numpointsexpected > 0:
                         fitcoefficients.append(
-                            vy95_phixsfitrow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
+                            VY95PhixsFitRow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
                         )
 
                         if len(fitcoefficients) * 8 == numpointsexpected:
                             lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype in {20, 21, 22}:  # sampled data points
                     if len(row) == 2 and row_is_all_floats and lowerlevelname:
@@ -826,8 +819,6 @@ def read_phixs_tables(
                                     f" one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry"
                                 )
                             enryd *= thresholdenergyryd
-                        # elif pointnumber == 0 and abs(enryd - 1.0) < 0.2:
-                        #     print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
 
                         xspoint = enryd, float(row[1].replace("D", "E"))
                         phixstables[filenum][lowerlevelname][pointnumber] = xspoint
@@ -897,13 +888,9 @@ def read_phixs_tables(
                     f" {phixs_type_labels[crosssectiontype]}",
                 )
 
-        # testing
-        # print('3d8(3F)4s_4Fe')
-        # print(phixstables[filenum]['3d8(3F)4s_4Fe'])
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
         )
-        # print(reduced_phixstables_onetarget['3d8(3F)4s_4Fe'])
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             try:
@@ -928,12 +915,12 @@ def read_phixs_tables(
                 # existing one if this target has a larger threshold cross section
                 # if lowerlevelname not in reduced_phixs_dict or \
                 #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
-                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]  # ruff: ignore[commented-out-code]
                 if lowerlevelname not in reduced_phixs_dict:
                     reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 else:
-                    print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
-                    # sys.exit()
+                    msg = f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}"
+                    raise ValueError(msg)
 
     if num_levelnames_with_zero_crosssection > 0:
         artisatomic.log_and_print(
@@ -971,8 +958,7 @@ def read_phixs_tables(
                 phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
             # e.g. if the target (non-J-split) with the highest fraction has 50%, the cross sections need to be multiplied by two
-            # reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
-            reduced_phixs_dict[lowerlevelname] = reduced_phixstable  # / (max_factor / factor_sum)
+            reduced_phixs_dict[lowerlevelname] = reduced_phixstable
 
     # map the non-J-split cross sections onto J-split levels. A table matches every level sharing
     # the configuration, so index the level list by match name once rather than rescanning it.
@@ -984,8 +970,7 @@ def read_phixs_tables(
         for levelindex in levelindices_of_matchname[lowerlevelname_a]:
             photoionization_crosssections[levelindex] = phixstable
             # .get() rather than __getitem__: a level whose target factors all came out zero is
-            # absent, and an empty list would look like "has data, no targets" to
-            # get_photoiontargetfractions()
+            # absent, and an empty list would look like "has data, no targets" to  get_photoiontargetfractions()
             photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
                 lowerlevelname_a
             )
@@ -1269,8 +1254,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
         for levelname, levelids in level_ids_of_level_name.items()
     }
 
-    filename = os.path.join(
-        hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, coldatafilename
+    filename = (
+        Path(hillier_ion_folder(atomic_number, ion_stage))
+        / ions_data[atomic_number, ion_stage].folder
+        / coldatafilename
     )
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
     coll_lines_in = 0
@@ -1362,7 +1349,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
 
                     # A term-resolved collision strength is shared over the J levels of both
                     # terms in proportion to their statistical weights:
-                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)
+                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)  # ruff: ignore[commented-out-code]
                     # so that sum_ij upsilon_ij = upsilon_term, which is what makes the total
                     # term-to-term rate right (ARTIS builds the rate from upsilon_ij / g_i).
                     lower_g_sum = g_sum_of_level_name[namefrom]
@@ -1372,7 +1359,6 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                         for id_upper in level_ids_of_level_name[nameto]:
                             if id_lower == id_upper:
                                 continue
-                            # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
                             upsilonscaled = (
                                 upsilon * (gvalues[id_lower] / lower_g_sum) * (gvalues[id_upper] / upper_g_sum)
                             )
@@ -1391,7 +1377,6 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                             else:
                                 upsilondict[key] = upsilonscaled
 
-                                # print(namefrom, nameto, upsilon)
                 except KeyError:
                     unlisted_from_message = " (unlisted)" if namefrom not in level_ids_of_level_name else ""
                     unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
@@ -1484,7 +1469,7 @@ def read_hyd_phixsdata():
     # tests call this repeatedly) must not leave sums from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
-    with open(os.devnull, "w", encoding="utf-8") as devnull:
+    with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         (
             _hillier_ionization_energy_ev,
             dfhillier_energy_levels,
@@ -1548,7 +1533,6 @@ def read_hyd_phixsdata():
             # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
             # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
             hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
-            # hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")

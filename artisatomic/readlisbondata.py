@@ -1,7 +1,7 @@
 """Read levels and transitions from the Lisbon data set. Not currently wired into the dispatch."""
 
+import typing as t
 from collections import defaultdict
-from collections import namedtuple
 
 import pandas as pd
 
@@ -72,9 +72,6 @@ class LisbonReader:
             lines["atomic_number"] = atomic_number
             lines["ion_charge"] = ion_charge
             lines["energy_lower"] = levels.iloc[lines["level_index_lower"]]["energy"].to_numpy()
-            # for r in lines.iterrows():
-            #     print(r)
-            #     print(levels.iloc[r['level_index_upper']]['energy'])
             lines["energy_upper"] = levels.iloc[lines["level_index_upper"]]["energy"].to_numpy()
             lines["gf"] = lines_data["gf"]
             lines["j_lower"] = levels.iloc[lines["level_index_lower"]]["j"].to_numpy()
@@ -88,28 +85,6 @@ class LisbonReader:
         self.lines = lines
 
 
-# def extend_ion_list(ion_handlers):
-#     selected_ions = [(38, 1)]
-#     for atomic_number, charge in selected_ions:
-#         assert (atomic_number, charge) in gfall_reader.ions
-#         ion_stage = charge + 1
-#
-#         found_element = False
-#         for (tmp_atomic_number, list_ions) in ion_handlers:
-#             if tmp_atomic_number == atomic_number:
-#                 if ion_stage not in list_ions:
-#                     list_ions.append((ion_stage, 'carsus'))
-#                     list_ions.sort()
-#                 found_element = True
-#
-#         if not found_element:
-#             ion_handlers.append((atomic_number, [(ion_stage, 'carsus')],))
-#
-#     ion_handlers.sort(key=lambda x: x[0])
-#
-#     return ion_handlers
-
-
 def get_levelname(row):
     """Name a Lisbon level from its label and J, since the label alone is not unique."""
     return f"{row.label}, j={row.j}"
@@ -121,15 +96,13 @@ def read_levels_data(dflevels):
     Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
     transitions forbidden: this data set does not supply parities.
     """
-    energy_level_tuple = namedtuple("energy_level_tuple", "levelname energyabovegsinpercm g parity")
-
     energy_levels = []
 
     for index, row in dflevels.iterrows():
         parity = -index  # give a unique parity so that all transitions are permitted
         energyabovegsinpercm = float(row.energy)
         g = 2 * row.j + 1
-        newlevel = energy_level_tuple(
+        newlevel = EnergyLevelTuple(
             levelname=get_levelname(row), parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm
         )
         energy_levels.append(newlevel)
@@ -146,18 +119,34 @@ def read_lines_data(energy_levels, dflines):
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
-    transitiontuple = namedtuple("transitiontuple", "lowerlevel upperlevel A coll_str")
 
     for (lowerlevel, upperlevel), row in dflines.iterrows():
-        transtuple = transitiontuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
+        transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
 
-        # print(line)
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
 
         transitions.append(transtuple)
 
     return transitions, transition_count_of_level_name
+
+
+class EnergyLevelTuple(t.NamedTuple):
+    """One Lisbon energy level."""
+
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: int
+
+
+class TransitionTuple(t.NamedTuple):
+    """One Lisbon bound-bound transition."""
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    coll_str: float
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -173,13 +162,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     LISPATH = "/Users/luke/Dropbox/GitHub/opacities/SystematicCalculations"
 
-    # nd_2_lvl = LISPATH + '/Nd/NdIII/NdIII_Levels.csv'
-    # nd_2_lns = LISPATH + '/Nd/NdIII/NdIII_Transitions.csv'
-    # u_2_lvl = LISPATH + '/U/UIII/UIII_Levels.csv'
-    # u_2_lns = LISPATH + '/U/UIII/UIII_Transitions.csv'
-    # lisbon_data = {'Nd 2': {'levels': nd_2_lvl, 'lines': nd_2_lns},
-    #                'U 2': {'levels': u_2_lvl, 'lines': u_2_lns}}
-
     lisbon_data = {
         f"{elsym} {ion_charge}": {
             "levels": f"{LISPATH}/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Levels.csv",
@@ -192,12 +174,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dflevels = lisbon_reader.levels.loc[atomic_number, ion_charge]
     energy_levels = read_levels_data(dflevels)
 
-    # for x in energy_levels:
-    #     print(x)
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
     dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
-
-    # print(dflines)
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines)
 

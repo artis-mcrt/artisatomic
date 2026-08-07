@@ -18,6 +18,7 @@ from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readkuruczdata
+from artisatomic import readlisbondata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
@@ -26,8 +27,6 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
 from artisatomic.phixs import match_hydrogenic_phixs
-
-# import artisatomic.readlisbondata as readlisbondata
 
 
 @dataclass(slots=True)
@@ -56,15 +55,14 @@ class IonData:
 
 
 # handlers whose readers share a common call signature and return
-# (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name)
-# with an additional upsilondict for qub_data
+# (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name) with an additional upsilondict for qub_data
 simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
     "boyle": lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(
         atomic_number, ion_stage
     ),
     "kurucz": readkuruczdata.read_levels_and_transitions,
     "dream": readdreamdata.read_levels_and_transitions,  # DREAM database of Z >= 57
-    # "lisbon": readlisbondata.read_levels_and_transitions,
+    "lisbon": readlisbondata.read_levels_and_transitions,
     "floers25calib": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
         atomic_number, ion_stage, flog, calibrated=True
     ),
@@ -114,8 +112,6 @@ def read_ion_data(
                     upsilondict,
                 ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
             else:  # hillier levels and transitions
-                # if ion_stage == 2:
-                #     upsilondict = readstoreydata.read_storey_2016_upsilondata(flog)
                 (
                     ionization_energy_ev,
                     energy_levels,
@@ -157,7 +153,8 @@ def read_ion_data(
                 (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name) = result
 
         else:
-            raise ValueError(f"Unknown handler: {handler}")
+            msg = f"Unknown handler: {handler}"
+            raise ValueError(msg)
 
     dfenergylevels = leveltuples_to_pldataframe(energy_levels)
 

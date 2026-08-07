@@ -98,7 +98,7 @@ def reduce_phixs_tables[KeyType](
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
-    dictout = dict(
+    return dict(
         zip(
             dicttables.keys(),
             parallel_map(
@@ -113,8 +113,6 @@ def reduce_phixs_tables[KeyType](
             strict=True,
         )
     )
-
-    return dictout
 
 
 # this method downsamples the photoionization cross section table to a

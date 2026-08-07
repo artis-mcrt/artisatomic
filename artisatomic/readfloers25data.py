@@ -53,7 +53,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     the file's index. Both the level indices and the transitions' references to them are
     validated, since a gap or an out-of-range index would silently misattach transitions.
     """
-    # ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
     calibstr = "calib" if calibrated else "uncalib"
@@ -80,7 +79,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
         dflevels = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype={"J": str}))
     if dashrowcount < 3:
-        raise ValueError(f"Did not find expected data table in {levels_file}")
+        msg = f"Did not find expected data table in {levels_file}"
+        raise ValueError(msg)
 
     dflevels = dflevels.with_columns(
         pl.when(pl.col("J").str.ends_with("/2"))
@@ -116,7 +116,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
         dftransitions = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow"))
     if dashrowcount < 3:
-        raise ValueError(f"Did not find expected data table in {lines_file}")
+        msg = f"Did not find expected data table in {lines_file}"
+        raise ValueError(msg)
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
