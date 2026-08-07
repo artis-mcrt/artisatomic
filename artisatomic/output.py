@@ -123,16 +123,26 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
             if not dftransitions_ion.is_empty():
-                dftransitions_ion = dftransitions_ion.with_columns(
-                    pl.struct(["lowerlevel", "upperlevel", "forbidden"])
-                    .map_elements(
-                        lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
-                            (row["lowerlevel"], row["upperlevel"]),
-                            -2.0 if row["forbidden"] else -1.0,
-                        ),
-                        return_dtype=pl.Float64,
+                # a left join rather than a per-row map_elements(): this runs over every
+                # transition of the ion (2.6M of them for the cmfgen set), where a Python callback
+                # per row costs more than the whole rest of the write. upsilondict's keys are
+                # unique, so the join cannot duplicate rows, and maintain_order keeps the frame in
+                # the order the reader produced it.
+                dfupsilon = pl.DataFrame(
+                    [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
+                    schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
+                    orient="row",
+                )
+                dftransitions_ion = (
+                    dftransitions_ion.with_columns(
+                        pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
                     )
-                    .alias("coll_str")
+                    .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
+                    .with_columns(
+                        # no upsilon for this transition: -2 marks it forbidden, -1 unknown
+                        coll_str=pl.col("upsilon").fill_null(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+                    )
+                    .drop("upsilon")
                 )
 
             with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
@@ -246,13 +256,15 @@ def write_transition_data(
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
-            ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
-        ].iter_rows():
-            # level ids are zero-based in memory, but the output format numbers them from one
-            ftransitiondata.write(
-                f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
-            )
+        # writelines() over a generator, not a write() per row: this loop runs 2.6M times for the
+        # cmfgen set, where the per-call overhead is a measurable part of the whole run
+        # level ids are zero-based in memory, but the output format numbers them from one
+        ftransitiondata.writelines(
+            f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
+            for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
+                ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
+            ].iter_rows()
+        )
 
     ftransitiondata.write("\n")
 
@@ -345,8 +357,9 @@ def write_phixs_data(
                 )
                 raise ValueError(msg)
 
-        for crosssection in photoionization_crosssections[lowerlevelid]:
-            fphixs.write(f"{crosssection:16.8E}\n")
+        # one writelines() per table rather than a write() per point: nphixspoints lines per level,
+        # 1.5M of them for the cmfgen set
+        fphixs.writelines(f"{crosssection:16.8E}\n" for crosssection in photoionization_crosssections[lowerlevelid])
 
     if skipped_no_threshold > 0:
         log_and_print(

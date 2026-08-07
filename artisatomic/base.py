@@ -1,11 +1,14 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
+import atexit
 import contextlib
+import itertools
 import multiprocessing as mp
 import sys
 import typing as t
 from collections.abc import Callable
 from collections.abc import Iterable
+from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
@@ -169,9 +172,14 @@ def path_for_log(filepath: str | Path) -> str:
 
 
 def isfloat(value: t.Any) -> bool:
-    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3)."""
+    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3).
+
+    Called once per field of every line of the CMFGEN oscillator files (5.3M times for the cmfgen
+    test set), so the replace() is done only when there is a D to replace rather than allocating
+    a copy of every field.
+    """
     try:
-        float(value.replace("D", "E"))
+        float(value.replace("D", "E") if "D" in value else value)
     except ValueError:
         return False
 
@@ -226,6 +234,27 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return dictioniz
 
 
+_process_pool: ProcessPoolExecutor | None = None
+
+
+def get_process_pool() -> ProcessPoolExecutor:
+    """Get the one process pool for the whole run, creating it on first use.
+
+    Building a pool costs about 0.6 s however small the batch, because "spawn" makes every worker
+    re-import this package and its numpy/polars/pandas dependencies. A build asks for one pool per
+    ion per photoionisation file, so a pool per call spent most of its time starting up. Peak
+    memory is unchanged (the same workers, alive for longer).
+    """
+    global _process_pool
+    if _process_pool is None:
+        # an explicit spawn context rather than mp.set_start_method(force=True), which reached
+        # outside this function to change the default for the whole process
+        _process_pool = ProcessPoolExecutor(mp_context=mp.get_context("spawn"))
+        atexit.register(_process_pool.shutdown, wait=False, cancel_futures=True)
+
+    return _process_pool
+
+
 def parallel_map[ResultType](
     fn: Callable[..., ResultType],
     *iterables: Iterable[t.Any],
@@ -235,15 +264,30 @@ def parallel_map[ResultType](
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
-    if use_multiprocessing:
-        mp.set_start_method("spawn", force=True)
-        from tqdm.contrib.concurrent import process_map
+    # materialise so the work can be sized: the chunk size and the serial cutoff below both need
+    # a length, and the callers pass views and generators
+    lists = [list(iterable) for iterable in iterables]
+    nitems = min((len(x) for x in lists), default=0)
 
-        results = process_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+    # even with the pool already up, handing a handful of items to it costs more in IPC than doing
+    # them here (readqubdata reduces four cross-section tables at a time)
+    if nitems <= 32:
+        return list(itertools.starmap(fn, zip(*lists, strict=True)))
+
+    # without a chunk size, items go to the workers one at a time and the IPC per item costs more
+    # than the work; tqdm warns about it above 1000 items
+    chunksize = kwargs.pop("chunksize", max(1, nitems // (mp.cpu_count() * 4)))
+
+    if use_multiprocessing:
+        from tqdm import tqdm
+
+        results = list(
+            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, **kwargs)  # ty:ignore[no-matching-overload]
+        )
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results

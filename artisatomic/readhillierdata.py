@@ -1,6 +1,5 @@
 """Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
 
-import math
 import os
 import sys
 import typing as t
@@ -489,7 +488,12 @@ def read_levels_and_transitions(
             linesplitdash = line.split("-")
             row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
 
-            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and all(map(artisatomic.isfloat, row[2:4])):
+            # the two isfloat() calls are spelled out rather than all(map(...)) over a slice: this
+            # runs for every transition line of every ion (2.6M for the cmfgen set), where
+            # building a slice, a map object and an all() call per line is most of the test
+            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and (
+                artisatomic.isfloat(row[2]) and artisatomic.isfloat(row[3])
+            ):
                 try:
                     lambda_value = float(row[4])
                 except ValueError:
@@ -634,7 +638,12 @@ def read_phixs_tables(
             for line in fhillierphot:
                 row = line.split()
 
-                if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
+                # Every marker below is a trailing "!..." comment, so a line with no '!' at all
+                # cannot match any of them. 94% of a phot file is two-column cross-section data,
+                # and testing that once here skips seven " ".join() calls per such line.
+                has_marker = "!" in line
+
+                if has_marker and len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
                     # this is not used because the upper ion's levels are not known at this time
                     targetlevelname = row[0]
                     artisatomic.log_and_print(flog, "Photoionisation target: " + targetlevelname)
@@ -646,7 +655,7 @@ def read_phixs_tables(
                         sys.exit(1)
                     phixstargets[filenum] = targetlevelname
 
-                if len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
+                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
                     if row[0].lower() == "true":
                         j_splitting_on = True
                         artisatomic.log_and_print(flog, "File specifies J-splitting enabled")
@@ -659,9 +668,10 @@ def read_phixs_tables(
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit(1)
 
-                if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
-                    row[-3:]
-                ) == "!Configuration name [*]":
+                if has_marker and (
+                    (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name")
+                    or " ".join(row[-3:]) == "!Configuration name [*]"
+                ):
                     lowerlevelname = row[0]
                     # with J splitting the name (including any [J] suffix) maps to exactly one
                     # level; without it, strip the suffix so the table covers the configuration
@@ -683,7 +693,7 @@ def read_phixs_tables(
                         print("ERROR: no upper level name")
                         sys.exit(1)
 
-                if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
+                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
                     # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
                     # matches the oscillator value for every ion in ions_data) and just report it.
@@ -695,15 +705,22 @@ def read_phixs_tables(
                             f" which disagrees with ion_stage {ion_stage}",
                         )
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
+                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
                     numpointsexpected = int(row[0])
                     pointnumber = 0
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit" and row[0] != "Megabarns":
+                if (
+                    has_marker
+                    and len(row) >= 2
+                    and " ".join(row[1:]) == "!Cross-section unit"
+                    and row[0] != "Megabarns"
+                ):
                     print(f"Wrong cross-section unit: {row[0]}")
                     sys.exit(1)
 
-                row_is_all_floats = all(map(artisatomic.isfloat, row))
+                # a line carrying a "!..." marker has text in it, so it can never be all floats.
+                # Short-circuiting on that skips the parse attempt on every header line.
+                row_is_all_floats = not has_marker and all(map(artisatomic.isfloat, row))
                 if crosssectiontype == 0:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -859,7 +876,7 @@ def read_phixs_tables(
                     lowerlevelname = ""
                     numpointsexpected = 0
 
-                if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
+                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
                     crosssectiontype = int(row[0])
                     phixs_type_levels[crosssectiontype].add(lowerlevelname)
 
@@ -1025,36 +1042,36 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     so the cross section is zero until the offset threshold.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, c in enumerate(energygrid):
-        energy_div_threshold = 1 + 20 * (c**2)
+    energy_div_threshold = 1 + 20 * (energygrid**2)
 
-        if nu_o is None:
-            threshold_div_energy = energy_div_threshold**-1
-            crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy**s)
-        else:
-            # type 7
-            # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
-            # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
-            #                       Offset was being added to the current frequency instead
-            #                       of the ionization edge.
+    if nu_o is None:
+        threshold_div_energy = energy_div_threshold**-1
+        crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy**s)
+    else:
+        # type 7
+        # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
+        # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
+        #                       Offset was being added to the current frequency instead
+        #                       of the ionization edge.
 
-            threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
-            offset_threshold_div_energy = (energy_div_threshold**-1) * (
-                1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
-            )
+        threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
+        offset_threshold_div_energy = (energy_div_threshold**-1) * (
+            1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
+        )
 
-            crosssection = (
-                sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s
-                if offset_threshold_div_energy < 1.0
-                else 0.0
-            )
+        # the cross section is zero until the offset edge is reached. np.where evaluates both
+        # arms, which is safe here: the ratio is positive everywhere, so the discarded arm has
+        # no domain error to raise.
+        crosssection = np.where(
+            offset_threshold_div_energy < 1.0,
+            sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s,
+            0.0,
+        )
 
-        phixstable[index] = energy_div_threshold * thresholdenergyryd, crosssection
-    return phixstable
+    return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
 
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
@@ -1139,25 +1156,22 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
     already accounts for the effective charge, so the result must not be rescaled by the caller.
     """
-    energygrid = hyd_gaunt_energygrid_ryd[n]
-    phixstable = np.empty((len(energygrid), 2))
+    energygrid = np.asarray(hyd_gaunt_energygrid_ryd[n])
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
     scale_factor = 7.91 / thresholdenergyryd / n
 
-    for index, energy_ryd in enumerate(energygrid):
-        energydivthreshold = energy_ryd / energygrid[0]
+    energydivthreshold = energygrid / energygrid[0]
 
-        crosssection = (
-            scale_factor * hyd_gaunt_factor[n][index] / energydivthreshold**3 if energydivthreshold > 0 else 0.0
-        )
+    crosssection = np.where(
+        energydivthreshold > 0,
+        scale_factor * np.asarray(hyd_gaunt_factor[n]) / energydivthreshold**3,
+        0.0,
+    )
 
-        phixstable[index][0] = energydivthreshold * thresholdenergyryd  # / ryd_to_ev
-        phixstable[index][1] = crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 # Peach, Saraph, and Seaton (1988)
@@ -1167,23 +1181,19 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     Returns (energy in Rydberg, cross section in Megabarns) pairs.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, cb in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (cb**2)
-        u = energydivthreshold
+    energydivthreshold = 1 + 20 * (energygrid**2)
+    u = energydivthreshold
 
-        x = math.log10(min(u, e))
+    x = np.log10(np.minimum(u, e))
 
-        crosssection = 10 ** (a + x * (b + x * (c + x * d)))
-        if u > e:
-            crosssection *= (e / u) ** 2
+    crosssection = 10 ** (a + x * (b + x * (c + x * d)))
+    # above the break the fit is continued with a 1/u^2 tail
+    crosssection = np.where(u > e, crosssection * (e / u) ** 2, crosssection)
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 # only applies to helium
@@ -1196,20 +1206,16 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
     below the break at e, a straight line above it.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    for index, c_en in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c_en**2)
+    energydivthreshold = 1 + 20 * (energygrid**2)
 
-        x = math.log10(energydivthreshold)
+    x = np.log10(energydivthreshold)
 
-        crosssection = 10 ** (((d * x + c) * x + b) * x + a) if x < e else 10 ** (f + g * x)
+    crosssection = np.where(x < e, 10 ** (((d * x + c) * x + b) * x + a), 10 ** (f + g * x))
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
@@ -1221,29 +1227,27 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     eV divided by E_0, and each shell after the first is gated on FREQ >= EV_TO_HZ * E_th_eV.
     """
     energygrid = np.arange(0, 1.0, 0.001)
-    phixstable = np.empty((len(energygrid), 2))
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    for index, c in enumerate(energygrid):
-        energydivthreshold = 1 + 20 * (c**2)
-        energy_ev = energydivthreshold * thresholdenergyev
+    energydivthreshold = 1 + 20 * (energygrid**2)
+    energy_ev = energydivthreshold * thresholdenergyev
 
-        crosssection = 0.0
-        for shellnum, params in enumerate(fitcoefficients):
-            # the first shell starts at the level's own ionization edge, later (inner) shells
-            # only contribute above their own threshold
-            if shellnum > 0 and energy_ev < params.E_th_eV:
-                continue
-            y = energy_ev / params.E_0
-            P = params.P
-            Q = 5.5 + params.l - 0.5 * params.P
-            y_a = params.y_a
-            y_w = params.y_w
-            crosssection += params.sigma_0 * ((y - 1) ** 2 + y_w**2) * (y**-Q) * ((1 + math.sqrt(y / y_a)) ** -P)
+    crosssection = np.zeros(len(energygrid))
+    for shellnum, params in enumerate(fitcoefficients):
+        y = energy_ev / params.E_0
+        P = params.P
+        Q = 5.5 + params.l - 0.5 * params.P
+        y_a = params.y_a
+        y_w = params.y_w
+        shellcrosssection = params.sigma_0 * ((y - 1) ** 2 + y_w**2) * (y**-Q) * ((1 + np.sqrt(y / y_a)) ** -P)
+        # the first shell starts at the level's own ionization edge, later (inner) shells
+        # only contribute above their own threshold
+        if shellnum > 0:
+            shellcrosssection = np.where(energy_ev < params.E_th_eV, 0.0, shellcrosssection)
+        crosssection += shellcrosssection
 
-        phixstable[index] = energydivthreshold * thresholdenergyryd, crosssection
-    return phixstable
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
