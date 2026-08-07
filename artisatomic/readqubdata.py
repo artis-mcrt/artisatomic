@@ -362,10 +362,14 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     id_lower = int(row[1])
                 A = float(row[2].replace("-", "E-").replace("+", "E+"))
                 if A > 2e-30:
-                    # a raise rather than an assert: this validates an input file, and a
-                    # non-positive id would otherwise wrap to the wrong level via negative indexing
-                    if id_lower < 1 or id_upper < 1:
-                        msg = f"non-positive transition level ids {id_lower}, {id_upper} in {atom_filepath}"
+                    # a raise rather than an assert: this validates an input file. A non-positive
+                    # id would wrap to the wrong level via negative indexing, and one past the end
+                    # would raise a bare IndexError naming neither the file nor the transition.
+                    if not 1 <= id_lower <= len(qub_energylevels) or not 1 <= id_upper <= len(qub_energylevels):
+                        msg = (
+                            f"transition level ids {id_lower}, {id_upper} in {atom_filepath} are outside"
+                            f" the file's {len(qub_energylevels)} levels"
+                        )
                         raise ValueError(msg)
                     # the file numbers levels from one; level ids are zero-based in memory
                     id_lower -= 1

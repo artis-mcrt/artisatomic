@@ -300,6 +300,37 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert np.all(crosssections[0] == 0.0)
 
 
+def test_write_phixs_data_with_no_phixs_arrays():
+    """A reader that found no photoionization data must not make write_phixs_data() index off the end.
+
+    write_output_files() fills a target list for every level whenever the reader supplied none, and
+    readnahardata.get_photoiontargetfractions() always gives at least the ground state. If the
+    reader also left the cross-section and threshold arrays empty (no usable .ptpx tables), the
+    level ids from those target lists have nothing behind them.
+    """
+    import argparse
+
+    import artisatomic
+
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    flog = io.StringIO()
+    fphixs = io.StringIO()
+
+    artisatomic.write_phixs_data(
+        fphixs,
+        atomic_number=26,
+        ion_stage=1,
+        photoionization_crosssections=np.empty((0, args.nphixspoints)),
+        photoionization_targetfractions=[[(0, 1.0)] for _ in range(3)],
+        photoionization_thresholds_ev=np.empty(0),
+        args=args,
+        flog=flog,
+    )
+
+    assert not fphixs.getvalue()
+    assert "Writing 0 phixs tables" in flog.getvalue()
+
+
 def test_read_coldata_term_to_j_redistribution():
     """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
 

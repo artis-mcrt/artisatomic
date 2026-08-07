@@ -994,8 +994,11 @@ def read_phixs_tables(
                 lowerlevelname_a
             )
             # abs() as at the phixs-fit sites above: CMFGEN writes a negative Lam(A) for some
-            # levels, and that sign would read as readqubdata's "no threshold value" sentinel
-            photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
+            # levels, and that sign would read as readqubdata's "no threshold value" sentinel.
+            # A zero Lam(A) gives no threshold at all rather than dividing by zero; the level
+            # keeps its NaN and write_phixs_data() skips it.
+            if lambdaangstroms[levelindex] != 0.0:
+                photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
     return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
 

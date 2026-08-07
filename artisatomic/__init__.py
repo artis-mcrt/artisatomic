@@ -1284,8 +1284,13 @@ def write_phixs_data(
     # start as NaN and are filled in only for levels that got a table, so NaN means "no data".
     # A negative value is written deliberately (readqubdata): ARTIS reads it as "no value given"
     # and takes the threshold from the difference of the level energies instead.
+    # the target fractions are filled in per level by the caller, but a reader that found no
+    # photoionization data at all returns the cross-section and threshold arrays still empty, so
+    # bound the ids by what those arrays actually hold rather than indexing off the end
     levelids_with_targets = [
-        levelid for levelid, targetlist in enumerate(photoionization_targetfractions) if targetlist
+        levelid
+        for levelid, targetlist in enumerate(photoionization_targetfractions)
+        if targetlist and levelid < len(photoionization_crosssections) and levelid < len(photoionization_thresholds_ev)
     ]
     levelids_to_write = [
         levelid for levelid in levelids_with_targets if not np.isnan(photoionization_thresholds_ev[levelid])
