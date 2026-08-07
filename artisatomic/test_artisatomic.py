@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
+from artisatomic import add_level_ids_forbidden
 from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
@@ -595,6 +596,86 @@ def test_read_coldata_term_to_j_redistribution():
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
+def test_readboyledata_levels_get_distinct_parities(monkeypatch):
+    """The AOIFE data set supplies no parities, so no transition may come out forbidden.
+
+    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity, so
+    giving every level the same parity made every transition of the ion forbidden — and helium has
+    plenty of permitted ones. readlisbondata and readkuruczdata use the negated level id for
+    exactly this reason.
+
+    The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
+    its README), so this builds the three tables the reader wants in memory.
+    """
+    import h5py  # pyright: ignore[reportMissingTypeStubs]
+
+    from artisatomic import readboyledata
+
+    # compound dtypes, as a real HDF5 table has: the integer columns must stay integers, or the
+    # level names format differently in the two readers below
+    levels_dtype = [("atomic_number", "i8"), ("ion_number", "i8"), ("level_number", "i8")]
+    levels_dtype += [("energy", "f8"), ("g", "f8"), ("metastable", "i8")]
+    lines_dtype = [("line_id", "i8"), ("wavelength", "f8"), ("atomic_number", "i8"), ("ion_number", "i8")]
+    lines_dtype += [("f_ul", "f8"), ("f_lu", "f8"), ("level_number_lower", "i8"), ("level_number_upper", "i8")]
+    lines_dtype += [("nu", "f8"), ("B_lu", "f8"), ("B_ul", "f8"), ("A_ul", "f8")]
+
+    # He I: three levels, and two lines between them
+    levels_data = np.array(
+        [
+            (2, 0, 0, 0.0, 1.0, 0),
+            (2, 0, 1, 159856.0, 3.0, 1),
+            (2, 0, 2, 166278.0, 1.0, 0),
+            (2, 1, 0, 0.0, 2.0, 0),  # He II, must be filtered out
+        ],
+        dtype=levels_dtype,
+    )
+    lines_data = np.array(
+        [
+            (0, 584.0, 2, 0, 0.1, 0.3, 0, 2, 0.0, 0.0, 0.0, 1.8e9),
+            (1, 10830.0, 2, 0, 0.2, 0.6, 1, 2, 0.0, 0.0, 0.0, 1.0e7),
+        ],
+        dtype=lines_dtype,
+    )
+
+    with h5py.File("aoife-test", "w", driver="core", backing_store=False) as fakefile:
+        fakefile.create_dataset("/levels_data", data=levels_data)
+        fakefile.create_dataset("/lines_data", data=lines_data)
+        monkeypatch.setattr(readboyledata, "get_aoife_dataset", lambda: fakefile)
+
+        energy_levels = readboyledata.read_levels_data(2, 1)
+        transitions, transition_count_of_level_name = readboyledata.read_lines_data(2, 1)
+
+    # the other ion's level is filtered out
+    assert len(energy_levels) == 3
+
+    # every level gets its own parity, so no pair of them can compare equal
+    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+
+    dflevels = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "levelname": [level.levelname for level in energy_levels],
+                "energyabovegsinpercm": [level.energyabovegsinpercm for level in energy_levels],
+                "g": [level.g for level in energy_levels],
+                "parity": [level.parity for level in energy_levels],
+            }
+        )
+    )
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [t.lowerlevel for t in transitions],
+            "upperlevel": [t.upperlevel for t in transitions],
+            "A": [t.A for t in transitions],
+        }
+    )
+    assert not any(add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list())
+
+    # the two readers must agree on the level names, or the adata.txt transition counts land on
+    # levels that do not exist: one formatted the number through int() and the other did not
+    assert set(transition_count_of_level_name) <= {level.levelname for level in energy_levels}
+    assert transition_count_of_level_name[energy_levels[2].levelname] == 2
 
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
