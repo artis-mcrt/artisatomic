@@ -623,7 +623,6 @@ def read_phixs_tables(
         with artisatomic.xopen_check_extension(filename) as fhillierphot:
             lowerlevelindex = -1
             lowerlevelname = ""
-            targetlevelname = ""
             numpointsexpected = 0
             pointnumber = 0
             crosssectiontype = -1
@@ -676,10 +675,15 @@ def read_phixs_tables(
                         if levelname == lowerlevelname:
                             lowerlevelindex = levelindex
                             break
-                    if targetlevelname == "":
-                        print("ERROR: no upper level name")
-                        sys.exit()
-                    # print(f"Reading level {lowerlevelindex} '{lowerlevelname}'")
+
+                    if "targetlevelname" in locals():
+                        if targetlevelname == "":  # pyright: ignore[reportPossiblyUnboundVariable]
+                            print("ERROR: no upper level name")
+                            sys.exit()
+                    else:
+                        print("WARNING: targelevelname does not exist, skipping to the next line")
+                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in !Configuration name and confuse things...
+                    # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file, not from here: RDPHOT_GEN_V2
