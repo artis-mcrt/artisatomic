@@ -302,19 +302,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert np.all(crosssections[0] == 0.0)
 
 
-def test_nonnegative_int_rejects_negatives():
-    """A negative level count is a typo, not a way to switch the estimate off."""
-    import argparse
-
-    from artisatomic import nonnegative_int
-
-    assert nonnegative_int("0") == 0
-    assert nonnegative_int("100") == 100
-
-    with pytest.raises(argparse.ArgumentTypeError):
-        nonnegative_int("-1")
-
-
 def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
     import argparse

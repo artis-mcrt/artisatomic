@@ -220,20 +220,6 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     return dflevels
 
 
-def nonnegative_int(value: str) -> int:
-    """Argparse type for an option that counts things, where a negative value is always a mistake.
-
-    Raises ArgumentTypeError below zero, so that a typo such as -1 is reported instead of being
-    taken as "off".
-    """
-    intvalue = int(value)
-    if intvalue < 0:
-        msg = f"expected a non-negative integer, got {value}"
-        raise argparse.ArgumentTypeError(msg)
-
-    return intvalue
-
-
 def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
     """Write an ARTIS atomic database from the configured ions and handlers."""
     if args is None:
@@ -275,7 +261,7 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
 
         parser.add_argument(
             "-nlevels_hydrogenic_for_unknown_phixs",
-            type=nonnegative_int,
+            type=int,
             default=100,
             help=(
                 "Consider this many of the lowest levels of any ion whose handler supplied no"
@@ -291,6 +277,12 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
         parser.set_defaults(**kwargs)
         argcomplete.autocomplete(parser)
         args = parser.parse_args(argsraw)
+
+    # 0 is the way to switch the estimate off, so a negative value is a typo rather than a
+    # quieter way of saying the same thing
+    if args.nlevels_hydrogenic_for_unknown_phixs < 0:
+        msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
+        raise ValueError(msg)
 
     ion_handlers = get_ion_handlers()
 
