@@ -3,7 +3,6 @@
 import argparse
 import typing as t
 from collections.abc import Callable
-from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -19,6 +18,7 @@ from artisatomic import readkuruczdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
+from artisatomic.base import ion_log_path
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
@@ -87,10 +87,7 @@ def read_ion_data(
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
 
-    logfilepath = Path(
-        args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
-    )
-    with logfilepath.open("w", encoding="utf-8") as flog:
+    with ion_log_path(atomic_number, ion_stage, args).open("w", encoding="utf-8") as flog:
         log_and_print(
             flog,
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
@@ -132,8 +129,7 @@ def read_ion_data(
                 transition_count_of_level_name,
             ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
 
-            if len(upsilondict) == 0:
-                upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
 
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
                 (
@@ -141,8 +137,6 @@ def read_ion_data(
                     hillier_photoion_targetconfigs,
                     photoionization_thresholds_ev,
                 ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog)
-            else:
-                hillier_photoion_targetconfigs = None
 
         elif handler in simple_handler_readers:
             result = simple_handler_readers[handler](atomic_number, ion_stage, flog)

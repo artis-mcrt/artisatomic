@@ -43,7 +43,8 @@ roman_numerals = (
 )
 
 # the single copy of each constant for the whole package. The Planck constant comes from
-# artistools.constants (h_ev_s); these have no artistools equivalent, so they are defined here
+# artistools.constants (h_ev_s, imported inside the functions that use it, so that importing the
+# package stays cheap); these have no artistools equivalent, so they are defined here
 ryd_to_ev = 13.605693122994232
 hc_in_ev_cm = 0.0001239841984332003
 hc_in_ev_angstrom = 12398.419843320025
@@ -91,6 +92,11 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
         raise ValueError(msg)
 
     return dflevels
+
+
+def ion_log_path(atomic_number: int, ion_stage: int, args) -> Path:
+    """Path of the per-ion log file, written by the reading pass and appended to by the writing pass."""
+    return Path(args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
 
 
 def log_and_print(flog, strout):

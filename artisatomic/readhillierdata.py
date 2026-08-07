@@ -11,13 +11,13 @@ from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
 import polars as pl
-from artistools.constants import h_ev_s as h_in_ev_seconds
 
 import artisatomic
+from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import ryd_to_ev
+from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
 
@@ -229,10 +229,6 @@ elsymboltohilliercode = {
     "Ba": "BAR",
 }
 
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
-PYDIR = Path(__file__).parent.absolute()
-atomicdata = pd.read_csv(os.path.join(PYDIR, "atomic_properties.txt"), sep=r"\s+", comment="#")
-elsymbols = ["n", *list(atomicdata["symbol"].values)]
 
 # hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
 # hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
@@ -1008,6 +1004,10 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
     so the cross section is zero until the offset threshold.
     """
+    # deferred so that importing artisatomic (and every spawned phixs worker) doesn't pay for
+    # the artistools package import
+    from artistools.constants import h_ev_s as h_in_ev_seconds
+
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1070,6 +1070,8 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
     See SUB_PHOT_GEN in CMFGEN's newsubs/sub_phot_gen.f.
     """
+    from artistools.constants import h_ev_s as h_in_ev_seconds
+
     assert l_start >= 0
     assert l_end <= n - 1
     energygrid = hyd_phixs_energygrid_ryd[n, l_start]

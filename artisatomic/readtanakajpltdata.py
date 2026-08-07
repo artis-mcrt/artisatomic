@@ -6,6 +6,7 @@ import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
 
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
@@ -64,8 +65,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, 34 + 5000)],
             names=["levelid", "g", "parity", "energy_ev", "configuration"],
         ) as reader:
-            hc_in_ev_cm = 0.0001239841984332003
-
             dflevels = pl.from_pandas(reader.get_chunk(levelcount)).select(
                 energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
                 parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),

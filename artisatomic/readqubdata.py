@@ -15,6 +15,7 @@ import polars as pl
 
 import artisatomic
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.levelnames import lchars
 
 tyndall_co3_path = (
     Path(__file__).parent.resolve()
@@ -22,8 +23,6 @@ tyndall_co3_path = (
     / "atomic-data-qub"
     / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
 ).resolve()
-
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
 class QUBEnergyLevel(t.NamedTuple):

@@ -157,9 +157,10 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
+    from artistools.constants import h_ev_s as h_in_ev_seconds
+
     rhd.read_hyd_phixsdata()
 
-    h_in_ev_seconds = rhd.h_in_ev_seconds
     ryd_to_ev = rhd.ryd_to_ev
 
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936

@@ -135,32 +135,13 @@ def reduce_phixs_tables_worker(
     ryd_to_hz = 3289841960250880.5
     h_over_kb_in_K_sec = 4.799243073366221e-11
 
-    # proportional to recombination rate
-    # nu0 = 1e16
-    # fac = math.exp(h_over_kb_in_K_sec * nu0 / optimaltemperature)
-
     def integrand(nu):
         """Weight for averaging the cross section: proportional to the recombination rate."""
         return (nu**2) * math.exp(-h_over_kb_in_K_sec * nu / optimaltemperature)
 
-    # def integrand_vec(nu_list):
-    #    return [(nu ** 2) * math.exp(- h_over_kb_in_K_sec * (nu - nu0) / optimaltemperature)
-    #            for nu in nu_list]
-
     integrand_vec = np.vectorize(integrand)
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
-
-    # for key in keylist:
-    #   tablein = dicttables[key]
-    # # filter zero points out of the table
-    # firstnonzeroindex = 0
-    # for i, point in enumerate(tablein):
-    #     if point[1] != 0.:
-    #         firstnonzeroindex = i
-    #         break
-    # if firstnonzeroindex != 0:
-    #     tablein = tablein[firstnonzeroindex:]
 
     # table says zero threshold, so avoid divide by zero
     if tablein[0][0] == 0.0:
@@ -168,8 +149,6 @@ def reduce_phixs_tables_worker(
 
     threshold_old_ryd = tablein[0][0]
     # tablein is an array of pairs (energy, phixs cross section)
-
-    # nu0 = tablein[0][0] * ryd_to_hz
 
     arr_sigma_out = np.empty(nphixspoints)
     # x is nu/nu_edge
@@ -215,15 +194,6 @@ def reduce_phixs_tables_worker(
 
         nsamples = len(samples_in_interval)
 
-        # integralnosigma, err = integrate.fixed_quad(integrand_vec, enlow, enhigh, n=250)
-        # integralwithsigma, err = integrate.fixed_quad(
-        #    lambda x: sigma_interp(x) * integrand_vec(x), enlow, enhigh, n=250)
-
-        # this is incredibly fast, but maybe not accurate
-        # integralnosigma, err = integrate.quad(integrand, enlow, enhigh, epsrel=1e-2)
-        # integralwithsigma, err = integrate.quad(
-        #    lambda x: sigma_interp(x) * integrand(x), enlow, enhigh, epsrel=1e-2)
-
         if nsamples >= 50 or enlow > tablein[-1][0]:
             arr_energyryd = samples_in_interval[:, 0]
             arr_sigma_megabarns = samples_in_interval[:, 1]
@@ -254,6 +224,5 @@ def reduce_phixs_tables_worker(
             print("Math error: ", i, nsamples, integralwithsigma, integralnosigma)
             print(samples_in_interval)
             arr_sigma_out[i] = 0.0
-            # sys.exit()
 
     return arr_sigma_out

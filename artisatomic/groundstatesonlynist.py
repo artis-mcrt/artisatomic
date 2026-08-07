@@ -9,8 +9,6 @@ import pandas as pd
 
 import artisatomic
 
-hc_in_ev_cm = 0.0001239841984332003
-
 
 class EnergyLevel(t.NamedTuple):
     """A ground state read from the NIST table."""

@@ -11,6 +11,7 @@ import polars as pl
 from artisatomic.base import atomic_weights
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_log_path
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
 from artisatomic.iondata import IonData
@@ -81,13 +82,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         transition_count_of_level_name = iondata.transition_count_of_level_name
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
-        flog = open(
-            os.path.join(
-                args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt"
-            ),
-            "a",
-            encoding="utf-8",
-        )
+        flog = ion_log_path(atomic_number, ion_stage, args).open("a", encoding="utf-8")
 
         log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
 

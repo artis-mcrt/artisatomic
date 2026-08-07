@@ -7,10 +7,10 @@ and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2
 
 The implementation lives in submodules (base, levelnames, ionhandlers, phixs, iondata, output,
 cli); everything is re-exported here so readers and scripts can keep using the flat
-artisatomic.name interface.
+artisatomic.name interface. Submodules and readers import base-level helpers and constants with
+`from artisatomic.base import ...` (safe from circularity, since base imports nothing from the
+package); the flat `artisatomic.name` attribute access remains for facade-level names.
 """
-
-from artistools.constants import h_ev_s as h_in_ev_seconds
 
 from artisatomic import groundstatesonlynist
 from artisatomic import readboyledata
@@ -81,7 +81,6 @@ __all__ = [
     "get_nist_ionization_energies_ev",
     "get_parity_from_config",
     "groundstatesonlynist",
-    "h_in_ev_seconds",
     "hc_in_ev_angstrom",
     "hc_in_ev_cm",
     "interpret_configuration",
@@ -116,6 +115,17 @@ __all__ = [
     "write_transition_data",
     "xopen_check_extension",
 ]
+
+
+def __getattr__(name: str) -> float:
+    """Resolve artisatomic.h_in_ev_seconds lazily, so importing the package does not import artistools."""
+    if name == "h_in_ev_seconds":
+        from artistools.constants import h_ev_s
+
+        return h_ev_s
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)
+
 
 if __name__ == "__main__":
     main()
