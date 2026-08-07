@@ -334,6 +334,7 @@ hyd_phixs: dict[tuple[int, int], np.ndarray] = {}
 # keys are n quantum number
 hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
 hyd_gaunt_factor: dict[int, list[float]] = {}
+max_hyd_n = -1
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -731,6 +732,11 @@ def read_phixs_tables(
                         fitcoefficients.append(float(row[0]))
                         if len(fitcoefficients) == 2:
                             scale, n = fitcoefficients
+
+                            # max_hyd_n is 30, some files have n's > 50
+                            if n > max_hyd_n:
+                                continue
+
                             n = int(n)
                             lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
                             # scale the cross sections but not the energy grid
@@ -795,6 +801,12 @@ def read_phixs_tables(
 
                         if len(fitcoefficients) == 4:
                             n, l_start, l_end, nu_o = fitcoefficients
+
+                            # Small number of Co II have n == 40, just ignore these.
+                            if atomic_number == 27 and ion_stage == 2 and n == 40:
+                                print(f"WARNING: Encountered n={n} Co II, {lowerlevelname}. Skipping this.")
+                                continue
+
                             if l_end > n - 1:
                                 artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
@@ -1532,6 +1544,8 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
+                global max_hyd_n
+                max_hyd_n = max_n
 
             if len(row) > 1:
                 if row[1] == "!N_ST_U":
