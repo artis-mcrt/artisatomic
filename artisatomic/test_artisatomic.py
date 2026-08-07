@@ -818,6 +818,24 @@ def test_write_adata_level_comment():
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
+def test_parse_gfall_collapses_label_whitespace():
+    r"""Kurucz labels are fixed-width padded, so their whitespace runs must be collapsed.
+
+    Expr.replace() swaps whole values equal to a literal, so `.replace(r"\s+", " ")` on a label
+    column matched nothing and every run survived into the level names written to adata.txt.
+    Only `.str.replace_all()` treats the argument as a pattern.
+    """
+    gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(38, 0))).collect()
+
+    labels = pl.concat([gfall["label_lower"], gfall["label_upper"]]).unique().to_list()
+    assert labels, "expected some labels for Sr I"
+    # no run of two or more spaces survives, and none is left padded at either end
+    assert not [label for label in labels if "  " in label]
+    assert all(label == label.strip() for label in labels)
+    # the collapse must join the parts rather than delete the separator ('s4d  1D' -> 's4d 1D')
+    assert any(" " in label for label in labels)
+
+
 def test_get_level_valence_n():
     """Each reader's level names yield the valence electron's principal quantum number."""
     # each handler has its own level-name format and parser
