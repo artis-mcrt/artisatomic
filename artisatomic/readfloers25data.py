@@ -91,17 +91,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         .alias("g")
     )
 
-    # The level table is indexed from zero in file order and the transitions refer to those
-    # indices, so a gap would silently attach transitions to the wrong levels. Not an assert:
-    # this validates an input file and must not disappear under python -O.
+    # the levels are indexed from zero in file order and the transitions refer to those indices,
+    # so a gap would misattach them. Not an assert: input validation must survive python -O.
     if dflevels["Index"].to_list() != list(range(dflevels.height)):
         msg = f"Level indices in {levels_file} are not contiguous and zero-based"
         raise ValueError(msg)
 
-    # Configuration is not unique (levels of the same configuration differ by J), so build a
-    # unique level name from it. Index is contiguous, so including it guarantees uniqueness.
-    # The configuration stays first so that get_level_valence_n() and the adata.txt comment
-    # column both still start with it.
+    # Configuration is not unique (levels of one configuration differ by J), so append the
+    # contiguous index. The configuration stays first, for get_level_valence_n() and the
+    # adata.txt comment.
     dflevels = dflevels.with_columns(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
@@ -122,9 +120,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
-    # Transitions reference levels by zero-based index, and an out-of-range reference would be
-    # silently dropped by the level-id joins in add_level_ids_forbidden(), leaving an incomplete
-    # database. Not an assert: this validates an input file and must not disappear under python -O.
+    # an out-of-range level reference would be silently dropped by the joins in
+    # add_level_ids_forbidden(). Not an assert: input validation must survive python -O.
     if dftransitions.height > 0:
         transition_level_indices = pl.concat([dftransitions["Lower"], dftransitions["Upper"]])
         min_index = t.cast("int", transition_level_indices.min())

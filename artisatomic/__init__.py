@@ -184,21 +184,17 @@ def add_handler_if_not_set(
             if ion_stage not in [get_ion_stage(x) for x in list_ions_handlers_out]:
                 # add an ion that is not present in the element's list
                 list_ions_handlers_out.append((ion_stage, handler))
-                list_ions_handlers_out.sort(key=get_ion_stage)
         ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
 
     if not found_element:
         new_element_ions: list[int | tuple[int, str]] = [(ion_stage, handler)]
         ion_handlers_out.append((atomic_number, new_element_ions))
 
-    ion_handlers_out.sort(key=operator.itemgetter(0))
-
-    return ion_handlers_out
+    return sort_ion_handlers(ion_handlers_out)
 
 
-# The id-keyed transition columns consumed by write_transition_data(). Readers with nothing to
-# report use this schema so an empty frame still carries them; name-keyed reader frames (e.g.
-# Hillier's namefrom/nameto) get lowerlevel/upperlevel joined on later by add_level_ids_forbidden().
+# The id-keyed transition columns write_transition_data() needs, so an empty frame still carries
+# them. Name-keyed frames get lowerlevel/upperlevel from add_level_ids_forbidden() instead.
 empty_transitions_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
 
 
@@ -215,9 +211,8 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
 
     dflevels = dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
 
-    # lookups elsewhere index this frame by level id, so a reader-supplied levelid column
-    # (e.g. from the tanakajplt data files) must be contiguous and start at zero.
-    # A raise rather than an assert: this can be validating an input file's id column.
+    # the frame is indexed by level id elsewhere, so a reader-supplied levelid must be contiguous
+    # and zero-based. Not an assert: input validation must survive python -O.
     if not dflevels["levelid"].equals(pl.int_range(dflevels.height, dtype=pl.Int64, eager=True)):
         msg = "level ids must be contiguous and start at zero"
         raise ValueError(msg)
@@ -567,6 +562,18 @@ def isfloat(value: t.Any) -> bool:
     return True
 
 
+compression_extensions = ("", ".zst", ".gz", ".xz")
+
+
+def find_file_check_extension(filename: str | Path) -> Path | None:
+    """Find a data file by its plain name, accepting any of the compressed variants of that name.
+
+    Returns None if neither the plain name nor any compressed form exists, so that callers which
+    treat a missing file as "no data for this ion" can say so without opening it.
+    """
+    return next((path for ext in compression_extensions if (path := Path(f"{filename}{ext}")).is_file()), None)
+
+
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """Open a data file, trying the compressed variants of the name if it does not exist.
 
@@ -575,15 +582,13 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """
     from xopen import xopen
 
-    extensions = ["", ".zst", ".gz", ".xz"]
-    filepaths = [f"{filename}{ext}" for ext in extensions]
-    for filepath in filepaths:
-        try:
-            return xopen(filepath, **kwargs)
-        except FileNotFoundError:
-            continue
-    msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
-    raise FileNotFoundError(msg)
+    filepath = find_file_check_extension(filename)
+    if filepath is None:
+        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
+        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
+        raise FileNotFoundError(msg)
+
+    return xopen(filepath, **kwargs)
 
 
 # split a list into evenly sized chunks
@@ -639,7 +644,7 @@ def match_hydrogenic_phixs(
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
-    photoionization_thresholds_ev = np.zeros(energy_levels.height)
+    photoionization_thresholds_ev = np.full(energy_levels.height, np.nan)
     phixstables = {}
     for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
         if levelindex >= 100:
@@ -941,9 +946,8 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
     if not instr.startswith("Eqv st"):
         while instr:
             if instr[-1].upper() in lchars:
-                # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'.
-                # The digit-letter-letter case keeps its leading digit, so '4sp(3P)_7Po[2]'
-                # yields a pretend orbital '4sp' rather than dropping the 4 (as before).
+                # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'. A
+                # digit-letter-letter run keeps its digit, so '4sp(3P)_7Po[2]' gives '4sp'.
                 startpos = (
                     -3
                     if len(instr) >= 3
@@ -960,12 +964,9 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
                 instr = instr[:left_bracket_pos]
             elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
                 if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    # Single-digit occupation. A two-digit n is kept ('10d1') only when the
-                    # digits cannot belong to a preceding orbital: '3d14s2' is genuinely
-                    # ambiguous -- 3d(1) 4s(2) or 3d 14s(2) -- and there the single-digit
-                    # reading wins because an occupation of 1 is common and a two-digit n
-                    # carrying an explicit occupation is not. At the start of the string or
-                    # after a parent term there is no such ambiguity.
+                    # Single-digit occupation. A two-digit n survives ('10d1') only where the
+                    # digits cannot belong to a preceding orbital: '3d14s2' is ambiguous
+                    # (3d1 4s2 or 3d 14s2), and there the occupation-1 reading wins.
                     two_digit_n = (
                         len(instr) >= 4
                         and is_two_digit_n(instr[-4:-2])
@@ -1015,10 +1016,9 @@ def get_parity_from_config(instr) -> int:
         l = lchars_lower.index(orbitalstr[lpos])
         nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
 
-        # An orbital must satisfy l <= n - 1. CMFGEN packs the high-l levels of a shell into one
-        # level whose orbital letter is a merge marker rather than a real l ('2s2_13w_2W',
-        # '2s2_2p3(4So)5z_5Z'), and those fail this test. Such a level spans several l of both
-        # parities, so the marker contributes no definite parity and only the real orbitals count.
+        # An orbital must satisfy l <= n - 1. CMFGEN's merged high-l levels ('2s2_13w_2W',
+        # '2s2_2p3(4So)5z_5Z') fail this: the letter is a merge marker spanning several l of both
+        # parities, so it has no definite parity and only the real orbitals count.
         principalquantumnumber = int(orbitalstr[:lpos]) if orbitalstr[:lpos].isdigit() else 0
         if l >= principalquantumnumber:
             continue
@@ -1280,15 +1280,22 @@ def write_phixs_data(
     reported. Level ids, of this ion and of the upper ion's targets, are zero-based in memory but
     numbered from one in the output.
     """
-    # a level gets a table only if it has photoionisation targets and a threshold energy. The
-    # threshold arrays start as zeros and are only filled in for levels that got a cross-section
-    # table, so a threshold of exactly zero means "no data for this level". (A negative threshold
-    # is a deliberate sentinel used by readqubdata, so keep those.)
+    # a level gets a table only if it has targets and a threshold energy. The threshold arrays
+    # start as NaN and are filled in only for levels that got a table, so NaN means "no data".
+    # A negative value is written deliberately (readqubdata): ARTIS reads it as "no value given"
+    # and takes the threshold from the difference of the level energies instead.
+    # the target fractions are filled in per level by the caller, but a reader that found no
+    # photoionization data at all returns the cross-section and threshold arrays still empty, so
+    # bound the ids by what those arrays actually hold rather than indexing off the end
     levelids_with_targets = [
-        levelid for levelid, targetlist in enumerate(photoionization_targetfractions) if targetlist
+        levelid
+        for levelid, targetlist in enumerate(photoionization_targetfractions)
+        if targetlist and levelid < len(photoionization_crosssections) and levelid < len(photoionization_thresholds_ev)
     ]
-    levelids_to_write = [levelid for levelid in levelids_with_targets if photoionization_thresholds_ev[levelid] != 0.0]
-    skipped_zero_threshold = len(levelids_with_targets) - len(levelids_to_write)
+    levelids_to_write = [
+        levelid for levelid in levelids_with_targets if not np.isnan(photoionization_thresholds_ev[levelid])
+    ]
+    skipped_no_threshold = len(levelids_with_targets) - len(levelids_to_write)
 
     log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata2.txt'")
     flog.write(
@@ -1329,10 +1336,10 @@ def write_phixs_data(
         for crosssection in photoionization_crosssections[lowerlevelid]:
             fphixs.write(f"{crosssection:16.8E}\n")
 
-    if skipped_zero_threshold > 0:
+    if skipped_no_threshold > 0:
         log_and_print(
             flog,
-            f"Skipped {skipped_zero_threshold} levels with no photoionization threshold energy",
+            f"Skipped {skipped_no_threshold} levels with no photoionization threshold energy",
         )
 
 

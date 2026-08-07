@@ -10,8 +10,10 @@ import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
+from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
+from artisatomic import match_hydrogenic_phixs
 from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
@@ -23,6 +25,7 @@ from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
+from artisatomic import write_phixs_data
 
 
 def test_reduce_configuration():
@@ -58,9 +61,9 @@ def test_get_parity_from_config():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
-    # CMFGEN packs the high-l levels of a shell into one level whose orbital letter is a merge
-    # marker, not a real l: '5z' would be l=22 and '13w' l=19, both impossible for their n. Such a
-    # level spans several l of both parities, so only the real orbitals decide the parity.
+    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
+    # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
+    # the real orbitals decide the parity.
     assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
@@ -224,9 +227,8 @@ def test_hydrogenic_phixs_effective_charge_scaling():
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
-            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and the gaunt factor at
-            # threshold depends only on n, so the ratio to the n=1 value is exactly n / Z**2
-            # once the n-dependence of g_bf is divided out by comparing at the same n.
+            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
+            # depends only on n, so comparing at the same n leaves a ratio of exactly n / Z**2
             same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 
@@ -245,12 +247,9 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     """
     import argparse
 
-    import artisatomic
-
     rhd.read_hyd_phixsdata()
 
     ryd_to_ev = rhd.ryd_to_ev
-    hc_in_ev_cm = artisatomic.hc_in_ev_cm
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
@@ -264,7 +263,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     )
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
 
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels,
         ionization_energy_ev=ionization_energy_ev,
@@ -289,16 +288,45 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
         args=args,
     )
-    assert thresholds[0] == 0.0
+    assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
     assert targetfractions[0] == []
     assert np.all(crosssections[0] == 0.0)
+
+
+def test_write_phixs_data_with_no_phixs_arrays():
+    """A reader that found no photoionization data must not make write_phixs_data() index off the end.
+
+    write_output_files() fills a target list for every level whenever the reader supplied none, and
+    readnahardata.get_photoiontargetfractions() always gives at least the ground state. If the
+    reader also left the cross-section and threshold arrays empty (no usable .ptpx tables), the
+    level ids from those target lists have nothing behind them.
+    """
+    import argparse
+
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    flog = io.StringIO()
+    fphixs = io.StringIO()
+
+    write_phixs_data(
+        fphixs,
+        atomic_number=26,
+        ion_stage=1,
+        photoionization_crosssections=np.empty((0, args.nphixspoints)),
+        photoionization_targetfractions=[[(0, 1.0)] for _ in range(3)],
+        photoionization_thresholds_ev=np.empty(0),
+        args=args,
+        flog=flog,
+    )
+
+    assert not fphixs.getvalue()
+    assert "Writing 0 phixs tables" in flog.getvalue()
 
 
 def test_read_coldata_term_to_j_redistribution():
