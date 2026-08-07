@@ -1,5 +1,6 @@
 import math
 import os
+import re
 import sys
 import typing as t
 from collections import defaultdict
@@ -390,24 +391,35 @@ def read_levels_and_transitions(
     )
 
     prev_line = ""
-    with artisatomic.xopen_check_extension(filename) as fhillierosc:
+    # TODO: Would be nice to have a way of dealing with different encodings automatically, but this seems to be the only case so probably not worth it
+    with artisatomic.xopen_check_extension(
+        filename, encoding="iso-8859-1" if atomic_number == 12 and ion_stage == 8 else "utf-8"
+    ) as fhillierosc:
         expected_energy_levels = -1
         expected_transitions = -1
         row_format_energy_level = None
         format_date = "NOT_SPECIFIED"
         for line in fhillierosc:
             row = line.split()
-            if line.startswith("**************************") and prev_line:
-                headerline = prev_line
-                headerline = headerline.replace("ID", "hillierlevelid")
-                headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
-                headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
-                headerline = headerline.replace("eV", "thresholdenergyev")
-                headerline = headerline.replace("Lam(A)", "lambdaangstrom")
-                headerline = headerline.replace("ARAD", "arad")
-                row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
-                print("File contains columns:")
-                print(f"  {row_format_energy_level}")
+            if (
+                re.match(r"x*\*+", line) and prev_line
+            ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
+                if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
+                    print("Fe VIII has a bespoke header")
+                    row_format_energy_level = "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
+                    print("File contains columns:")
+                    print(f"  {row_format_energy_level}")
+                else:
+                    headerline = prev_line
+                    headerline = headerline.replace("ID", "hillierlevelid")
+                    headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
+                    headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
+                    headerline = headerline.replace("eV", "thresholdenergyev")
+                    headerline = headerline.replace("Lam(A)", "lambdaangstrom")
+                    headerline = headerline.replace("ARAD", "arad")
+                    row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
+                    print("File contains columns:")
+                    print(f"  {row_format_energy_level}")
             elif line.rstrip().endswith("!Number of energy levels"):
                 expected_energy_levels = int(row[0])
                 artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
