@@ -157,9 +157,10 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
+    from artisatomic.base import h_in_ev_seconds
+
     rhd.read_hyd_phixsdata()
 
-    h_in_ev_seconds = rhd.h_in_ev_seconds
     ryd_to_ev = rhd.ryd_to_ev
 
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
@@ -376,6 +377,101 @@ def test_write_phixs_data_with_no_phixs_arrays():
 
     assert not fphixs.getvalue()
     assert "Writing 0 phixs tables" in flog.getvalue()
+
+
+def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
+    """Build a minimal single-level IonData for the target-fraction resolver tests."""
+    from artisatomic.iondata import IonData
+
+    return IonData(
+        ion_stage=ion_stage,
+        handler="cmfgen",
+        is_top_ion=is_top_ion,
+        ionization_energy_ev=10.0,
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0],
+                "energyabovegsinpercm": [0.0],
+                "g": [9.0],
+                "levelname": [f"gs{ion_stage}"],
+            }
+        ),
+        dftransitions=pl.DataFrame(),
+        transition_count_of_level_name={},
+        upsilondict={},
+        hillier_photoion_targetconfigs=targetconfigs,
+        photoionization_crosssections=np.empty((0, 100)),
+        photoionization_targetfractions=targetfractions if targetfractions is not None else [],
+        photoionization_thresholds_ev=np.empty(0),
+    )
+
+
+def test_resolve_photoion_targetfractions():
+    """Each non-top ion gets its targets resolved against the next ion up; the top ion gets none."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # the lower ion names the upper ion's ground state as its only target configuration
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
+    upper = make_iondata(2, is_top_ion=True)
+    resolve_photoion_targetfractions([lower, upper])
+
+    assert lower.photoionization_targetfractions == [[(0, 1.0)]]
+    # the top ion has no upper ion to photoionise to, so it is left exactly as it was read
+    assert upper.photoionization_targetfractions == []
+
+
+def test_resolve_photoion_targetfractions_keeps_reader_supplied():
+    """An ion whose reader already gave per-level fractions (e.g. the hydrogenic estimate) keeps them."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # a target list the Hillier resolver would never produce, so an overwrite would be visible
+    supplied = [[(7, 1.0)]]
+    lower = make_iondata(1, is_top_ion=False, targetfractions=supplied, targetconfigs=[[("gs2", 1.0)]])
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)])
+
+    assert lower.photoionization_targetfractions == supplied
+
+
+def test_resolve_photoion_targetfractions_rejects_misordered_ions():
+    """A list that is not one element's ions in ascending order is rejected rather than resolved.
+
+    Each ion is resolved against the next entry as its upper ion, so a top ion anywhere but last
+    means the levels being matched belong to the wrong ion.
+    """
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
+
+    # a list whose last ion is not the top ion is missing the upper ion the last entry needs
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
+
+
+def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
+    """Writing an ion that still needs resolving must fail loudly, not drop its cross sections.
+
+    write_output_files() no longer resolves target fractions itself, so an ion with cross sections
+    but no targets would have every one of its tables silently skipped by write_phixs_data().
+    """
+    import argparse
+
+    from artisatomic.output import write_output_files
+
+    (tmp_path / "logs").mkdir()
+    tmpargs = argparse.Namespace(
+        output_folder=str(
+            tmp_path,
+        ),
+        output_folder_logs="logs",
+        nophixs=False,
+        nphixspoints=100,
+    )
+    lower = make_iondata(1, is_top_ion=False)
+    lower.photoionization_crosssections = np.zeros((1, 100))
+
+    with pytest.raises(ValueError, match="call resolve_photoion_targetfractions"):
+        write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
 def test_read_coldata_term_to_j_redistribution():

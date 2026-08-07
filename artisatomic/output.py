@@ -3,6 +3,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -73,100 +74,114 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
-    Every non-top ion's photoionization_targetfractions must already be filled in (see
-    resolve_photoion_targetfractions() in iondata).
+    Every non-top ion's photoionization_targetfractions must already be filled in by
+    resolve_photoion_targetfractions() (in iondata), which this does not call itself. Writing an
+    ion that still needs resolving would silently drop its cross sections, so that is rejected.
     """
-    for i, iondata in enumerate(iondatalist):
+    log_folder = Path(args.output_folder, args.output_folder_logs)
+
+    for iondata in iondatalist:
         ion_stage = iondata.ion_stage
         upsilondict = iondata.upsilondict
         transition_count_of_level_name = iondata.transition_count_of_level_name
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
-        flog = ion_log_path(atomic_number, ion_stage, args).open("a", encoding="utf-8")
+        with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as flog:
+            log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
 
-        log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
+            dfenergylevels_ion = iondata.dfenergylevels
+            dftransitions_ion = iondata.dftransitions
 
-        dfenergylevels_ion = iondata.dfenergylevels
-        dftransitions_ion = iondata.dftransitions
-
-        if dftransitions_ion.is_empty():
-            unused_upsilon_transitions = set()
-        else:
-            dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
-            unused_upsilon_transitions = set(upsilondict.keys()).difference(
-                dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
-            )
-
-        log_and_print(flog, f"Adding in {len(unused_upsilon_transitions):d} extra transitions with only upsilon values")
-
-        if unused_upsilon_transitions:
-            dfupsilon_only_transitions = pl.DataFrame(
-                list(unused_upsilon_transitions),
-                schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
-                orient="row",
-            ).with_columns(A=0.0)
-            for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(named=False):
-                namefrom = dfenergylevels_ion["levelname"][id_upper]
-                nameto = dfenergylevels_ion["levelname"][id_lower]
-
-                transition_count_of_level_name[namefrom] += 1
-                transition_count_of_level_name[nameto] += 1
-
-            dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
-            dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
-
-        if not dftransitions_ion.is_empty():
-            dftransitions_ion = dftransitions_ion.with_columns(
-                pl.struct(["lowerlevel", "upperlevel", "forbidden"])
-                .map_elements(
-                    lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
-                        (row["lowerlevel"], row["upperlevel"]),
-                        -2.0 if row["forbidden"] else -1.0,
-                    ),
-                    return_dtype=pl.Float64,
+            if dftransitions_ion.is_empty():
+                unused_upsilon_transitions = set()
+            else:
+                dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
+                unused_upsilon_transitions = set(upsilondict.keys()).difference(
+                    dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
                 )
-                .alias("coll_str")
+
+            log_and_print(
+                flog, f"Adding in {len(unused_upsilon_transitions):d} extra transitions with only upsilon values"
             )
 
-        with open(os.path.join(args.output_folder, "adata.txt"), "a", encoding="utf-8") as fatommodels:
-            write_adata(
-                fatommodels,
-                atomic_number,
-                ion_stage,
-                dfenergylevels_ion,
-                iondata.ionization_energy_ev,
-                transition_count_of_level_name,
-                flog,
-            )
+            if unused_upsilon_transitions:
+                dfupsilon_only_transitions = pl.DataFrame(
+                    list(unused_upsilon_transitions),
+                    schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
+                    orient="row",
+                ).with_columns(A=0.0)
+                for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(
+                    named=False
+                ):
+                    namefrom = dfenergylevels_ion["levelname"][id_upper]
+                    nameto = dfenergylevels_ion["levelname"][id_lower]
 
-        dftransitions_ion = (
-            dftransitions_ion
-            if dftransitions_ion.is_empty()
-            else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
-        )
-        with open(os.path.join(args.output_folder, "transitiondata.txt"), "a", encoding="utf-8") as ftransitiondata:
-            write_transition_data(
-                ftransitiondata,
-                atomic_number,
-                ion_stage,
-                dftransitions_ion,
-                flog,
-            )
+                    transition_count_of_level_name[namefrom] += 1
+                    transition_count_of_level_name[nameto] += 1
 
-        if i < len(iondatalist) - 1 and not args.nophixs:  # ignore the top ion
-            with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
-                write_phixs_data(
-                    fphixs,
+                dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
+                dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
+
+            if not dftransitions_ion.is_empty():
+                dftransitions_ion = dftransitions_ion.with_columns(
+                    pl.struct(["lowerlevel", "upperlevel", "forbidden"])
+                    .map_elements(
+                        lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
+                            (row["lowerlevel"], row["upperlevel"]),
+                            -2.0 if row["forbidden"] else -1.0,
+                        ),
+                        return_dtype=pl.Float64,
+                    )
+                    .alias("coll_str")
+                )
+
+            with open(os.path.join(args.output_folder, "adata.txt"), "a", encoding="utf-8") as fatommodels:
+                write_adata(
+                    fatommodels,
                     atomic_number,
                     ion_stage,
-                    iondata.photoionization_crosssections,
-                    iondata.photoionization_targetfractions,
-                    iondata.photoionization_thresholds_ev,
-                    args,
+                    dfenergylevels_ion,
+                    iondata.ionization_energy_ev,
+                    transition_count_of_level_name,
                     flog,
                 )
 
-        flog.close()
+            dftransitions_ion = (
+                dftransitions_ion
+                if dftransitions_ion.is_empty()
+                else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
+            )
+            with open(os.path.join(args.output_folder, "transitiondata.txt"), "a", encoding="utf-8") as ftransitiondata:
+                write_transition_data(
+                    ftransitiondata,
+                    atomic_number,
+                    ion_stage,
+                    dftransitions_ion,
+                    flog,
+                )
+
+            if not iondata.is_top_ion and not args.nophixs:
+                # an ion with cross sections but no targets has not been through
+                # resolve_photoion_targetfractions(), and every one of its tables would be
+                # dropped without a word by write_phixs_data()
+                if len(iondata.photoionization_crosssections) > 0 and not iondata.photoionization_targetfractions:
+                    msg = (
+                        f"Z={atomic_number} ion_stage={ion_stage} has photoionization cross sections but no target"
+                        " fractions: call resolve_photoion_targetfractions() before write_output_files()"
+                    )
+                    raise ValueError(msg)
+
+                with open(os.path.join(args.output_folder, "phixsdata_v2.txt"), "a", encoding="utf-8") as fphixs:
+                    write_phixs_data(
+                        fphixs,
+                        atomic_number,
+                        ion_stage,
+                        iondata.photoionization_crosssections,
+                        iondata.photoionization_targetfractions,
+                        iondata.photoionization_thresholds_ev,
+                        args,
+                        flog,
+                    )
 
 
 def write_adata(

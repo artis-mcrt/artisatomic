@@ -93,9 +93,9 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     return dflevels
 
 
-def ion_log_path(atomic_number: int, ion_stage: int, args) -> Path:
+def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:
     """Path of the per-ion log file, written by the reading pass and appended to by the writing pass."""
-    return Path(args.output_folder, args.output_folder_logs, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
+    return Path(log_folder, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
 
 
 def log_and_print(flog, strout):

@@ -44,6 +44,7 @@ from artisatomic.cli import main
 from artisatomic.cli import process_files
 from artisatomic.iondata import IonData
 from artisatomic.iondata import read_ion_data
+from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.iondata import simple_handler_readers
 from artisatomic.ionhandlers import add_handler_if_not_set
 from artisatomic.ionhandlers import drop_handlers
@@ -105,6 +106,7 @@ __all__ = [
     "readtanakajpltdata",
     "reduce_phixs_tables",
     "reduce_phixs_tables_worker",
+    "resolve_photoion_targetfractions",
     "roman_numerals",
     "ryd_to_ev",
     "simple_handler_readers",

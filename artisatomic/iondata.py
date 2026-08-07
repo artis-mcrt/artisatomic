@@ -5,6 +5,7 @@ import itertools
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
@@ -40,6 +41,9 @@ class IonData:
 
     ion_stage: int
     handler: str
+    # the top ion has no upper ion, so it gets neither cross sections nor a phixs block. Recorded
+    # here at read time so the reading, resolving and writing passes cannot disagree about it.
+    is_top_ion: bool
     ionization_energy_ev: float
     dfenergylevels: pl.DataFrame
     dftransitions: pl.DataFrame
@@ -94,7 +98,8 @@ def read_ion_data(
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
 
-    with ion_log_path(atomic_number, ion_stage, args).open("w", encoding="utf-8") as flog:
+    logfilepath = ion_log_path(Path(args.output_folder, args.output_folder_logs), atomic_number, ion_stage)
+    with logfilepath.open("w", encoding="utf-8") as flog:
         log_and_print(
             flog,
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
@@ -177,6 +182,7 @@ def read_ion_data(
     return IonData(
         ion_stage=ion_stage,
         handler=handler,
+        is_top_ion=is_top_ion,
         ionization_energy_ev=ionization_energy_ev,
         dfenergylevels=dfenergylevels,
         dftransitions=dftransitions,
@@ -189,15 +195,27 @@ def read_ion_data(
     )
 
 
-def resolve_photoion_targetfractions(iondatalist: list[IonData], args: argparse.Namespace) -> None:
+def resolve_photoion_targetfractions(iondatalist: list[IonData]) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
-    An ion's targets are levels of the next ion up, so the fractions can only be resolved once
-    the whole element has been read, and pairwise() leaves the top ion alone: it has no upper ion
-    to photoionise to. An ion whose reader already gave per-level fractions keeps them.
+    An ion's targets are levels of the next ion up, so the fractions can only be resolved once the
+    whole element has been read. The top ion is left alone (it has no upper ion to photoionise
+    to), as is any ion whose reader already gave per-level fractions.
+
+    Call this before write_output_files() unless cross sections are switched off entirely; the
+    writer needs the fractions and does not resolve them itself.
     """
-    if args.nophixs:
+    if not iondatalist:
         return
+
+    # the ions must be one element's, in ascending stage order: each is resolved against the next
+    # entry as its upper ion. A top ion anywhere but last means the list is not that, and the
+    # levels being read as targets would belong to the wrong ion.
+    if not iondatalist[-1].is_top_ion or any(iondata.is_top_ion for iondata in iondatalist[:-1]):
+        msg = (
+            "iondatalist must be one element's ions in ascending ion stage order, with only the last being the top ion"
+        )
+        raise ValueError(msg)
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
