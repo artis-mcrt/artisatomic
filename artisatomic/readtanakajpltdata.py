@@ -69,8 +69,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
                 parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
                 g=pl.col("g").cast(pl.Float64),
-                # the level name keeps the file's own 1-based number, but the level id is
-                # zero-based like everywhere else in memory
+                # Every expression in one select() reads the INPUT frame, so both columns below
+                # are the file's own values, not the ones being computed alongside them: the name
+                # gets the file's 1-based number rather than the zero-based levelid, and the
+                # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
+                # a human-readable comment in adata.txt — and read_fwf() has already stripped the
+                # text, so this is deliberate rather than the shadowing accident it resembles.
                 levelname=pl.format(
                     "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
                 ),
