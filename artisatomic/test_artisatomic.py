@@ -10,8 +10,10 @@ import pytest
 
 from artisatomic import add_handler_if_not_set
 from artisatomic import get_default_handler
+from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
+from artisatomic import match_hydrogenic_phixs
 from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
@@ -23,6 +25,7 @@ from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
+from artisatomic import write_phixs_data
 
 
 def test_reduce_configuration():
@@ -244,12 +247,9 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     """
     import argparse
 
-    import artisatomic
-
     rhd.read_hyd_phixsdata()
 
     ryd_to_ev = rhd.ryd_to_ev
-    hc_in_ev_cm = artisatomic.hc_in_ev_cm
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
@@ -263,7 +263,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     )
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
 
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels,
         ionization_energy_ev=ionization_energy_ev,
@@ -288,7 +288,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_unbound,
         ionization_energy_ev=ionization_energy_ev,
@@ -310,13 +310,11 @@ def test_write_phixs_data_with_no_phixs_arrays():
     """
     import argparse
 
-    import artisatomic
-
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
     flog = io.StringIO()
     fphixs = io.StringIO()
 
-    artisatomic.write_phixs_data(
+    write_phixs_data(
         fphixs,
         atomic_number=26,
         ion_stage=1,
