@@ -7,8 +7,6 @@ import pandas as pd
 
 import artisatomic
 
-hc_in_ev_cm = 0.0001239841984332003
-
 
 class LisbonReader:
     """Extract levels and lines from the Lisbon Atomic Group data.

@@ -42,10 +42,11 @@ roman_numerals = (
     "XX",
 )
 
+# the single copy of each constant for the whole package. The Planck constant comes from
+# artistools.constants (h_ev_s); these have no artistools equivalent, so they are defined here
 ryd_to_ev = 13.605693122994232
 hc_in_ev_cm = 0.0001239841984332003
 hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
 
 
 def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
@@ -148,12 +149,6 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
         raise FileNotFoundError(msg)
 
     return xopen(filepath, **kwargs)
-
-
-# split a list into evenly sized chunks
-def chunks[T](listin: list[T], chunk_size: int) -> list[list[T]]:
-    """Split a list into consecutive chunks of at most chunk_size items."""
-    return [listin[i : i + chunk_size] for i in range(0, len(listin), chunk_size)]
 
 
 @lru_cache(maxsize=1)

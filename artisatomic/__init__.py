@@ -10,6 +10,8 @@ cli); everything is re-exported here so readers and scripts can keep using the f
 artisatomic.name interface.
 """
 
+from artistools.constants import h_ev_s as h_in_ev_seconds
+
 from artisatomic import groundstatesonlynist
 from artisatomic import readboyledata
 from artisatomic import readdreamdata
@@ -21,13 +23,11 @@ from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import atomic_weights
-from artisatomic.base import chunks
 from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
-from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
@@ -70,7 +70,6 @@ __all__ = [
     "add_handler_if_not_set",
     "add_level_ids_forbidden",
     "atomic_weights",
-    "chunks",
     "clear_files",
     "compression_extensions",
     "drop_handlers",

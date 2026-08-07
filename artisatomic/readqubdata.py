@@ -14,6 +14,7 @@ import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
 
 tyndall_co3_path = (
     Path(__file__).parent.resolve()
@@ -22,11 +23,6 @@ tyndall_co3_path = (
     / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
 ).resolve()
 
-ryd_to_ev = 13.605693122994232
-
-hc_in_ev_cm = 0.0001239841984332003
-hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
