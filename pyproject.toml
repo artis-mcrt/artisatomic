@@ -132,8 +132,7 @@ preview = true
 select = ["ALL"]
 ignore = [
     # every float comparison here is deliberate: a divide-by-zero guard, a validation of an exact
-    # value read from a data file, or a sentinel against a value that was literally assigned 0.0
-    # (a photoionisation threshold of exactly zero means "no data for this level")
+    # value read from a data file, or a test for a cross section that is zero everywhere
     "float-equality-comparison",
     "missing-type-function-argument",
     "missing-return-type-undocumented-public-function",

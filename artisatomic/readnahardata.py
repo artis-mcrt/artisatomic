@@ -106,12 +106,13 @@ def build_nahar_levels_and_phixs(
 
             for state_tuple, phixstable in reduced_phixs_dict.items():
                 matching_levelindices = levelindices_of_state.get(state_tuple, [])
+                # a state right at the ionization threshold has nothing to ionize from, so leave
+                # it with no threshold energy and let write_phixs_data() skip it
+                threshold_ev = thresholds_ev_dict[state_tuple]
                 for levelindex in matching_levelindices:
                     photoionization_crosssections[levelindex] = phixstable
-                    # a state right at the ionization threshold has nothing to ionize from, so
-                    # leave it with no threshold energy and let write_phixs_data() skip it
-                    if thresholds_ev_dict[state_tuple] > 0.0:
-                        photoionization_thresholds_ev[levelindex] = thresholds_ev_dict[state_tuple]
+                    if threshold_ev > 0.0:
+                        photoionization_thresholds_ev[levelindex] = threshold_ev
 
                 if not matching_levelindices:
                     twosplusone, l, parity, indexinsymmetry = state_tuple

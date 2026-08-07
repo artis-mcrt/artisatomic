@@ -28,6 +28,8 @@ build
 
 # coverage
 coverage.xml
-# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms
+# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms,
+# but not the .coveragerc config file that the glob would otherwise swallow
 .coverage*
+!.coveragerc
 htmlcov/
