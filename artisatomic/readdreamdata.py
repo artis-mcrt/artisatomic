@@ -77,12 +77,16 @@ def read_levels_data(dflines):
     Each line carries both of its levels inline, so the levels are the distinct lower and upper
     levels over all lines, sorted by energy.
     """
+    # a set for the membership test, not `not in energy_levels`: that was a linear scan of the
+    # list per candidate, so building the level list cost O(levels^2)
+    seen: set[DreamEnergyLevelRow] = set()
     energy_levels = []
 
     for prefix in ["Lower", "Upper"]:
         for _, row in dflines.drop_duplicates(subset=[prefix + "_Type", prefix + "_Level", prefix + "_g"]).iterrows():
             leveltuple = energytuplefromrow(row, prefix)
-            if leveltuple not in energy_levels:
+            if leveltuple not in seen:
+                seen.add(leveltuple)
                 energy_levels.append(leveltuple)
 
     energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
@@ -122,12 +126,20 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels = read_levels_data(dfiondata)
 
+    # a dict, not energy_levels.index(): that scanned the level list once per level of every
+    # line, so resolving the ids cost O(lines x levels) for a database of Z >= 57 lanthanides
+    levelid_of_leveltuple = {leveltuple: levelid for levelid, leveltuple in enumerate(energy_levels)}
+
     def get_level_index(row, prefix):
         """Return the zero-based level id of the row's level."""
         leveltuple = energytuplefromrow(row, prefix)
-        if leveltuple in energy_levels:
-            return energy_levels.index(leveltuple)
-        raise AssertionError
+        levelid = levelid_of_leveltuple.get(leveltuple)
+        if levelid is None:
+            # not an assert: every line's levels come from the same frame the level list was
+            # built from, so a miss means they disagree and must not be silently mapped
+            msg = f"DREAM line names a {prefix} level that is not in the level list: {leveltuple}"
+            raise ValueError(msg)
+        return levelid
 
     dfiondata.insert(
         2,

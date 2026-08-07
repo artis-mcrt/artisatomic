@@ -1,5 +1,6 @@
 """Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data."""
 
+import os
 import re
 import string
 import typing as t
@@ -12,10 +13,17 @@ import artisatomic
 
 USE_CALIBRATED = True
 
-BASEPATH = str(
-    Path.home()
-    / f"Google Drive/Shared drives/Atomic Data Group/OptimizedFACdata/OptimizedFAC_lanthanides{'_calibrated' if USE_CALIBRATED else ''}"
-)
+
+def get_basepath() -> Path:
+    """Directory holding the OptimizedFAC lanthanide data.
+
+    Not part of this repository, so ARTISATOMIC_FAC_PATH overrides where it is looked for, as
+    ARTISATOMIC_LISBON_PATH does for the Lisbon files. The default is the Google Drive mount
+    path, which is where the shared drive appears on the machine this was written for.
+    """
+    calibstr = "_calibrated" if USE_CALIBRATED else ""
+    default = Path.home() / "Google Drive/Shared drives/Atomic Data Group/OptimizedFACdata"
+    return Path(os.environ.get("ARTISATOMIC_FAC_PATH", default)) / f"OptimizedFAC_lanthanides{calibstr}"
 
 
 # Constants
@@ -153,8 +161,17 @@ def GetLines(filename: Path | str) -> pd.DataFrame:
 
 def extend_ion_list(ion_handlers):
     """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
-    assert Path(BASEPATH).is_dir()
-    for s in Path(BASEPATH).glob("**/*.lev.asc"):
+    basepath = get_basepath()
+    # not an assert: this reports a missing data directory and must survive python -O, and it
+    # names the environment variable rather than just failing the glob silently
+    if not basepath.is_dir():
+        msg = (
+            f"FAC data directory {basepath} not found."
+            " Set ARTISATOMIC_FAC_PATH to the directory holding the OptimizedFAC_lanthanides* folders."
+        )
+        raise FileNotFoundError(msg)
+
+    for s in basepath.glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
         atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
@@ -239,17 +256,17 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
 
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}{'_calib' if USE_CALIBRATED else ''}"
-    ion_folder = BASEPATH + f"/{ionstr}"
-    levels_file = ion_folder + f"/{ionstr}.lev.asc"
-    lines_file = ion_folder + f"/{ionstr}.tr.asc"
+    ion_folder = get_basepath() / ionstr
+    levels_file = ion_folder / f"{ionstr}.lev.asc"
+    lines_file = ion_folder / f"{ionstr}.tr.asc"
 
     if atomic_number == 92 and ion_stage in {2, 3}:
-        ion_folder = str(
-            Path.home()
-            / f"Google Drive/Shared drives/Atomic Data Group/Paper_Nd_U/FAC/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
-        )
-        levels_file = f"{ion_folder}/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.lev.asc"
-        lines_file = f"{ion_folder}/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.tr.asc"
+        # U II and U III come from a separate convergence study, which sits beside the
+        # OptimizedFAC folders rather than inside them
+        ionstr = f"{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
+        ion_folder = get_basepath().parent.parent / "Paper_Nd_U" / "FAC" / ionstr
+        levels_file = ion_folder / f"{ionstr}.lev.asc"
+        lines_file = ion_folder / f"{ionstr}.tr.asc"
 
     artisatomic.log_and_print(
         flog,
@@ -259,7 +276,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
-    assert Path(levels_file).exists()
+    if not levels_file.is_file():
+        msg = f"FAC levels file {levels_file} not found"
+        raise FileNotFoundError(msg)
     dflevels = GetLevels(filename=levels_file, ionization_energy_in_ev=ionization_energy_in_ev)
 
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
@@ -267,7 +286,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
-    assert Path(lines_file).exists()
+    if not lines_file.is_file():
+        msg = f"FAC transitions file {lines_file} not found"
+        raise FileNotFoundError(msg)
     dflines = GetLines(filename=lines_file)
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map)
