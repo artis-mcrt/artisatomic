@@ -1,7 +1,9 @@
-"""Read levels and transitions from the Lisbon data set. Not currently wired into the dispatch."""
+"""Read levels and transitions from the Lisbon Atomic Group data set (the "lisbon" handler)."""
 
+import os
 import typing as t
 from collections import defaultdict
+from pathlib import Path
 
 import pandas as pd
 
@@ -150,7 +152,11 @@ class TransitionTuple(t.NamedTuple):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    """Read one ion from the Lisbon data set. Not currently wired into the handler dispatch."""
+    """Read one ion from the Lisbon data set.
+
+    The CSV files are not bundled with artisatomic; ARTISATOMIC_LISBON_PATH overrides where they
+    are looked for.
+    """
     ion_charge = ion_stage - 1
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
@@ -160,12 +166,23 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     print(f"Reading Lisbon data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman})")
 
-    LISPATH = "/Users/luke/Dropbox/GitHub/opacities/SystematicCalculations"
+    # the Lisbon CSVs are not part of this repository, so the location is configurable and
+    # checked up front: pandas would otherwise report only the missing file, not what to set
+    lisbonpath = Path(
+        os.environ.get("ARTISATOMIC_LISBON_PATH", Path(__file__).parent.resolve() / ".." / "atomic-data-lisbon")
+    ).resolve()
+    if not lisbonpath.is_dir():
+        msg = (
+            f"Lisbon data directory {lisbonpath} not found. Set ARTISATOMIC_LISBON_PATH to the directory holding the"
+            " per-ion <El>/<El><Stage>/<El><Stage>_Levels.csv and _Transitions.csv files."
+        )
+        raise FileNotFoundError(msg)
 
+    iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     lisbon_data = {
         f"{elsym} {ion_charge}": {
-            "levels": f"{LISPATH}/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Levels.csv",
-            "lines": f"{LISPATH}/{elsym}/{elsym}{ion_stage_roman}/{elsym}{ion_stage_roman}_Transitions.csv",
+            "levels": str(iondir / f"{elsym}{ion_stage_roman}_Levels.csv"),
+            "lines": str(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"),
         }
     }
 
