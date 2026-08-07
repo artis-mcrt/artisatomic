@@ -262,7 +262,12 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
         parser.add_argument(
             "--use_hydrogenic_for_unknown_phixs",
             action="store_true",
-            help="Use hydrogenic cross sections for ions with unknown cross sections",
+            help=(
+                "Estimate hydrogenic cross sections for ions whose handler supplied none at all."
+                " An ion with even one cross section from its data source is left untouched, so"
+                " this never replaces or extends measured data. Excludes the top ion, which has no"
+                " upper ion to photoionise to."
+            ),
         )
 
         parser.set_defaults(**kwargs)
@@ -502,12 +507,15 @@ def read_ion_data(
 
     dfenergylevels = leveltuples_to_pldataframe(energy_levels)
 
+    # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an ion
+    # with even one cross-section table is left alone, so measured data is never replaced. The top
+    # ion is excluded because there is no upper ion for it to photoionise to.
     if (
         not is_top_ion
         and not args.nophixs
         and len(photoionization_crosssections) == 0
         and args.use_hydrogenic_for_unknown_phixs
-    ):  # don't get cross sections for top ion
+    ):
         (
             photoionization_crosssections,
             photoionization_targetfractions,
@@ -623,7 +631,12 @@ def match_hydrogenic_phixs(
 
     Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
     the lowest levels, scaled to that level's own ionisation threshold, with the upper ion's ground
-    state as the only target. Enabled by -use_hydrogenic_for_unknown_phixs.
+    state as the only target. Enabled by --use_hydrogenic_for_unknown_phixs.
+
+    The caller only reaches this for an ion whose handler returned no cross sections at all, so
+    real data is never replaced or extended by an estimate. The granularity is the whole ion: an
+    ion whose handler covered even one level keeps exactly the levels that handler covered, and
+    the rest are left without photoionization rather than filled in hydrogenically.
     """
     dict_get_n_func = {
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
