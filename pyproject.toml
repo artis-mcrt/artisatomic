@@ -225,9 +225,6 @@ local_scheme = "no-local-version"
 [tool.ty.rules]
 unused-ignore-comment = "ignore"
 
-[tool.pytest.ini_options]
-addopts = "--cov=artisatomic --cov-report=xml:coverage.xml --cov-report=term-missing"
-
 [tool.coverage.run]
 source = ["artisatomic"]
 omit = ["artisatomic/test_artisatomic.py"]

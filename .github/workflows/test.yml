@@ -81,7 +81,7 @@ jobs:
               run: source ./setup_cmfgen_data.sh
 
             - name: Test with pytest
-              run: uv run python3 -m pytest
+              run: uv run python3 -m pytest --cov --cov-report=xml:coverage.xml
 
             - name: Upload coverage artifact
               if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
