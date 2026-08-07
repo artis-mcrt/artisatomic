@@ -497,7 +497,7 @@ def read_levels_and_transitions(
                     )
                     sys.exit()
 
-            if line.lstrip().startswith("Oscillator strengths") and len(hillier_energy_levels) > 0:
+            if re.match("^ +Osci(l|ll)ator strengths", line) and len(hillier_energy_levels) > 0:
                 break
 
         artisatomic.log_and_print(flog, f"Read {len(hillier_energy_levels):d} levels")
@@ -505,7 +505,7 @@ def read_levels_and_transitions(
 
         # defined_transition_ids = []
         for line in fhillierosc:
-            if line.startswith("                        Oscillator strengths"):  # only allow one table
+            if re.match("^ +Osci(l|ll)ator strengths", line):  # only allow one table, and account for spelling mistakes
                 break
             linesplitdash = line.split("-")
             row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
@@ -730,7 +730,7 @@ def read_phixs_tables(
 
                 elif crosssectiontype == 2:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(int(float(row[0])))
+                        fitcoefficients.append(int(float(row[0].replace("D", "E"))))
                         if len(fitcoefficients) == 3:
                             n, l_start, l_end = fitcoefficients
                             if l_end > n - 1:
@@ -1294,6 +1294,15 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(line.strip()) == 0:
                 continue  # skip blank lines
 
+            if (
+                header_row != []
+                and temperature_index != -1
+                and num_expected_t_values != -1
+                and re.match(r"^\*+", line.strip())
+            ):
+                print("WARNING: Found line of *'s after reading header, assuming that's the end of the table")
+                break  # Some files have lines of stars at the end, if we see one of these just exit (e.g. Na VI, Ne V)
+
             if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
                 break
 
@@ -1331,11 +1340,11 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
             if len(row) >= 2:
                 row_two_to_end = " ".join(row[1:])
 
-                if row_two_to_end == "!Number of transitions":
+                if row_two_to_end.startswith("!Number of transitions"):
                     number_expected_transitions = int(row[0])
                 elif row_two_to_end.startswith("!Number of T values OMEGA tabulated at"):
                     num_expected_t_values = int(row[0])
-                elif row_two_to_end == "!Scaling factor for OMEGA (non-file values)" and float(row[0]) != 1.0:
+                elif row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)") and float(row[0]) != 1.0:
                     artisatomic.log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
                     sys.exit()
 
@@ -1343,7 +1352,11 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 namefromnameto = "".join(row[:-num_expected_t_values])
                 upsilonvalues = row[-num_expected_t_values:]
 
-                namefrom, nameto = map(str.strip, namefromnameto.split("-"))
+                if "-" in namefromnameto:
+                    namefrom, nameto = map(str.strip, namefromnameto.split("-"))
+                else:
+                    # Assume there is just a space between them
+                    namefrom, nameto = row[:2]
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
