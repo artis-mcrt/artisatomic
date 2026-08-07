@@ -521,8 +521,7 @@ def test_read_coldata_term_to_j_redistribution():
 
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
-    # pyrefly: ignore [unnecessary-type-conversion]
-    assert sum(bool(v > 0.0) for v in upsilondict_fe2.values()) == 10601
+    assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
 
 
 def test_add_handler_if_not_set():
