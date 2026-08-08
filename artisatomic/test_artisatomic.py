@@ -972,6 +972,20 @@ def test_get_level_valence_n():
     # each handler has its own level-name format and parser
     assert readkuruczdata.get_level_valence_n("s5p  3P,enpercm=14276.381,j=0.0") == 5
     assert readtanakajpltdata.get_level_valence_n("2,even,{  4d- 3  4d+ 1  5s+ 1 }") == 5
+
+    # the 2024 Ge-sequence JPLT files append an LS-coupled term string after the configuration
+    assert (
+        readtanakajpltdata.get_level_valence_n(
+            "1,even,3s2_3p6_3d10_4s2_4p2                  3s(2).3p(6).3d(10).4s(2).4p(2)_3P"
+        )
+        == 4
+    )
+    # parent terms may follow a shell ("4p(3)4S") or stand as their own segment ("3P2_3P.7p")
+    assert readtanakajpltdata.get_level_valence_n("6,odd,3s2_3p6_3d10_4s4p3   3s(2).3p(6).3d(10).4s.4p(3)4S_5S") == 4
+    assert (
+        readtanakajpltdata.get_level_valence_n("60,odd,3d(10)1S0.4s(2).4p(6).4d(10)1S0_1S.5s(2).5p(2)3P2_3P.7p_4D") == 7
+    )
+    assert readtanakajpltdata.get_level_valence_n("1,even,5d(10).6s(2).6p(6).7s(2)_1S") == 7
     assert readfloers25data.get_level_valence_n("4f10") == 4
     assert readfloers25data.get_level_valence_n("4f9.6s") == 6
     assert readfloers25data.get_level_valence_n("5s2.5p5") == 5
