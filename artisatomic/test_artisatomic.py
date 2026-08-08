@@ -787,6 +787,46 @@ def test_parent_elevel_zero_normalisation_is_anchored():
     assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
 
 
+def multiply_for_parallel_map(factor: int, value: int) -> int:
+    """Multiply two numbers, at module level so that the "spawn" workers can import it."""
+    return factor * value
+
+
+def test_parallel_map_rejects_arguments_it_cannot_honour():
+    """Iterables of different lengths, and a per-call worker count, are refused rather than obeyed in part."""
+    from artisatomic import parallel_map
+
+    # Executor.map() and thread_map() stop at the shortest iterable while the serial path's
+    # zip(strict=True) raises, so a short one must be caught here rather than quietly costing
+    # the caller the tail of its work on one path and not another.
+    for nitems in (4, 40):  # either side of the serial cutoff
+        with pytest.raises(ValueError, match=r"different lengths"):
+            parallel_map(multiply_for_parallel_map, range(nitems), range(nitems - 1))
+
+    # the pool is shared by the whole run, so this could only ever have applied to the thread path
+    with pytest.raises(TypeError, match=r"max_workers"):
+        parallel_map(multiply_for_parallel_map, range(4), range(4), max_workers=2)
+
+
+def test_parallel_map_matches_starmap_on_both_sides_of_the_serial_cutoff():
+    """The serial shortcut and the pooled path return exactly what itertools.starmap() would."""
+    import itertools
+
+    from artisatomic import parallel_map
+
+    # 4 items takes the serial shortcut, 40 goes to the pool. Both consume two iterables, so
+    # each argument has to reach the right parameter, and both must keep the input order.
+    for nitems in (4, 40):
+        factors = list(range(nitems))
+        values = list(range(100, 100 + nitems))
+        expected = list(itertools.starmap(multiply_for_parallel_map, zip(factors, values, strict=True)))
+
+        assert parallel_map(multiply_for_parallel_map, factors, values) == expected
+
+    # a generator is consumed once and has no length, so it must survive being materialised
+    assert parallel_map(multiply_for_parallel_map, (i for i in range(4)), [2] * 4) == [0, 2, 4, 6]
+
+
 def test_split_element_ionstage_str():
     """'FeII' splits into element and ion stage, including the symbols made only of Roman numeral letters."""
     from artisatomic import split_element_ionstage_str

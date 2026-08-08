@@ -258,36 +258,63 @@ def get_process_pool() -> ProcessPoolExecutor:
 def parallel_map[ResultType](
     fn: Callable[..., ResultType],
     *iterables: Iterable[t.Any],
-    **kwargs: t.Any,
+    chunksize: int | None = None,
+    **tqdm_kwargs: t.Any,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
+    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing.
+
+    Every iterable must be the same length. Executor.map() and thread_map() stop at the shortest,
+    as zip() does, so an accidentally short one would silently drop the tail of the work instead
+    of failing, and the three paths below would not even drop the same items.
+
+    chunksize is a keyword of its own rather than something popped back out of the display
+    options. Everything else is a tqdm option (desc, unit, ...) and reaches the progress bar
+    unchanged on both pooled paths.
+    """
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
     # materialise so the work can be sized: the chunk size and the serial cutoff below both need
     # a length, and the callers pass views and generators
     lists = [list(iterable) for iterable in iterables]
-    nitems = min((len(x) for x in lists), default=0)
+    lengths = [len(x) for x in lists]
+    # not an assert: this decides how much of the work is done, so it must survive python -O
+    if len(set(lengths)) > 1:
+        msg = f"parallel_map() was given iterables of different lengths: {lengths}"
+        raise ValueError(msg)
+    nitems = lengths[0] if lengths else 0
+
+    # the pool is shared by the whole run and is already built by the time a second call reaches
+    # it, so a per-call worker count cannot be honoured. Rejected rather than forwarded, which
+    # applied it on the thread path and raised TqdmKeyError on the process path.
+    if "max_workers" in tqdm_kwargs:
+        msg = "parallel_map() does not take max_workers: the process pool is shared by the whole run"
+        raise TypeError(msg)
 
     # even with the pool already up, handing a handful of items to it costs more in IPC than doing
     # them here (readqubdata reduces four cross-section tables at a time)
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 
-    # without a chunk size, items go to the workers one at a time and the IPC per item costs more
-    # than the work; tqdm warns about it above 1000 items
-    chunksize = kwargs.pop("chunksize", max(1, nitems // (mp.cpu_count() * 4)))
+    if chunksize is None:
+        # without a chunk size, items go to the workers one at a time and the IPC per item costs
+        # more than the work; tqdm warns about it above 1000 items
+        chunksize = max(1, nitems // (mp.cpu_count() * 4))
+
+    # the length is known here, so neither path has to infer the bar's total from its first
+    # iterable, and both show the same one
+    tqdm_kwargs.setdefault("total", nitems)
 
     if use_multiprocessing:
         from tqdm import tqdm
 
         results = list(
-            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, **kwargs)  # ty:ignore[no-matching-overload]
+            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), **tqdm_kwargs)  # ty:ignore[no-matching-overload]
         )
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *lists, chunksize=chunksize, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, **tqdm_kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results
