@@ -258,36 +258,55 @@ def get_process_pool() -> ProcessPoolExecutor:
 def parallel_map[ResultType](
     fn: Callable[..., ResultType],
     *iterables: Iterable[t.Any],
-    **kwargs: t.Any,
+    chunksize: int | None = None,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
+    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing.
+
+    Every iterable must be the same length. Executor.map() and thread_map() stop at the shortest,
+    as zip() does, so an accidentally short one would silently drop the tail of the work instead
+    of failing, and the three paths below would not even drop the same items.
+
+    The keywords above are all there are. thread_map() absorbs a dozen more that shape the pool
+    it builds (max_workers, timeout, mp_context, ...), none of which the run-wide pool from
+    get_process_pool() can honour, and which tqdm() on the other path rejects: forwarding them
+    would apply the caller's intent on a free-threading build and raise on a stock one.
+    """
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
     # materialise so the work can be sized: the chunk size and the serial cutoff below both need
     # a length, and the callers pass views and generators
     lists = [list(iterable) for iterable in iterables]
-    nitems = min((len(x) for x in lists), default=0)
+    lengths = [len(x) for x in lists]
+    # not an assert: this decides how much of the work is done, so it must survive python -O
+    if len(set(lengths)) > 1:
+        msg = f"parallel_map() was given iterables of different lengths: {lengths}"
+        raise ValueError(msg)
+    nitems = lengths[0] if lengths else 0
 
     # even with the pool already up, handing a handful of items to it costs more in IPC than doing
     # them here (readqubdata reduces four cross-section tables at a time)
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 
-    # without a chunk size, items go to the workers one at a time and the IPC per item costs more
-    # than the work; tqdm warns about it above 1000 items
-    chunksize = kwargs.pop("chunksize", max(1, nitems // (mp.cpu_count() * 4)))
+    if chunksize is None:
+        # without a chunk size, items go to the workers one at a time and the IPC per item costs
+        # more than the work; tqdm warns about it above 1000 items
+        chunksize = max(1, nitems // (mp.cpu_count() * 4))
 
+    # disable=None means "disable on non-TTY": the bar is for someone watching a build, and it
+    # redraws by carriage return, so a redirected run or a CI capture got a line of half-drawn
+    # bars interleaved with the real output for every call. thread_map() forwards this to tqdm.
     if use_multiprocessing:
         from tqdm import tqdm
 
         results = list(
-            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, **kwargs)  # ty:ignore[no-matching-overload]
+            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, disable=None)  # ty:ignore[no-matching-overload]
         )
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *lists, chunksize=chunksize, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results

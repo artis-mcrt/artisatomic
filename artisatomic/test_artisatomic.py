@@ -2,6 +2,7 @@
 """Tests for the artisatomic readers, parsers and output writers."""
 
 import io
+import operator
 import typing as t
 
 import numpy as np
@@ -785,6 +786,35 @@ def test_parent_elevel_zero_normalisation_is_anchored():
     # the ground state, however it is spelled, collapses to one group; nothing else moves
     assert normalised == ["0", "0", "10.05", "100.0", "1234.5", "0.05"]
     assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
+
+
+def test_parallel_map_rejects_iterables_of_different_lengths():
+    """A short iterable is refused, whichever path the call would otherwise have taken."""
+    from artisatomic import parallel_map
+
+    # Executor.map() and thread_map() stop at the shortest iterable while the serial shortcut's
+    # zip(strict=True) raises, so the check has to happen before the path is chosen. 4 items takes
+    # the shortcut and 40 the pool, and neither may quietly do less work than it was asked for.
+    for nitems in (4, 40):
+        with pytest.raises(ValueError, match=r"different lengths"):
+            parallel_map(operator.sub, range(nitems), range(nitems - 1))
+
+
+def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
+    """Both paths apply fn to one item of each iterable, in the order they were given."""
+    from artisatomic import parallel_map
+
+    # 4 items takes the serial shortcut, 40 goes to the pool. Subtraction does not commute, so
+    # the results also pin which iterable reaches which parameter.
+    for nitems in (4, 40):
+        minuends = list(range(nitems))
+        subtrahends = list(range(100, 100 + nitems))
+        expected = [minuend - subtrahend for minuend, subtrahend in zip(minuends, subtrahends, strict=True)]
+
+        assert parallel_map(operator.sub, minuends, subtrahends) == expected
+
+    # a generator is consumed once and has no length, so it must survive being materialised
+    assert parallel_map(operator.sub, (i for i in range(4)), [1] * 4) == [-1, 0, 1, 2]
 
 
 def test_split_element_ionstage_str():
