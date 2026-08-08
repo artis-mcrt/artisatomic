@@ -110,6 +110,7 @@ jobs:
                   file: coverage.xml
                   language: Python
                   label: code-coverage-agent
+                  fail-on-error: false
 
     tests:
         strategy:
