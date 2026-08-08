@@ -294,16 +294,19 @@ def parallel_map[ResultType](
         # more than the work; tqdm warns about it above 1000 items
         chunksize = max(1, nitems // (mp.cpu_count() * 4))
 
+    # disable=None means "disable on non-TTY": the bar is for someone watching a build, and it
+    # redraws by carriage return, so a redirected run or a CI capture got a line of half-drawn
+    # bars interleaved with the real output for every call. thread_map() forwards this to tqdm.
     if use_multiprocessing:
         from tqdm import tqdm
 
         results = list(
-            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems)  # ty:ignore[no-matching-overload]
+            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, disable=None)  # ty:ignore[no-matching-overload]
         )
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results
