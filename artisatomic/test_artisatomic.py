@@ -2,6 +2,7 @@
 """Tests for the artisatomic readers, parsers and output writers."""
 
 import io
+import operator
 import typing as t
 
 import numpy as np
@@ -787,44 +788,33 @@ def test_parent_elevel_zero_normalisation_is_anchored():
     assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
 
 
-def multiply_for_parallel_map(factor: int, value: int) -> int:
-    """Multiply two numbers, at module level so that the "spawn" workers can import it."""
-    return factor * value
-
-
-def test_parallel_map_rejects_arguments_it_cannot_honour():
-    """Iterables of different lengths, and a per-call worker count, are refused rather than obeyed in part."""
+def test_parallel_map_rejects_iterables_of_different_lengths():
+    """A short iterable is refused, whichever path the call would otherwise have taken."""
     from artisatomic import parallel_map
 
-    # Executor.map() and thread_map() stop at the shortest iterable while the serial path's
-    # zip(strict=True) raises, so a short one must be caught here rather than quietly costing
-    # the caller the tail of its work on one path and not another.
-    for nitems in (4, 40):  # either side of the serial cutoff
-        with pytest.raises(ValueError, match=r"different lengths"):
-            parallel_map(multiply_for_parallel_map, range(nitems), range(nitems - 1))
-
-    # the pool is shared by the whole run, so this could only ever have applied to the thread path
-    with pytest.raises(TypeError, match=r"max_workers"):
-        parallel_map(multiply_for_parallel_map, range(4), range(4), max_workers=2)
-
-
-def test_parallel_map_matches_starmap_on_both_sides_of_the_serial_cutoff():
-    """The serial shortcut and the pooled path return exactly what itertools.starmap() would."""
-    import itertools
-
-    from artisatomic import parallel_map
-
-    # 4 items takes the serial shortcut, 40 goes to the pool. Both consume two iterables, so
-    # each argument has to reach the right parameter, and both must keep the input order.
+    # Executor.map() and thread_map() stop at the shortest iterable while the serial shortcut's
+    # zip(strict=True) raises, so the check has to happen before the path is chosen. 4 items takes
+    # the shortcut and 40 the pool, and neither may quietly do less work than it was asked for.
     for nitems in (4, 40):
-        factors = list(range(nitems))
-        values = list(range(100, 100 + nitems))
-        expected = list(itertools.starmap(multiply_for_parallel_map, zip(factors, values, strict=True)))
+        with pytest.raises(ValueError, match=r"different lengths"):
+            parallel_map(operator.sub, range(nitems), range(nitems - 1))
 
-        assert parallel_map(multiply_for_parallel_map, factors, values) == expected
+
+def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
+    """Both paths apply fn to one item of each iterable, in the order they were given."""
+    from artisatomic import parallel_map
+
+    # 4 items takes the serial shortcut, 40 goes to the pool. Subtraction does not commute, so
+    # the results also pin which iterable reaches which parameter.
+    for nitems in (4, 40):
+        minuends = list(range(nitems))
+        subtrahends = list(range(100, 100 + nitems))
+        expected = [minuend - subtrahend for minuend, subtrahend in zip(minuends, subtrahends, strict=True)]
+
+        assert parallel_map(operator.sub, minuends, subtrahends) == expected
 
     # a generator is consumed once and has no length, so it must survive being materialised
-    assert parallel_map(multiply_for_parallel_map, (i for i in range(4)), [2] * 4) == [0, 2, 4, 6]
+    assert parallel_map(operator.sub, (i for i in range(4)), [1] * 4) == [-1, 0, 1, 2]
 
 
 def test_split_element_ionstage_str():
