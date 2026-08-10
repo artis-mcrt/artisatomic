@@ -84,21 +84,14 @@ ions_data = {
     (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
     (2, 2): IonFiles("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
     # C
-    (6, 1): IonFiles("12dec04", "ci_split_osc", ["phot_smooth_50"], "cicol.dat"),
-    # (6, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (6, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (6, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (6, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (6, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (6, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # N
-    (7, 1): IonFiles(
-        "19apr23",
-        "osc_data",
-        # ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], # Including all phot_data_* fails, they all have the same configurations and are counted as duplicates  # ruff: ignore[commented-out-code]
-        ["phot_data_A"],
-        "col_data",
-    ),
+    (7, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], "col_data"),
     # N II, III, IV have phot_data_B which breaks things, same issue as for N I
     (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
@@ -106,11 +99,11 @@ ions_data = {
     (7, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (7, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (7, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # O O I, IV have  phot_data_B, same issue as for N I
-    (8, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # O
+    (8, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
     (8, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (8, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
     (8, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (8, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (8, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
