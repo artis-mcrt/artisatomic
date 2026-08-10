@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
+"""Read levels, transitions and collision strengths from the QUB (Queen's University Belfast) data."""
+
 import os
+import string
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from pathlib import Path
 
 import numpy as np
@@ -11,6 +13,8 @@ import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
+from artisatomic.levelnames import lchars
 
 tyndall_co3_path = (
     Path(__file__).parent.resolve()
@@ -19,15 +23,26 @@ tyndall_co3_path = (
     / ("co_tyndall_test_sample" if os.environ.get("ARTISATOMIC_TESTMODE") == "1" else "co_tyndall")
 ).resolve()
 
-ryd_to_ev = 13.605693122994232
 
-hc_in_ev_cm = 0.0001239841984332003
-hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
+class QUBTransitionRow(t.NamedTuple):
+    """One QUB bound-bound transition.
+
+    nameto is the UPPER level's name and namefrom the LOWER level's, matching the columns
+    add_level_ids_forbidden() joins on to recover upperlevel and lowerlevel.
+    """
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+    nameto: str
+    namefrom: str
+    lambdaangstrom: float
+    coll_str: float
 
 
 class QUBEnergyLevel(t.NamedTuple):
+    """One energy level of a QUB calculation."""
+
     levelname: str
     qub_id: int
     twosplusone: int
@@ -41,7 +56,13 @@ class QUBEnergyLevel(t.NamedTuple):
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
 
 
+def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
+    """Whether a transition between two levels is forbidden, i.e. they have the same parity."""
+    return levela.parity == levelb.parity
+
+
 def extend_ion_list(ion_handlers):
+    """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler."""
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
         ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
@@ -52,6 +73,13 @@ def extend_ion_list(ion_handlers):
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float]]:
+    """Read levels and effective collision strengths from an ADAS adf04 file.
+
+    Returns the ionization energy in eV, the levels, and a dict of upsilon values keyed by a
+    (lower, upper) pair of zero-based level ids. The file numbers levels from one, and the rest
+    of the code looks up id n at list index n - 1, so the level ids are validated as contiguous
+    and 1-based. Collision strengths are taken at one temperature, chosen per element.
+    """
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
@@ -118,10 +146,9 @@ def read_adf04(
             energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
             energylevels.append(energylevel)
 
-            # the transition and upsilon tables index levels by this 1-based id, and the rest of
-            # the code looks up id n at list index n - 1, so a non-contiguous or non-1-based file
-            # would silently attach every transition to the wrong level. Not an assert: this
-            # validates an input file and must not disappear under python -O.
+            # the transition and upsilon tables use these 1-based ids and the rest of the code
+            # looks up id n at index n - 1, so a non-contiguous file would misattach every
+            # transition. Not an assert: input validation must survive python -O.
             if energylevel.qub_id != len(energylevels):
                 msg = (
                     f"adf04 level id {energylevel.qub_id} found at position {len(energylevels)} in {filepath}."
@@ -131,9 +158,8 @@ def read_adf04(
 
         upsilonheader = fleveltrans.readline().split()
         list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
-        # each collision row is: upper, lower, A-value, one upsilon per temperature, and finally
-        # the infinite-energy (Born) limit. Name that last column so the row width matches and
-        # pandas does not silently drop a column to make the data fit the header.
+        # each collision row is upper, lower, A-value, one upsilon per temperature, then the
+        # infinite-energy (Born) limit. Name that last column so pandas does not drop one to fit.
         list_headers = ["upper", "lower", "avalue", *list_tempheaders, "born_limit"]
         qubupsilondf_alltemps = pd.read_csv(
             fleveltrans,
@@ -185,10 +211,12 @@ def read_adf04(
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
-    qub_transition_row = namedtuple(
-        "qub_transition_row", "lowerlevel upperlevel A nameto namefrom lambdaangstrom coll_str"
-    )
+    """Read one ion from the QUB calculations.
 
+    Covers both the newer per-ion adf04 calculations and the older Co II/III/IV data sets, which
+    have their own file layouts. Also returns the effective collision strengths, so this reader
+    supplies an upsilondict where most others leave it to be filled in elsewhere.
+    """
     new_qub_calculations = {
         (38, 1),
         (38, 2),
@@ -242,99 +270,118 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     id_upper -= 1
                     level_upper = qub_energylevels[id_upper]
                     level_lower = qub_energylevels[id_lower]
-                    namefrom = level_upper.levelname
-                    nameto = level_lower.levelname
+                    levelname_upper = level_upper.levelname
+                    levelname_lower = level_lower.levelname
                     # WARNING replace with correct selection rules!
                     forbidden = level_upper.parity == level_lower.parity
-                    transition_count_of_level_name[namefrom] += 1
-                    transition_count_of_level_name[nameto] += 1
+                    transition_count_of_level_name[levelname_upper] += 1
+                    transition_count_of_level_name[levelname_lower] += 1
                     delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
                     lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
                     if (id_lower, id_upper) in upsilondict:
-                        coll_str = upsilondict[(id_lower, id_upper)]
+                        coll_str = upsilondict[id_lower, id_upper]
                     elif forbidden:
                         coll_str = -2.0
                     else:
                         coll_str = -1.0
-                    transition = qub_transition_row(id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str)
+                    transition = QUBTransitionRow(
+                        lowerlevel=id_lower,
+                        upperlevel=id_upper,
+                        A=A,
+                        nameto=levelname_upper,
+                        namefrom=levelname_lower,
+                        lambdaangstrom=lamdaangstrom,
+                        coll_str=coll_str,
+                    )
                     qub_transitions.append(transition)
 
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
-        qub_transitions = pl.DataFrame(schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
+        qub_transitions = pl.DataFrame(schema=artisatomic.empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
-        atom_file = f"{atomic_number}_{ion_stage}.adf04"
-        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(
-            Path("atomic-data-qub", atom_file), atomic_number, ion_stage, flog
-        )
+        atom_filepath = Path("atomic-data-qub", f"{atomic_number}_{ion_stage}.adf04")
+        ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(atom_filepath, atomic_number, ion_stage, flog)
 
         qub_transitions = []
         transition_count_of_level_name = defaultdict(int)
-        with open(Path("atomic-data-qub", atom_file)) as ftrans:
-            ftrans.seek(0)
-            atom_group_note = False
-            longest_line_length = 0
-            # Use the length of lines to locate collision strengths
-            # Ignoring notes section between C- markers
-            for line in ftrans:
-                if line.startswith("C-"):
-                    atom_group_note = not atom_group_note
-                    continue
-                if atom_group_note:
-                    continue
-                longest_line_length = max(longest_line_length, len(line))
-            ftrans.seek(0)
-            for line in ftrans:
-                if line.startswith("C-"):
-                    atom_group_note = not atom_group_note
-                    continue
-                if atom_group_note:
-                    continue
+        # two passes are needed (collision strengths are found by line length, known only after
+        # seeing every line), so read the lines once: a decompressing stream may not seek back
+        with artisatomic.xopen_check_extension(atom_filepath) as ftrans:
+            translines = ftrans.readlines()
 
-                rowlen = line
-                row = line.split()
+        atom_group_note = False
+        longest_line_length = 0
+        # Use the length of lines to locate collision strengths
+        # Ignoring notes section between C- markers
+        for line in translines:
+            if line.startswith("C-"):
+                atom_group_note = not atom_group_note
+                continue
+            if atom_group_note:
+                continue
+            longest_line_length = max(longest_line_length, len(line))
 
-                if len(rowlen) == longest_line_length:
-                    # W II file has the first two columns swapped around from the standard order
-                    if atomic_number == 74 and ion_stage == 2:
-                        id_upper = int(row[1])
-                        id_lower = int(row[0])
-                    else:
-                        id_upper = int(row[0])
-                        id_lower = int(row[1])
-                    A = float(row[2].replace("-", "E-").replace("+", "E+"))
-                    if A > 2e-30:
-                        # a raise rather than an assert: this validates an input file, and a
-                        # non-positive id would otherwise wrap to the wrong level via negative indexing
-                        if id_lower < 1 or id_upper < 1:
-                            msg = f"non-positive transition level ids {id_lower}, {id_upper} in {atom_file}"
-                            raise ValueError(msg)
-                        # the file numbers levels from one; level ids are zero-based in memory
-                        id_lower -= 1
-                        id_upper -= 1
-                        level_upper = qub_energylevels[id_upper]
-                        level_lower = qub_energylevels[id_lower]
-                        namefrom = level_upper.levelname
-                        nameto = level_lower.levelname
-                        forbidden = artisatomic.check_forbidden(level_upper, level_lower)
-                        transition_count_of_level_name[namefrom] += 1
-                        transition_count_of_level_name[nameto] += 1
-                        delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
-                        lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
-                        if (id_lower, id_upper) in upsilondict:
-                            coll_str = upsilondict[(id_lower, id_upper)]
-                        elif forbidden:
-                            coll_str = -2.0
-                        else:
-                            coll_str = -1.0
-                        transition = qub_transition_row(
-                            id_lower, id_upper, A, namefrom, nameto, lamdaangstrom, coll_str
+        for line in translines:
+            if line.startswith("C-"):
+                atom_group_note = not atom_group_note
+                continue
+            if atom_group_note:
+                continue
+
+            rowlen = line
+            row = line.split()
+
+            if len(rowlen) == longest_line_length:
+                # W II file has the first two columns swapped around from the standard order
+                if atomic_number == 74 and ion_stage == 2:
+                    id_upper = int(row[1])
+                    id_lower = int(row[0])
+                else:
+                    id_upper = int(row[0])
+                    id_lower = int(row[1])
+                A = float(row[2].replace("-", "E-").replace("+", "E+"))
+                if A > 2e-30:
+                    # a raise rather than an assert: this validates an input file. A non-positive
+                    # id would wrap to the wrong level via negative indexing, and one past the end
+                    # would raise a bare IndexError naming neither the file nor the transition.
+                    if not 1 <= id_lower <= len(qub_energylevels) or not 1 <= id_upper <= len(qub_energylevels):
+                        msg = (
+                            f"transition level ids {id_lower}, {id_upper} in {atom_filepath} are outside"
+                            f" the file's {len(qub_energylevels)} levels"
                         )
-                        qub_transitions.append(transition)
+                        raise ValueError(msg)
+                    # the file numbers levels from one; level ids are zero-based in memory
+                    id_lower -= 1
+                    id_upper -= 1
+                    level_upper = qub_energylevels[id_upper]
+                    level_lower = qub_energylevels[id_lower]
+                    levelname_upper = level_upper.levelname
+                    levelname_lower = level_lower.levelname
+                    forbidden = check_forbidden(level_upper, level_lower)
+                    transition_count_of_level_name[levelname_upper] += 1
+                    transition_count_of_level_name[levelname_lower] += 1
+                    delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
+                    lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
+                    if (id_lower, id_upper) in upsilondict:
+                        coll_str = upsilondict[id_lower, id_upper]
+                    elif forbidden:
+                        coll_str = -2.0
+                    else:
+                        coll_str = -1.0
+                    transition = QUBTransitionRow(
+                        lowerlevel=id_lower,
+                        upperlevel=id_upper,
+                        A=A,
+                        nameto=levelname_upper,
+                        namefrom=levelname_lower,
+                        lambdaangstrom=lamdaangstrom,
+                        coll_str=coll_str,
+                    )
+                    qub_transitions.append(transition)
 
     else:
         msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage}"
@@ -346,12 +393,18 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
 
 def read_qub_photoionizations(
-    atomic_number, ion_stage, energy_levels, args, flog
+    atomic_number, ion_stage, levelcount: int, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
+    """Read QUB photoionization cross sections for one ion, downsampled onto the output grid.
+
+    Returns the cross sections, the upper-ion target fractions per level, and the threshold
+    energies, all indexed by zero-based level id. Levels with no data keep an empty target list,
+    which is how write_phixs_data() knows to skip them.
+    """
+    photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
-    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in energy_levels]
-    photoionization_thresholds_ev = np.zeros(len(energy_levels))
+    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
+    photoionization_thresholds_ev = np.full(levelcount, np.nan)
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in range(8):
@@ -518,10 +571,9 @@ def read_qub_photoionizations(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
 
-        # Unlike the Co II branch above, every level is deliberately given a phixs entry: levels
-        # of the ground quartet get the tabulated cross section, and all higher levels get an
-        # explicit all-zero table (no photoionization) rather than being omitted from the output.
-        for levelid in range(len(energy_levels)):
+        # unlike the Co II branch above, every level deliberately gets a phixs entry: the ground
+        # quartet gets the tabulated cross section and higher levels an explicit all-zero table
+        for levelid in range(levelcount):
             photoionization_thresholds_ev[levelid] = -1.0
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
             if levelid < 4:
@@ -531,6 +583,14 @@ def read_qub_photoionizations(
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a QUB level name.
+
+    Falls back to n=1 with a warning when the name cannot be parsed, since a missing n only
+    affects the hydrogenic photoionisation estimate rather than the level itself.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     namesplit = levelname.split("_")
     part = namesplit[0].strip()
     if len(namesplit) < 2:
@@ -545,7 +605,7 @@ def get_level_valence_n(levelname: str):
         if not part[-1].isdigit():
             print(f"WARNING: Could not find n in {levelname}. Using n=1")
             return 1
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     part = part.strip(lchars.lower())
 
     valance_n = None

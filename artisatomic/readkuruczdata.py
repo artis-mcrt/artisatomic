@@ -1,5 +1,8 @@
+"""Read levels and transitions from the Kurucz gfall line lists."""
+
 import os
 import re
+import string
 import typing as t
 from pathlib import Path
 
@@ -10,10 +13,17 @@ import artisatomic
 
 kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
 if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
-    kuruczdatapath = kuruczdatapath / "test_sample"
+    kuruczdatapath /= "test_sample"
 
 
 def parse_gfall(fname: str) -> pl.LazyFrame:
+    """Parse one Kurucz gfall line list into a frame of transitions with their two levels.
+
+    Each gfall row is a transition carrying both of its levels inline, in a fixed-width Fortran
+    format. The two levels are ordered into lower/upper by energy here, since the file lists
+    them in an arbitrary order. A negative energy in the file means a predicted (rather than
+    measured) level, which is recorded in a "theoretical" flag and the magnitude kept.
+    """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
     gfall_fortran_format = (
@@ -126,12 +136,18 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
     )
     if gfall.select(pl.n_unique("z_dot_ioncharge")).collect().item() != 1:
-        raise ValueError(f"Expected exactly one unique ion in file {fname}, but found multiple")
+        msg = f"Expected exactly one unique ion in file {fname}, but found multiple"
+        raise ValueError(msg)
 
     return gfall
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
+    """Locate one ion's Kurucz line list, trying the extendedatoms and zztar layouts.
+
+    Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
+    has no data for it.
+    """
     extended_atoms_filenames = [
         f"gf{atomic_number:02d}{ion_charge:02d}.lines.zst",
         f"gf{atomic_number:02d}{ion_charge:02d}.lines",
@@ -148,12 +164,19 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
         if path_gfall.is_file():
             return path_gfall
 
-    raise FileNotFoundError(f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}.")
+    msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
+    raise FileNotFoundError(msg)
 
 
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, dict[str, int]]:
+    """Read one ion from the Kurucz line lists.
+
+    The files are transition lists rather than level lists, so the levels are recovered by
+    taking the distinct lower and upper levels of every transition. The ionization energy comes
+    from NIST rather than the file.
+    """
     ion_charge = ion_stage - 1
 
     artisatomic.log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
@@ -254,13 +277,21 @@ def read_levels_and_transitions(
     }
     artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions, transition_count_of_level_name
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a Kurucz level label.
+
+    Falls back to n=1 with a warning when the label cannot be parsed, since a missing n only
+    affects the hydrogenic photoionisation estimate rather than the level itself.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
         print(f"WARNING: Could not find n in {levelname}. Using n=1")
@@ -272,7 +303,7 @@ def get_level_valence_n(levelname: str):
         if not part[-1].isdigit():
             print(f"WARNING: Could not find n in {levelname}. Using n=1")
             return 1
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     part = part.strip("spdfghijklmnopqr")
 
     # inefficient way to find the last number in a string

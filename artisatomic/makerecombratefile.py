@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-# import itertools
+"""Write recombrates.txt from the Nahar total recombination rate files."""
+
 import glob
+import string
 import sys
-from collections import namedtuple
+import typing as t
 from pathlib import Path
 
 import ChiantiPy.core as ch  # pyright: ignore[reportMissingTypeStubs]
@@ -12,12 +14,21 @@ from artistools import get_composition_data
 from artistools import get_elsymbolslist
 
 
+class RecombRow(t.NamedTuple):
+    """One row of a Nahar .rrc total recombination rate table."""
+
+    logT: float  # ruff: ignore[mixed-case-variable-in-class-scope]  # the field name is the DataFrame column read back below
+    RRC_low_n: float
+    RRC_total: float
+
+
 def read_nahar_rrcfile(filename, noprint=False):
+    """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
     if not noprint:
         print(f"  reading {filename}")
 
     header_row: list[str] = []
-    with open(filename) as filein:
+    with Path(filename).open(encoding="utf-8") as filein:
         while True:
             line = filein.readline()
             if not line:  # end of file, otherwise a file without the marker would loop forever
@@ -36,7 +47,6 @@ def read_nahar_rrcfile(filename, noprint=False):
         index_low_n = header_row.index("RRC(low-n)")
         index_tot = header_row.index("RRC(total)")
 
-        recomb_tuple = namedtuple("recomb_tuple", ["logT", "RRC_low_n", "RRC_total"])
         records = []
         for line in filein:
             if row := line.split():
@@ -45,12 +55,13 @@ def read_nahar_rrcfile(filename, noprint=False):
                     print(header_row)
                     print(row)
                     sys.exit()
-                records.append(recomb_tuple(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
+                records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
     return pd.DataFrame(records)
 
 
 def main():
+    """Write recombrates.txt from the Nahar recombination rate files."""
     # Shull & Steenberg 1982
     A_rad: dict[tuple[int, int], float] = {}
     X_rad: dict[tuple[int, int], float] = {}
@@ -71,7 +82,7 @@ def main():
     artis_files_path = Path(__file__).parent.parent.absolute() / "artis_files"
     dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
-    with open(artis_files_path / "recombrates.txt", mode="w", encoding="utf-8") as frecombrates:
+    with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
         for Z, lowermost_ion_stage, uppermost_ion_stage in dfcomposition.select(
             "Z", "lowermost_ion_stage", "uppermost_ion_stage"
         ).iter_rows():
@@ -80,20 +91,12 @@ def main():
                 upperionstage = lowerionstage + 1
                 print(f"Z={atomic_number} {get_elsymbolslist()[atomic_number]} {upperionstage}->{lowerionstage}")
 
-                # if atomic_number == 28:  # Pure Shull & Steenberg 1982
-                #     arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                #     frecombrates.write(f'{atomic_number} {upperionstage} {len(arr_logT_e)}\n')
-                #     for logT_e in arr_logT_e:
-                #         T_e = 10 ** logT_e
-                #         rrc = A_rad[atomic_number, lowerionstage] * (T_e / 1e4) ** - X_rad[atomic_number, lowerionstage]
-                #         frecombrates.write(f"{logT_e:.1f} {-1.0} {rrc}\n")
-
                 if rrcfiles := glob.glob(
                     f"atomic-data-nahar/{get_elsymbolslist()[atomic_number].lower()}{lowerionstage}.rrc*.txt"
                 ):  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
                     ionstr = Path(naharfilename).name.split(".")[0]  # should be something like 'fe2'
-                    elsymbol = ionstr.rstrip("0123456789")
+                    elsymbol = ionstr.rstrip(string.digits)
                     lowerionstage = int(ionstr[len(elsymbol) :])
                     upperionstage = lowerionstage + 1
                     atomic_number = get_elsymbolslist().index(elsymbol.title())
@@ -102,21 +105,6 @@ def main():
                     frecombrates.writelines(
                         f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n" for _, row in dfrecombrates.iterrows()
                     )
-
-                # elif atomic_number == 28 and lowerionstage >= 3:
-                #     # Get Nahar's boost factors relative to SS82 for Fe, and apply them to the SS82 rates for Ni
-                #     rrcfiles = glob.glob(
-                #         f'atomic-data-nahar/fe{lowerionstage - 2}.rrc*.txt')
-                #     dfrecombrates = read_nahar_rrcfile(rrcfiles[0], noprint=True)
-                #     frecombrates.write(f'{atomic_number} {upperionstage} {len(dfrecombrates)}\n')
-                #     for _, row in dfrecombrates.iterrows():
-                #         T_e = 10 ** row['logT']
-                #         rrc_fe_ss82 = A_rad[26, lowerionstage - 2] * (T_e / 1e4) ** - X_rad[26, lowerionstage - 2]
-                #         rrc_ni_ss82 = A_rad[28, lowerionstage] * (T_e / 1e4) ** - X_rad[28, lowerionstage]
-                #         rrc_total = rrc_ni_ss82 * (row['RRC_total'] / rrc_fe_ss82)
-                #         print(f"Log T {row['logT']} Nahar/SS1982 boost factor: {(row['RRC_total'] / rrc_fe_ss82)}")
-                #         frecombrates.write(f"{row['logT']} {-1.0} {rrc_total}\n")
-
                 else:  # use Chianti with ChiantiPy
                     print("  using Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
@@ -129,9 +117,8 @@ def main():
                     arr_rrc = ion.RrRate["rate"]
                     ion.drRate()
                     arr_drc = ion.DrRate["rate"]
-                    # the third column is the total recombination rate, matching the RRC(total)
-                    # column used for the Nahar files above, so dielectronic recombination must be
-                    # included rather than computed and discarded
+                    # the third column is the total recombination rate, matching RRC(total) used
+                    # for the Nahar files above, so dielectronic recombination must be included
                     frecombrates.writelines(
                         f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
                     )

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Tests for the artisatomic readers, parsers and output writers."""
+
 import io
 import typing as t
 
@@ -7,39 +9,35 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
-from artisatomic import get_default_handler
-from artisatomic import get_term_as_tuple
+from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
-from artisatomic import interpret_parent_term
+from artisatomic import leveltuples_to_pldataframe
+from artisatomic import match_hydrogenic_phixs
 from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
-from artisatomic import readnahardata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic import reduce_configuration
 from artisatomic import reduce_phixs_tables_worker
-from artisatomic import score_config_match
-
-
-def test_reduce_configuration():
-    assert reduce_configuration("3d64s  (6D ) 8p  j5Fo") == "3d64s8p_5Fo"
-    assert reduce_configuration("3d6_3P2e") == "3d6_3Pe"
+from artisatomic import write_adata
+from artisatomic import write_phixs_data
 
 
 def test_interpret_term():
-    assert get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
-    assert get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
+    """LS terms are read from level names, reporting unknown rather than raising on unreadable ones."""
+    assert readhillierdata.get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
+    assert readhillierdata.get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
     # names with no L character must report "unknown" rather than raising UnboundLocalError
     for unreadable in ("e2x", "o12", "3d5", "12"):
-        assert get_term_as_tuple(unreadable) == (-1, -1, -1)
+        assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
 
 def test_get_parity_from_config():
+    """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
     from artisatomic import get_parity_from_config
 
     # sum of l over the occupied orbitals, mod 2
@@ -55,13 +53,15 @@ def test_get_parity_from_config():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
-
-def test_interpret_parent_term():
-    assert interpret_parent_term("(3P2)") == (3, 1, 2)
-    assert interpret_parent_term("(b2D)") == (2, 2, -1)
+    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
+    # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
+    # the real orbitals decide the parity.
+    assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
+    assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
 
 def test_interpret_configuration():
+    """Level names split into orbitals and term, including the ambiguous two-digit n and occupation cases."""
     assert interpret_configuration("3d7(4F)6d_5Pbe") == (["3d7", "(4F)", "6d"], 5, 1, 2, -1)
     assert interpret_configuration("3d6(5D)6d4Ge[9/2]") == (["3d6", "(5D)", "6d"], 4, 4, 0, -1)
     assert interpret_configuration("3d6(3G)4s4p_w5Go[4]") == (["3d6", "(3G)", "4s", "4p"], 5, 4, 1, 4)
@@ -95,25 +95,8 @@ def test_interpret_configuration():
     assert interpret_configuration("4f145d106s2_1Se") == (["4f14", "5d10", "6s2"], 1, 0, 0, -1)
 
 
-def test_score_config_match():
-    assert score_config_match("3d64s  (4P ) 4p  w5Do", "3d6(3P)4s4p_w5Do[4]") == 100
-    match1 = score_config_match("3d64s  (6D ) 5g  i5F ", "3d6(5D)4s5g_5Fe[4]")
-    assert match1 >= 49
-    assert score_config_match("3d64s  (6D ) 5g  (1S) i5F ", "3d6(5D)4s5g_5Fe[4]") == match1
-    assert score_config_match("3d6    (5D ) 6s  e6D ", "3d6(5D)6se6De[9/2]") > score_config_match(
-        "3d6    (5D ) 6s  e6D ", "3d6(5D)5s6De[9/2]"
-    )
-
-    assert score_config_match("Eqv st (0S ) 0s  a4P", "3d5_4Pe[4]") == 5
-    assert score_config_match("3d6    (5D ) 0s  b2F ", "3d7b2Fe") >= 12
-    assert score_config_match("3d5    (2D ) 4p  v3Po", "3d5(b2D)4p_3Po") == 98
-
-    # closed d shells must score the same as any other configuration: if '3d104s2' is misparsed
-    # as 3d1 + 04s2 then the 4s2 piece stops matching and the score halves
-    assert score_config_match("3d104s2_1Se", "3d10(1S)4s2_1Se") == score_config_match("3d64s2_5De", "3d6(5D)4s2_5De")
-
-
 def test_hydrogenic_phixs():
+    """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
     ryd_to_ev = rhd.ryd_to_ev
 
     rhd.read_hyd_phixsdata()
@@ -173,10 +156,10 @@ def test_hydrogenic_nl_phixs_offset_type8():
           SUM=SUM/ZION/ZION
           PHOT(I)=PHOT(I) + SUM/((LEND-LST+1)*(LEND+LST+1))
     """
+    from artisatomic.base import h_in_ev_seconds
 
     rhd.read_hyd_phixsdata()
 
-    h_in_ev_seconds = rhd.h_in_ev_seconds
     ryd_to_ev = rhd.ryd_to_ev
 
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
@@ -196,11 +179,11 @@ def test_hydrogenic_nl_phixs_offset_type8():
     assert np.all(phixstable[~below_offset_edge, 1] > 0.0)
 
     # independent reimplementation of the CMFGEN branch
-    grid = rhd.hyd_phixs_energygrid_ryd[(n, l_start)]
+    grid = rhd.hyd_phixs_energygrid_ryd[n, l_start]
     u_grid = grid / grid[0]  # not in-place: the module-global table must stay untouched
     sigma_table = np.zeros(len(u_grid))
     for l in range(l_start, l_end + 1):
-        sigma_table += (2 * l + 1) * rhd.hyd_phixs[(n, l)]
+        sigma_table += (2 * l + 1) * rhd.hyd_phixs[n, l]
 
     for index, en_ev in enumerate(energy_ev):
         if en_ev < threshold_ev + e_o_ev:
@@ -237,9 +220,8 @@ def test_hydrogenic_phixs_effective_charge_scaling():
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
-            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and the gaunt factor at
-            # threshold depends only on n, so the ratio to the n=1 value is exactly n / Z**2
-            # once the n-dependence of g_bf is divided out by comparing at the same n.
+            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
+            # depends only on n, so comparing at the same n leaves a ratio of exactly n / Z**2
             same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 
@@ -258,12 +240,9 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     """
     import argparse
 
-    import artisatomic
-
     rhd.read_hyd_phixsdata()
 
     ryd_to_ev = rhd.ryd_to_ev
-    hc_in_ev_cm = artisatomic.hc_in_ev_cm
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
@@ -275,9 +254,11 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
+    )
 
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels,
         ionization_energy_ev=ionization_energy_ev,
@@ -302,16 +283,194 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    crosssections, targetfractions, thresholds = artisatomic.match_hydrogenic_phixs(
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
         args=args,
     )
-    assert thresholds[0] == 0.0
+    assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
     assert targetfractions[0] == []
     assert np.all(crosssections[0] == 0.0)
+
+
+def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
+    """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
+    import argparse
+
+    rhd.read_hyd_phixsdata()
+
+    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    nlevels = 5
+    dflevels = pl.DataFrame(
+        {
+            "levelid": list(range(nlevels)),
+            # ascending, and all well below the ionization energy so none is skipped as unbound
+            "energyabovegsinpercm": [i * 1000.0 for i in range(nlevels)],
+            "g": [2.0] * nlevels,
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * nlevels,
+        }
+    )
+
+    for nlevels_option, n_expected in ((0, 0), (2, 2), (nlevels + 10, nlevels)):
+        args = argparse.Namespace(
+            nphixspoints=100,
+            phixsnuincrement=0.03,
+            optimaltemperature=6000,
+            nlevels_hydrogenic_for_unknown_phixs=nlevels_option,
+        )
+        _, targetfractions, thresholds = match_hydrogenic_phixs(
+            atomic_number=2,
+            energy_levels=dflevels,
+            ionization_energy_ev=ionization_energy_ev,
+            ion_handler="kurucz",
+            args=args,
+        )
+        assert sum(bool(targets) for targets in targetfractions) == n_expected
+        assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
+
+    # the limit bounds the levels considered, not the tables produced: an unbound level inside it
+    # is skipped but still counts, so asking for 3 here yields only the one bound level below them
+    unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
+    dflevels_partly_unbound = dflevels.with_columns(
+        energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
+    )
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=3
+    )
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_partly_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        args=args,
+    )
+    assert np.count_nonzero(~np.isnan(thresholds)) == 1
+
+
+def test_write_phixs_data_with_no_phixs_arrays():
+    """A reader that found no photoionization data must not make write_phixs_data() index off the end.
+
+    resolve_photoion_targetfractions() fills a target list for every level whenever the reader supplied none, and
+    readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
+    reader also left the cross-section and threshold arrays empty, the level ids from those target
+    lists have nothing behind them.
+    """
+    import argparse
+
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    flog = io.StringIO()
+    fphixs = io.StringIO()
+
+    write_phixs_data(
+        fphixs,
+        atomic_number=26,
+        ion_stage=1,
+        photoionization_crosssections=np.empty((0, args.nphixspoints)),
+        photoionization_targetfractions=[[(0, 1.0)] for _ in range(3)],
+        photoionization_thresholds_ev=np.empty(0),
+        args=args,
+        flog=flog,
+    )
+
+    assert not fphixs.getvalue()
+    assert "Writing 0 phixs tables" in flog.getvalue()
+
+
+def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
+    """Build a minimal single-level IonData for the target-fraction resolver tests."""
+    from artisatomic.iondata import IonData
+
+    return IonData(
+        ion_stage=ion_stage,
+        handler="cmfgen",
+        is_top_ion=is_top_ion,
+        ionization_energy_ev=10.0,
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0],
+                "energyabovegsinpercm": [0.0],
+                "g": [9.0],
+                "levelname": [f"gs{ion_stage}"],
+            }
+        ),
+        dftransitions=pl.DataFrame(),
+        transition_count_of_level_name={},
+        upsilondict={},
+        hillier_photoion_targetconfigs=targetconfigs,
+        photoionization_crosssections=np.empty((0, 100)),
+        photoionization_targetfractions=targetfractions if targetfractions is not None else [],
+        photoionization_thresholds_ev=np.empty(0),
+    )
+
+
+def test_resolve_photoion_targetfractions():
+    """Each non-top ion gets its targets resolved against the next ion up; the top ion gets none."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # the lower ion names the upper ion's ground state as its only target configuration
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
+    upper = make_iondata(2, is_top_ion=True)
+    resolve_photoion_targetfractions([lower, upper])
+
+    assert lower.photoionization_targetfractions == [[(0, 1.0)]]
+    # the top ion has no upper ion to photoionise to, so it is left exactly as it was read
+    assert upper.photoionization_targetfractions == []
+
+
+def test_resolve_photoion_targetfractions_keeps_reader_supplied():
+    """An ion whose reader already gave per-level fractions (e.g. the hydrogenic estimate) keeps them."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    # a target list the Hillier resolver would never produce, so an overwrite would be visible
+    supplied = [[(7, 1.0)]]
+    lower = make_iondata(1, is_top_ion=False, targetfractions=supplied, targetconfigs=[[("gs2", 1.0)]])
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)])
+
+    assert lower.photoionization_targetfractions == supplied
+
+
+def test_resolve_photoion_targetfractions_rejects_misordered_ions():
+    """A list that is not one element's ions in ascending order is rejected rather than resolved.
+
+    Each ion is resolved against the next entry as its upper ion, so a top ion anywhere but last
+    means the levels being matched belong to the wrong ion.
+    """
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
+
+    # a list whose last ion is not the top ion is missing the upper ion the last entry needs
+    with pytest.raises(ValueError, match="ascending ion stage order"):
+        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
+
+
+def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
+    """Writing an ion that still needs resolving must fail loudly, not drop its cross sections.
+
+    write_output_files() no longer resolves target fractions itself, so an ion with cross sections
+    but no targets would have every one of its tables silently skipped by write_phixs_data().
+    """
+    import argparse
+
+    from artisatomic.output import write_output_files
+
+    (tmp_path / "logs").mkdir()
+    tmpargs = argparse.Namespace(
+        output_folder=str(
+            tmp_path,
+        ),
+        output_folder_logs="logs",
+        nophixs=False,
+        nphixspoints=100,
+    )
+    lower = make_iondata(1, is_top_ion=False)
+    lower.photoionization_crosssections = np.zeros((1, 100))
+
+    with pytest.raises(ValueError, match="call resolve_photoion_targetfractions"):
+        write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -335,21 +494,21 @@ def test_read_coldata_term_to_j_redistribution():
     def read_ion(atomic_number, ion_stage):
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
-            _, energy_levels, _, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+            _, dflevels, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, flog, args)
         levelids_of_term = defaultdict(list)
-        for levelid, level in enumerate(energy_levels):
-            levelids_of_term[level.levelname.split("[")[0]].append(levelid)
-        return energy_levels, upsilondict, levelids_of_term
+        for levelid, levelname in enumerate(dflevels["levelname"]):
+            levelids_of_term[levelname.split("[")[0]].append(levelid)
+        return dflevels["g"].to_list(), upsilondict, levelids_of_term
 
-    energy_levels, upsilondict, levelids_of_term = read_ion(8, 3)
+    gvalues, upsilondict, levelids_of_term = read_ion(8, 3)
 
     lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
     upper_ids = levelids_of_term["2s_2p3_3Do"]
-    assert [energy_levels[i].g for i in lower_ids] == [1.0, 3.0, 5.0]
+    assert [gvalues[i] for i in lower_ids] == [1.0, 3.0, 5.0]
 
     sums_from_lower = [
-        sum(upsilondict[(i, j)] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
+        sum(upsilondict[i, j] for j in upper_ids if upsilondict.get((i, j), -1.0) > 0.0) for i in lower_ids
     ]
 
     # the single value in the collision data file for this term pair
@@ -366,29 +525,46 @@ def test_read_coldata_term_to_j_redistribution():
 
 
 def test_add_handler_if_not_set():
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]] = [(26, [1, 2])]
+    """Adding a handler returns a new list and never overrides an ion that is already present."""
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+    unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
-    # adding an ion for a new element must not modify the input list
+    # add an ion for a new element
     result = add_handler_if_not_set(ion_handlers, 58, 1, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2]), (58, [(1, "dream")])]
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
     # add an ion to an existing element
     result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
-    assert ion_handlers == [(26, [1, 2])]
-    assert result == [(26, [1, 2, (3, "dream")])]
+    assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
-    # an already-present ion stage is not replaced or duplicated
+    # an already-present ion stage keeps the handler it was given, whatever the new one says
     result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
-    assert result == [(26, [1, 2])]
+    assert result == unchanged
 
-    # ion stages with handlers can be given as tuples or lists (e.g. loaded from JSON)
-    ion_handlers_json = t.cast("list[tuple[int, list[int | tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # the calls return a new list each time, so none of them touched the one they were given
+    assert ion_handlers == unchanged
+
+    # ion stages can be given as tuples or lists (e.g. straight from json.load())
+    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 
 
+def test_parse_ion_handlers():
+    """The JSON form becomes tuples, and an ion that names no handler is rejected."""
+    from artisatomic import parse_ion_handlers
+
+    # json.load() gives nested lists; every ion must come back as an (ion_stage, handler) tuple
+    assert parse_ion_handlers([[26, [[1, "cmfgen"], [2, "cmfgen"]]]]) == [(26, [(1, "cmfgen"), (2, "cmfgen")])]
+
+    # a bare ion stage is a leftover from when the handler was optional. It must be named as such
+    # here, rather than failing later where neither the element nor the file would be mentioned.
+    with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
+        parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
+
+
 def test_split_element_ionstage_str():
+    """'FeII' splits into element and ion stage, including the symbols made only of Roman numeral letters."""
     from artisatomic import split_element_ionstage_str
 
     assert split_element_ionstage_str("FeII") == (26, 2)
@@ -408,21 +584,8 @@ def test_split_element_ionstage_str():
         split_element_ionstage_str("NotAnIon")
 
 
-def test_get_default_handler():
-    assert get_default_handler(2, 3) == "boyle"
-    assert get_default_handler(26, 1) == "cmfgen"
-    assert get_default_handler(56, 2) == "cmfgen"
-    assert get_default_handler(38, 1) == "qub_data"
-    # QUB calculations take precedence over DREAM for W, Pt, and Au ion stages 1-3
-    assert get_default_handler(74, 1) == "qub_data"
-    assert get_default_handler(78, 3) == "qub_data"
-    assert get_default_handler(79, 2) == "qub_data"
-    assert get_default_handler(74, 4) == "dream"
-    assert get_default_handler(60, 2) == "dream"
-    assert get_default_handler(45, 1) == "kurucz"
-
-
 def test_hillier_extend_ion_list():
+    """The CMFGEN ion list honours the maximum ion stage and the hydrogen exclusion."""
     result = readhillierdata.extend_ion_list([], maxionstage=1, include_hydrogen=False)
     assert (2, [(1, "cmfgen")]) in result
     assert (26, [(1, "cmfgen")]) in result
@@ -431,6 +594,7 @@ def test_hillier_extend_ion_list():
 
 
 def test_reduce_phixs_tables_worker():
+    """Downsampling a cross-section table preserves the recombination rate it was weighted for."""
     nphixspoints = 100
     phixsnuincrement = 0.03
     temperature = 6000.0
@@ -476,6 +640,7 @@ def test_reduce_phixs_tables_worker():
 
 
 def test_read_adf04():
+    """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
     ionization_energy_ev, energylevels, upsilondict = readqubdata.read_adf04(
         (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
@@ -491,33 +656,47 @@ def test_read_adf04():
     assert level1.parity == 0
 
 
-def test_read_nahar_energy_level_file_missing():
-    # a missing file should be logged and returned as empty data, not crash
-    flog = io.StringIO()
-    (
-        nahar_energy_levels,
-        nahar_core_states,
-        nahar_level_index_of_state,
-        nahar_configurations,
-        nahar_ionization_potential_rydberg,
-    ) = readnahardata.read_nahar_energy_level_file("does/not/exist.en.ls.txt", 26, 2, flog)
-    assert nahar_energy_levels == []
-    assert nahar_core_states == []
-    assert nahar_level_index_of_state == {}
-    assert nahar_configurations == {}
-    assert nahar_ionization_potential_rydberg == -1.0
-    assert "does not exist" in flog.getvalue()
+def test_write_adata_level_comment():
+    """The level comment is the level's name, with no padding.
 
+    artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
+    not whitespace, so any padding written here ends up inside the level name it reports. The
+    Hillier display replacements are applied here rather than in the reader, where the name is the
+    key that transitions are matched on.
+    """
+    dfhillier = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "levelname": ["someion_gs"],
+                "g": [9.0],
+                "energyabovegsinpercm": [0.0],
+                "lambdaangstrom": [911.0],
+                "hillierlevelid": [1],
+                "parity": [0],
+            }
+        )
+    )
+    buf = io.StringIO()
+    write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())
+    hillier_line = buf.getvalue().splitlines()[1]
+    assert hillier_line.endswith(" someion_gs")
+    assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-def test_nahar_get_photoiontargetfractions():
-    dflower = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [9.0], "levelname": ["gs"]})
-    dfupper = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [10.0], "levelname": ["gs2"]})
-    nahar_core_states = [readnahardata.NaharCoreState(1, "3d6", "5De", 0.0)]
-    targetlist = readnahardata.get_photoiontargetfractions(dflower, dfupper, nahar_core_states, {}, io.StringIO())
-    assert targetlist[0] == [(0, 1.0)]  # the upper ion's ground state
+    # a level name containing spaces is written unchanged, and reads back as everything after
+    # the fourth field
+    spacedlevelname = "3Pe index 1 '2s22p2'"
+    dfspaced = leveltuples_to_pldataframe(
+        pl.DataFrame({"levelname": [spacedlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
+    )
+    buf = io.StringIO()
+    write_adata(buf, 8, 1, dfspaced, 13.6, {}, io.StringIO())
+    spaced_line = buf.getvalue().splitlines()[1]
+    assert spaced_line.endswith(" " + spacedlevelname)
+    assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
 def test_get_level_valence_n():
+    """Each reader's level names yield the valence electron's principal quantum number."""
     # each handler has its own level-name format and parser
     assert readkuruczdata.get_level_valence_n("s5p  3P,enpercm=14276.381,j=0.0") == 5
     assert readtanakajpltdata.get_level_valence_n("2,even,{  4d- 3  4d+ 1  5s+ 1 }") == 5

@@ -1,3 +1,6 @@
+"""Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
+
+import string
 import typing as t
 from pathlib import Path
 
@@ -8,10 +11,16 @@ import artisatomic
 
 
 def get_basepath() -> Path:
+    """Directory holding the Floers+25 level and transition tables."""
     return artisatomic.PYDIR / ".." / "atomic-data-floers25" / "OutputFiles"
 
 
 def extend_ion_list(ion_handlers, calibrated=True):
+    """Add every ion with a Floers+25 data file to ion_handlers.
+
+    With calibrated=True the uncalibrated files are added as well, so that an ion with no
+    calibrated data still gets its uncalibrated version rather than being left out.
+    """
     BASEPATH = get_basepath()
     assert BASEPATH.is_dir()
     # if calibrated is requested, also add uncalibrated data where calibrated data is not available
@@ -20,7 +29,7 @@ def extend_ion_list(ion_handlers, calibrated=True):
         calibstr = "calib" if searchcalib else "uncalib"
         handlername = f"floers25{calibstr}"
         for s in BASEPATH.glob(f"*_levels_{calibstr}.txt*"):
-            ionstr = s.name.lstrip("0123456789").split("_")[0]
+            ionstr = s.name.lstrip(string.digits).split("_")[0]
             atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
             ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
@@ -28,6 +37,8 @@ def extend_ion_list(ion_handlers, calibrated=True):
 
 
 class FloersEnergyLevel(t.NamedTuple):
+    """One energy level of the Floers+25 data set."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -35,7 +46,13 @@ class FloersEnergyLevel(t.NamedTuple):
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibrated: bool):
-    # ion_charge = ion_stage - 1
+    """Read one ion from the Floers+25 data set, calibrated or uncalibrated.
+
+    The ionization energy comes from NIST rather than the file. Configurations are not unique
+    (levels of one configuration differ by J), so level names combine the configuration, J and
+    the file's index. Both the level indices and the transitions' references to them are
+    validated, since a gap or an out-of-range index would silently misattach transitions.
+    """
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
     calibstr = "calib" if calibrated else "uncalib"
@@ -50,7 +67,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {levels_file.name} and {lines_file.name}",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     dashrowcount = 0
     with artisatomic.xopen_check_extension(levels_file) as f:
@@ -62,7 +79,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
         dflevels = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype={"J": str}))
     if dashrowcount < 3:
-        raise ValueError(f"Did not find expected data table in {levels_file}")
+        msg = f"Did not find expected data table in {levels_file}"
+        raise ValueError(msg)
 
     dflevels = dflevels.with_columns(
         pl.when(pl.col("J").str.ends_with("/2"))
@@ -73,17 +91,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         .alias("g")
     )
 
-    # The level table is indexed from zero in file order and the transitions refer to those
-    # indices, so a gap would silently attach transitions to the wrong levels. Not an assert:
-    # this validates an input file and must not disappear under python -O.
+    # the levels are indexed from zero in file order and the transitions refer to those indices,
+    # so a gap would misattach them. Not an assert: input validation must survive python -O.
     if dflevels["Index"].to_list() != list(range(dflevels.height)):
         msg = f"Level indices in {levels_file} are not contiguous and zero-based"
         raise ValueError(msg)
 
-    # Configuration is not unique (levels of the same configuration differ by J), so build a
-    # unique level name from it. Index is contiguous, so including it guarantees uniqueness.
-    # The configuration stays first so that get_level_valence_n() and the adata.txt comment
-    # column both still start with it.
+    # Configuration is not unique (levels of one configuration differ by J), so append the
+    # contiguous index. The configuration stays first, for get_level_valence_n() and the
+    # adata.txt comment.
     dflevels = dflevels.with_columns(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
@@ -100,13 +116,13 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
         dftransitions = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow"))
     if dashrowcount < 3:
-        raise ValueError(f"Did not find expected data table in {lines_file}")
+        msg = f"Did not find expected data table in {lines_file}"
+        raise ValueError(msg)
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
-    # Transitions reference levels by zero-based index, and an out-of-range reference would be
-    # silently dropped by the level-id joins in add_level_ids_forbidden(), leaving an incomplete
-    # database. Not an assert: this validates an input file and must not disappear under python -O.
+    # an out-of-range level reference would be silently dropped by the joins in
+    # add_level_ids_forbidden(). Not an assert: input validation must survive python -O.
     if dftransitions.height > 0:
         transition_level_indices = pl.concat([dftransitions["Lower"], dftransitions["Upper"]])
         min_index = t.cast("int", transition_level_indices.min())
@@ -144,10 +160,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
 
 def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a Floers+25 level name.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
     if part[-1] not in "spdfg":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
         assert part[-1].isdigit()
-        part = part.rstrip("0123456789")
+        part = part.rstrip(string.digits)
     return int(part.rstrip("spdfg"))

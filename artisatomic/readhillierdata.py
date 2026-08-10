@@ -1,285 +1,317 @@
+"""Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
+
 import math
 import os
 import re
 import sys
 import typing as t
 from collections import defaultdict
-from collections import namedtuple
 from functools import cache
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
-import pandas as pd
+import polars as pl
 
 import artisatomic
-from artisatomic.manual_matches import hillier_name_replacements
+from artisatomic.base import elsymbols
+from artisatomic.base import h_in_ev_seconds
+from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import ryd_to_ev
+from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
 
-hillier_rowformat_a = (
-    "levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2 gam4"
+# Column layout of the level table in the oldest oscillator files, which carry no header line
+# (no "!Format date"). Its fourth column is a threshold FREQUENCY, not an energy.
+hillier_rowformat_noheader = "levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid"
+
+
+# The files disagree on which columns they carry, so only these are kept and every ion gets the
+# same frame. parity is not in the file: it is read from the level name and decides forbidden-ness.
+class HillierEnergyLevel(t.NamedTuple):
+    """One energy level read from a CMFGEN oscillator file."""
+
+    levelname: str
+    g: float
+    energyabovegsinpercm: float
+    lambdaangstrom: float
+    hillierlevelid: int
+    parity: int
+
+
+class HillierTransition(t.NamedTuple):
+    """One bound-bound transition read from a CMFGEN oscillator file, keyed by level name."""
+
+    namefrom: str
+    nameto: str
+    f: float
+    A: float
+    lambdaangstrom: float
+    i: int
+    j: int
+    hilliertransitionid: int
+
+
+_pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64}
+
+# derived from the NamedTuples so the row classes stay the single source of the frame layouts
+hillier_level_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierEnergyLevel.__annotations__.items()}
 )
-hillier_rowformat_b = (
-    "levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6"
-)
-hillier_rowformat_c = "levelname g energyabovegsinpercm thresholdenergyev lambdaangstrom hillierlevelid"
-hillier_rowformat_d = (
-    "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
+hillier_transition_schema = pl.Schema(
+    {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()}
 )
 
-hillier_rowformat = {
-    "17-Jun-2014": (
-        "levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad c4 c6"
-    ),
-    "17-Oct-2000": (
-        "levelname g energyabovegsinpercm freqtentothe15hz thresholdenergyev lambdaangstrom hillierlevelid arad gam2"
-        " gam4"
-    ),
-    "NOT_SPECIFIED": "levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid",
-}
+# every schema column except parity is read straight out of the level table
+hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname != "parity")
+
 
 # keys are (atomic number, ion stage)
-ion_files = namedtuple(
-    "ion_files", ["folder", "levelstransitionsfilename", "energylevelrowformat", "photfilenames", "coldatafilename"]
-)
+class IonFiles(t.NamedTuple):
+    """The CMFGEN files holding one ion's levels, cross sections and collision data."""
+
+    folder: str
+    levelstransitionsfilename: str
+    photfilenames: list[str]
+    coldatafilename: str
+
 
 ions_data = {
     # H
-    (1, 1): ion_files("5dec96", "hi_osc.dat", hillier_rowformat_c, ["hiphot.dat"], "hicol.dat"),
-    (1, 2): ion_files("", "", hillier_rowformat_c, [""], ""),
+    (1, 1): IonFiles("5dec96", "hi_osc.dat", ["hiphot.dat"], "hicol.dat"),
+    (1, 2): IonFiles("", "", [""], ""),
     # He
-    (2, 1): ion_files("11may07", "heioscdat_a7.dat_old", hillier_rowformat_a, ["heiphot_a7.dat"], "heicol.dat"),
-    (2, 2): ion_files("5dec96", "he2_osc.dat", hillier_rowformat_c, ["he2phot.dat"], "he2col.dat"),
+    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
+    (2, 2): IonFiles("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
     # C
-    (6, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (6, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (6, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (6, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (6, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (6, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (6, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # N
-    (7, 1): ion_files(
+    (7, 1): IonFiles(
         "19apr23",
         "osc_data",
-        hillier_rowformat_b,
         ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"],
         "col_data",
     ),
-    (7, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (7, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (7, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (7, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (7, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # O TODO: O IV, should be able to include phot_data_B, but doing so breaks artis
-    (8, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    (8, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (8, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (8, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A", "phot_data_B"], "col_data"),
-    (8, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (8, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (8, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (8, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (8, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (8, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (8, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # F
-    # (9, 2): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
-    # (9, 3): ion_files('tst', 'fin_osc', hillier_rowformat_a, ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
+    # (9, 2): IonFiles('tst', 'fin_osc', ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
+    # (9, 3): IonFiles('tst', 'fin_osc', ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
     # Ne
-    (10, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (10, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (10, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (10, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (10, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (10, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (10, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (10, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (10, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (10, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Na
-    (11, 1): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (11, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (11, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (11, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (11, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (11, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (11, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Mg
-    (12, 1): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (12, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (12, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (12, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (12, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (12, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (12, 7): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (12, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (12, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (12, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (12, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (12, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Al
-    (13, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (13, 2): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (13, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (13, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (13, 7): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (13, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (13, 11): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (13, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (13, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Si
-    (14, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A", "phot_data_B"], "col_data"),
-    (14, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (14, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (14, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (14, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (14, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    # P (I not in CMFGEN)
-    (15, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (15, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (15, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (15, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (15, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (15, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (15, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (15, 9): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (15, 10): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (15, 11): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    (14, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (14, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (14, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # P (I not in CMFGEN)  # ruff: ignore[commented-out-code]
+    (15, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (15, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # S
-    (16, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 6): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (16, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (16, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (16, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (16, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Cl (only ions IV to VII)
-    (17, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (17, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (17, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (17, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (17, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (17, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (17, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (17, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Ar
-    (18, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (18, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (18, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (18, 4): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (18, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (18, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (18, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (18, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (18, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (18, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (18, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (18, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # K
-    (19, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (19, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (19, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (19, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (19, 5): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (19, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (19, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (19, 8): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (19, 9): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (19, 10): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (19, 11): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
+    (19, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (19, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Ca
-    (20, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (20, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (20, 3): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (20, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (20, 5): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (20, 6): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (20, 7): ion_files("19apr23", "osc_data", hillier_rowformat_c, ["phot_data_A"], "col_data"),
-    (20, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (20, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (20, 10): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (20, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (20, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (20, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Sc (only I-III are in CMFGEN)
-    # (21, 1): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    # (21, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    # (21, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (21, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # (21, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # (21, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
-    (22, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (22, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    # (22, 4): ion_files("18oct00", "tkiv_osc.dat", hillier_rowformat_a, ["phot_data.dat"], "col_guess.dat"),
+    (22, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (22, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
     # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): ion_files("27may10", "vi_osc", hillier_rowformat_a, ["vi_phot.dat"], "col_guess.dat"),
+    # (23, 1): IonFiles("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
     # Cr
-    (24, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (24, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (24, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (24, 7): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 8): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 9): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 13): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (24, 14): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (24, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (24, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Mn (Mn I is not in CMFGEN)
-    (25, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 3): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (25, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (25, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (25, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (25, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (25, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (25, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (25, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Fe
-    (26, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["REV_PHOT_DATA"], "col_data"),
-    (26, 2): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 4): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (26, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (26, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (26, 8): ion_files("19apr23", "osc_data", hillier_rowformat_d, ["phot_data_A"], "col_data"),
-    (26, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (26, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 13): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 14): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 15): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (26, 16): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (26, 1): IonFiles("19apr23", "osc_data", ["REV_PHOT_DATA"], "col_data"),
+    (26, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 15): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 16): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Co
-    (27, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (27, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (27, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (27, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (27, 5): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (27, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (27, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (27, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (27, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    (27, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (27, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Ni
-    (28, 1): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (28, 3): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 4): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 5): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 6): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (28, 7): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (28, 8): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (28, 9): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
-    (28, 10): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 11): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 12): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 13): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 14): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 15): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
-    (28, 16): ion_files("19apr23", "osc_data", hillier_rowformat_b, ["phot_data_A"], "col_data"),
+    (28, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 15): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (28, 16): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Cu, Zn and above are not in CMGFEN?
     # Ba
-    # (56, 2): ion_files("19apr23", "osc_data", hillier_rowformat_a, ["phot_data_A"], "col_data"),
+    # (56, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
 }
 
 elsymboltohilliercode = {
@@ -311,21 +343,22 @@ elsymboltohilliercode = {
     "Ba": "BAR",
 }
 
-ryd_to_ev = 13.605693122994232
-hc_in_ev_cm = 0.0001239841984332003
-hc_in_ev_angstrom = 12398.419843320025
-h_in_ev_seconds = 4.135667696923859e-15
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
-PYDIR = Path(__file__).parent.absolute()
-atomicdata = pd.read_csv(os.path.join(PYDIR, "atomic_properties.txt"), sep=r"\s+", comment="#")
-elsymbols = ["n", *list(atomicdata["symbol"].values)]
-
-# hilliercodetoelsymbol = {v : k for (k,v) in elsymboltohilliercode.items()}
-# hilliercodetoatomic_number = {k : elsymbols.index(v) for (k,v) in hilliercodetoelsymbol.items()}
 
 atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltohilliercode.items()}
 
-vy95_phixsfitrow = namedtuple("vy95_phixsfitrow", ["n", "l", "E_th_eV", "E_0", "sigma_0", "y_a", "P", "y_w"])
+
+class VY95PhixsFitRow(t.NamedTuple):
+    """One Verner & Yakovlev (1995) analytic photoionization cross-section fit."""
+
+    n: int
+    l: int
+    E_th_eV: float
+    E_0: float
+    sigma_0: float
+    y_a: float
+    P: float
+    y_w: float
+
 
 # keys are (n, l), values are energy in Rydberg or cross_section in Megabarns.
 # Stored as arrays because get_hydrogenic_nl_phixstable() is called once per level per ion.
@@ -339,6 +372,7 @@ max_hyd_n = -1
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
+    """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
         (
             artisatomic.PYDIR
@@ -351,44 +385,109 @@ def hillier_ion_folder(atomic_number, ion_stage):
     )
 
 
+def get_term_as_tuple(config: str) -> tuple[int, int, int]:
+    """Read the LS term of a Hillier level name as (2S+1, L, parity), parity 0 even and 1 odd.
+
+    Returns -1 for any component that cannot be read, which readers log rather than treat as an
+    error. Parity comes from the name's 'e'/'o' suffix where it has one; otherwise it is summed
+    over the occupied orbitals, which is what handles CMFGEN's merged high-l levels.
+    """
+    config = config.split("[", maxsplit=1)[0]
+
+    if "{" in config and "}" in config:  # JJ coupling, no L and S
+        if config[-1] == "e":
+            return (-1, -1, 0)
+
+        if config[-1] == "o":
+            return (-1, -1, 1)
+
+        print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
+        return (-1, -1, -1)
+
+    lposition = -1
+    l = -1
+    for charpos, char in reversed(list(enumerate(config))):
+        if char in lchars:
+            lposition = charpos
+            l = lchars.index(char)
+            break
+    if lposition < 0:
+        if config[-1] == "e":
+            return (-1, -1, 0)
+        if config[-1] == "o":
+            return (-1, -1, 1)
+        return (-1, -1, -1)
+    # a malformed name can fail at the int() or at either index, and any of those just means
+    # the term is unreadable
+    try:  # ruff: ignore[too-many-statements-in-try-clause]
+        twosplusone = int(config[lposition - 1])  # could this be two digits long?
+        if lposition + 1 > len(config) - 1:
+            # No 'e'/'o' suffix to give the parity. CMFGEN writes its merged high-l levels this
+            # way, repeating the orbital letter as the term symbol (2s2_13w_2W, 2s2_2p3(4So)5z_5Z),
+            # so sum l over the occupied orbitals instead of assuming an even term.
+            parity = artisatomic.get_parity_from_config(config)
+        elif config[lposition + 1] == "o":
+            parity = 1
+        elif config[lposition + 1] == "e":
+            parity = 0
+        elif config[lposition + 2] == "o":
+            parity = 1
+        elif config[lposition + 2] == "e":
+            parity = 0
+        else:
+            twosplusone = -1
+            l = -1
+            parity = -1
+    except (IndexError, ValueError):
+        twosplusone = -1
+        l = -1
+        parity = -1
+    return (twosplusone, l, parity)
+
+
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
-) -> tuple[float, list[t.Any], list[t.Any], defaultdict[str, int], defaultdict[tuple[int, int, int], list[str]]]:
-    # the level and transition rows are namedtuples built at runtime from the column names in
-    # each oscillator file, so they cannot be given a static type
-    hillier_energy_levels: list[t.Any] = []
-    hillier_levelnamesnoJ_matching_term: defaultdict[tuple[int, int, int], list[str]] = defaultdict(list)
+) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+    """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
+
+    Returns the ionization energy in eV, a level frame, a transition frame, and the number of
+    transitions touching each level name. Levels with no transitions are dropped. The level
+    table's columns are read from the header the file carries above it, so the layout varies by
+    ion; see hillier_rowformat_noheader for the oldest files, which have no header.
+
+    Transitions are keyed by level name here. add_level_ids_forbidden() joins the level ids on
+    afterwards, once the level frame has been given its ids.
+    """
     transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
-    transitions: list[t.Any] = []
 
     if atomic_number == 1 and ion_stage == 2:
-        ionization_energy_ev = 0.0
-        energy_level_row = namedtuple(
-            "energy_level_row", "levelname qub_id twosplusone l j energyabovegsinpercm g parity"
-        )
-
-        hillier_energy_levels.append(energy_level_row("I", 1, 0, 0, 0, 0.0, 10, 0))
+        # a bare proton: a single dummy level, and no oscillator file to read
         return (
             hillier_ionization_energy_ev,
-            hillier_energy_levels,
-            transitions,
+            pl.DataFrame(
+                [
+                    HillierEnergyLevel(
+                        levelname="I", g=10.0, energyabovegsinpercm=0.0, lambdaangstrom=0.0, hillierlevelid=1, parity=0
+                    )
+                ],
+                schema=hillier_level_schema,
+                orient="row",
+            ),
+            pl.DataFrame(schema=hillier_transition_schema),
             transition_count_of_level_name,
-            hillier_levelnamesnoJ_matching_term,
         )
 
     filename = Path(
         hillier_ion_folder(atomic_number, ion_stage),
-        ions_data[(atomic_number, ion_stage)].folder,
-        ions_data[(atomic_number, ion_stage)].levelstransitionsfilename,
+        ions_data[atomic_number, ion_stage].folder,
+        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
     )
 
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
-    hillier_transition_row = namedtuple(
-        "hillier_transition_row",
-        "namefrom nameto f A lambdaangstrom i j hilliertransitionid",
-    )
+    levelrows: list[HillierEnergyLevel] = []
+    transitionrows: list[HillierTransition] = []
 
     prev_line = ""
     # TODO: Would be nice to have a way of dealing with different encodings automatically, but this seems to be the only case so probably not worth it
@@ -435,77 +534,78 @@ def read_levels_and_transitions(
             prev_line = line.strip()
 
         if not row_format_energy_level:
-            assert format_date == "NOT_SPECIFIED"
-            row_format_energy_level = ions_data[(atomic_number, ion_stage)].energylevelrowformat
+            # the files that predate the header also predate the format date line
+            if format_date != "NOT_SPECIFIED":
+                msg = f"{filename} gives a format date of {format_date} but carries no column header"
+                raise ValueError(msg)
+            row_format_energy_level = hillier_rowformat_noheader
+            print("File has no column header, assuming columns:")
+            print(f"  {row_format_energy_level}")
 
-        print("Manually specified columns:")
-        print(f"  {ions_data[(atomic_number, ion_stage)].energylevelrowformat}")
-        assert row_format_energy_level == ions_data[(atomic_number, ion_stage)].energylevelrowformat, (
-            f"Row format in file ({row_format_energy_level}) does not match expected format ({ions_data[(atomic_number, ion_stage)].energylevelrowformat}) for ion {atomic_number:d} stage {ion_stage:d}"
-        )
-        # assert(row_format_energy_level == hillier_rowformat[format_date])
-
-        hillier_energy_level_row = namedtuple(  # pyrefly: ignore[bad-class-definition]
-            "hillier_energy_level_row",
-            row_format_energy_level + " corestateid twosplusone l parity indexinsymmetry naharconfiguration matchscore",
-        )
+        # the file columns vary by ion, so find where the ones we keep sit in each row
+        headercolumns = row_format_energy_level.split()
+        colindex = {colname: index for index, colname in enumerate(headercolumns)}
+        levelcolcount = len(headercolumns)
+        if len(colindex) != levelcolcount:
+            # a repeated header token would silently shadow an earlier column's position
+            msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
+            raise ValueError(msg)
+        missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
+        if missingcolumns:
+            msg = (
+                f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
+                f" it has {row_format_energy_level}"
+            )
+            raise ValueError(msg)
 
         for line in fhillierosc:
             row = line.split()
             # check for right number of columns and that are all numbers except first column
-            if len(row) == len(row_format_energy_level.split()) and all(map(artisatomic.isfloat, row[1:])):
-                hillier_energy_level = hillier_energy_level_row(*row, 0, -1, -1, -1, -1, "", -1)
+            if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
+                hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
+                levelname = row[colindex["levelname"]]
+                energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
+                lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
+                (twosplusone, _l, parity) = get_term_as_tuple(levelname)
 
-                hillierlevelid = int(hillier_energy_level.hillierlevelid.lstrip("-"))
-                levelname = hillier_energy_level.levelname
-                if levelname not in hillier_name_replacements:
-                    (twosplusone, l, parity) = artisatomic.get_term_as_tuple(levelname)
-                else:
-                    (twosplusone, l, parity) = artisatomic.get_term_as_tuple(hillier_name_replacements[levelname])
-
-                hillier_energy_level = hillier_energy_level._replace(
-                    hillierlevelid=hillierlevelid,
-                    energyabovegsinpercm=float(hillier_energy_level.energyabovegsinpercm.replace("D", "E")),
-                    g=float(hillier_energy_level.g),
-                    twosplusone=twosplusone,
-                    l=l,
-                    parity=parity,
+                levelrows.append(
+                    HillierEnergyLevel(
+                        levelname=levelname,
+                        g=float(row[colindex["g"]]),
+                        energyabovegsinpercm=energyabovegsinpercm,
+                        lambdaangstrom=lambdaangstrom,
+                        hillierlevelid=hillierlevelid,
+                        parity=parity,
+                    )
                 )
 
-                hillier_energy_levels.append(hillier_energy_level)
-
-                if twosplusone == -1 and atomic_number > 1:
-                    # -1 indicates that the term could not be interpreted
-                    if parity == -1:
-                        artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
-                    # else:
-                    # artisatomic.log_and_print(flog, "Can't find LS term in Hillier level name '{0:}' (parity is {1:})".format(levelname, parity))
-                else:
-                    levelnamenoJ = levelname.split("[")[0]
-                    if levelnamenoJ not in hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)]:
-                        hillier_levelnamesnoJ_matching_term[(twosplusone, l, parity)].append(levelnamenoJ)
+                # -1 indicates that the term could not be interpreted
+                if twosplusone == -1 and atomic_number > 1 and parity == -1:
+                    artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
                 # if this is the ground state
-                if float(hillier_energy_levels[-1].energyabovegsinpercm) < 1.0:
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / float(hillier_energy_levels[-1].lambdaangstrom)
+                if energyabovegsinpercm < 1.0:
+                    hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
 
-                if hillierlevelid != len(hillier_energy_levels):
+                if hillierlevelid != len(levelrows):
                     artisatomic.log_and_print(
                         flog,
-                        f"Hillier levels mismatch: id {len(hillier_energy_levels):d} found at entry number"
-                        f" {hillierlevelid:d}",
+                        f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
                     )
                     sys.exit()
 
-            if re.match("^ +Osci(l|ll)ator strengths", line) and len(hillier_energy_levels) > 0:
+            if re.match(r"^ +Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
                 break
 
-        artisatomic.log_and_print(flog, f"Read {len(hillier_energy_levels):d} levels")
-        assert len(hillier_energy_levels) == expected_energy_levels
+        artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
+        if len(levelrows) != expected_energy_levels:
+            msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
+            raise ValueError(msg)
 
-        # defined_transition_ids = []
         for line in fhillierosc:
-            if re.match("^ +Osci(l|ll)ator strengths", line):  # only allow one table, and account for spelling mistakes
+            if re.match(
+                r"^ +Osci(l|ll)ator strengths", line
+            ):  # only allow one table, and account for spelling mistakes
                 break
             linesplitdash = line.split("-")
             row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
@@ -516,53 +616,50 @@ def read_levels_and_transitions(
                 except ValueError:
                     lambda_value = -1
 
-                hilliertransitionid = int(row[7]) if len(row) == 8 else len(transitions) + 1
-                # print(row)
-                transition = hillier_transition_row(
-                    namefrom=row[0],
-                    nameto=row[1],
-                    f=float(row[2].replace("D", "E")),
-                    A=float(row[3].replace("D", "E")),
-                    lambdaangstrom=lambda_value,
-                    i=int(row[5].rstrip("-")),
-                    j=int(row[6]),
-                    hilliertransitionid=hilliertransitionid,
+                transitioncount = len(transitionrows)
+                hilliertransitionid = int(row[7]) if len(row) == 8 else transitioncount + 1
+                namefrom = row[0]
+                nameto = row[1]
+
+                transitionrows.append(
+                    HillierTransition(
+                        namefrom=namefrom,
+                        nameto=nameto,
+                        f=float(row[2].replace("D", "E")),
+                        A=float(row[3].replace("D", "E")),
+                        lambdaangstrom=lambda_value,
+                        i=int(row[5].rstrip("-")),
+                        j=int(row[6]),
+                        hilliertransitionid=hilliertransitionid,
+                    )
                 )
 
-                if True:  # or int(transition.hilliertransitionid) not in defined_transition_ids: #checking for duplicates massively slows down the code
-                    #                    defined_transition_ids.append(int(transition.hilliertransitionid))
-                    transitions.append(transition)
-                    transition_count_of_level_name[transition.namefrom] += 1
-                    transition_count_of_level_name[transition.nameto] += 1
+                transition_count_of_level_name[namefrom] += 1
+                transition_count_of_level_name[nameto] += 1
 
-                    if int(transition.hilliertransitionid) != len(transitions):
-                        print(
-                            f"{filename} WARNING: Transition id {int(transition.hilliertransitionid):d} found at entry"
-                            f" number {len(transitions):d}"
-                        )
-                        # sys.exit()
-                else:
-                    # dead while the duplicate check above is disabled for speed, but kept so
-                    # that re-enabling it restores the error path
-                    artisatomic.log_and_print(  # pyright: ignore[reportUnreachable]
-                        flog, f"FATAL: multiply-defined Hillier transition: {transition.namefrom} {transition.nameto}"
+                if hilliertransitionid != transitioncount + 1:
+                    print(
+                        f"{filename} WARNING: Transition id {hilliertransitionid:d} found at entry"
+                        f" number {transitioncount + 1:d}"
                     )
-                    sys.exit()
 
-    artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
-    assert len(transitions) == expected_transitions
+    dftransitions = pl.DataFrame(transitionrows, schema=hillier_transition_schema, orient="row")
 
-    # filter out levels with no transitions
-    hillier_energy_levels = [
-        level for level in hillier_energy_levels if transition_count_of_level_name[level.levelname] > 0
-    ]
+    artisatomic.log_and_print(flog, f"Read {dftransitions.height:d} transitions")
+    if dftransitions.height != expected_transitions:
+        msg = f"{filename} declares {expected_transitions} transitions but {dftransitions.height} were read"
+        raise ValueError(msg)
+
+    # filter out levels with no transitions: a name is only counted above when one is read for it
+    dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
+        pl.col("levelname").is_in(set(transition_count_of_level_name))
+    )
 
     return (
         hillier_ionization_energy_ev,
-        hillier_energy_levels,
-        transitions,
+        dfhillier_energy_levels,
+        dftransitions,
         transition_count_of_level_name,
-        hillier_levelnamesnoJ_matching_term,
     )
 
 
@@ -573,7 +670,7 @@ phixs_type_labels = {
     2: "Hydrogenic split l (z states, n > 11) [n, l_start, l_end]",
     3: "Hydrogenic pure n level (all l, n >= 13) [scale, n]",
     4: "Used for CIV rates from Leobowitz (JQSRT 1972,12,299) (6 numbers)",
-    5: "Opacity project fits (from Peach, Sraph, and Seaton (1988) (5 numbers)",
+    5: "Opacity project fits (from Peach, Saraph, and Seaton (1988) (5 numbers)",
     6: "Hummer fits to the opacity cross-sections for HeI",
     7: "Modified Seaton formula fit (cross section zero until offset edge)",
     8: "Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]",
@@ -585,22 +682,41 @@ phixs_type_labels = {
 
 
 def read_phixs_tables(
-    atomic_number, ion_stage, energy_levels, args, flog
+    atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[str, float]] | None], npt.NDArray[np.float64]]:
-    # this gets partially overwritten anyway
-    photoionization_crosssections = np.zeros((len(energy_levels), args.nphixspoints))
-    photoionization_thresholds_ev = np.zeros(len(energy_levels))
-    # None means "no photoionisation data for this level". get_photoiontargetfractions() relies on
-    # this to tell those levels apart from levels that do have a cross-section table, so it must
-    # not be initialised to empty lists.
-    photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None for _ in energy_levels]
-    # return np.zeros((len(energy_levels), args.nphixspoints)),
-    # photoionization_targetfractions  # TODO: replace with real data
+    """Read one ion's CMFGEN photoionization cross sections, downsampled onto the output grid.
 
-    # charge of the ion left behind by the photoionisation, i.e. CMFGEN's ZION (= ZXzV, which it
-    # reads from the oscillator file, where it equals the ionisation stage for every ion here)
+    Returns the cross sections, the target configurations and their fractions per level, and the
+    threshold energies, all indexed by zero-based level id. A level with no data keeps None in
+    the target list, which get_photoiontargetfractions() relies on to tell it apart from a level
+    whose targets all came out zero. The files give fit coefficients rather than tabulated cross
+    sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
+    functions that evaluate them.
+    """
+    # pulled out of the frame once: the loops below index these per level, per cross-section table
+    levelcount = dfenergy_levels.height
+    levelnames: list[str] = dfenergy_levels["levelname"].to_list()
+    lambdaangstroms: list[float] = dfenergy_levels["lambdaangstrom"].to_list()
+
+    # first level index of each name, with and without the [J] suffix: tables are matched to levels
+    # by name, and rescanning the level list per table would be O(levels x tables)
+    firstlevelindex_of_levelname: dict[str, int] = {}
+    firstlevelindex_of_levelnamenoJ: dict[str, int] = {}
+    for levelindex, levelname in enumerate(levelnames):
+        firstlevelindex_of_levelname.setdefault(levelname, levelindex)
+        firstlevelindex_of_levelnamenoJ.setdefault(levelname.split("[")[0], levelindex)
+
+    # this gets partially overwritten anyway
+    photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
+    photoionization_thresholds_ev = np.full(levelcount, np.nan)
+    # None means "no photoionisation data for this level", which get_photoiontargetfractions()
+    # relies on, so this must not be initialised to empty lists
+    photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None] * levelcount
+
+    # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file, which
+    # equals the ionisation stage for every ion here)
     zion = ion_stage
-    photfilenames = ions_data[(atomic_number, ion_stage)].photfilenames
+    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
@@ -612,10 +728,10 @@ def read_phixs_tables(
     phixs_type_levels = defaultdict(list)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
-        if photfilename == "":
+        if not photfilename:
             continue
         filename = Path(
-            hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, photfilename
+            hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
         artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
@@ -660,36 +776,30 @@ def read_phixs_tables(
                     row[-3:]
                 ) == "!Configuration name [*]":
                     lowerlevelname = row[0]
-                    # with J splitting, the name (including any [J] suffix) maps to exactly one
-                    # level, so it must be kept intact. Without J splitting, strip the [J] suffix
-                    # so the table applies to all levels sharing the configuration
+                    # with J splitting the name (including any [J] suffix) maps to exactly one
+                    # level; without it, strip the suffix so the table covers the configuration
                     if not j_splitting_on and "[" in lowerlevelname:
                         lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
                     lowerlevelindex = 0
-                    # find the zero-based index of the first matching level (without J splitting,
-                    # several matches may differ by J values)
-                    for levelindex, energy_level in enumerate(energy_levels):
-                        levelname = energy_level.levelname if j_splitting_on else energy_level.levelname.split("[")[0]
-                        if levelname == lowerlevelname:
-                            lowerlevelindex = levelindex
-                            break
-
-                    if "targetlevelname" in locals():
-                        if targetlevelname == "":  # pyright: ignore[reportPossiblyUnboundVariable]
+                    # first matching level (without J splitting, several may differ by J);
+                    # no match keeps the old default of 0
+                    lowerlevelindex = (
+                        firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
+                    ).get(lowerlevelname, 0)
+                    if "trargetlevelname" in locals():
+                        if not targetlevelname:
                             print("ERROR: no upper level name")
                             sys.exit()
                     else:
                         print("WARNING: targelevelname does not exist, skipping to the next line")
                         continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in !Configuration name and confuse things...
-                    # print(f"Reading level {lowerlevelid} '{lowerlevelname}'")
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
-                    # CMFGEN's ZION comes from the oscillator file, not from here: RDPHOT_GEN_V2
-                    # never reads this field. The two disagree for 29 files in the shipped
-                    # database, so keep using ion_stage (which matches the oscillator value for
-                    # every ion in ions_data) and only report the discrepancy.
+                    # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
+                    # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
+                    # matches the oscillator value for every ion in ions_data) and just report it.
                     zion_from_photfile = int(float(row[0]))
                     if zion_from_photfile != ion_stage:
                         artisatomic.log_and_print(
@@ -715,18 +825,15 @@ def read_phixs_tables(
                             print("ERROR: Cross section type 0 has non-zero number after it")
                             sys.exit()
 
-                        # phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
-
                 elif crosssectiontype == 1:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 3:
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 2:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -736,12 +843,11 @@ def read_phixs_tables(
                             if l_end > n - 1:
                                 artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
-                                lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                                lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
                                     lambda_angstrom, n, l_start, l_end
                                 )
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 3:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -754,57 +860,43 @@ def read_phixs_tables(
                                 continue
 
                             n = int(n)
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             # scale the cross sections but not the energy grid
                             phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, n)
                             phixstable[:, 1] *= scale
                             phixstables[filenum][lowerlevelname] = phixstable
 
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Hydrogenic pure n formula values for level {0}'.format(lowerlevelname))
-                            # print(lowerlevelname)
-                            # print(phixstables[filenum][lowerlevelname][:10])
-                            # print(get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)[:10])
 
                 elif crosssectiontype == 5:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 5:
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_opproject_phixstable(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # artisatomic.log_and_print(flog, 'Using OP project formula values for level {0}'.format(lowerlevelname))
-
                 elif crosssectiontype == 6:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 8:
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_hummer_phixstable(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
-                            # print(lowerlevelname, "HUMMER")
-                            # print(fitcoefficients)
-                            # print(phixstables[lowerlevelname][::5])
-                            # print(phixstables[lowerlevelname][-10:])
-
-                            # artisatomic.log_and_print(flog, 'Using Hummer formula values for level {0}'.format(lowerlevelname))
-
                 elif crosssectiontype == 7:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 4:
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_seaton_phixstable(
                                 lambda_angstrom, *fitcoefficients
                             )
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # log_and_print(flog, 'Using modified Seaton formula values for level {0}'.format(lowerlevelname))
 
                 elif crosssectiontype == 8:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
@@ -826,47 +918,43 @@ def read_phixs_tables(
                             if l_end > n - 1:
                                 artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
-                                lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                                lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
                                     lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion
                                 )
-                                # log_and_print(flog, 'Using offset Hydrogenic split l formula values for level {0}'.format(lowerlevelname))
                                 numpointsexpected = len(phixstables[filenum][lowerlevelname])
 
                 elif crosssectiontype == 9:
                     if len(row) == 8 and numpointsexpected > 0:
                         fitcoefficients.append(
-                            vy95_phixsfitrow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
+                            VY95PhixsFitRow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
                         )
 
                         if len(fitcoefficients) * 8 == numpointsexpected:
-                            lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                             phixstables[filenum][lowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
                             numpointsexpected = len(phixstables[filenum][lowerlevelname])
-                            # artisatomic.log_and_print(flog, 'Using Verner & Yakolev 1995 formula values for level {0}'.format(lowerlevelname))
 
-                elif crosssectiontype in [20, 21, 22]:  # sampled data points
-                    if len(row) == 2 and row_is_all_floats and lowerlevelname != "":
+                elif crosssectiontype in {20, 21, 22}:  # sampled data points
+                    if len(row) == 2 and row_is_all_floats and lowerlevelname:
                         if lowerlevelname not in phixstables[filenum]:
                             phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
 
-                        lambda_angstrom = abs(float(energy_levels[lowerlevelindex].lambdaangstrom))
+                        lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                         thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
                         enryd = float(row[0].replace("D", "E"))
 
-                        if crosssectiontype in [
+                        if crosssectiontype in {
                             20,
                             21,
                             22,
-                        ]:  # the x value is actually a fraction of the threshold, not an energy
+                        }:  # the x value is actually a fraction of the threshold, not an energy
                             if pointnumber == 0 and abs(enryd - 1.0) > 0.5:
                                 print(
                                     f"{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is not near"
                                     f" one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry"
                                 )
                             enryd *= thresholdenergyryd
-                        # elif pointnumber == 0 and abs(enryd - 1.0) < 0.2:
-                        #     print(f'{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is near one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry')
 
                         xspoint = enryd, float(row[1].replace("D", "E"))
                         phixstables[filenum][lowerlevelname][pointnumber] = xspoint
@@ -901,13 +989,11 @@ def read_phixs_tables(
                         phixs_type_levels[crosssectiontype].append(lowerlevelname)
 
                 if len(row) == 0:
-                    # For the tabulated types the array is preallocated to the declared row count,
-                    # so a short table leaves trailing zeros behind. Compare the number of points
-                    # actually read instead. (The previous check tested `targetlevelname in
-                    # <2-D float ndarray>`, which is always False, so it never ran.)
+                    # for the tabulated types the array is preallocated to the declared row
+                    # count, so a short table leaves trailing zeros: compare the points read
                     if (
-                        crosssectiontype in [20, 21, 22]
-                        and lowerlevelname != ""
+                        crosssectiontype in {20, 21, 22}
+                        and lowerlevelname
                         and lowerlevelname in phixstables[filenum]
                         and pointnumber != numpointsexpected
                     ):
@@ -938,17 +1024,22 @@ def read_phixs_tables(
                     f" {phixs_type_labels[crosssectiontype]}",
                 )
 
-        # testing
-        # print('3d8(3F)4s_4Fe')
-        # print(phixstables[filenum]['3d8(3F)4s_4Fe'])
         reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
         )
-        # print(reduced_phixstables_onetarget['3d8(3F)4s_4Fe'])
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
+            except IndexError:
+                # The cross section is zero everywhere on the output grid, so the level gets no
+                # photoionization. For type 8 (offset) this happens when the offset edge
+                # nu_edge + nu_o lies beyond the grid that reduce_phixs_tables() samples.
+                num_levelnames_with_zero_crosssection += 1
+                artisatomic.log_and_print(
+                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
+                )
+            else:
                 phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
                     (
                         phixstargets[filenum],
@@ -960,21 +1051,12 @@ def read_phixs_tables(
                 # existing one if this target has a larger threshold cross section
                 # if lowerlevelname not in reduced_phixs_dict or \
                 #         phixs_at_threshold > reduced_phixs_dict[lowerlevelname][0]:
-                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]
+                #     reduced_phixs_dict[lowerlevelname] = reduced_phixstables_onetarget[lowerlevelname]  # ruff: ignore[commented-out-code]
                 if lowerlevelname not in reduced_phixs_dict:
                     reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 else:
-                    print(f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}")
-                    # sys.exit()
-            except IndexError:
-                # The cross section is zero everywhere on the output grid, so the level is dropped
-                # and gets no photoionization at all. For a type-8 (offset) cross section this
-                # happens whenever the offset edge nu_edge + nu_o lies beyond the end of the
-                # nu/nu_edge grid that reduce_phixs_tables() samples.
-                num_levelnames_with_zero_crosssection += 1
-                artisatomic.log_and_print(
-                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
-                )
+                    msg = f"ERROR: DUPLICATE CROSS SECTION TABLE FOR {lowerlevelname}"
+                    raise ValueError(msg)
 
     if num_levelnames_with_zero_crosssection > 0:
         artisatomic.log_and_print(
@@ -1012,30 +1094,38 @@ def read_phixs_tables(
                 phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
             # e.g. if the target (non-J-split) with the highest fraction has 50%, the cross sections need to be multiplied by two
-            # reduced_phixs_dict[lowerlevelname] = reduced_phixstable / (max_factor / factor_sum)
-            reduced_phixs_dict[lowerlevelname] = reduced_phixstable  # / (max_factor / factor_sum)
+            reduced_phixs_dict[lowerlevelname] = reduced_phixstable
 
-    # now the non-J-split cross sections are mapped onto J-split levels
+    # map the non-J-split cross sections onto J-split levels. A table matches every level sharing
+    # the configuration, so index the level list by match name once rather than rescanning it.
+    levelindices_of_matchname: defaultdict[str, list[int]] = defaultdict(list)
+    for levelindex, levelname in enumerate(levelnames):
+        levelindices_of_matchname[levelname if j_splitting_on else levelname.split("[")[0]].append(levelindex)
+
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
-        for levelindex, energy_level in enumerate(energy_levels):
-            levelname_b = energy_level.levelname if j_splitting_on else energy_level.levelname.split("[")[0]
-
-            if levelname_b == lowerlevelname_a:  # due to J splitting, we may match multiple levels here
-                photoionization_crosssections[levelindex] = phixstable
-                # .get() rather than the defaultdict's __getitem__: a level whose target factors
-                # all came out zero is absent here, and inserting an empty list for it would look
-                # like "has data, no targets" instead of "no data" to get_photoiontargetfractions()
-                photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
-                    levelname_b
-                )
-
-                # photoionization_thresholds_ev[levelindex] = energy_level.thresholdenergyev
-                photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / float(energy_level.lambdaangstrom)
+        for levelindex in levelindices_of_matchname[lowerlevelname_a]:
+            photoionization_crosssections[levelindex] = phixstable
+            # .get() rather than __getitem__: a level whose target factors all came out zero is
+            # absent, and an empty list would look like "has data, no targets" to  get_photoiontargetfractions()
+            photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
+                lowerlevelname_a
+            )
+            # abs() as at the phixs-fit sites above: CMFGEN writes a negative Lam(A) for some
+            # levels, and that sign would read as readqubdata's "no threshold value" sentinel.
+            # A zero Lam(A) gives no threshold at all rather than dividing by zero; the level
+            # keeps its NaN and write_phixs_data() skips it.
+            if lambdaangstroms[levelindex] != 0.0:
+                photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
     return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
 
 
 def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
+    """Evaluate a Seaton formula fit (CMFGEN cross-section type 1, or type 7 when nu_o is given).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
+    so the cross section is zero until the offset threshold.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1078,12 +1168,12 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
     Depends only on the quantum numbers, not on the level, so cache it: the callers below run
     once per level per ion.
     """
-    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[(n, l_start)]))
+    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[n, l_start]))
     for l in range(l_start, l_end + 1):
-        if not np.array_equal(hyd_phixs_energygrid_ryd[(n, l)], hyd_phixs_energygrid_ryd[(n, l_start)]):
+        if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             print("TABLE MISMATCH")
             sys.exit()
-        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[(n, l)]
+        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
 
     return arr_sigma_summed_over_l
 
@@ -1100,7 +1190,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     """
     assert l_start >= 0
     assert l_end <= n - 1
-    energygrid = hyd_phixs_energygrid_ryd[(n, l_start)]
+    energygrid = hyd_phixs_energygrid_ryd[n, l_start]
     phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
@@ -1126,9 +1216,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # energy / (E_o + E_threshold), i.e. U measured from the offset edge rather than the true edge
         u_offset = thresholdenergyev * u_grid / (e_o_ev + thresholdenergyev)
 
-        # CMFGEN interpolates log10(cross section) linearly in log10(U), and the tabulated U grid is
-        # geometric, so this reproduces its RJ = LOG10(U) / L_DEL_U indexing.
-        # u_offset <= u_grid for e_o_ev >= 0, so we never need to extrapolate past the table end.
+        # CMFGEN interpolates log10(cross section) linearly in log10(U) on a geometric U grid,
+        # reproducing its RJ = LOG10(U) / L_DEL_U indexing. u_offset <= u_grid for e_o_ev >= 0,
+        # so the table end is never extrapolated past.
         with np.errstate(divide="ignore"):
             log_sigma = np.log10(arr_sigma_summed_over_l)
         arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_grid), log_sigma) * scale_factor
@@ -1146,6 +1236,11 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 # test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb?? can't find a source for this
 # give the same results as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
+    """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
+    already accounts for the effective charge, so the result must not be rescaled by the caller.
+    """
     energygrid = hyd_gaunt_energygrid_ryd[n]
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1167,8 +1262,12 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     return phixstable
 
 
-# Peach, Sraph, and Seaton (1988)
+# Peach, Saraph, and Seaton (1988)
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
+    """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (1988) (CMFGEN type 5).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1192,7 +1291,12 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 # only applies to helium
 # the threshold cross sections seems ok, but energy dependence could be slightly wrong
 # what is the h parameter that is not used??
-def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # noqa: ARG001
+def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ignore[unused-function-argument]
+    """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. A cubic in log10(E/E_th)
+    below the break at e, a straight line above it.
+    """
     energygrid = np.arange(0, 1.0, 0.001)
     phixstable = np.empty((len(energygrid), 2))
 
@@ -1244,43 +1348,52 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     return phixstable
 
 
-def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
+def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
+    """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
+
+    Returns a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids.
+    Where the file gives one value for a whole term but the level list is J-split, the value is
+    shared over the term's J levels in proportion to g_i * g_j, so that summing over the term
+    recovers the file's value.
+    """
     t_scale_factor = 1e4  # Hiller temperatures are given as T_4
     upsilondict: dict[tuple[int, int], float] = {}
-    coldatafilename = ions_data[(atomic_number, ion_stage)].coldatafilename
-    if coldatafilename == "":
+    coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
+    if not coldatafilename:
         artisatomic.log_and_print(flog, "No collisional data file specified")
         return upsilondict
 
+    levelnames: list[str] = dfenergy_levels["levelname"].to_list()
+    gvalues: list[float] = dfenergy_levels["g"].to_list()
+
     found_nonjsplit_transition = False
     level_ids_of_level_name = {}
-    for levelid, energy_level in enumerate(energy_levels):
-        if hasattr(energy_level, "levelname"):
-            levelname = energy_level.levelname
+    for levelid, levelname in enumerate(levelnames):
+        levelnamenoJ = levelname.split("[")[0]
+        if levelname != levelnamenoJ:  # levels are J split
+            level_ids_of_level_name[levelname] = [levelid]
+        elif not found_nonjsplit_transition:
+            artisatomic.log_and_print(flog, "Found at least one transition specifying level name with no J value")
+            found_nonjsplit_transition = True
 
-            levelnamenoJ = levelname.split("[")[0]
-            if levelname != levelnamenoJ:  # levels are J split
-                level_ids_of_level_name[levelname] = [levelid]
-            elif not found_nonjsplit_transition:
-                artisatomic.log_and_print(flog, "Found at least one transition specifying level name with no J value")
-                found_nonjsplit_transition = True
+        # keep track of the level ids of states that differ by J only
+        # in case the collisional data level names are not J split
+        try:
+            level_ids_of_level_name[levelnamenoJ].append(levelid)
+        except KeyError:
+            level_ids_of_level_name[levelnamenoJ] = [levelid]
 
-            # keep track of the level ids of states that differ by J only
-            # in case the collisional data level names are not J split
-            try:
-                level_ids_of_level_name[levelnamenoJ].append(levelid)
-            except KeyError:
-                level_ids_of_level_name[levelnamenoJ] = [levelid]
-
-    # total statistical weight of each term, used to share a term-resolved collision strength over
-    # its J levels. Depends only on the level list, so build it once rather than per input row.
+    # total statistical weight per term, for sharing a term-resolved collision strength over its
+    # J levels. Depends only on the level list, so build it once.
     g_sum_of_level_name = {
-        levelname: sum(energy_levels[levelid].g for levelid in levelids)
+        levelname: sum(gvalues[levelid] for levelid in levelids)
         for levelname, levelids in level_ids_of_level_name.items()
     }
 
-    filename = os.path.join(
-        hillier_ion_folder(atomic_number, ion_stage), ions_data[(atomic_number, ion_stage)].folder, coldatafilename
+    filename = (
+        Path(hillier_ion_folder(atomic_number, ion_stage))
+        / ions_data[atomic_number, ion_stage].folder
+        / coldatafilename
     )
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
     coll_lines_in = 0
@@ -1360,7 +1473,9 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
-                try:
+                # any level lookup below can raise KeyError for a name not in the level list,
+                # so guard the whole block rather than each lookup
+                try:  # ruff: ignore[too-many-statements-in-try-clause]
                     if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
                         artisatomic.log_and_print(
                             flog,
@@ -1374,22 +1489,18 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                     for id_lower in level_ids_of_level_name[namefrom]:
                         for id_lower2 in level_ids_of_level_name[namefrom]:
                             if id_lower < id_lower2 and (id_lower, id_lower2) not in upsilondict:
-                                upsilondict[(id_lower, id_lower2)] = -2.0
+                                upsilondict[id_lower, id_lower2] = -2.0
 
                     for id_upper in level_ids_of_level_name[nameto]:
                         for id_upper2 in level_ids_of_level_name[nameto]:
                             if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
-                                upsilondict[(id_upper, id_upper2)] = -2.0
+                                upsilondict[id_upper, id_upper2] = -2.0
 
-                    # When the collision data is given between LS terms but the level list is
-                    # J-split, the term effective collision strength is shared over the J levels
-                    # of both terms in proportion to their statistical weights:
-                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)
-                    # so that sum_ij upsilon_ij = upsilon_term. That invariant is what makes the
-                    # total term-to-term rate come out right, because ARTIS forms the collisional
-                    # excitation rate coefficient as proportional to upsilon_ij / g_i.
-                    # Both sums are over the complete term, so each pair keeps its correct value
-                    # regardless of which pairs happen to be representable as lower id < upper id.
+                    # A term-resolved collision strength is shared over the J levels of both
+                    # terms in proportion to their statistical weights:
+                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)  # ruff: ignore[commented-out-code]
+                    # so that sum_ij upsilon_ij = upsilon_term, which is what makes the total
+                    # term-to-term rate right (ARTIS builds the rate from upsilon_ij / g_i).
                     lower_g_sum = g_sum_of_level_name[namefrom]
                     upper_g_sum = g_sum_of_level_name[nameto]
 
@@ -1397,15 +1508,12 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                         for id_upper in level_ids_of_level_name[nameto]:
                             if id_lower == id_upper:
                                 continue
-                            # print(f'Transition {namefrom} (level {id_lower:d} in {level_ids_of_level_name[namefrom]}) -> {nameto} (level {id_upper:d} in {level_ids_of_level_name[nameto]})')
                             upsilonscaled = (
-                                upsilon
-                                * (energy_levels[id_lower].g / lower_g_sum)
-                                * (energy_levels[id_upper].g / upper_g_sum)
+                                upsilon * (gvalues[id_lower] / lower_g_sum) * (gvalues[id_upper] / upper_g_sum)
                             )
-                            # upsilon is symmetric, and the output wants lower id < upper id. The
-                            # two terms' J levels can interleave in energy, so order the key here
-                            # rather than dropping the pairs that come out the wrong way round.
+                            # upsilon is symmetric and the output wants lower id < upper id; the
+                            # terms' J levels can interleave, so order the key rather than
+                            # dropping the pairs that come out reversed
                             key = (min(id_lower, id_upper), max(id_lower, id_upper))
                             if key in upsilondict and upsilondict[key] >= 0.0:
                                 artisatomic.log_and_print(
@@ -1418,7 +1526,6 @@ def read_coldata(atomic_number, ion_stage, energy_levels, flog, args):
                             else:
                                 upsilondict[key] = upsilonscaled
 
-                                # print(namefrom, nameto, upsilon)
                 except KeyError:
                     unlisted_from_message = " (unlisted)" if namefrom not in level_ids_of_level_name else ""
                     unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
@@ -1452,6 +1559,13 @@ def get_photoiontargetfractions(
     dfenergy_levels_upperion,
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
 ) -> list[list[tuple[int, float]]]:
+    """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
+
+    Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. A target
+    configuration that names several J-split levels of the upper ion is shared over them in
+    proportion to their statistical weights. Levels with no cross-section data (None) and levels
+    whose targets could not be matched both fall back to the upper ion's ground state.
+    """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
 
@@ -1494,33 +1608,40 @@ def get_photoiontargetfractions(
 
 
 def read_hyd_phixsdata():
-    # the cached (2l+1)-weighted sums are built from the tables filled in below, so a reload
-    # (repeated calls happen in the tests) must not leave sums computed from the previous tables
+    """Load the hydrogenic photoionization tables that the type 2, 3 and 8 fits interpolate.
+
+    Fills the module-level hyd_phixs / hyd_gaunt tables, so it must be called before any
+    get_hydrogenic_*_phixstable(). Thresholds are taken from the H I level list, which is
+    therefore required to be indexed by principal quantum number.
+    """
+    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload (the
+    # tests call this repeatedly) must not leave sums from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
-    with open(os.devnull, "w") as devnull:
+    with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         (
             _hillier_ionization_energy_ev,
-            hillier_energy_levels,
+            dfhillier_energy_levels,
             _transitions,
             _transition_count_of_level_name,
-            _hillier_level_ids_matching_term,
         ) = read_levels_and_transitions(1, 1, devnull)
 
     # the tables below are indexed by principal quantum number, so the H I level list must not
     # have been filtered (read_levels_and_transitions drops levels with no transitions)
-    for levelid, energy_level in enumerate(hillier_energy_levels, 1):
-        assert energy_level.hillierlevelid == levelid, (
-            "H I level list is not indexed by principal quantum number, so the hydrogenic"
-            " cross-section thresholds would be taken from the wrong levels"
-        )
+    assert dfhillier_energy_levels["hillierlevelid"].to_list() == list(range(1, dfhillier_energy_levels.height + 1)), (
+        "H I level list is not indexed by principal quantum number, so the hydrogenic"
+        " cross-section thresholds would be taken from the wrong levels"
+    )
+    # indexed by n - 1, i.e. the ionisation threshold wavelength of the level with principal
+    # quantum number n
+    lambdaangstrom_of_n = dfhillier_energy_levels["lambdaangstrom"].to_list()
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
     print(f"Reading hydrogen photoionization cross sections from {hyd_filename}")
     max_n = -1
     l_start_u = 0.0
     l_del_u = 0.0
-    with open(hyd_filename) as fhyd:
+    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1532,20 +1653,20 @@ def read_hyd_phixsdata():
             if " ".join(row[1:]) == "!L_DEL_U":
                 l_del_u = float(row[0].replace("D", "E"))
 
-            if max_n >= 0 and line.strip() == "":
+            if max_n >= 0 and not line.strip():
                 break
 
         for line in fhyd:
-            if line.strip() == "":
+            if not line.strip():
                 continue
 
             n, l, num_points = (int(x) for x in line.split())
-            e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n - 1].lambdaangstrom)
+            e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
 
             xs_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
-                xs_values = xs_values + values_thisline
+                xs_values += values_thisline
                 if len(xs_values) == num_points:
                     break
                 if len(xs_values) > num_points:
@@ -1555,20 +1676,19 @@ def read_hyd_phixsdata():
                     )
                     sys.exit()
 
-            hyd_phixs_energygrid_ryd[(n, l)] = np.array(
+            hyd_phixs_energygrid_ryd[n, l] = np.array(
                 [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
             )
             # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
             # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
-            hyd_phixs[(n, l)] = np.array([10 ** (8 + logxs) for logxs in xs_values])
-            # hyd_phixs_f = interpolate.interp1d(hyd_energydivthreholdgrid[(n, l)], hyd_phixs[(n, l)], kind='linear', assume_sorted=True)
+            hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")
     max_n = -1
     n_start_u = 0.0
     n_del_u = 0.0
-    with open(hyd_filename) as fhyd:
+    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1582,20 +1702,20 @@ def read_hyd_phixsdata():
                 elif row[1] == "!N_DEL_U":
                     n_del_u = float(row[0].replace("D", "E"))
 
-            if max_n >= 0 and line.strip() == "":
+            if max_n >= 0 and not line.strip():
                 break
 
         for line in fhyd:
-            if line.strip() == "":
+            if not line.strip():
                 continue
 
             n, num_points = (int(x) for x in line.split())
-            e_threshold_ev = hc_in_ev_angstrom / float(hillier_energy_levels[n - 1].lambdaangstrom)
+            e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
 
             gaunt_values: list[float] = []
             for line in fhyd:
                 values_thisline = [float(x) for x in line.split()]
-                gaunt_values = gaunt_values + values_thisline
+                gaunt_values += values_thisline
                 if len(gaunt_values) == num_points:
                     break
                 if len(gaunt_values) > num_points:
@@ -1609,10 +1729,15 @@ def read_hyd_phixsdata():
 
 
 def extend_ion_list(
-    ion_handlers: list[tuple[int, list[int | tuple[int, str]]]],
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     maxionstage: int | None = None,
     include_hydrogen: bool | None = False,
 ):
+    """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
+
+    Hydrogen is excluded by default: its levels are also the source of the hydrogenic
+    photoionisation tables used as a fallback for other elements.
+    """
     for atomic_number, ion_stage in ions_data:
         if maxionstage is not None and ion_stage > maxionstage:
             continue  # skip
