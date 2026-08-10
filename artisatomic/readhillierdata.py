@@ -782,7 +782,6 @@ def read_phixs_tables(
                         lowerlevelname = lowerlevelname.split("[")[0]
                     fitcoefficients = []
                     numpointsexpected = 0
-                    lowerlevelindex = 0
                     # first matching level (without J splitting, several may differ by J);
                     # no match keeps the old default of 0
                     lowerlevelindex = (
