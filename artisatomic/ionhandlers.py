@@ -41,7 +41,7 @@ def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
     # readdreamdata, readfacdata and groundstatesonlynist also offer extend_ion_list(), and can be
     # added to this sequence to pull in everything they have data for.
     ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=True)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=16, include_hydrogen=True)
     ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
 
