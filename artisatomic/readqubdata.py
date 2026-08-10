@@ -260,10 +260,14 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 id_lower = int(row[1])
                 A = float(row[2])
                 if A > 2e-30:
-                    # a raise rather than an assert: this validates an input file, and a
-                    # non-positive id would otherwise wrap to the wrong level via negative indexing
-                    if id_lower < 1 or id_upper < 1:
-                        msg = f"non-positive transition level ids {id_lower}, {id_upper} in {transitionfile}"
+                    # a raise rather than an assert: this validates an input file. A non-positive
+                    # id would wrap to the wrong level via negative indexing, and one past the end
+                    # would raise a bare IndexError naming neither the file nor the transition.
+                    if not 1 <= id_lower <= len(qub_energylevels) or not 1 <= id_upper <= len(qub_energylevels):
+                        msg = (
+                            f"transition level ids {id_lower}, {id_upper} in {transitionfile} are outside"
+                            f" the file's {len(qub_energylevels)} levels"
+                        )
                         raise ValueError(msg)
                     # the file numbers levels from one; level ids are zero-based in memory
                     id_lower -= 1
@@ -303,7 +307,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_ev = 54.9000015
 
     elif (atomic_number, ion_stage) in new_qub_calculations:
-        atom_filepath = Path("atomic-data-qub", f"{atomic_number}_{ion_stage}.adf04")
+        # qubpath, not a bare relative path: extend_ion_list() discovers these ions by globbing
+        # qubpath, so resolving the read against the working directory instead would let discovery
+        # succeed and the read fail whenever the run is started outside the repository root
+        atom_filepath = qubpath / f"{atomic_number}_{ion_stage}.adf04"
         ionization_energy_ev, qub_energylevels, upsilondict = read_adf04(atom_filepath, atomic_number, ion_stage, flog)
 
         qub_transitions = []
@@ -418,7 +425,18 @@ def read_qub_photoionizations(
 
             # column n of the file holds the cross section to the upper ion's level id n - 1
             for targetcolumn in range(1, ntargets + 1):
-                phixstables[targetcolumn] = photdata.loc[photdata[:][targetcolumn] > 0.0][[0, targetcolumn]].to_numpy()
+                phixstable = photdata.loc[photdata[:][targetcolumn] > 0.0][[0, targetcolumn]].to_numpy()
+                if len(phixstable) == 0:
+                    # nothing positive in this column, so there is no table to downsample. Skipping
+                    # here leaves the target out of the fractions below, which is what a zero cross
+                    # section means anyway; reduce_phixs_tables() would index off an empty array.
+                    artisatomic.log_and_print(
+                        flog,
+                        f"WARNING: level {lowerlevelid} has no positive cross section to target"
+                        f" {targetcolumn - 1}, so that target is dropped",
+                    )
+                    continue
+                phixstables[targetcolumn] = phixstable
 
             reduced_phixs_dict = artisatomic.reduce_phixs_tables(
                 phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
@@ -593,12 +611,18 @@ def get_level_valence_n(levelname: str):
     """
     namesplit = levelname.split("_")
     part = namesplit[0].strip()
-    if len(namesplit) < 2:
+    # `part` is empty for a name that starts with '_', and stripping a leading parent term below
+    # can empty it too, so re-test it before every part[-1] rather than raising IndexError
+    if len(namesplit) < 2 or not part:
         print(f"WARNING: Could not find valence n in {levelname}. Using n=1")
         return 1
 
     if part[-1] == ")" and "(" in part:
         part = part[: part.rfind("(")]
+
+    if not part:
+        print(f"WARNING: Could not find n in {levelname}. Using n=1")
+        return 1
 
     if part[-1] not in lchars.lower():
         # Last character must be mumber of electrons in the orbital: remove it

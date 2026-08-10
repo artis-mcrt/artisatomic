@@ -85,8 +85,16 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
 
     ion_handlers = get_ion_handlers()
 
-    assert len(ion_handlers) > 0
-    readhillierdata.read_hyd_phixsdata()
+    if not ion_handlers:
+        # not an assert: an empty selection writes an empty database rather than failing, and
+        # get_ion_handlers() reads a file, so this validates input and must survive python -O
+        msg = "No ions selected. artisatomicionhandlers.json is empty, or no reader found any data."
+        raise ValueError(msg)
+
+    # only the cross sections use these tables, and reading them means parsing the whole H I
+    # oscillator file plus two hydrogenic data files
+    if not args.nophixs:
+        readhillierdata.read_hyd_phixsdata()
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 
@@ -99,6 +107,9 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
     else:
         Path(log_folder).mkdir(exist_ok=True, parents=True)
 
+    # a record of what this run used, written beside the logs. It is NOT the file
+    # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
+    # directory. Copy this one there to repeat a run exactly, as the CI workflow does.
     with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)

@@ -2,16 +2,27 @@
 
 import typing as t
 from collections import defaultdict
+from functools import cache
 from pathlib import Path
 
 datafilepath = Path(Path(Path(__file__).resolve()).parent, "..", "atomic-data-helium-boyle", "aoife.hdf5")
 
-try:
-    import h5py  # pyright: ignore[reportMissingTypeStubs]
 
-    aoife_dataset = h5py.File(datafilepath, "r") if datafilepath.exists() else None
-except ModuleNotFoundError:
-    aoife_dataset = None
+@cache
+def get_aoife_dataset():
+    """Open the AOIFE HDF5 file, once, on first use.
+
+    Opened here rather than at import: `import artisatomic` pulls this module in, so opening at
+    import held a file handle for the whole of every run, whichever handlers were selected.
+    Returns None when the file (or h5py) is absent, which is how the readers below report that
+    this data set is unavailable.
+    """
+    try:
+        import h5py  # pyright: ignore[reportMissingTypeStubs]
+    except ModuleNotFoundError:
+        return None
+
+    return h5py.File(datafilepath, "r") if datafilepath.exists() else None
 
 
 class EnergyLevelRow(t.NamedTuple):
@@ -45,7 +56,8 @@ def read_ionization_data(atomic_number, ion_stage):
 
     He III is a bare nucleus, so the file has no entry for it and a sentinel is used instead.
     """
-    assert aoife_dataset is not None
+    aoife_dataset = get_aoife_dataset()
+    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
     ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
@@ -67,20 +79,41 @@ def read_levels_data(atomic_number, ion_stage):
     Levels have no spectroscopic names, so each is named after its zero-based level number,
     in the same format read_lines_data() uses to count transitions per level.
     """
-    assert aoife_dataset is not None
+    aoife_dataset = get_aoife_dataset()
+    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
     levels_data = aoife_dataset["/levels_data"]
 
     energy_levels: list[EnergyLevelRow] = []
 
     for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
-        _atomic_num, _ion_number, level_number, energyabovegsinpercm, _g, _metastable = rowtuple
-        # the six unpacked columns plus three more make up the nine fields, which the type
-        # checkers cannot count through the star-unpacking
-        energy_level = EnergyLevelRow(*rowtuple, energyabovegsinpercm, 0, f"level{level_number:05d}")  # pyrefly: ignore [bad-argument-count] # ty:ignore[too-many-positional-arguments] # pyright: ignore[reportCallIssue]
+        atomic_num, ion_number, level_number, energyabovegsinpercm, g, metastable = rowtuple
 
-        if int(energy_level.atomic_number) != atomic_number or int(energy_level.ion_number) != ion_stage - 1:
+        if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
-        energy_levels.append(energy_level)
+
+        # named rather than *rowtuple plus three positional extras, which no type checker could
+        # count through (it needed three suppressions) and which is how a bare 0 came to be the
+        # parity of every level
+        energy_levels.append(
+            EnergyLevelRow(
+                atomic_number=atomic_num,
+                ion_number=ion_number,
+                level_number=level_number,
+                energy=energyabovegsinpercm,
+                g=g,
+                metastable=metastable,
+                energyabovegsinpercm=energyabovegsinpercm,
+                # A DISTINCT parity per level. This data set supplies none, and
+                # add_level_ids_forbidden() marks a transition forbidden when its two levels share
+                # one, so a fixed 0 made every transition of the ion forbidden (coll_str -2) when
+                # helium has plenty of permitted ones. readlisbondata and readkuruczdata use the
+                # negated level id for the same reason.
+                parity=-int(level_number),
+                # int() as read_lines_data() does, so the two agree on the name whatever dtype the
+                # file stores the level number in
+                levelname=f"level{int(level_number):05d}",
+            )
+        )
 
     return energy_levels
 
@@ -92,7 +125,8 @@ def read_lines_data(atomic_number, ion_stage):
     numbers are already zero-based, matching the level ids used in memory. No collision
     strengths are available, so every transition gets the -1 "unknown" sentinel.
     """
-    assert aoife_dataset is not None
+    aoife_dataset = get_aoife_dataset()
+    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
     lines_data = aoife_dataset["/lines_data"]
 
     transitions = []

@@ -1,5 +1,6 @@
 """Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -69,8 +70,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
                 parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
                 g=pl.col("g").cast(pl.Float64),
-                # the level name keeps the file's own 1-based number, but the level id is
-                # zero-based like everywhere else in memory
+                # Every expression in one select() reads the INPUT frame, so both columns below
+                # are the file's own values, not the ones being computed alongside them: the name
+                # gets the file's 1-based number rather than the zero-based levelid, and the
+                # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
+                # a human-readable comment in adata.txt — and read_fwf() has already stripped the
+                # text, so this is deliberate rather than the shadowing accident it resembles.
                 levelname=pl.format(
                     "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
                 ),
@@ -129,8 +134,19 @@ def get_level_valence_n(levelname: str):
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
+
+    data_v2.1 mixes two conventions: the original relativistic one, "{  4s+ 2  4p- 1 }",
+    where the valence orbital heads the last double-space-separated token, and the
+    LS-coupled one of the 2024 Ge-sequence files, "3s(2).3p(6).3d(10).4s.4p(3)2D_3D",
+    where it is the last dot-separated shell before the term label.
     """
-    n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+    if "{" in levelname:
+        n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+    else:
+        lastshell = levelname.rsplit(" ", maxsplit=1)[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0]
+        nmatch = re.match(r"\d+", lastshell)
+        assert nmatch is not None, f"Could not parse valence n from level name: {levelname}"
+        n = int(nmatch.group())
     assert n >= 0
     assert n < 20
     return n

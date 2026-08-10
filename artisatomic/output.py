@@ -1,7 +1,6 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -124,16 +123,26 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
             if not dftransitions_ion.is_empty():
-                dftransitions_ion = dftransitions_ion.with_columns(
-                    pl.struct(["lowerlevel", "upperlevel", "forbidden"])
-                    .map_elements(
-                        lambda row, upsilondict=upsilondict: upsilondict.get(  # type: ignore[misc]
-                            (row["lowerlevel"], row["upperlevel"]),
-                            -2.0 if row["forbidden"] else -1.0,
-                        ),
-                        return_dtype=pl.Float64,
+                # a left join rather than a per-row map_elements(): this runs over every
+                # transition of the ion (2.6M of them for the cmfgen set), where a Python callback
+                # per row costs more than the whole rest of the write. upsilondict's keys are
+                # unique, so the join cannot duplicate rows, and maintain_order keeps the frame in
+                # the order the reader produced it.
+                dfupsilon = pl.DataFrame(
+                    [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
+                    schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
+                    orient="row",
+                )
+                dftransitions_ion = (
+                    dftransitions_ion.with_columns(
+                        pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
                     )
-                    .alias("coll_str")
+                    .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
+                    .with_columns(
+                        # no upsilon for this transition: -2 marks it forbidden, -1 unknown
+                        coll_str=pl.col("upsilon").fill_null(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+                    )
+                    .drop("upsilon")
                 )
 
             with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
@@ -230,18 +239,32 @@ def write_transition_data(
     """
     log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
+    # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
+    # transition. Checked over the whole frame before the header goes out, so a bad row fails
+    # before anything is written rather than leaving a block whose count overstates its rows.
+    # Not an assert: this guards written output and must survive python -O.
+    if not dftransitions_ion.is_empty():
+        misordered = dftransitions_ion.filter(pl.col("lowerlevel") >= pl.col("upperlevel"))
+        if not misordered.is_empty():
+            levelid_lower, levelid_upper = misordered.select("lowerlevel", "upperlevel").row(0)
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that are not"
+                f" ordered with the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
+            )
+            raise ValueError(msg)
+
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
-            ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
-        ].iter_rows():
-            assert levelid_lower < levelid_upper
-
-            # level ids are zero-based in memory, but the output format numbers them from one
-            ftransitiondata.write(
-                f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
-            )
+        # writelines() over a generator, not a write() per row: this loop runs 2.6M times for the
+        # cmfgen set, where the per-call overhead is a measurable part of the whole run
+        # level ids are zero-based in memory, but the output format numbers them from one
+        ftransitiondata.writelines(
+            f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
+            for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
+                ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
+            ].iter_rows()
+        )
 
     ftransitiondata.write("\n")
 
@@ -299,9 +322,13 @@ def write_phixs_data(
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
-    if len(photoionization_crosssections) >= 1 and photoionization_crosssections[0][0] == 0.0:
-        log_and_print(flog, "ERROR: ground state has zero photoionization cross section")
-        sys.exit()
+    # only for a ground state that is actually being written: a level with no targets, or none
+    # left after the threshold filter, is deliberately skipped (match_hydrogenic_phixs does this
+    # for a ground state at or above the ionization energy), and that is not an error
+    if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
+        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
+        log_and_print(flog, f"ERROR: {msg}")
+        raise ValueError(msg)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
@@ -324,13 +351,15 @@ def write_phixs_data(
                 fphixs.write(f"{upperionlevelid + 1:8d}{targetprobability:12f}\n")
                 probability_sum += targetprobability
             if abs(probability_sum - 1.0) > 0.00001:
-                print(f"STOP! phixs fractions sum to {probability_sum:.5f} != 1.0")
-                print(targetlist)
-                print(f"level id {lowerlevelid}")
-                sys.exit()
+                msg = (
+                    f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
+                    f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
+                )
+                raise ValueError(msg)
 
-        for crosssection in photoionization_crosssections[lowerlevelid]:
-            fphixs.write(f"{crosssection:16.8E}\n")
+        # one writelines() per table rather than a write() per point: nphixspoints lines per level,
+        # 1.5M of them for the cmfgen set
+        fphixs.writelines(f"{crosssection:16.8E}\n" for crosssection in photoionization_crosssections[lowerlevelid])
 
     if skipped_no_threshold > 0:
         log_and_print(
@@ -353,9 +382,19 @@ def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]],
             if listions_nohandlers:
                 ion_stage_min = min(listions_nohandlers)
                 ion_stage_max = max(listions_nohandlers)
-                assert all(ion_stage in listions_nohandlers for ion_stage in range(ion_stage_min, ion_stage_max + 1)), (
-                    f"Missing ion stages for Z={atomic_number} between {ion_stage_min} and {ion_stage_max}"
-                )
+                # the file gives only the range, so a gap in it would silently claim ions that were
+                # never written. Not an assert: this guards written output and must survive -O.
+                missing = [
+                    ion_stage
+                    for ion_stage in range(ion_stage_min, ion_stage_max + 1)
+                    if ion_stage not in listions_nohandlers
+                ]
+                if missing:
+                    msg = (
+                        f"Missing ion stages {missing} for Z={atomic_number} between {ion_stage_min}"
+                        f" and {ion_stage_max}"
+                    )
+                    raise ValueError(msg)
                 nions = ion_stage_max - ion_stage_min + 1
 
             fcomp.write(

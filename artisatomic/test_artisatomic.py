@@ -2,6 +2,7 @@
 """Tests for the artisatomic readers, parsers and output writers."""
 
 import io
+import operator
 import typing as t
 
 import numpy as np
@@ -9,6 +10,7 @@ import polars as pl
 import pytest
 
 from artisatomic import add_handler_if_not_set
+from artisatomic import add_level_ids_forbidden
 from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
@@ -473,6 +475,79 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
         write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
+def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
+    """A level with a cross-section table in more than one phot file keeps the largest, rescaled.
+
+    Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
+    state of the upper ion, and a level is normally present in all of them: O I's phot_nosm_A and
+    phot_nosm_B share all 107 of their configuration names. Treating the second table as an error
+    made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV) unreadable, and none of
+    them was in the tests/ matrix, which was Fe/Co/Ni only.
+
+    Only one table can be written per level, so the one with the largest threshold cross section
+    wins. write_phixs_data() writes it as the level's TOTAL and splits it over the targets, so it
+    must first be divided by the kept target's own fraction, which is what this pins: reading each
+    phot file alone gives that target's raw table, and the combined read must reproduce the winner
+    divided by its fraction.
+    """
+    import argparse
+    import contextlib
+
+    ionfiles = readhillierdata.ions_data[8, 1]
+    # checked before the expensive reads below, so a change here fails as itself
+    assert len(ionfiles.photfilenames) == 2, f"O I is expected to have two phot files, got {ionfiles.photfilenames}"
+
+    rhd.read_hyd_phixsdata()
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+
+    def read_phixs(photfilenames):
+        """Read O I's cross sections using only the named phot files."""
+        monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=photfilenames))
+        flog = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _, _ = rhd.read_levels_and_transitions(8, 1, flog)
+            crosssections, targetconfigs, _thresholds = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+        return crosssections, targetconfigs, flog.getvalue()
+
+    file_a, file_b = ionfiles.photfilenames
+    crosssections_a, targets_a, _ = read_phixs([file_a])
+    crosssections_b, targets_b, _ = read_phixs([file_b])
+    crosssections, targetconfigs, log = read_phixs([file_a, file_b])
+
+    # the duplicates are reported rather than raised
+    assert "has a cross section table in more than one photoionisation file" in log
+
+    # every level that was read has a table, not just the ones from the first file
+    assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
+
+    # a level in both files ends up with both targets recorded
+    levelids_in_both = [
+        levelid
+        for levelid, targets in enumerate(targetconfigs)
+        if targets and len(targets) > 1 and np.any(crosssections_a[levelid]) and np.any(crosssections_b[levelid])
+    ]
+    assert levelids_in_both, "expected O I levels with a cross section table in both phot files"
+
+    for levelid in levelids_in_both:
+        # each single-file read has one target holding 100% of the level, so its table is unrescaled
+        targetlist_a, targetlist_b, targetlist = targets_a[levelid], targets_b[levelid], targetconfigs[levelid]
+        assert targetlist_a is not None
+        assert targetlist_b is not None
+        assert targetlist is not None
+
+        threshold_a = crosssections_a[levelid][np.nonzero(crosssections_a[levelid])][0]
+        threshold_b = crosssections_b[levelid][np.nonzero(crosssections_b[levelid])][0]
+        kept_crosssections, kept_target = (
+            (crosssections_a[levelid], targetlist_a[0][0])
+            if threshold_a >= threshold_b
+            else (crosssections_b[levelid], targetlist_b[0][0])
+        )
+        kept_fraction = dict(targetlist)[kept_target]
+        # a table left at one target's share would be low by exactly this factor
+        assert 0.0 < kept_fraction < 1.0
+        assert np.allclose(crosssections[levelid], kept_crosssections / kept_fraction, rtol=1e-10)
+
+
 def test_read_coldata_term_to_j_redistribution():
     """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
 
@@ -524,6 +599,136 @@ def test_read_coldata_term_to_j_redistribution():
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
 
 
+def test_readboyledata_levels_get_distinct_parities(monkeypatch):
+    """The AOIFE data set supplies no parities, so no transition may come out forbidden.
+
+    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity, so
+    giving every level the same parity made every transition of the ion forbidden — and helium has
+    plenty of permitted ones. readlisbondata and readkuruczdata use the negated level id for
+    exactly this reason.
+
+    The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
+    its README), so this builds the three tables the reader wants in memory.
+    """
+    import h5py  # pyright: ignore[reportMissingTypeStubs]
+
+    from artisatomic import readboyledata
+
+    # compound dtypes, as a real HDF5 table has: the integer columns must stay integers, or the
+    # level names format differently in the two readers below
+    levels_dtype = [("atomic_number", "i8"), ("ion_number", "i8"), ("level_number", "i8")]
+    levels_dtype += [("energy", "f8"), ("g", "f8"), ("metastable", "i8")]
+    lines_dtype = [("line_id", "i8"), ("wavelength", "f8"), ("atomic_number", "i8"), ("ion_number", "i8")]
+    lines_dtype += [("f_ul", "f8"), ("f_lu", "f8"), ("level_number_lower", "i8"), ("level_number_upper", "i8")]
+    lines_dtype += [("nu", "f8"), ("B_lu", "f8"), ("B_ul", "f8"), ("A_ul", "f8")]
+
+    # He I: three levels, and two lines between them
+    levels_data = np.array(
+        [
+            (2, 0, 0, 0.0, 1.0, 0),
+            (2, 0, 1, 159856.0, 3.0, 1),
+            (2, 0, 2, 166278.0, 1.0, 0),
+            (2, 1, 0, 0.0, 2.0, 0),  # He II, must be filtered out
+        ],
+        dtype=levels_dtype,
+    )
+    lines_data = np.array(
+        [
+            (0, 584.0, 2, 0, 0.1, 0.3, 0, 2, 0.0, 0.0, 0.0, 1.8e9),
+            (1, 10830.0, 2, 0, 0.2, 0.6, 1, 2, 0.0, 0.0, 0.0, 1.0e7),
+        ],
+        dtype=lines_dtype,
+    )
+
+    with h5py.File("aoife-test", "w", driver="core", backing_store=False) as fakefile:
+        fakefile.create_dataset("/levels_data", data=levels_data)
+        fakefile.create_dataset("/lines_data", data=lines_data)
+        monkeypatch.setattr(readboyledata, "get_aoife_dataset", lambda: fakefile)
+
+        energy_levels = readboyledata.read_levels_data(2, 1)
+        transitions, transition_count_of_level_name = readboyledata.read_lines_data(2, 1)
+
+    # the other ion's level is filtered out
+    assert len(energy_levels) == 3
+
+    # every level gets its own parity, so no pair of them can compare equal
+    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+
+    dflevels = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "levelname": [level.levelname for level in energy_levels],
+                "energyabovegsinpercm": [level.energyabovegsinpercm for level in energy_levels],
+                "g": [level.g for level in energy_levels],
+                "parity": [level.parity for level in energy_levels],
+            }
+        )
+    )
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [t.lowerlevel for t in transitions],
+            "upperlevel": [t.upperlevel for t in transitions],
+            "A": [t.A for t in transitions],
+        }
+    )
+    assert not any(add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list())
+
+    # the two readers must agree on the level names, or the adata.txt transition counts land on
+    # levels that do not exist: one formatted the number through int() and the other did not
+    assert set(transition_count_of_level_name) <= {level.levelname for level in energy_levels}
+    assert transition_count_of_level_name[energy_levels[2].levelname] == 2
+
+
+def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
+    """Lisbon lines name their levels by position in the levels file, which is re-sorted by energy.
+
+    Indexing the sorted list with the file's own position attaches every transition to the wrong
+    pair of levels whenever the source CSV is not already in energy order, which is what the map
+    returned by read_levels_data() (as in readfacdata) is for. The map is keyed by row position
+    rather than index label, matching the levels.iloc[...] lookup LisbonReader itself does.
+    """
+    import pandas as pd
+
+    from artisatomic import readlisbondata
+
+    # deliberately not in energy order: file index 0 is the HIGHEST level, 2 the ground state
+    dflevels = pd.DataFrame(
+        {"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]}, index=[0, 1, 2]
+    )
+
+    energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(dflevels)
+
+    # levels come back in ascending energy, so the file's order is exactly reversed
+    assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 5000.0]
+    assert levelid_of_fileindex == {2: 0, 1: 1, 0: 2}
+    # the unique parity sentinel keeps all transitions permitted
+    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+
+    # one line from the file's level 2 (the ground state) to its level 0 (the top level)
+    dflines = pd.DataFrame(
+        {"A": [1.5e8]},
+        index=pd.MultiIndex.from_tuples([(2, 0)], names=["level_index_lower", "level_index_upper"]),
+    )
+    transitions, transition_count_of_level_name = readlisbondata.read_lines_data(
+        energy_levels, dflines, levelid_of_fileindex
+    )
+
+    # ...which is level id 0 -> 2 after the sort, written with the lower id first
+    assert len(transitions) == 1
+    assert (transitions[0].lowerlevel, transitions[0].upperlevel) == (0, 2)
+    assert transitions[0].A == 1.5e8
+    assert transition_count_of_level_name == {energy_levels[0].levelname: 1, energy_levels[2].levelname: 1}
+
+    # a line naming a level the table does not have means the two files disagree about the
+    # numbering. Skipping it would drop every transition and write a silently empty ion.
+    dflines_unknown = pd.DataFrame(
+        {"A": [1.0]},
+        index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
+    )
+    with pytest.raises(ValueError, match="names level index 99"):
+        readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
+
+
 def test_add_handler_if_not_set():
     """Adding a handler returns a new list and never overrides an ion that is already present."""
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
@@ -561,6 +766,55 @@ def test_parse_ion_handlers():
     # here, rather than failing later where neither the element nor the file would be mentioned.
     with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
+
+
+def test_parent_elevel_zero_normalisation_is_anchored():
+    r"""Only a parent level that IS 0.0 may be renamed to 0, not one that merely contains it.
+
+    polars' str.replace() takes a pattern and matches anywhere in the value, so a bare "0.0" also
+    rewrote "10.05" to "105" and "100.0" to "100", moving those levels into the wrong group_by
+    bucket in download_gammaspec_betaminus_alpha. literal=True does not help: "0.0" really is a
+    substring of "10.05". Anchoring with ^...$ is what confines it to the whole value.
+    """
+    parent_elevels = ["0.0", "0", "10.05", "100.0", "1234.5", "0.05"]
+    normalised = (
+        pl.DataFrame({"parent_elevel": parent_elevels})
+        .with_columns(pl.col("parent_elevel").str.replace(r"^0\.0$", "0"))["parent_elevel"]
+        .to_list()
+    )
+
+    # the ground state, however it is spelled, collapses to one group; nothing else moves
+    assert normalised == ["0", "0", "10.05", "100.0", "1234.5", "0.05"]
+    assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
+
+
+def test_parallel_map_rejects_iterables_of_different_lengths():
+    """A short iterable is refused, whichever path the call would otherwise have taken."""
+    from artisatomic import parallel_map
+
+    # Executor.map() and thread_map() stop at the shortest iterable while the serial shortcut's
+    # zip(strict=True) raises, so the check has to happen before the path is chosen. 4 items takes
+    # the shortcut and 40 the pool, and neither may quietly do less work than it was asked for.
+    for nitems in (4, 40):
+        with pytest.raises(ValueError, match=r"different lengths"):
+            parallel_map(operator.sub, range(nitems), range(nitems - 1))
+
+
+def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
+    """Both paths apply fn to one item of each iterable, in the order they were given."""
+    from artisatomic import parallel_map
+
+    # 4 items takes the serial shortcut, 40 goes to the pool. Subtraction does not commute, so
+    # the results also pin which iterable reaches which parameter.
+    for nitems in (4, 40):
+        minuends = list(range(nitems))
+        subtrahends = list(range(100, 100 + nitems))
+        expected = [minuend - subtrahend for minuend, subtrahend in zip(minuends, subtrahends, strict=True)]
+
+        assert parallel_map(operator.sub, minuends, subtrahends) == expected
+
+    # a generator is consumed once and has no length, so it must survive being materialised
+    assert parallel_map(operator.sub, (i for i in range(4)), [1] * 4) == [-1, 0, 1, 2]
 
 
 def test_split_element_ionstage_str():
@@ -695,11 +949,43 @@ def test_write_adata_level_comment():
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
+def test_parse_gfall_collapses_label_whitespace():
+    r"""Kurucz labels are fixed-width padded, so their whitespace runs must be collapsed.
+
+    Expr.replace() swaps whole values equal to a literal, so `.replace(r"\s+", " ")` on a label
+    column matched nothing and every run survived into the level names written to adata.txt.
+    Only `.str.replace_all()` treats the argument as a pattern.
+    """
+    gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(38, 0))).collect()
+
+    labels = pl.concat([gfall["label_lower"], gfall["label_upper"]]).unique().to_list()
+    assert labels, "expected some labels for Sr I"
+    # no run of two or more spaces survives, and none is left padded at either end
+    assert not [label for label in labels if "  " in label]
+    assert all(label == label.strip() for label in labels)
+    # the collapse must join the parts rather than delete the separator ('s4d  1D' -> 's4d 1D')
+    assert any(" " in label for label in labels)
+
+
 def test_get_level_valence_n():
     """Each reader's level names yield the valence electron's principal quantum number."""
     # each handler has its own level-name format and parser
     assert readkuruczdata.get_level_valence_n("s5p  3P,enpercm=14276.381,j=0.0") == 5
     assert readtanakajpltdata.get_level_valence_n("2,even,{  4d- 3  4d+ 1  5s+ 1 }") == 5
+
+    # the 2024 Ge-sequence JPLT files append an LS-coupled term string after the configuration
+    assert (
+        readtanakajpltdata.get_level_valence_n(
+            "1,even,3s2_3p6_3d10_4s2_4p2                  3s(2).3p(6).3d(10).4s(2).4p(2)_3P"
+        )
+        == 4
+    )
+    # parent terms may follow a shell ("4p(3)4S") or stand as their own segment ("3P2_3P.7p")
+    assert readtanakajpltdata.get_level_valence_n("6,odd,3s2_3p6_3d10_4s4p3   3s(2).3p(6).3d(10).4s.4p(3)4S_5S") == 4
+    assert (
+        readtanakajpltdata.get_level_valence_n("60,odd,3d(10)1S0.4s(2).4p(6).4d(10)1S0_1S.5s(2).5p(2)3P2_3P.7p_4D") == 7
+    )
+    assert readtanakajpltdata.get_level_valence_n("1,even,5d(10).6s(2).6p(6).7s(2)_1S") == 7
     assert readfloers25data.get_level_valence_n("4f10") == 4
     assert readfloers25data.get_level_valence_n("4f9.6s") == 6
     assert readfloers25data.get_level_valence_n("5s2.5p5") == 5

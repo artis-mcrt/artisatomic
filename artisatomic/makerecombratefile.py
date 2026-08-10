@@ -41,7 +41,7 @@ def read_nahar_rrcfile(filename, noprint=False):
 
         if not header_row:
             print("ERROR: no header found")
-            sys.exit()
+            sys.exit(1)
 
         index_logt = header_row.index("log(T)")
         index_low_n = header_row.index("RRC(low-n)")
@@ -54,7 +54,7 @@ def read_nahar_rrcfile(filename, noprint=False):
                     print("Row contains wrong number of items for header:")
                     print(header_row)
                     print(row)
-                    sys.exit()
+                    sys.exit(1)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
     return pd.DataFrame(records)

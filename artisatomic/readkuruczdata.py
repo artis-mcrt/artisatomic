@@ -116,11 +116,13 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         for column in double_columns
     )
 
-    # Clean labels
+    # Clean labels. str.replace_all(), not Expr.replace(): the latter swaps whole values that
+    # equal the literal string "\s+", so the internal whitespace runs the gfall columns are padded
+    # with ('s4d  1D') were never collapsed and went into the level names as-is.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
     gfall = gfall.with_columns(
-        pl.col("label_lower").str.strip_chars().replace(r"\s+", " "),
-        pl.col("label_upper").str.strip_chars().replace(r"\s+", " "),
+        pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " "),
+        pl.col("label_upper").str.strip_chars().str.replace_all(r"\s+", " "),
     ).filter(
         (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
     )

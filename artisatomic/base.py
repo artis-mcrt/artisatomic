@@ -1,11 +1,14 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
+import atexit
 import contextlib
+import itertools
 import multiprocessing as mp
 import sys
 import typing as t
 from collections.abc import Callable
 from collections.abc import Iterable
+from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
@@ -14,7 +17,9 @@ import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
 atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
-atomicdata = atomicdata.apply(lambda x: x.fillna(x.number / 0.45), axis=1)  # estimate unknown atomic mass as Z / 0.45
+# estimate unknown atomic mass as Z / 0.45. Only the mass column: a row-wise fillna() filled every
+# column with it, including the densities and radii, which are not masses and are not read here.
+atomicdata["mass"] = atomicdata["mass"].fillna(atomicdata["number"] / 0.45)
 elsymbols = ["n", *list(atomicdata["symbol"].values)]
 atomic_weights = ["n", *list(atomicdata["mass"].values)]
 
@@ -93,6 +98,55 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     return dflevels
 
 
+def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> dict[int, int]:
+    """Map each level's index in its source file to its zero-based level id.
+
+    Readers whose level list is re-sorted by energy need this, because their transitions still
+    name their levels by the file's numbering. Pass the file indices in the sorted level order,
+    i.e. fileindices[n] is the file index of the level that ended up at level id n.
+
+    A duplicated file index would overwrite its entry and misroute every transition referencing
+    it, so that is rejected here rather than surfacing as a transition on the wrong level.
+    """
+    fileindices = list(fileindices)
+    levelid_of_fileindex = {int(fileindex): levelid for levelid, fileindex in enumerate(fileindices)}
+
+    # not an assert: input validation must survive python -O
+    if len(levelid_of_fileindex) != len(fileindices):
+        msg = (
+            f"Duplicate level indices in {sourcename}: {len(fileindices)} levels but only"
+            f" {len(levelid_of_fileindex)} unique indices"
+        )
+        raise ValueError(msg)
+
+    return levelid_of_fileindex
+
+
+def resolve_transition_levelids(
+    fileindex_lower: t.Any, fileindex_upper: t.Any, levelid_of_fileindex: dict[int, int], sourcename: str
+) -> tuple[int, int]:
+    """Resolve one transition's file-numbered levels to zero-based level ids, lower id first.
+
+    Raises rather than skipping an index that names no level: a reader whose transition and level
+    files disagree about the numbering (0- vs 1-based, say) would otherwise drop every transition
+    and write a silently empty ion instead of failing.
+    """
+    try:
+        lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
+        upperlevel = levelid_of_fileindex[int(fileindex_upper)]
+    except KeyError as exc:
+        msg = (
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]},"
+            f" which is not one of the {len(levelid_of_fileindex)} levels read. The transition and level files"
+            " may disagree about the level numbering."
+        )
+        raise ValueError(msg) from exc
+
+    # the levels were re-sorted by energy, so a transition can name them either way round.
+    # transitiondata.txt is written with the lower id first.
+    return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
+
+
 def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:
     """Path of the per-ion log file, written by the reading pass and appended to by the writing pass."""
     return Path(log_folder, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
@@ -118,9 +172,14 @@ def path_for_log(filepath: str | Path) -> str:
 
 
 def isfloat(value: t.Any) -> bool:
-    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3)."""
+    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3).
+
+    Called once per field of every line of the CMFGEN oscillator files (5.3M times for the cmfgen
+    test set), so the replace() is done only when there is a D to replace rather than allocating
+    a copy of every field.
+    """
     try:
-        float(value.replace("D", "E"))
+        float(value.replace("D", "E") if "D" in value else value)
     except ValueError:
         return False
 
@@ -175,24 +234,79 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return dictioniz
 
 
+_process_pool: ProcessPoolExecutor | None = None
+
+
+def get_process_pool() -> ProcessPoolExecutor:
+    """Get the one process pool for the whole run, creating it on first use.
+
+    Building a pool costs about 0.6 s however small the batch, because "spawn" makes every worker
+    re-import this package and its numpy/polars/pandas dependencies. A build asks for one pool per
+    ion per photoionisation file, so a pool per call spent most of its time starting up. Peak
+    memory is unchanged (the same workers, alive for longer).
+    """
+    global _process_pool
+    if _process_pool is None:
+        # an explicit spawn context rather than mp.set_start_method(force=True), which reached
+        # outside this function to change the default for the whole process
+        _process_pool = ProcessPoolExecutor(mp_context=mp.get_context("spawn"))
+        atexit.register(_process_pool.shutdown, wait=False, cancel_futures=True)
+
+    return _process_pool
+
+
 def parallel_map[ResultType](
     fn: Callable[..., ResultType],
     *iterables: Iterable[t.Any],
-    **kwargs: t.Any,
+    chunksize: int | None = None,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing."""
+    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing.
+
+    Every iterable must be the same length. Executor.map() and thread_map() stop at the shortest,
+    as zip() does, so an accidentally short one would silently drop the tail of the work instead
+    of failing, and the three paths below would not even drop the same items.
+
+    The keywords above are all there are. thread_map() absorbs a dozen more that shape the pool
+    it builds (max_workers, timeout, mp_context, ...), none of which the run-wide pool from
+    get_process_pool() can honour, and which tqdm() on the other path rejects: forwarding them
+    would apply the caller's intent on a free-threading build and raise on a stock one.
+    """
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
-    if use_multiprocessing:
-        mp.set_start_method("spawn", force=True)
-        from tqdm.contrib.concurrent import process_map
+    # materialise so the work can be sized: the chunk size and the serial cutoff below both need
+    # a length, and the callers pass views and generators
+    lists = [list(iterable) for iterable in iterables]
+    lengths = [len(x) for x in lists]
+    # not an assert: this decides how much of the work is done, so it must survive python -O
+    if len(set(lengths)) > 1:
+        msg = f"parallel_map() was given iterables of different lengths: {lengths}"
+        raise ValueError(msg)
+    nitems = lengths[0] if lengths else 0
 
-        results = process_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+    # even with the pool already up, handing a handful of items to it costs more in IPC than doing
+    # them here (readqubdata reduces four cross-section tables at a time)
+    if nitems <= 32:
+        return list(itertools.starmap(fn, zip(*lists, strict=True)))
+
+    if chunksize is None:
+        # without a chunk size, items go to the workers one at a time and the IPC per item costs
+        # more than the work; tqdm warns about it above 1000 items
+        chunksize = max(1, nitems // (mp.cpu_count() * 4))
+
+    # disable=None means "disable on non-TTY": the bar is for someone watching a build, and it
+    # redraws by carriage return, so a redirected run or a CI capture got a line of half-drawn
+    # bars interleaved with the real output for every call. thread_map() forwards this to tqdm.
+    if use_multiprocessing:
+        from tqdm import tqdm
+
+        results = list(
+            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, disable=None)  # ty:ignore[no-matching-overload]
+        )
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *iterables, **kwargs)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
 
     assert isinstance(results, list)
     return results
