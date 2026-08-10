@@ -812,7 +812,7 @@ def read_phixs_tables(
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
                     if "targetlevelname" in locals():
-                        if not targetlevelname:
+                        if not targetlevelname:  # pyright: ignore[reportPossiblyUnboundVariable] # pyrefly: ignore[unbound-name]
                             print("ERROR: no upper level name")
                             sys.exit(1)
                     else:
