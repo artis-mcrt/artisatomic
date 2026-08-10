@@ -792,7 +792,7 @@ def read_phixs_tables(
                             print("ERROR: no upper level name")
                             sys.exit()
                     else:
-                        print("WARNING: targelevelname does not exist, skipping to the next line")
+                        print("WARNING: targetlevelname does not exist, skipping to the next line")
                         continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in !Configuration name and confuse things...
 
                 if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
