@@ -787,7 +787,7 @@ def read_phixs_tables(
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
-                    if "trargetlevelname" in locals():
+                    if "targetlevelname" in locals():
                         if not targetlevelname:
                             print("ERROR: no upper level name")
                             sys.exit()
