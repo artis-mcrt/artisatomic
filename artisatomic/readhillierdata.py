@@ -264,7 +264,7 @@ ions_data = {
     (26, 1): IonFiles("19apr23", "osc_data", ["REV_PHOT_DATA"], "col_data"),
     (26, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (26, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", ["phot_data_A"], "col_data"),
     (26, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (26, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (26, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
