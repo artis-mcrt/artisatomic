@@ -92,10 +92,9 @@ ions_data = {
     (6, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # N
     (7, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], "col_data"),
-    # N II, III, IV have phot_data_B which breaks things, same issue as for N I
-    (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (7, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
     (7, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (7, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (7, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
@@ -588,7 +587,7 @@ def read_levels_and_transitions(
                     )
                     sys.exit(1)
 
-            if re.match(r"^ +Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
+            if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
                 break
 
         artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
@@ -598,7 +597,7 @@ def read_levels_and_transitions(
 
         for line in fhillierosc:
             if re.match(
-                r"^ +Osci(l|ll)ator strengths", line
+                r"^\s*Osci(l|ll)ator strengths", line
             ):  # only allow one table, and account for spelling mistakes
                 break
             linesplitdash = line.split("-")
@@ -745,6 +744,7 @@ def read_phixs_tables(
         with artisatomic.xopen_check_extension(filename) as fhillierphot:
             lowerlevelindex = -1
             lowerlevelname = ""
+            targetlevelname = ""
             numpointsexpected = 0
             pointnumber = 0
             crosssectiontype = -1
@@ -804,13 +804,12 @@ def read_phixs_tables(
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
-                    if "targetlevelname" in locals():
-                        if not targetlevelname:  # pyright: ignore[reportPossiblyUnboundVariable] # pyrefly: ignore[unbound-name]
-                            print("ERROR: no upper level name")
-                            sys.exit(1)
-                    else:
-                        print("WARNING: targetlevelname does not exist, skipping to the next line")
-                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in !Configuration name and confuse things...
+                    if not phixstargets[filenum]:
+                        print("WARNING: no photoionisation target, skipping to the next line")
+                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in "!Configuration name" and confuse things...
+                    if not targetlevelname:
+                        print("ERROR: no upper level name")
+                        sys.exit(1)
 
                 if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
@@ -874,11 +873,16 @@ def read_phixs_tables(
 
                 elif crosssectiontype == 3:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(float(row[0]))
+                        fitcoefficients.append(float(row[0].replace("D", "E")))
                         if len(fitcoefficients) == 2:
                             scale, n = fitcoefficients
 
                             # max_hyd_n is 30, some files have n's > 50
+                            if max_hyd_n < 0:
+                                msg = (
+                                    "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
+                                )
+                                raise RuntimeError(msg)
                             if n > max_hyd_n:
                                 continue
 
@@ -1445,7 +1449,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 and num_expected_t_values != -1
                 and re.match(r"^\*+", line.strip())
             ):
-                print("WARNING: Found line of *'s after reading header, assuming that's the end of the table")
+                artisatomic.log_and_print(
+                    flog, "WARNING: Found line of *'s after reading header, assuming that's the end of the table"
+                )
                 break  # Some files have lines of stars at the end, if we see one of these just exit (e.g. Na VI, Ne V)
 
             if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
@@ -1489,7 +1495,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     number_expected_transitions = int(row[0])
                 elif row_two_to_end.startswith("!Number of T values OMEGA tabulated at"):
                     num_expected_t_values = int(row[0])
-                elif row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)") and float(row[0]) != 1.0:
+                elif (
+                    row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
+                    and float(row[0].replace("D", "E")) != 1.0
+                ):
                     artisatomic.log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
                     sys.exit(1)
 
@@ -1500,7 +1509,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 if "-" in namefromnameto:
                     namefrom, nameto = map(str.strip, namefromnameto.split("-"))
                 else:
-                    # Assume there is just a space between them
+                    # Assume there is just a space between them (as is the case in Ni XIV)
                     namefrom, nameto = row[:2]
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
