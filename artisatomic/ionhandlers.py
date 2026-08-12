@@ -44,6 +44,7 @@ def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
     ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=16, include_hydrogen=True)
     ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=True)
 
     return sort_ion_handlers(ion_handlers)
 
