@@ -60,11 +60,19 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     BASEPATH = get_basepath()
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
     levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
+
+    # Check if original Floers+25 formatted data present
+    # If so: use that, if newer data format read in files for all transition types
     lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
+
+    if lines_file.is_file():
+        transition_files = [lines_file]
+    else:
+        transition_files = sorted(BASEPATH.glob(f"{ionstr}_transitions_{calibstr}_*.txt"))
 
     artisatomic.log_and_print(
         flog,
-        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {levels_file.name} and {lines_file.name}",
+        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {levels_file.name} and {len(transition_files)} transition files",
     )
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
@@ -106,18 +114,23 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    dashrowcount = 0
-    with artisatomic.xopen_check_extension(lines_file) as f:
-        for line in f:
-            if line.startswith("--"):
-                dashrowcount += 1
-                if dashrowcount == 3:  # data table starts after the '----' lines
-                    break
+    transition_tables = []
 
-        dftransitions = pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow"))
-    if dashrowcount < 3:
-        msg = f"Did not find expected data table in {lines_file}"
-        raise ValueError(msg)
+    for transition_file in transition_files:
+        dashrowcount = 0
+        with artisatomic.xopen_check_extension(transition_file) as f:
+            for line in f:
+                if line.startswith("--"):
+                    dashrowcount += 1
+                    if dashrowcount == 3:  # data table starts after the '----' lines
+                        break
+
+            transition_tables.append(pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow")))
+
+        if dashrowcount < 3:
+            raise ValueError(f"Did not find expected data table in {transition_file}")
+
+    dftransitions = pl.concat(transition_tables).sort(["Lower", "Upper"])
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 
@@ -129,7 +142,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         max_index = t.cast("int", transition_level_indices.max())
         if min_index < 0 or max_index >= dflevels.height:
             msg = (
-                f"Transition level indices in {lines_file} span {min_index}..{max_index}, outside the"
+                f"Transition level indices for {ionstr} span {min_index}..{max_index}, outside the"
                 f" level table's 0..{dflevels.height - 1}"
             )
             raise ValueError(msg)
@@ -154,7 +167,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it.
     # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory
-    dftransitions = dftransitions.select(lowerlevel=pl.col("Lower"), upperlevel=pl.col("Upper"), A=pl.col("A"))
+    # want to avoid duplicate Lower/Upper index pairs by combining them and adding their A-values
+    dftransitions = (
+        dftransitions.select(
+            lowerlevel=pl.col("Lower"),
+            upperlevel=pl.col("Upper"),
+            A=pl.col("A"),
+        )
+        .group_by(["upperlevel", "lowerlevel"], maintain_order=True)
+        .agg(A=pl.col("A").sum())
+    )
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
