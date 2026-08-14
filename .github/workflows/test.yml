@@ -170,25 +170,9 @@ jobs:
               run: source ./setup_jplt_data.sh
 
             - name: Extract Floers25 atomic data
-              if: matrix.testname == 'floers25'
+              if: startsWith(matrix.testname, 'floers25')
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
-
-            - name: Cache Floers25 calibrated atomic data
-              if: matrix.testname == 'floers25calib'
-              uses: actions/cache@v6
-              with:
-                  # setup_floers25_data.sh extracts every lanthanide ion, so this is ~570 MiB to
-                  # read three of them. Narrowing the glob does not help: it still matches every
-                  # ion, and changing this path changes the cache version, forcing a cold
-                  # ~875 MB Zenodo download of everything again.
-                  path: atomic-data-floers25/OutputFiles/**
-                  key: atomic-data-floers25-calibrated-zenodo-19335084
-
-            - name: Download/extract Floers25 calibrated atomic data
-              if: matrix.testname == 'floers25calib'
-              working-directory: atomic-data-floers25/
-              run: source ./setup_floers25_data.sh
 
             - name: Generate artis atomic data files
               run: |
