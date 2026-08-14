@@ -178,9 +178,11 @@ jobs:
               if: matrix.testname == 'floers25calib'
               uses: actions/cache@v6
               with:
-                  # only the calibrated files, so this never picks up what the floers25 job
-                  # extracts from testdata.tar.xz into the same directory
-                  path: atomic-data-floers25/OutputFiles/*_calib.txt*
+                  # setup_floers25_data.sh extracts every lanthanide ion, so this is ~570 MiB to
+                  # read three of them. Narrowing the glob does not help: it still matches every
+                  # ion, and changing this path changes the cache version, forcing a cold
+                  # ~875 MB Zenodo download of everything again.
+                  path: atomic-data-floers25/OutputFiles/**
                   key: atomic-data-floers25-calibrated-zenodo-19335084
 
             - name: Download/extract Floers25 calibrated atomic data
