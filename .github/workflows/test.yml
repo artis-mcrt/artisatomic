@@ -97,12 +97,14 @@ jobs:
 
 
     upload-coverage-python:
-        # an if: with no status function implies success(), so this runs only when pytest and every
-        # matrix leg passed. That is deliberate: a leg that failed uploaded no data, and publishing
-        # the combine of what remains would report a coverage drop that is an artifact of the
-        # failure rather than a real regression.
+        # needs the matrix so the artifacts exist, but requires only pytest to have passed: a single
+        # red leg would otherwise take the whole report down, on exactly the PR whose reader change
+        # you want to see covered. A failed leg uploads nothing, so the number is then lower than a
+        # green run's - read it alongside the matrix, not as a regression on its own.
+        # naming a status function here is what disables the implicit success() over all of needs.
         needs: [pytest, tests]
-        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        if: ${{ !cancelled() && needs.pytest.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
+            == github.repository) }}
         runs-on: ubuntu-latest
         permissions:
             contents: read
