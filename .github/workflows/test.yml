@@ -80,8 +80,10 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
-            # -p writes .coverage.<host>.<pid>.<random>, so this file and the one from each tests/
-            # matrix job survive being downloaded into one directory and combined
+            # -p names the file .coverage.<host>.pid<pid>.X<random>x.H<hash>h, so this one and the
+            # one from each tests/ matrix job survive being downloaded into a single directory. The
+            # trailing hash covers the measured lines, and combine skips files whose hashes match,
+            # so a "Combined 7 files, skipped 1" line means duplicate data, not lost data.
             - name: Test with pytest
               run: uv run python3 -m coverage run -p -m pytest
 
@@ -95,9 +97,12 @@ jobs:
 
 
     upload-coverage-python:
+        # an if: with no status function implies success(), so this runs only when pytest and every
+        # matrix leg passed. That is deliberate: a leg that failed uploaded no data, and publishing
+        # the combine of what remains would report a coverage drop that is an artifact of the
+        # failure rather than a real regression.
         needs: [pytest, tests]
-        if: ${{ !cancelled() && needs.pytest.result == 'success' && needs.tests.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
-            == github.repository) }}
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         permissions:
             contents: read
@@ -112,6 +117,12 @@ jobs:
               with:
                   activate-environment: true
 
+            # the data files were written by the coverage version in uv.lock, and coverage refuses
+            # to read a data file whose schema version differs from its own, so the reader has to
+            # come from the same lockfile rather than from an unpinned uvx
+            - name: Install artisatomic
+              run: uv sync --compile-bytecode
+
             # one directory holding every job's .coverage.* file
             - name: Download coverage data
               uses: actions/download-artifact@v8
@@ -121,9 +132,9 @@ jobs:
 
             - name: Combine coverage into one report
               run: |
-                  uvx coverage combine
-                  uvx coverage xml -o coverage.xml
-                  uvx coverage report
+                  uv run coverage combine
+                  uv run coverage xml -o coverage.xml
+                  uv run coverage report
 
             - name: Check for a pull request associated with this commit
               id: haspr
@@ -202,14 +213,6 @@ jobs:
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
                   uv run python3 -m coverage run -p .venv/bin/makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
 
-            - name: Upload coverage data
-              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-              uses: actions/upload-artifact@v7
-              with:
-                  name: coverage-data-${{ matrix.testname }}
-                  path: .coverage.*
-                  include-hidden-files: true
-
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
               run: |
@@ -218,6 +221,16 @@ jobs:
                   echo
                   md5sum *.txt
                   md5sum -c ../checksums.txt
+
+            # after the checksum, so an artifact-service failure cannot fail the leg before the
+            # assertion this job exists for has run
+            - name: Upload coverage data
+              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-${{ matrix.testname }}
+                  path: .coverage.*
+                  include-hidden-files: true
 
             - name: tar and zip output files
               if: always()
