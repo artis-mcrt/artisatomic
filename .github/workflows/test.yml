@@ -80,31 +80,63 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # -p gives each data file a unique name, so this one and every tests/ matrix job's
+            # survive being downloaded into a single directory. There are more files than jobs
+            # (each spawned phixs worker writes its own), and combine reporting some as skipped
+            # means their measured lines were identical, not that data was lost.
             - name: Test with pytest
-              run: uv run python3 -m pytest --cov --cov-report=xml:coverage.xml
+              run: uv run coverage run -p -m pytest
 
-            - name: Upload coverage artifact
-              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+            - name: Upload coverage data
               uses: actions/upload-artifact@v7
               with:
-                  name: coverage-report-python
-                  path: coverage.xml
+                  name: coverage-data-pytest
+                  path: .coverage.*
+                  include-hidden-files: true
 
 
     upload-coverage-python:
-        needs: pytest
-        if: ${{ !cancelled() && needs.pytest.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
-            == github.repository) }}
+        # needs the matrix so its artifacts exist, but requires only pytest to have passed, so one
+        # red leg cannot take the whole report down. Naming a status function is what disables the
+        # implicit success() over all of needs.
+        needs: [pytest, tests]
+        if: ${{ !cancelled() && needs.pytest.result == 'success' }}
         runs-on: ubuntu-latest
         permissions:
             contents: read
             code-quality: write
             pull-requests: read
         steps:
-            - name: Download coverage artifact
+            - name: Checkout Code
+              uses: actions/checkout@v7
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            # coverage refuses to read a data file whose schema version differs from its own, so the
+            # reader comes from the same lockfile that pinned the writers rather than from an
+            # unpinned uvx
+            - name: Install coverage
+              run: uv sync --only-group coverage
+
+            - name: Download coverage data
               uses: actions/download-artifact@v8
               with:
-                  name: coverage-report-python
+                  pattern: coverage-data-*
+                  merge-multiple: true
+
+            - name: Combine coverage and report
+              # without this, uv run rebuilds the project and re-syncs the default groups that the
+              # install step above just skipped
+              env:
+                  UV_NO_SYNC: 1
+              run: |
+                  uv run coverage combine
+                  uv run coverage xml
+                  uv run coverage report
+
             - name: Check for a pull request associated with this commit
               id: haspr
               if: github.ref != 'refs/heads/main'
@@ -122,7 +154,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, floers25, jplt, kurucz, qub]
+                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, qub]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
@@ -142,6 +174,9 @@ jobs:
             - name: Install artisatomic
               run: uv sync --compile-bytecode
 
+            # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
+            # hydrogenic photoionisation tables from HYD/I on any run without -nophixs, so gating this
+            # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
               id: cache-cmfgendata
@@ -154,10 +189,11 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
+            # no-ops when the data is there, while setup_cmfgen_data.sh curls and extracts anyway
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
               uses: actions/cache@v6
-              id: cache-jpltdata
               with:
                   path: atomic-data-tanaka-jplt/data_v2.1/**
                   key: atomic-data-tanaka-jplt-files-v2.1
@@ -175,7 +211,7 @@ jobs:
             - name: Generate artis atomic data files
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  uv run makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+                  uv run coverage run -p -m artisatomic -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
@@ -185,6 +221,17 @@ jobs:
                   echo
                   md5sum *.txt
                   md5sum -c ../checksums.txt
+
+            # after the checksum, so an artifact-service failure cannot fail the leg before the
+            # assertion this job exists for has run
+            - name: Upload coverage data
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-${{ matrix.testname }}
+                  path: .coverage.*
+                  include-hidden-files: true
+                  # a leg that measured nothing is a regression, not a warning
+                  if-no-files-found: error
 
             - name: tar and zip output files
               if: always()

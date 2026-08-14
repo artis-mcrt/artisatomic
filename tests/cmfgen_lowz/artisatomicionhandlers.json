@@ -1,0 +1,8 @@
+[
+    [1, [[1, "cmfgen"], [2, "cmfgen"]]],
+    [2, [[1, "cmfgen"], [2, "cmfgen"]]],
+    [6, [[1, "cmfgen"], [2, "cmfgen"], [3, "cmfgen"], [4, "cmfgen"]]],
+    [7, [[1, "cmfgen"], [2, "cmfgen"], [3, "cmfgen"]]],
+    [9, [[2, "cmfgen"], [3, "cmfgen"]]],
+    [15, [[4, "cmfgen"], [5, "cmfgen"]]]
+]
