@@ -122,7 +122,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, floers25, jplt, kurucz, qub]
+                testname: [cmfgen, cmfgen_lowz, floers25, floers25calib, jplt, kurucz, qub]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
@@ -171,6 +171,19 @@ jobs:
               if: matrix.testname == 'floers25'
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
+
+            - name: Cache Floers25 calibrated atomic data
+              if: matrix.testname == 'floers25calib'
+              uses: actions/cache@v6
+              id: cache-floers25calibdata
+              with:
+                  path: atomic-data-floers25/OutputFiles/**
+                  key: atomic-data-floers25-calibrated-zenodo-19335084
+
+            - name: Download/extract Floers25 calibrated atomic data
+              if: matrix.testname == 'floers25calib'
+              working-directory: atomic-data-floers25/
+              run: source ./setup_floers25_data.sh
 
             - name: Generate artis atomic data files
               run: |
