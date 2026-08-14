@@ -40,13 +40,13 @@ dependencies = [
 [dependency-groups]
 dev = [
     "basedpyright>=1.39.3",
+    "coverage>=7.15.3",
     "matplotlib>=3.10.7",
     "mypy>=2.1.0",
     "pandas-stubs>=3.0.0.260204",
     "pip>=25.2",
     "prek>=0.1.6",
     "pyrefly>=1.2.0",
-    "coverage>=7.15.3",
     "pytest>=8.3.3",
     "ruff>=0.16.1",
     "ty>=0.0.65",
@@ -214,6 +214,11 @@ omit = ["artisatomic/test_artisatomic.py"]
 # the pytest job and each tests/ matrix job measure a separate process on a separate runner, and
 # their data files are combined into one report. Relative paths are what let them line up.
 relative_files = true
+# parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a
+# spawned child starts with no tracer, so without this the phixs downsampling - most of what a
+# matrix job actually does - is measured nowhere. Each worker writes its own data file, which the
+# combine step folds in with the rest.
+concurrency = ["multiprocessing"]
 
 [tool.coverage.report]
 skip_covered = false
