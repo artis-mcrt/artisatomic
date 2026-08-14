@@ -217,5 +217,7 @@ omit = ["artisatomic/test_artisatomic.py"]
 # separate runners' paths only line up in the combined report if they are relative
 relative_files = true
 # parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a
-# spawned child starts with no tracer, so without this those lines are measured nowhere
+# spawned child starts with no tracer, so without this those lines are measured nowhere. Note this
+# also puts coverage in parallel mode always, so a local run needs `coverage combine` before
+# `coverage report` finds anything.
 concurrency = ["multiprocessing"]

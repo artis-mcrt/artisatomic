@@ -117,7 +117,7 @@ jobs:
 
             # coverage refuses to read a data file whose schema version differs from its own, so the
             # reader comes from the same lockfile that pinned the writers rather than from an
-            # unpinned uvx. Only the group, so this does not build the project to run one tool.
+            # unpinned uvx
             - name: Install coverage
               run: uv sync --only-group coverage
 
@@ -127,12 +127,15 @@ jobs:
                   pattern: coverage-data-*
                   merge-multiple: true
 
-            # --no-sync or uv run reinstalls the default groups it was just told to skip
             - name: Combine coverage and report
+              # without this, uv run rebuilds the project and re-syncs the default groups that the
+              # install step above just skipped
+              env:
+                  UV_NO_SYNC: 1
               run: |
-                  uv run --no-sync coverage combine
-                  uv run --no-sync coverage xml
-                  uv run --no-sync coverage report
+                  uv run coverage combine
+                  uv run coverage xml
+                  uv run coverage report
 
             - name: Check for a pull request associated with this commit
               id: haspr
@@ -171,7 +174,7 @@ jobs:
             - name: Install artisatomic
               run: uv sync --compile-bytecode
 
-            # every matrix entry needs this, not just the cmfgen ones: makeartisatomicfiles reads the
+            # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
             # hydrogenic photoionisation tables from HYD/I on any run without -nophixs, so gating this
             # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
@@ -227,6 +230,8 @@ jobs:
                   name: coverage-data-${{ matrix.testname }}
                   path: .coverage.*
                   include-hidden-files: true
+                  # a leg that measured nothing is a regression, not a warning
+                  if-no-files-found: error
 
             - name: tar and zip output files
               if: always()

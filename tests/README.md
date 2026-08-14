@@ -2,8 +2,10 @@
 
 Each directory here is one entry of the `tests` matrix in
 [../.github/workflows/test.yml](../.github/workflows/test.yml). The job copies the set's
-`artisatomicionhandlers.json` to the repository root, runs `makeartisatomicfiles`, and checks the
-four output files against `checksums.txt`.
+`artisatomicionhandlers.json` to the repository root, runs `python -m artisatomic` under coverage
+(`-m` is the form `coverage run` can name), and checks the four output files against
+`checksums.txt`. That is the same `main()` the `makeartisatomicfiles` console script calls, so the
+recipe below reproduces it.
 
 Verification is whole-file MD5, so **any** change to level naming, sorting, phixs downsampling or a
 default argument invalidates every checksum at once. Regenerate a set with:
