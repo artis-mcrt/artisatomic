@@ -211,6 +211,9 @@ unused-ignore-comment = "ignore"
 [tool.coverage.run]
 source = ["artisatomic"]
 omit = ["artisatomic/test_artisatomic.py"]
+# the pytest job and each tests/ matrix job measure a separate process on a separate runner, and
+# their data files are combined into one report. Relative paths are what let them line up.
+relative_files = true
 
 [tool.coverage.report]
 skip_covered = false

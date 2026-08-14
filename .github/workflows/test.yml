@@ -80,20 +80,23 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # -p writes .coverage.<host>.<pid>.<random>, so this file and the one from each tests/
+            # matrix job survive being downloaded into one directory and combined
             - name: Test with pytest
-              run: uv run python3 -m pytest --cov --cov-report=xml:coverage.xml
+              run: uv run python3 -m coverage run -p -m pytest
 
-            - name: Upload coverage artifact
+            - name: Upload coverage data
               if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
               uses: actions/upload-artifact@v7
               with:
-                  name: coverage-report-python
-                  path: coverage.xml
+                  name: coverage-data-pytest
+                  path: .coverage.*
+                  include-hidden-files: true
 
 
     upload-coverage-python:
-        needs: pytest
-        if: ${{ !cancelled() && needs.pytest.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
+        needs: [pytest, tests]
+        if: ${{ !cancelled() && needs.pytest.result == 'success' && needs.tests.result == 'success' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name
             == github.repository) }}
         runs-on: ubuntu-latest
         permissions:
@@ -101,10 +104,27 @@ jobs:
             code-quality: write
             pull-requests: read
         steps:
-            - name: Download coverage artifact
+            - name: Checkout Code
+              uses: actions/checkout@v7
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            # one directory holding every job's .coverage.* file
+            - name: Download coverage data
               uses: actions/download-artifact@v8
               with:
-                  name: coverage-report-python
+                  pattern: coverage-data-*
+                  merge-multiple: true
+
+            - name: Combine coverage into one report
+              run: |
+                  uvx coverage combine
+                  uvx coverage xml -o coverage.xml
+                  uvx coverage report
+
             - name: Check for a pull request associated with this commit
               id: haspr
               if: github.ref != 'refs/heads/main'
@@ -174,10 +194,21 @@ jobs:
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
 
+            # under coverage, so the readers this set exercises reach the combined report. The
+            # console script is run as a file because the entry point is artisatomic:main, which
+            # coverage run -m cannot name
             - name: Generate artis atomic data files
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  uv run makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+                  uv run python3 -m coverage run -p .venv/bin/makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+
+            - name: Upload coverage data
+              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-${{ matrix.testname }}
+                  path: .coverage.*
+                  include-hidden-files: true
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
