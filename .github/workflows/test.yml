@@ -127,11 +127,12 @@ jobs:
                   pattern: coverage-data-*
                   merge-multiple: true
 
+            # --no-sync or uv run reinstalls the default groups it was just told to skip
             - name: Combine coverage and report
               run: |
-                  uv run coverage combine
-                  uv run coverage xml
-                  uv run coverage report
+                  uv run --no-sync coverage combine
+                  uv run --no-sync coverage xml
+                  uv run --no-sync coverage report
 
             - name: Check for a pull request associated with this commit
               id: haspr
