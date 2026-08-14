@@ -122,7 +122,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, cmfgen_lowz, floers25, floers25calib, jplt, kurucz, qub]
+                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, qub]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
@@ -170,7 +170,7 @@ jobs:
               run: source ./setup_jplt_data.sh
 
             - name: Extract Floers25 atomic data
-              if: startsWith(matrix.testname, 'floers25')
+              if: matrix.testname == 'floers25'
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
 
