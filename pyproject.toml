@@ -38,9 +38,12 @@ dependencies = [
 ]
 
 [dependency-groups]
+# its own group so the workflow's combine job can install the coverage the lockfile pinned without
+# building the project and its 76 packages to run one tool
+coverage = ["coverage>=7.15.3"]
 dev = [
+    { include-group = "coverage" },
     "basedpyright>=1.39.3",
-    "coverage>=7.15.3",
     "matplotlib>=3.10.7",
     "mypy>=2.1.0",
     "pandas-stubs>=3.0.0.260204",
@@ -211,14 +214,8 @@ unused-ignore-comment = "ignore"
 [tool.coverage.run]
 source = ["artisatomic"]
 omit = ["artisatomic/test_artisatomic.py"]
-# the pytest job and each tests/ matrix job measure a separate process on a separate runner, and
-# their data files are combined into one report. Relative paths are what let them line up.
+# separate runners' paths only line up in the combined report if they are relative
 relative_files = true
 # parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a
-# spawned child starts with no tracer, so without this the phixs downsampling - most of what a
-# matrix job actually does - is measured nowhere. Each worker writes its own data file, which the
-# combine step folds in with the rest.
+# spawned child starts with no tracer, so without this those lines are measured nowhere
 concurrency = ["multiprocessing"]
-
-[tool.coverage.report]
-skip_covered = false

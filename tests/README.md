@@ -9,7 +9,11 @@ Verification is whole-file MD5, so **any** change to level naming, sorting, phix
 default argument invalidates every checksum at once. Regenerate a set with:
 
 ```bash
-ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD" sh -c 'cp tests/<name>/artisatomicionhandlers.json . && uv run makeartisatomicfiles -output_folder tests/<name>/output && rm artisatomicionhandlers.json && (cd tests/<name>/output && md5sum *.txt > ../checksums.txt)'
+export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"
+cp tests/<name>/artisatomicionhandlers.json .
+uv run makeartisatomicfiles -output_folder tests/<name>/output
+rm artisatomicionhandlers.json
+(cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
 ```
 
 `ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz and QUB readers to their committed
@@ -17,13 +21,11 @@ ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD" sh -c 'cp tests/<name>/artisatomicionha
 `get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
 repository root silently overrides the built-in ion selection of every later local run.
 
-**Every** set needs the CMFGEN corpus, not just the `cmfgen` ones — `makeartisatomicfiles` reads the
-hydrogenic photoionisation tables from `HYD/I` on any run without `-nophixs`, and `qub` additionally
-reads Co II from CMFGEN. That is why the workflow's CMFGEN setup step is the one not gated on
-`matrix.testname`. `jplt` downloads its own corpus on top; Kurucz, QUB and Floers+25 come from
-committed samples. When a set needs a new ion, prefer adding it to a committed sample over
-introducing another download: the published Floers+25 corpus is 5.5 GiB, but `testdata.tar.xz`
-carries only the handful of ions the tests name.
+**Every** set needs the CMFGEN corpus, not just the `cmfgen` ones, which is why the workflow's
+CMFGEN setup step is the one not gated on `matrix.testname` (the comment there says why). `jplt`
+downloads its own corpus on top; Kurucz, QUB and Floers+25 come from committed samples. When a set
+needs a new ion, prefer adding it to a committed sample over introducing another download: the
+published Floers+25 corpus is 5.5 GiB, but `testdata.tar.xz` carries only the ions the tests name.
 
 ## What each set is for
 
@@ -40,9 +42,6 @@ trimming a set for speed can silently delete coverage while looking like a routi
 | `qub` | Co II–IV | The `qub_cobalt` handler, from the committed `co_tyndall_test_sample/`. Co II comes from CMFGEN, Co III–IV from the QUB adf04 files. |
 
 ## Adding a set
-
-Add the directory with an `artisatomicionhandlers.json`, add the name to `matrix.testname`, add any
-data-setup step it needs, generate `checksums.txt`, and add a row above saying what it covers.
 
 Prefer a new set over extending an existing one when the ions are unrelated: matrix entries run in
 parallel, so a new set is free in wall clock, while extending a set churns its four checksums.

@@ -62,6 +62,9 @@ dependencies = [
 ]
 
 [package.dev-dependencies]
+coverage = [
+    { name = "coverage" },
+]
 dev = [
     { name = "basedpyright" },
     { name = "coverage" },
@@ -96,6 +99,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+coverage = [{ name = "coverage", specifier = ">=7.15.3" }]
 dev = [
     { name = "basedpyright", specifier = ">=1.39.3" },
     { name = "coverage", specifier = ">=7.15.3" },
