@@ -739,6 +739,122 @@ def test_add_level_ids_forbidden_parity():
     assert forbidden == [False, False, False, False, True]
 
 
+def test_get_level_j():
+    """J is read from the brackets a J-resolved CMFGEN level name ends with."""
+    get_level_j = readhillierdata.get_level_j
+
+    assert get_level_j("3d6_a5De[4]") == 4.0
+    assert get_level_j("3d5(4D)4po[9/2]") == 4.5
+    assert get_level_j("3d4(3P2)4po[1/2]") == 0.5
+
+    # JJ coupling states the J in braces, the brackets being taken by the level index
+    assert get_level_j("2s2_2p(2P<1/2>)4f_2{5/2}e") == 2.5
+
+    # A term-resolved level has no J of its own -- its g counts every J of the term -- and nor
+    # does a merged level. Neither may be given one.
+    for noj in ("1___", "8SNG", "10z_2Zo", "2s2_2p3(4So)5z_5Z", "3d6(5D)4s_6De"):
+        assert get_level_j(noj) is None
+
+
+def test_add_level_ids_forbidden_delta_j():
+    """E1 needs |dJ| <= 1 and forbids J=0 -> J=0, on a transition that carries no f."""
+    # opposite parities throughout, so the Laporte rule can never fire and only dJ decides
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2, 3, 4],
+            "parity": [0, 1, 0, 1, 0],
+            "j": [1.0, 2.0, 3.0, 0.0, 0.0],
+        },
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    # A = 0 marks the upsilon-only pairs, which no source called an electric dipole line
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [0, 0, 4, 0],
+            "upperlevel": [1, 2, 3, 3],
+            "A": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    # the joins do not keep the row order, so read the answers back by transition
+    forbidden = {(lo, up): f for lo, up, f in result[["lowerlevel", "upperlevel", "forbidden"]].iter_rows()}
+
+    assert forbidden[0, 1] is False  # J 1 -> 2, dJ = 1
+    assert forbidden[0, 2] is True  # J 1 -> 3, dJ = 2
+    assert forbidden[4, 3] is True  # J 0 -> 0, forbidden even though dJ = 0
+    assert forbidden[0, 3] is False  # J 1 -> 0, dJ = 1
+
+
+def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
+    """A source that gives the transition an f says it is E1, and that beats the J labels.
+
+    Some data sets disagree with themselves. CMFGEN's provisional F III set splits a term by a
+    nominal 0.8 cm-1 and then shares the term's f over all the J pairs, so it lists dJ = 2 lines
+    with f as large as 0.116. To call those forbidden would give a strong line the forbidden
+    collision approximation.
+    """
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [1, 0], "j": [0.5, 2.5]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [3.4e9], "f": [0.116]})
+
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+
+    # dJ = 2, so the rule is broken and reported, but the f keeps the transition permitted
+    assert result["breaksdeltaj"].to_list() == [True]
+    assert result["forbidden"].to_list() == [False]
+
+    # with no f and no A, the same pair is forbidden
+    nof = dftransitions.with_columns(A=0.0).drop("f")
+    assert add_level_ids_forbidden(dflevels, nof)["forbidden"].to_list() == [True]
+
+
+def test_log_deltaj_contradictions_judges_f_and_a_separately():
+    """Only a transition strong enough to be E1 contradicts its own J labels.
+
+    f has no units and an E1 line carries 1e-3 to 1. A is a rate in s-1 over many decades, where
+    a forbidden line still reaches ~1e2, so the same cut would report every forbidden line a
+    reader supplies A for as a contradiction.
+    """
+    from artisatomic.output import log_deltaj_contradictions
+
+    def warnings_for(dftransitions: pl.DataFrame) -> str:
+        flog = io.StringIO()
+        log_deltaj_contradictions(flog, dftransitions, "Test II")
+        return flog.getvalue()
+
+    breaksrule = {"lowerlevel": [0], "upperlevel": [1], "breaksdeltaj": [True]}
+
+    # f: a strong line contradicts the labels, a forbidden line's own small f does not
+    assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [3.4e9], "f": [0.116]}))
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [1.0e-2], "f": [1.9e-9]}))
+
+    # A, where a forbidden line reaches 14 s-1 in QUB's Co III and must stay quiet
+    assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [1.9e8]}))
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [14.0]}))
+
+    # a transition that keeps the rule is never reported, however strong it is
+    assert not warnings_for(pl.DataFrame({**breaksrule, "breaksdeltaj": [False], "A": [1.9e8]}))
+
+
+def test_add_level_ids_forbidden_delta_j_needs_both_levels():
+    """A level with no J turns off the dJ rule for its transitions. It does not undo the parities."""
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1, 2], "parity": [0, 1, 1], "j": [1.0, None, 5.0]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 1], "upperlevel": [1, 2], "A": [0.0, 0.0]})
+
+    # the first pair has no J to compare and two different parities, so nothing can call it
+    # forbidden. The second pair shares a parity, which the missing J must not undo.
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, True]
+
+    # a frame with no j column at all behaves as it did before this code read J
+    nojcol = dflevels.drop("j")
+    assert add_level_ids_forbidden(nojcol, dftransitions)["forbidden"].to_list() == [False, True]
+
+
 def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
     """Absence is null and only null, so a negative number is an ordinary parity that can match.
 

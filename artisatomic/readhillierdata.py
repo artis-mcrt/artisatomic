@@ -1,6 +1,7 @@
 """Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
 
 import os
+import re
 import sys
 import typing as t
 from collections import defaultdict
@@ -26,7 +27,8 @@ hillier_rowformat_noheader = "levelname g energyabovegsinpercm freqtentothe15hz 
 
 
 # The files disagree on which columns they carry, so only these are kept and every ion gets the
-# same frame. parity is not in the file: it is read from the level name and decides forbidden-ness.
+# same frame. Neither parity nor J is in the file: both are read from the level name, and both
+# decide forbidden-ness.
 class HillierEnergyLevel(t.NamedTuple):
     """One energy level read from a CMFGEN oscillator file."""
 
@@ -36,6 +38,7 @@ class HillierEnergyLevel(t.NamedTuple):
     lambdaangstrom: float
     hillierlevelid: int
     parity: int | None  # None where the level has no definite parity, e.g. a merged '1___'
+    j: float | None  # None where the name carries no J, as a term-resolved level does not
 
 
 class HillierTransition(t.NamedTuple):
@@ -52,7 +55,13 @@ class HillierTransition(t.NamedTuple):
 
 
 # every polars column is nullable, so an optional field needs no separate dtype
-_pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64, int | None: pl.Int64}
+_pl_dtype_of = {
+    str: pl.String,
+    float: pl.Float64,
+    int: pl.Int64,
+    int | None: pl.Int64,
+    float | None: pl.Float64,
+}
 
 # derived from the NamedTuples so the row classes stay the single source of the frame layouts
 hillier_level_schema = pl.Schema(
@@ -62,8 +71,8 @@ hillier_transition_schema = pl.Schema(
     {name: _pl_dtype_of[fieldtype] for name, fieldtype in HillierTransition.__annotations__.items()}
 )
 
-# every schema column except parity is read straight out of the level table
-hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname != "parity")
+# every schema column except the two read from the level name comes straight out of the table
+hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname not in {"parity", "j"})
 
 
 # keys are (atomic number, ion stage)
@@ -308,6 +317,28 @@ def get_level_parity(config: str) -> int:
     return -1 if configparity is None else configparity
 
 
+def get_level_j(levelname: str) -> float | None:
+    """J of a Hillier level name, or None where the name does not state one.
+
+    CMFGEN writes J in brackets at the end of a J-resolved level's name, as a whole number or a
+    half-integer fraction: '3d6_a5De[4]', '3d5(4D)4po[9/2]'. A term-resolved level has no
+    bracket, and its g counts every J of the term, so nothing can be recovered from that either.
+
+    JJ-coupling names carry theirs in braces ('2s2_2p(2P<1/2>)4f_2{5/2}e') where the brackets
+    would otherwise hold the level index, so those are read too.
+    """
+    match = re.search(r"[\[{](\d+)(?:/(\d+))?[\]}]\w*$", levelname)
+    if match is None:
+        return None
+
+    numerator, denominator = match.group(1), match.group(2)
+    if denominator is None:
+        return float(numerator)
+
+    # only halves are physical, so anything else is some other bracketed quantity
+    return float(numerator) / float(denominator) if denominator == "2" else None
+
+
 def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     """Read the LS term of a Hillier level name as (2S+1, L, parity), parity 0 even and 1 odd.
 
@@ -373,7 +404,13 @@ def read_levels_and_transitions(
             pl.DataFrame(
                 [
                     HillierEnergyLevel(
-                        levelname="I", g=10.0, energyabovegsinpercm=0.0, lambdaangstrom=0.0, hillierlevelid=1, parity=0
+                        levelname="I",
+                        g=10.0,
+                        energyabovegsinpercm=0.0,
+                        lambdaangstrom=0.0,
+                        hillierlevelid=1,
+                        parity=0,
+                        j=None,  # a bare nucleus, with no transitions for a J to bear on
                     )
                 ],
                 schema=hillier_level_schema,
@@ -480,6 +517,7 @@ def read_levels_and_transitions(
                         lambdaangstrom=lambdaangstrom,
                         hillierlevelid=hillierlevelid,
                         parity=parity,
+                        j=get_level_j(levelname),
                     )
                 )
 
