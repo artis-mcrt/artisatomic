@@ -1,6 +1,6 @@
 """Parse level names: split a configuration into orbitals and a term, and derive the parity."""
 
-import typing as t
+from collections.abc import Iterator
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
@@ -127,7 +127,7 @@ def interpret_configuration(instr_orig: str, warn: bool = True) -> tuple[list[st
     return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
 
 
-def _iter_occupied_orbitals(instr, warn: bool) -> t.Iterator[tuple[int, int, bool]]:
+def _iter_occupied_orbitals(instr, warn: bool) -> Iterator[tuple[int, int, bool]]:
     """Walk the occupied orbitals of a configuration, yielding (l, number of electrons, merged).
 
     Parent terms in parentheses are not occupied orbitals and are skipped. An orbital must
