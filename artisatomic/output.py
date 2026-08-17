@@ -33,8 +33,13 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     """Fill in whichever of lowerlevel, upperlevel and forbidden a reader did not supply.
 
     Readers that key their transitions by level name (namefrom/nameto) get the level ids joined
-    on here; readers that already supply ids keep them. A transition is forbidden when its two
-    levels have the same parity.
+    on here; readers that already supply ids keep them. A transition is forbidden when both of
+    its levels have a known parity and it is the same one.
+
+    A negative parity means the level has no definite parity, either because it merges sub-levels
+    of both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
+    from the level name. Those never count as a match: equal parity is only evidence of
+    forbiddenness when the parities are real.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -65,7 +70,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
                 ),
                 on="upperlevel",
             )
-            .with_columns(forbidden=pl.col("lower_parity") == pl.col("upper_parity"))
+            .with_columns(forbidden=(pl.col("lower_parity") == pl.col("upper_parity")) & (pl.col("lower_parity") >= 0))
         )
     return dftransitions_ion
 

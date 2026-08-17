@@ -56,7 +56,9 @@ from artisatomic.ionhandlers import drop_handlers as drop_handlers
 from artisatomic.ionhandlers import get_ion_handlers as get_ion_handlers
 from artisatomic.ionhandlers import parse_ion_handlers as parse_ion_handlers
 from artisatomic.ionhandlers import sort_ion_handlers as sort_ion_handlers
+from artisatomic.levelnames import get_config_parity as get_config_parity
 from artisatomic.levelnames import get_parity_from_config as get_parity_from_config
+from artisatomic.levelnames import has_merged_orbital as has_merged_orbital
 from artisatomic.levelnames import interpret_configuration as interpret_configuration
 from artisatomic.output import add_level_ids_forbidden as add_level_ids_forbidden
 from artisatomic.output import clear_files as clear_files

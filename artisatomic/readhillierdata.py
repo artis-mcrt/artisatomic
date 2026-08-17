@@ -276,24 +276,51 @@ def hillier_ion_folder(atomic_number, ion_stage):
     )
 
 
+def get_level_parity(config: str) -> int:
+    """Parity of a Hillier level name: 0 even, 1 odd, -1 no definite parity.
+
+    The trailing 'e'/'o' of the name is the parity wherever there is one, which is almost always:
+    it agrees with every level name in the CMFGEN set whose term is otherwise readable, and it is
+    the only thing that gets the intermediate-coupling names right ('3d5(4D)4po[3]', where the
+    term letter belongs to the parent term '(4D)' rather than to the level).
+
+    Names with no suffix fall back to summing l over the occupied orbitals. That leaves the
+    levels that merge sub-levels of both parities and so have no parity to read: CMFGEN's merged
+    high-l levels ('2s2_13w_2W'), its merged n-levels ('1___', '13___', g = 2n^2) and He I's
+    merged singlets and triplets ('8SNG', '8TRP'). Those are -1, which
+    add_level_ids_forbidden() never counts as a parity match.
+    """
+    config = config.split("[", maxsplit=1)[0]
+    if not config:
+        return -1
+
+    # first, because a merged level spans both parities whatever the rest of the name says
+    if artisatomic.has_merged_orbital(config):
+        return -1
+
+    if config[-1] == "e":
+        return 0
+    if config[-1] == "o":
+        return 1
+
+    configparity = artisatomic.get_config_parity(config)
+    return -1 if configparity is None else configparity
+
+
 def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     """Read the LS term of a Hillier level name as (2S+1, L, parity), parity 0 even and 1 odd.
 
     Returns -1 for any component that cannot be read, which readers log rather than treat as an
-    error. Parity comes from the name's 'e'/'o' suffix where it has one; otherwise it is summed
-    over the occupied orbitals, which is what handles CMFGEN's merged high-l levels.
+    error. The parity is worked out separately by get_level_parity(), so it can still come back
+    when the term itself is unreadable.
     """
+    parity = get_level_parity(config)
     config = config.split("[", maxsplit=1)[0]
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
-        if config[-1] == "e":
-            return (-1, -1, 0)
-
-        if config[-1] == "o":
-            return (-1, -1, 1)
-
-        print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
-        return (-1, -1, -1)
+        if parity < 0:
+            print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
+        return (-1, -1, parity)
 
     lposition = -1
     l = -1
@@ -303,36 +330,15 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
             l = lchars.index(char)
             break
     if lposition < 0:
-        if config[-1] == "e":
-            return (-1, -1, 0)
-        if config[-1] == "o":
-            return (-1, -1, 1)
-        return (-1, -1, -1)
-    # a malformed name can fail at the int() or at either index, and any of those just means
-    # the term is unreadable
-    try:  # ruff: ignore[too-many-statements-in-try-clause]
+        return (-1, -1, parity)
+
+    # a malformed name can fail at the int() or at the index, and either just means the term is
+    # unreadable, which says nothing about the parity
+    try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
-        if lposition + 1 > len(config) - 1:
-            # No 'e'/'o' suffix to give the parity. CMFGEN writes its merged high-l levels this
-            # way, repeating the orbital letter as the term symbol (2s2_13w_2W, 2s2_2p3(4So)5z_5Z),
-            # so sum l over the occupied orbitals instead of assuming an even term.
-            parity = artisatomic.get_parity_from_config(config)
-        elif config[lposition + 1] == "o":
-            parity = 1
-        elif config[lposition + 1] == "e":
-            parity = 0
-        elif config[lposition + 2] == "o":
-            parity = 1
-        elif config[lposition + 2] == "e":
-            parity = 0
-        else:
-            twosplusone = -1
-            l = -1
-            parity = -1
     except (IndexError, ValueError):
-        twosplusone = -1
-        l = -1
-        parity = -1
+        return (-1, -1, parity)
+
     return (twosplusone, l, parity)
 
 
@@ -378,6 +384,7 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
     levelrows: list[HillierEnergyLevel] = []
+    levels_without_parity: list[str] = []
     transitionrows: list[HillierTransition] = []
 
     prev_line = ""
@@ -448,6 +455,14 @@ def read_levels_and_transitions(
                 lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
                 (twosplusone, _l, parity) = get_term_as_tuple(levelname)
 
+                if parity < 0:
+                    # No definite parity: a merged level, which is normal CMFGEN, or a name we
+                    # could not read. Give each one its own value so that no two of them can
+                    # compare equal and be called forbidden, whatever the consumer does with the
+                    # parity column. add_level_ids_forbidden() also rejects negatives outright.
+                    parity = -1 - len(levelrows)
+                    levels_without_parity.append(levelname)
+
                 levelrows.append(
                     HillierEnergyLevel(
                         levelname=levelname,
@@ -459,8 +474,9 @@ def read_levels_and_transitions(
                     )
                 )
 
-                # -1 indicates that the term could not be interpreted
-                if twosplusone == -1 and atomic_number > 1 and parity == -1:
+                # -1 indicates that the term could not be interpreted. Levels with no parity are
+                # summarised once below instead, so that a merged ion does not log every level.
+                if twosplusone == -1 and atomic_number > 1 and parity >= 0:
                     artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
                 # if this is the ground state
@@ -478,6 +494,15 @@ def read_levels_and_transitions(
                 break
 
         artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
+        if levels_without_parity:
+            # Normal for ions with merged levels, so this is a count and a sample rather than a
+            # warning per level: H I and He II are merged all the way down.
+            artisatomic.log_and_print(
+                flog,
+                f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
+                f" (transitions between them are treated as permitted), e.g."
+                f" {', '.join(levels_without_parity[:5])}",
+            )
         if len(levelrows) != expected_energy_levels:
             msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
             raise ValueError(msg)

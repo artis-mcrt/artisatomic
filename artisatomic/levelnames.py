@@ -1,5 +1,7 @@
 """Parse level names: split a configuration into orbitals and a term, and derive the parity."""
 
+import typing as t
+
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
@@ -119,35 +121,85 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
     return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
 
 
-def get_parity_from_config(instr) -> int:
-    """Parity of a level from its configuration: the sum of l over the occupied orbitals, mod 2.
+def _iter_occupied_orbitals(instr, warn: bool) -> t.Iterator[tuple[int, int, bool]]:
+    """Walk the occupied orbitals of a configuration, yielding (l, number of electrons, merged).
 
-    Returns 0 for even and 1 for odd. Parent terms in parentheses are not occupied orbitals and
-    are skipped, as are merge markers (see the l >= n check below).
+    Parent terms in parentheses are not occupied orbitals and are skipped. An orbital must
+    satisfy l <= n - 1; CMFGEN's merged high-l levels ('2s2_13w_2W', '2s2_2p3(4So)5z_5Z') fail
+    this, because the letter is a merge marker spanning several l rather than one orbital. Those
+    are yielded with merged=True so callers can tell the two cases apart.
+
+    One token can hold more than one orbital, because interpret_configuration() keeps a
+    digit-letter-letter run together: '4sp(3P)_7Po' gives '4sp', which is 4s and 4p sharing the
+    one principal quantum number. Each letter is therefore taken in turn, with the digits that
+    follow it as its occupation and 1 where it has none.
     """
-    configsplit = interpret_configuration(instr)[0]
     lchars_lower = lchars.lower()
-    lsum = 0
-    for orbitalstr in configsplit:
+    for orbitalstr in interpret_configuration(instr)[0]:
         if orbitalstr.startswith("("):
             continue  # a parent term such as '(5D)', not an occupied orbital
-        # the orbital letter is the first non-digit, allowing a two-digit principal quantum number
-        lpos = next((pos for pos, char in enumerate(orbitalstr) if char in lchars_lower), None)
-        if lpos is None:
+
+        # the leading digits are the principal quantum number, which may be two digits long
+        nend = 0
+        while nend < len(orbitalstr) and orbitalstr[nend].isdigit():
+            nend += 1
+        principalquantumnumber = int(orbitalstr[:nend]) if nend else 0
+
+        pos = nend
+        foundorbital = False
+        while pos < len(orbitalstr):
+            if orbitalstr[pos] not in lchars_lower:
+                pos += 1
+                continue
+            l = lchars_lower.index(orbitalstr[pos])
+            pos += 1
+            nstart = pos
+            while pos < len(orbitalstr) and orbitalstr[pos].isdigit():
+                pos += 1
+            nelec = int(orbitalstr[nstart:pos]) if pos > nstart else 1
+            foundorbital = True
+            yield l, nelec, l >= principalquantumnumber
+
+        if not foundorbital and warn:
             # don't fail silently: a skipped orbital means the parity (and hence the forbidden
             # flags of every transition involving this level) could come out wrong
             print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}', skipping it for the parity")
-            continue
-        l = lchars_lower.index(orbitalstr[lpos])
-        nelec = int(orbitalstr[lpos + 1 :]) if len(orbitalstr[lpos + 1 :]) > 0 else 1
 
-        # An orbital must satisfy l <= n - 1. CMFGEN's merged high-l levels ('2s2_13w_2W',
-        # '2s2_2p3(4So)5z_5Z') fail this: the letter is a merge marker spanning several l of both
-        # parities, so it has no definite parity and only the real orbitals count.
-        principalquantumnumber = int(orbitalstr[:lpos]) if orbitalstr[:lpos].isdigit() else 0
-        if l >= principalquantumnumber:
-            continue
 
-        lsum += l * nelec
+def has_merged_orbital(instr) -> bool:
+    """Whether the configuration contains a merge marker, i.e. an orbital with l >= n.
 
-    return lsum % 2
+    CMFGEN writes its merged high-l levels this way ('2s2_13w_2W', '10z_2Z'): the letter stands
+    for several l of both parities at once, so the level has no parity rather than an unreadable
+    one, and no suffix on the name can supply it.
+    """
+    return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False))
+
+
+def get_config_parity(instr) -> int | None:
+    """Parity of a configuration (0 even, 1 odd), or None when it does not determine one.
+
+    None means no orbital in the name had a readable l to sum, as for CMFGEN's merged n-levels
+    '1___' and '13___' (g = 2n^2, every l of that n) and He I's merged '8SNG' and '8TRP'. That is
+    different from the 0 those would otherwise get from an empty sum. Merge markers are left out
+    of the sum as in get_parity_from_config(), so check has_merged_orbital() as well when a level
+    with no definite parity has to be recognised.
+    """
+    lsum = 0
+    readable = False
+    for l, nelec, merged in _iter_occupied_orbitals(instr, warn=True):
+        if not merged:
+            lsum += l * nelec
+            readable = True
+
+    return lsum % 2 if readable else None
+
+
+def get_parity_from_config(instr) -> int:
+    """Parity of a level from its configuration: the sum of l over the occupied orbitals, mod 2.
+
+    Returns 0 for even and 1 for odd. Merge markers have no definite l, so they are left out of
+    the sum rather than making the whole result unknown. Prefer get_config_parity() where a level
+    with no definite parity has to be told apart from an even one.
+    """
+    return sum(l * nelec for l, nelec, merged in _iter_occupied_orbitals(instr, warn=True) if not merged) % 2

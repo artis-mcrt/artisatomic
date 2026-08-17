@@ -38,6 +38,59 @@ def test_interpret_term():
         assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
 
+def test_get_level_parity():
+    """A CMFGEN level's parity comes from its 'e'/'o' suffix, and merged levels have none at all."""
+    get_level_parity = readhillierdata.get_level_parity
+
+    # the 'e'/'o' suffix, which is what nearly every name carries
+    assert get_level_parity("1s2_1Se") == 0
+    assert get_level_parity("2p_2Po") == 1
+    assert get_level_parity("3d5(6S)4s(7S)4d6De") == 0
+
+    # intermediate-coupling names, where the only term letter belongs to the parent term in
+    # parentheses. Reading the term instead of the suffix leaves these with no parity at all,
+    # and then any two of them wrongly compare equal.
+    assert get_level_parity("3d5(4D)4po[3]") == 1
+    assert get_level_parity("3d4(3P2)4po[1/2]") == 1
+    assert get_level_parity("3d6(3P2)4pbo[5/2]") == 1
+
+    # no suffix: sum l over the orbitals instead
+    assert get_level_parity("5s2.5p5") == 1  # 0*2 + 1*5
+    assert get_level_parity("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7, the parent term skipped
+
+    # ...and where there is no suffix and no readable orbital either, there is no parity
+    assert get_level_parity("Eqv st (0S ) 0s  a4P") < 0
+
+    # Levels that merge sub-levels of both parities have no parity to read, and must not be given
+    # one: '1___' and '13___' hold every l of that n (g = 2n^2), '8SNG'/'8TRP' are He I's merged
+    # singlets and triplets, and 'w'/'z' are merge markers for the high-l orbitals of a shell.
+    for merged in ("1___", "2___", "13___", "8SNG", "8TRP", "2s2_29w_2W", "10z_2Z", "2s2_2p3(4So)5z_5Z"):
+        assert get_level_parity(merged) < 0
+
+
+def test_has_merged_orbital():
+    """Merge markers are orbital letters standing for several l at once, so l >= n gives them away."""
+    from artisatomic import has_merged_orbital
+
+    assert has_merged_orbital("2s2_13w_2W")  # 'w' would be l=19, but n=13
+    assert has_merged_orbital("10z_2Z")  # 'z' would be l=22, but n=10
+    assert has_merged_orbital("2s2_2p3(4So)5z_5Z")
+
+    assert not has_merged_orbital("3d6(5D)10d_5Pe")  # 10d is a real orbital, l=2 < n=10
+    assert not has_merged_orbital("2p_2Po")
+    assert not has_merged_orbital("3d7(4F)6d_5Pbe")
+
+
+def test_get_parity_from_multi_orbital_token():
+    """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
+    from artisatomic import get_parity_from_config
+
+    # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
+    # Reading only the first letter and calling the rest an occupation raises on int('p').
+    assert get_parity_from_config("4sp(3P)_7Po") == 1
+    assert readhillierdata.get_level_parity("4sp(3P)_7Po[2]") == 1
+
+
 def test_get_parity_from_config():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
     from artisatomic import get_parity_from_config
@@ -597,6 +650,55 @@ def test_read_coldata_term_to_j_redistribution():
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
+def test_add_level_ids_forbidden_parity():
+    """Equal parity means forbidden, but only where both parities are real."""
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2, 3],
+            "parity": [0, 1, -1, -2],  # two real parities, then two levels with no definite parity
+        }
+    )
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [0, 0, 0, 2],
+            "upperlevel": [1, 2, 3, 3],
+            "A": [1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
+
+    # even -> odd is permitted, and a real parity never matches an absent one
+    assert forbidden == [False, False, False, False]
+
+    # ...while two levels that really do share a parity are forbidden
+    dfsameparity = pl.DataFrame({"levelid": [0, 1], "parity": [1, 1]})
+    dftrans = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
+    assert add_level_ids_forbidden(dfsameparity, dftrans)["forbidden"].to_list() == [True]
+
+
+def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
+    """H I is merged n-levels throughout, so nothing in it may come out forbidden.
+
+    Every H I level is named '<n>___' and holds every l of that n, giving it no definite parity.
+    Treating those as a matching parity made all 435 H I transitions forbidden, Lyman alpha
+    included -- the strongest permitted line there is, listed in hi_osc.dat with f = 0.4162.
+    """
+    _, dflevels, dftransitions, _ = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
+
+    # no level has a parity that could match another's
+    assert (dflevels["parity"] < 0).all()
+    assert dflevels["parity"].n_unique() == dflevels.height
+
+    dflevels = dflevels.with_row_index("levelid").with_columns(pl.col("levelid").cast(pl.Int64))
+    dftransitions = add_level_ids_forbidden(dflevels, dftransitions)
+    assert not any(dftransitions["forbidden"].to_list())
+
+    lymanalpha = dftransitions.filter((pl.col("lowerlevel") == 0) & (pl.col("upperlevel") == 1))
+    assert lymanalpha.height == 1
+    assert lymanalpha["A"].item() == pytest.approx(4.696e8)
+    assert not lymanalpha["forbidden"].item()
 
 
 def test_readboyledata_levels_get_distinct_parities(monkeypatch):
