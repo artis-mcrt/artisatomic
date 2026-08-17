@@ -30,12 +30,17 @@ def clear_files(args: argparse.Namespace) -> None:
 
 
 # A transition this strong is an electric dipole line, whatever the level names say. Below these
-# values, one that breaks the delta J rule is simply a forbidden line that the source listed with
-# its own small strength, which agrees with the label instead of contradicting it.
+# values, one that breaks the delta J rule is taken to be a forbidden line that the source listed
+# with its own small strength, which agrees with the label instead of contradicting it.
 #
-# The two need their own values because they are not the same quantity. f has no units and an E1
-# line carries 1e-3 to 1, so 1e-4 separates them. A is a rate in s-1 that spans many decades: a
-# forbidden line reaches ~1e2 (QUB's Co III peaks at 14), while an E1 line is 1e6 or more.
+# The two need their own values because they are not the same quantity. f has no units; A is a
+# rate in s-1 that spans many decades. Neither cut is a law of physics: a weak E1 line can sit
+# well below either (an intercombination line, or one between high levels), and a strong M1 or E2
+# line in a highly charged ion can sit above the A cut. They are where the two populations part in
+# this corpus -- forbidden lines end near f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1),
+# and the lines that contradict their own J labels start at f = 7.8e-4 (F III's smallest), only
+# eight times above the cut. A mislabelled line weaker than that falls on the wrong side, and
+# that is the accepted cost.
 min_f_asserts_e1 = 1e-4
 min_a_asserts_e1 = 1e5
 

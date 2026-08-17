@@ -745,8 +745,16 @@ def test_get_level_j():
     assert get_level_j("3d5(4D)4po[9/2]") == 4.5
     assert get_level_j("3d4(3P2)4po[1/2]") == 0.5
 
-    # JJ coupling states the J in braces, the brackets being taken by the level index
+    # a name with a brace and nothing after it gives J there; in pair coupling the brace holds
+    # K and the trailing bracket is J. The last group is the one read, and both come out right.
     assert get_level_j("2s2_2p(2P<1/2>)4f_2{5/2}e") == 2.5
+    assert get_level_j("2p5(2P*<1/2>)3d_2{3/2}o[1]") == 1.0
+
+    # Not every trailing bracket is a J: Si X and S X number their levels there instead. g tells
+    # them apart, because J is only J where g == 2J + 1. A 3P term has no J = 3.
+    assert get_level_j("2p3p3Pe[3]", g=5.0) is None
+    assert get_level_j("2s2_2p3_4So[2]", g=4.0) is None
+    assert get_level_j("3d6_a5De[4]", g=9.0) == 4.0
 
     # A term-resolved level has no J of its own -- its g counts every J of the term -- and nor
     # does a merged level. Neither may be given one.
@@ -1018,8 +1026,10 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # levels come back in ascending energy, so the file's order is exactly reversed
     assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 5000.0]
     assert levelid_of_fileindex == {2: 0, 1: 1, 0: 2}
-    # a null parity never matches another, so all transitions stay permitted
+    # a null parity never matches another, so the Laporte rule cannot fire...
     assert all(level.parity is None for level in energy_levels)
+    # ...and J is what the delta J rule has to go on, so it must reach the level tuple
+    assert [level.j for level in energy_levels] == [0.0, 1.0, 2.0]
 
     # one line from the file's level 2 (the ground state) to its level 0 (the top level)
     dflines = pd.DataFrame(

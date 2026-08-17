@@ -317,15 +317,22 @@ def get_level_parity(config: str) -> int:
     return -1 if configparity is None else configparity
 
 
-def get_level_j(levelname: str) -> float | None:
+def get_level_j(levelname: str, g: float | None = None) -> float | None:
     """J of a Hillier level name, or None where the name does not state one.
 
     CMFGEN writes J in brackets at the end of a J-resolved level's name, as a whole number or a
     half-integer fraction: '3d6_a5De[4]', '3d5(4D)4po[9/2]'. A term-resolved level has no
     bracket, and its g counts every J of the term, so nothing can be recovered from that either.
 
-    JJ-coupling names carry theirs in braces ('2s2_2p(2P<1/2>)4f_2{5/2}e') where the brackets
-    would otherwise hold the level index, so those are read too.
+    The last bracketed or braced group is the one read. In pair coupling the brace holds K and
+    the bracket J ('2p5(2P*<1/2>)3d_2{3/2}o[1]'); a name with a brace and nothing after it gives
+    J there ('2s2_2p(2P<1/2>)4f_2{5/2}e'). Both come out right that way, checked against g for
+    every such level in the corpus.
+
+    Not every trailing bracket is a J. Si X and S X number their levels in brackets instead
+    ('2p3p3Pe[3]' with g = 5, and a 3P term has no J = 3), and a few single levels elsewhere do
+    the same. Pass the level's g and the value is returned only where g == 2J + 1, which is
+    what J means; anything else is some other bracketed number and gives None.
     """
     match = re.search(r"[\[{](\d+)(?:/(\d+))?[\]}]\w*$", levelname)
     if match is None:
@@ -333,10 +340,16 @@ def get_level_j(levelname: str) -> float | None:
 
     numerator, denominator = match.group(1), match.group(2)
     if denominator is None:
-        return float(numerator)
+        j = float(numerator)
+    elif denominator == "2":
+        j = float(numerator) / 2.0
+    else:
+        return None  # only halves are physical, so this is some other bracketed quantity
 
-    # only halves are physical, so anything else is some other bracketed quantity
-    return float(numerator) / float(denominator) if denominator == "2" else None
+    if g is not None and abs(g - (2 * j + 1)) > 1e-6:
+        return None  # the bracket held something other than J
+
+    return j
 
 
 def get_term_as_tuple(config: str) -> tuple[int, int, int]:
@@ -517,7 +530,7 @@ def read_levels_and_transitions(
                         lambdaangstrom=lambdaangstrom,
                         hillierlevelid=hillierlevelid,
                         parity=parity,
-                        j=get_level_j(levelname),
+                        j=get_level_j(levelname, g=float(row[colindex["g"]])),
                     )
                 )
 
