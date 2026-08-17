@@ -49,7 +49,7 @@ class QUBEnergyLevel(t.NamedTuple):
     j: float
     energyabovegsinpercm: float
     g: float
-    parity: int | None  # None where the configuration determines no parity
+    parity: int
 
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
@@ -126,15 +126,18 @@ def read_adf04(
                     0.0,
                     0,
                 )
-            # None where the configuration determines no parity. The level name keeps the old
-            # best-effort even/odd letter in that case, so that names (and the adata.txt they are
-            # written to) do not depend on this, but the parity column says what is actually known
-            parity = artisatomic.get_config_parity(config)
+            # Deliberately the best-effort sum rather than get_config_parity(): an adf04
+            # configuration is often bare ('5s2') or uppercase ('3S2 3P6 3D5 4P1'), and
+            # interpret_configuration() reads neither as orbitals, so get_config_parity() would
+            # call the parity unknown for entire files. This keeps the long-standing behaviour --
+            # an empty sum, hence 0 -- which is right only where the true parity is even; fixing
+            # that needs the configuration parser to handle these forms, not a different caller.
+            parity = artisatomic.get_parity_from_config(config)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
                 lchars[energylevel.l],
-                ["e", "o"][parity if parity is not None else 0],
+                ["e", "o"][parity],
                 int(2 * energylevel.j),
                 energylevel.qub_id,
             )

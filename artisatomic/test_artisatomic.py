@@ -116,12 +116,23 @@ def test_get_parity_from_multi_orbital_token():
 
 def test_get_parity_from_config():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
+    from artisatomic import get_config_parity
     from artisatomic import get_parity_from_config
 
     # sum of l over the occupied orbitals, mod 2
-    assert get_parity_from_config("3d7") == 0  # 2 * 7 = 14
     assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
     assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
+
+    # A configuration with no term is not split into orbitals at all, so the sum is empty and the
+    # answer is 0 whatever the orbitals would have said. That is right for '3d7' (2 * 7 = 14) only
+    # by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). readqubdata relies on this, so it is
+    # pinned rather than left to be discovered; get_config_parity() reports the same names as
+    # unknown, which is what a caller that must not guess should use.
+    assert interpret_configuration("3d7")[0] == []
+    assert get_parity_from_config("3d7") == 0
+    assert get_parity_from_config("5p3") == 0  # the true parity is odd
+    assert get_config_parity("3d7") is None
+    assert get_config_parity("5p3") is None
 
     # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
     assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
