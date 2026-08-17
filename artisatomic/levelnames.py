@@ -7,7 +7,76 @@ reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
-def interpret_configuration(instr_orig: str, warn: bool = True) -> tuple[list[str], int, int, int, int]:
+def _split_orbitals(instr: str) -> list[str]:
+    """Split the configuration part of a level name into occupied orbitals and parent terms.
+
+    Parent terms keep their parentheses, so callers can tell them from occupied orbitals. Any
+    term has already been taken off the end by the caller, so all of this is configuration.
+    """
+    max_n = 20  # maximum possible principle quantum number n
+
+    def is_two_digit_n(strn: str) -> bool:
+        """Test whether two digits are a principal quantum number, not one digit of something else.
+
+        n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
+        '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.
+        """
+        return strn.isdigit() and 10 <= int(strn) < max_n
+
+    electron_config: list[str] = []
+    if instr.startswith("Eqv st"):
+        return electron_config
+
+    while instr:
+        if instr[-1].upper() in lchars:
+            # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'. A
+            # digit-letter-letter run keeps its digit, so '4sp(3P)_7Po[2]' gives '4sp'.
+            startpos = (
+                -3
+                if len(instr) >= 3
+                and (is_two_digit_n(instr[-3:-1]) or (instr[-3].isdigit() and not instr[-2].isdigit()))
+                else -2
+            )
+
+            electron_config.insert(0, instr[startpos:])
+            instr = instr[:startpos]
+        elif instr[-1] == ")":
+            left_bracket_pos = instr.rfind("(")
+            str_parent_term = instr[left_bracket_pos:].replace(" ", "")
+            electron_config.insert(0, str_parent_term)
+            instr = instr[:left_bracket_pos]
+        elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
+            if len(instr) >= 2 and instr[-2].upper() in lchars:
+                # Single-digit occupation. A two-digit n survives ('10d1') only where the
+                # digits cannot belong to a preceding orbital: '3d14s2' is ambiguous
+                # (3d1 4s2 or 3d 14s2), and there the occupation-1 reading wins.
+                two_digit_n = (
+                    len(instr) >= 4
+                    and is_two_digit_n(instr[-4:-2])
+                    and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
+                )
+                startpos = -4 if two_digit_n else -3
+                electron_config.insert(0, instr[startpos:])
+                instr = instr[:startpos]
+            elif len(instr) >= 3 and str.isdigit(instr[-2]) and instr[-3].upper() in lchars:
+                # Two-digit occupation, e.g. the closed shells '3d10' and '4f14'. This is
+                # unambiguous: trailing digits after the orbital letter are the occupation.
+                startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) else -3
+                electron_config.insert(0, instr[startpos:])
+                instr = instr[:startpos]
+            else:
+                instr = instr[:-1]
+        elif instr[-1] in {"_", " "}:
+            instr = instr[:-1]
+        else:
+            instr = instr[:-1]
+
+    return electron_config
+
+
+def interpret_configuration(
+    instr_orig: str, warn: bool = True, hasterm: bool = True
+) -> tuple[list[str], int, int, int, int]:
     """Split a level name into its orbitals and term.
 
     Returns (orbitals, 2S+1, L, parity, index in symmetry), where orbitals is the configuration
@@ -18,10 +87,16 @@ def interpret_configuration(instr_orig: str, warn: bool = True) -> tuple[list[st
     warn=False silences the malformed-name message for callers that expect names this cannot
     split. CMFGEN's merged levels ('1___', '8SNG') are such names by design, and there are
     enough of them to bury a real warning.
+
+    hasterm=False reads the whole string as a configuration, for sources whose level name carries
+    no term. An ADAS adf04 file keeps 2S+1 and L in their own columns, so its '5s2' is an orbital
+    rather than a term to strip, and its '3S2 3P6 3D5 4P1' would otherwise lose the 4P1 that way.
+    All the term components come back as -1, there being no term to read.
     """
-    max_n = 20  # maximum possible principle quantum number n
-    instr = instr_orig
-    instr = instr.split("[")[0]  # remove trailing bracketed J value
+    instr = instr_orig.split("[", maxsplit=1)[0]  # remove trailing bracketed J value
+
+    if not hasterm:
+        return _split_orbitals(instr), -1, -1, -1, -1
 
     if instr[-1] in lchars:
         term_parity = 0  # even
@@ -70,64 +145,10 @@ def interpret_configuration(instr_orig: str, warn: bool = True) -> tuple[list[st
         indexinsymmetry = reversedalphabets.index(instr[-1]) + 1 if term_parity == 1 else alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
-    def is_two_digit_n(strn: str) -> bool:
-        """Test whether two digits are a principal quantum number, not one digit of something else.
-
-        n is written 10 to 19 when it takes two digits, so a leading zero rules it out: the '0' of
-        '3d104s' belongs to the occupation number of the 3d shell, giving 4s and not 04s.
-        """
-        return strn.isdigit() and 10 <= int(strn) < max_n
-
-    electron_config: list[str] = []
-    if not instr.startswith("Eqv st"):
-        while instr:
-            if instr[-1].upper() in lchars:
-                # Orbital with no occupation number, e.g. the '10d' of '3d6(5D)10d_5Pe'. A
-                # digit-letter-letter run keeps its digit, so '4sp(3P)_7Po[2]' gives '4sp'.
-                startpos = (
-                    -3
-                    if len(instr) >= 3
-                    and (is_two_digit_n(instr[-3:-1]) or (instr[-3].isdigit() and not instr[-2].isdigit()))
-                    else -2
-                )
-
-                electron_config.insert(0, instr[startpos:])
-                instr = instr[:startpos]
-            elif instr[-1] == ")":
-                left_bracket_pos = instr.rfind("(")
-                str_parent_term = instr[left_bracket_pos:].replace(" ", "")
-                electron_config.insert(0, str_parent_term)
-                instr = instr[:left_bracket_pos]
-            elif str.isdigit(instr[-1]):  # the number of electrons in an orbital
-                if len(instr) >= 2 and instr[-2].upper() in lchars:
-                    # Single-digit occupation. A two-digit n survives ('10d1') only where the
-                    # digits cannot belong to a preceding orbital: '3d14s2' is ambiguous
-                    # (3d1 4s2 or 3d 14s2), and there the occupation-1 reading wins.
-                    two_digit_n = (
-                        len(instr) >= 4
-                        and is_two_digit_n(instr[-4:-2])
-                        and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
-                    )
-                    startpos = -4 if two_digit_n else -3
-                    electron_config.insert(0, instr[startpos:])
-                    instr = instr[:startpos]
-                elif len(instr) >= 3 and str.isdigit(instr[-2]) and instr[-3].upper() in lchars:
-                    # Two-digit occupation, e.g. the closed shells '3d10' and '4f14'. This is
-                    # unambiguous: trailing digits after the orbital letter are the occupation.
-                    startpos = -4 if len(instr) >= 4 and str.isdigit(instr[-4]) else -3
-                    electron_config.insert(0, instr[startpos:])
-                    instr = instr[:startpos]
-                else:
-                    instr = instr[:-1]
-            elif instr[-1] in {"_", " "}:
-                instr = instr[:-1]
-            else:
-                instr = instr[:-1]
-
-    return electron_config, term_twosplusone, term_l, term_parity, indexinsymmetry
+    return _split_orbitals(instr), term_twosplusone, term_l, term_parity, indexinsymmetry
 
 
-def _iter_occupied_orbitals(instr, warn: bool) -> Iterator[tuple[int, int, bool]]:
+def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator[tuple[int, int, bool]]:
     """Walk the occupied orbitals of a configuration, yielding (l, number of electrons, merged).
 
     Parent terms in parentheses are not occupied orbitals and are skipped. An orbital must
@@ -141,7 +162,7 @@ def _iter_occupied_orbitals(instr, warn: bool) -> Iterator[tuple[int, int, bool]
     follow it as its occupation and 1 where it has none.
     """
     lchars_lower = lchars.lower()
-    for orbitalstr in interpret_configuration(instr, warn=warn)[0]:
+    for orbitalstr in interpret_configuration(instr, warn=warn, hasterm=hasterm)[0]:
         if orbitalstr.startswith("("):
             continue  # a parent term such as '(5D)', not an occupied orbital
 
@@ -154,10 +175,17 @@ def _iter_occupied_orbitals(instr, warn: bool) -> Iterator[tuple[int, int, bool]
         pos = nend
         foundorbital = False
         while pos < len(orbitalstr):
-            if orbitalstr[pos] not in lchars_lower:
+            # Only a name with a term is read case-sensitively. CMFGEN writes orbitals in lower
+            # case and keeps upper case for terms, so an upper-case letter there is a term symbol
+            # or a parent term, not an orbital: reading '8SNG' (He I's merged singlets) as an 8s
+            # orbital, or the mangled '3H' of '3d4(3H)s44p_x3Io' as a merge marker, would be
+            # wrong. A bare configuration has no term to confuse it with, and adf04 writes its
+            # orbitals in upper case ('3S2 3P6 3D5 4P1'), so there the letter is unambiguous.
+            orbitalchar = orbitalstr[pos] if hasterm else orbitalstr[pos].lower()
+            if orbitalchar not in lchars_lower:
                 pos += 1
                 continue
-            l = lchars_lower.index(orbitalstr[pos])
+            l = lchars_lower.index(orbitalchar)
             pos += 1
             nstart = pos
             while pos < len(orbitalstr) and orbitalstr[pos].isdigit():
@@ -175,17 +203,17 @@ def _iter_occupied_orbitals(instr, warn: bool) -> Iterator[tuple[int, int, bool]
             print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}', skipping it for the parity")
 
 
-def has_merged_orbital(instr) -> bool:
+def has_merged_orbital(instr, hasterm: bool = True) -> bool:
     """Whether the configuration contains a merge marker, i.e. an orbital with l >= n.
 
     CMFGEN writes its merged high-l levels this way ('2s2_13w_2W', '10z_2Z'): the letter stands
     for several l of both parities at once, so the level has no parity rather than an unreadable
     one, and no suffix on the name can supply it.
     """
-    return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False))
+    return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False, hasterm=hasterm))
 
 
-def get_config_parity(instr, warn: bool = False) -> int | None:
+def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | None:
     """Parity of a configuration (0 even, 1 odd), or None when it does not determine one.
 
     None means no orbital in the name had a readable l to sum, as for CMFGEN's merged n-levels
@@ -199,7 +227,7 @@ def get_config_parity(instr, warn: bool = False) -> int | None:
     """
     lsum = 0
     readable = False
-    for l, nelec, merged in _iter_occupied_orbitals(instr, warn=warn):
+    for l, nelec, merged in _iter_occupied_orbitals(instr, warn=warn, hasterm=hasterm):
         if not merged:
             lsum += l * nelec
             readable = True

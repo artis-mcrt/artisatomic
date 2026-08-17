@@ -123,17 +123,6 @@ def test_get_parity_from_config():
     assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
     assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
 
-    # A configuration with no term is not split into orbitals at all, so the sum is empty and the
-    # answer is 0 whatever the orbitals would have said. That is right for '3d7' (2 * 7 = 14) only
-    # by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). readqubdata relies on this, so it is
-    # pinned rather than left to be discovered; get_config_parity() reports the same names as
-    # unknown, which is what a caller that must not guess should use.
-    assert interpret_configuration("3d7")[0] == []
-    assert get_parity_from_config("3d7") == 0
-    assert get_parity_from_config("5p3") == 0  # the true parity is odd
-    assert get_config_parity("3d7") is None
-    assert get_config_parity("5p3") is None
-
     # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
     assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
     assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
@@ -147,6 +136,46 @@ def test_get_parity_from_config():
     # the real orbitals decide the parity.
     assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
+
+    # Read as name-with-a-term, a bare configuration is mistaken for a term and no orbitals come
+    # back at all, so the sum is empty and the answer is 0 whatever the orbitals said: right for
+    # '3d7' (2 * 7 = 14) only by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). Callers with
+    # a bare configuration pass hasterm=False, below.
+    assert interpret_configuration("3d7")[0] == []
+    assert get_parity_from_config("3d7") == 0
+    assert get_parity_from_config("5p3") == 0  # the true parity is odd
+    assert get_config_parity("3d7") is None
+
+
+def test_parity_of_a_bare_configuration():
+    """A name with no term is all configuration, and adf04 writes its orbitals in upper case."""
+    from artisatomic import get_config_parity
+
+    # the whole string is orbitals, so nothing is lost off the end and odd really reads as odd
+    assert get_config_parity("3d7", hasterm=False) == 0  # 2 * 7 = 14
+    assert get_config_parity("5s2", hasterm=False) == 0  # 0 * 2
+    assert get_config_parity("5p3", hasterm=False) == 1  # 1 * 3
+    assert get_config_parity("2p", hasterm=False) == 1  # a lone orbital with no occupation
+
+    # ADAS adf04 configurations: upper case, space separated, with the level's own index in
+    # brackets at the end. Stripping a term took the last orbital with it, so '4P1' was lost and
+    # every level of FeIII.adf04 came out even; 3s2 3p6 3d5 4p1 is 0 + 6 + 10 + 1 = 17, odd.
+    assert get_config_parity("3S2 3P6 3D5 4P1   (1)", hasterm=False) == 1
+    assert get_config_parity("3S2 3P6 3D6   (5)", hasterm=False) == 0  # 0 + 6 + 12 = 18
+    assert interpret_configuration("3S2 3P6 3D5 4P1   (1)", hasterm=False)[0] == [
+        "3S2",
+        "3P6",
+        "3D5",
+        "4P1",
+        "(1)",
+    ]
+
+    # ...but upper case is only an orbital where there is no term to confuse it with. With a term
+    # the case still matters: '8SNG' is He I's merged singlets, not an 8s orbital, and the parent
+    # term left over from '3d4(3H)s44p_x3Io' is not a merge marker.
+    assert get_config_parity("8SNG") is None
+    assert readhillierdata.get_level_parity("8SNG") < 0
+    assert readhillierdata.get_level_parity("3d4(3H)s44p_x3Io[6]") == 1
 
 
 def test_interpret_configuration():
