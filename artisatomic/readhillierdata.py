@@ -495,7 +495,7 @@ def read_levels_and_transitions(
         for line in fhillierosc:
             row = line.split()
             if (
-                re.match(r"x*\*+", line) and prev_line
+                re.match(r"x*\*{5,}", line) and prev_line
             ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
                 if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
                     print("Fe VIII has a bespoke header")
@@ -750,6 +750,9 @@ def read_phixs_tables(
             crosssectiontype = -1
             fitcoefficients: list[t.Any] = []
 
+            # Used to skip problematic lines in Fe VIII and Ni X phot_data_A (see below)
+            in_header = False
+
             for line in fhillierphot:
                 row = line.split()
 
@@ -787,6 +790,12 @@ def read_phixs_tables(
                     (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name")
                     or " ".join(row[-3:]) == "!Configuration name [*]"
                 ):
+                    if not in_header:
+                        artisatomic.log_and_print(
+                            flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
+                        )
+                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines before the header that end in "!Configuration name" and confuse things...
+
                     lowerlevelname = row[0]
                     # with J splitting the name (including any [J] suffix) maps to exactly one
                     # level; without it, strip the suffix so the table covers the configuration
@@ -804,9 +813,6 @@ def read_phixs_tables(
                     lowerlevelindex = (
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
-                    if not phixstargets[filenum]:
-                        print("WARNING: no photoionisation target, skipping to the next line")
-                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines in the header that end in "!Configuration name" and confuse things...
                     if not targetlevelname:
                         print("ERROR: no upper level name")
                         sys.exit(1)
@@ -827,14 +833,11 @@ def read_phixs_tables(
                     numpointsexpected = int(row[0])
                     pointnumber = 0
 
-                if (
-                    has_marker
-                    and len(row) >= 2
-                    and " ".join(row[1:]) == "!Cross-section unit"
-                    and row[0] != "Megabarns"
-                ):
-                    print(f"Wrong cross-section unit: {row[0]}")
-                    sys.exit(1)
+                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
+                    in_header = True  # All phot_data_* in 19apr23 have this line
+                    if row[0] != "Megabarns":
+                        print(f"Wrong cross-section unit: {row[0]}")
+                        sys.exit(1)
 
                 # a line carrying a "!..." marker has text in it, so it can never be all floats.
                 # Short-circuiting on that skips the parse attempt on every header line.
@@ -1447,7 +1450,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 header_row != []
                 and temperature_index != -1
                 and num_expected_t_values != -1
-                and re.match(r"^\*+", line.strip())
+                and re.match(r"^\*{5,}+", line.strip())
             ):
                 artisatomic.log_and_print(
                     flog, "WARNING: Found line of *'s after reading header, assuming that's the end of the table"
@@ -1515,6 +1518,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 namefromnameto = "".join(row[:-num_expected_t_values])
                 upsilonvalues = row[-num_expected_t_values:]
 
+                assert len(row) - num_expected_t_values == 2
                 if "-" in namefromnameto:
                     namefrom, nameto = map(str.strip, namefromnameto.split("-"))
                 else:
