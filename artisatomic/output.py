@@ -39,7 +39,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     A negative parity means the level has no definite parity, either because it merges sub-levels
     of both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
     from the level name. Those never count as a match: equal parity is only evidence of
-    forbiddenness when the parities are real.
+    forbiddenness when the parities are real. Anything a reader could not give a whole number
+    for -- a null, a NaN, a string pandas inferred from a blank column -- means the same thing,
+    so the column is normalised to Int64 first and unreadable values join the negatives.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -57,17 +59,17 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         )
 
     if "forbidden" not in dftransitions_ion.columns:
+        # -1 for anything that is not a whole number: a NaN would otherwise compare equal to
+        # itself and pass the >= 0 test, and a null would make forbidden itself null, which
+        # write_transition_data's "{forbidden:d}" cannot format.
+        knownparity = pl.col("parity").cast(pl.Int64, strict=False).fill_null(-1)
         dftransitions_ion = (
             dftransitions_ion.join(
-                dfenergylevels_ion.select(
-                    pl.col("levelid").alias("lowerlevel"), pl.col("parity").alias("lower_parity")
-                ),
+                dfenergylevels_ion.select(pl.col("levelid").alias("lowerlevel"), knownparity.alias("lower_parity")),
                 on="lowerlevel",
             )
             .join(
-                dfenergylevels_ion.select(
-                    pl.col("levelid").alias("upperlevel"), pl.col("parity").alias("upper_parity")
-                ),
+                dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), knownparity.alias("upper_parity")),
                 on="upperlevel",
             )
             .with_columns(forbidden=(pl.col("lower_parity") == pl.col("upper_parity")) & (pl.col("lower_parity") >= 0))

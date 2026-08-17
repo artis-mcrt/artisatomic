@@ -329,14 +329,21 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
             lposition = charpos
             l = lchars.index(char)
             break
-    if lposition < 0:
+    # lposition == 0 leaves no room for the multiplicity, and config[-1] would quietly wrap round
+    # to the end of the name and read some other character as it
+    if lposition < 1:
         return (-1, -1, parity)
 
-    # a malformed name can fail at the int() or at the index, and either just means the term is
-    # unreadable, which says nothing about the parity
+    # The only L character can belong to a parenthesised parent term rather than to the level, as
+    # in '3d5(4D)4po[3]', where reporting the '(4D)' would describe the parent and not this level.
+    # An unclosed '(' before it is what tells them apart.
+    if config.rfind("(", 0, lposition) > config.rfind(")", 0, lposition):
+        return (-1, -1, parity)
+
+    # a malformed name just means the term is unreadable, which says nothing about the parity
     try:
         twosplusone = int(config[lposition - 1])  # could this be two digits long?
-    except (IndexError, ValueError):
+    except ValueError:
         return (-1, -1, parity)
 
     return (twosplusone, l, parity)
@@ -454,8 +461,10 @@ def read_levels_and_transitions(
                 energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
                 lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
                 (twosplusone, _l, parity) = get_term_as_tuple(levelname)
+                ismerged = parity < 0
+                isjjcoupled = "{" in levelname and "}" in levelname
 
-                if parity < 0:
+                if ismerged:
                     # No definite parity: a merged level, which is normal CMFGEN, or a name we
                     # could not read. Give each one its own value so that no two of them can
                     # compare equal and be called forbidden, whatever the consumer does with the
@@ -474,9 +483,10 @@ def read_levels_and_transitions(
                     )
                 )
 
-                # -1 indicates that the term could not be interpreted. Levels with no parity are
-                # summarised once below instead, so that a merged ion does not log every level.
-                if twosplusone == -1 and atomic_number > 1 and parity >= 0:
+                # -1 indicates that the term could not be interpreted. JJ-coupled names have no
+                # LS term by construction and merged levels are summarised once below, so neither
+                # is worth a line here; what is left is a name we expected to read and could not.
+                if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
                     artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
                 # if this is the ground state
@@ -500,7 +510,7 @@ def read_levels_and_transitions(
             artisatomic.log_and_print(
                 flog,
                 f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
-                f" (transitions between them are treated as permitted), e.g."
+                f" (every transition touching one is treated as permitted), e.g."
                 f" {', '.join(levels_without_parity[:5])}",
             )
         if len(levelrows) != expected_energy_levels:

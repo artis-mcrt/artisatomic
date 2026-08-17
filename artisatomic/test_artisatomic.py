@@ -37,6 +37,17 @@ def test_interpret_term():
     for unreadable in ("e2x", "o12", "3d5", "12"):
         assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
+    # The only L character can belong to a parenthesised parent term. Reporting '(4D)' would
+    # describe the parent rather than this level, so the term is unreadable -- but the trailing
+    # 'o' still gives the parity.
+    assert readhillierdata.get_term_as_tuple("3d5(4D)4po[3]") == (-1, -1, 1)
+    assert readhillierdata.get_term_as_tuple("3d4(3P2)4po[1/2]") == (-1, -1, 1)
+
+    # an L character at index 0 leaves no room for the multiplicity, and config[-1] would wrap
+    # round to the end of the name and read some unrelated character as it
+    assert readhillierdata.get_term_as_tuple("S2") == (-1, -1, -1)
+    assert readhillierdata.get_term_as_tuple("P2") == (-1, -1, -1)
+
 
 def test_get_level_parity():
     """A CMFGEN level's parity comes from its 'e'/'o' suffix, and merged levels have none at all."""
@@ -79,6 +90,18 @@ def test_has_merged_orbital():
     assert not has_merged_orbital("3d6(5D)10d_5Pe")  # 10d is a real orbital, l=2 < n=10
     assert not has_merged_orbital("2p_2Po")
     assert not has_merged_orbital("3d7(4F)6d_5Pbe")
+
+    # A token with no principal quantum number cannot be judged: n would default to 0 and then
+    # l >= n holds for every orbital letter, which would call the whole configuration merged and
+    # throw away the parity these names state outright with their 'o'.
+    for hasnon in ("3d8(2H)sp_2Go", "3d2(2D)sp_4Fo", "3d7(a2D)4sep_4Fo", "SEJ_s6p_7Fo", "3s2_3p_nd_a3Po"):
+        assert not has_merged_orbital(hasnon)
+        assert readhillierdata.get_level_parity(hasnon) == 1
+
+    # ...while a real merge marker still wins over an 'e'/'o' suffix, because the level really
+    # does span both parities. Al XI names one: '10z_2Zo', g=168.
+    assert has_merged_orbital("10z_2Zo")
+    assert readhillierdata.get_level_parity("10z_2Zo") < 0
 
 
 def test_get_parity_from_multi_orbital_token():
@@ -676,6 +699,26 @@ def test_add_level_ids_forbidden_parity():
     dfsameparity = pl.DataFrame({"levelid": [0, 1], "parity": [1, 1]})
     dftrans = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
     assert add_level_ids_forbidden(dfsameparity, dftrans)["forbidden"].to_list() == [True]
+
+
+@pytest.mark.parametrize(
+    ("parity", "dtype"),
+    [
+        ([None, None], pl.Int64),  # forbidden would be null, which "{forbidden:d}" cannot format
+        ([float("nan"), float("nan")], pl.Float64),  # NaN == NaN and NaN >= 0 are both true
+        (["1", "1"], pl.String),  # pandas infers text from a blank column, e.g. FAC's P
+    ],
+)
+def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):
+    """A parity that is not a whole number means the level has none, not that it matches itself."""
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": parity}, schema={"levelid": pl.Int64, "parity": dtype})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
+
+    forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
+
+    # a readable string parity is a real parity and still counts; the rest are unknown
+    assert forbidden == [dtype == pl.String]
+    assert forbidden[0] is not None  # would raise in write_transition_data
 
 
 def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():

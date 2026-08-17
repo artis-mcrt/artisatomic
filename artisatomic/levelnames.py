@@ -7,13 +7,17 @@ reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
 
 
-def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, int]:
+def interpret_configuration(instr_orig: str, warn: bool = True) -> tuple[list[str], int, int, int, int]:
     """Split a level name into its orbitals and term.
 
     Returns (orbitals, 2S+1, L, parity, index in symmetry), where orbitals is the configuration
     split into occupied orbitals and parent terms (kept in parentheses), and the index in
     symmetry comes from the seniority letter if the name has one. Term components that cannot be
     read come back as -1.
+
+    warn=False silences the malformed-name message for callers that expect names this cannot
+    split. CMFGEN's merged levels ('1___', '8SNG') are such names by design, and there are
+    enough of them to bury a real warning.
     """
     max_n = 20  # maximum possible principle quantum number n
     instr = instr_orig
@@ -25,7 +29,8 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
         term_parity = [0, 1][(instr[-1] == "o")]
         if all(char not in lchars for char in instr):
             # This will be an incorrectly formatted QUB file with no term
-            print("Warning: Check QUB file formatting")
+            if warn:
+                print("Warning: Check QUB file formatting")
         else:
             # Preserve previous behaviour
             instr = instr[:-1]
@@ -45,7 +50,8 @@ def interpret_configuration(instr_orig: str) -> tuple[list[str], int, int, int, 
             )
         instr = instr[:-1]
         if all(char not in lchars for char in instr):
-            print("Warning: Check QUB file formatting")
+            if warn:
+                print("Warning: Check QUB file formatting")
             break
 
     if instr and str.isdigit(instr[-1]):
@@ -135,7 +141,7 @@ def _iter_occupied_orbitals(instr, warn: bool) -> t.Iterator[tuple[int, int, boo
     follow it as its occupation and 1 where it has none.
     """
     lchars_lower = lchars.lower()
-    for orbitalstr in interpret_configuration(instr)[0]:
+    for orbitalstr in interpret_configuration(instr, warn=warn)[0]:
         if orbitalstr.startswith("("):
             continue  # a parent term such as '(5D)', not an occupied orbital
 
@@ -158,7 +164,10 @@ def _iter_occupied_orbitals(instr, warn: bool) -> t.Iterator[tuple[int, int, boo
                 pos += 1
             nelec = int(orbitalstr[nstart:pos]) if pos > nstart else 1
             foundorbital = True
-            yield l, nelec, l >= principalquantumnumber
+            # l >= n identifies a merge marker, but only where the token actually carried an n.
+            # Tokens such as the 'sp' of '3d8(2H)sp_2Go' have none, and calling those merged
+            # would discard the parity their name states outright.
+            yield l, nelec, nend > 0 and l >= principalquantumnumber
 
         if not foundorbital and warn:
             # don't fail silently: a skipped orbital means the parity (and hence the forbidden
@@ -176,7 +185,7 @@ def has_merged_orbital(instr) -> bool:
     return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False))
 
 
-def get_config_parity(instr) -> int | None:
+def get_config_parity(instr, warn: bool = False) -> int | None:
     """Parity of a configuration (0 even, 1 odd), or None when it does not determine one.
 
     None means no orbital in the name had a readable l to sum, as for CMFGEN's merged n-levels
@@ -184,10 +193,13 @@ def get_config_parity(instr) -> int | None:
     different from the 0 those would otherwise get from an empty sum. Merge markers are left out
     of the sum as in get_parity_from_config(), so check has_merged_orbital() as well when a level
     with no definite parity has to be recognised.
+
+    Unreadable names are the expected case for the callers that need the None, so this is quiet
+    by default; pass warn=True to get the per-orbital diagnostics.
     """
     lsum = 0
     readable = False
-    for l, nelec, merged in _iter_occupied_orbitals(instr, warn=True):
+    for l, nelec, merged in _iter_occupied_orbitals(instr, warn=warn):
         if not merged:
             lsum += l * nelec
             readable = True
