@@ -362,7 +362,9 @@ hyd_phixs: dict[tuple[int, int], np.ndarray] = {}
 # keys are n quantum number
 hyd_gaunt_energygrid_ryd: dict[int, list[float]] = {}
 hyd_gaunt_factor: dict[int, list[float]] = {}
-max_hyd_n = -1
+
+# Maximum hydrogenic principal quantum number
+max_hyd_l_n, max_hyd_gaunt_n = -1, -1
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -691,6 +693,10 @@ def read_phixs_tables(
     sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
     functions that evaluate them.
     """
+    msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
+    assert max_hyd_l_n != -1, msg
+    assert max_hyd_gaunt_n != -1, msg
+
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
@@ -865,6 +871,13 @@ def read_phixs_tables(
                         fitcoefficients.append(int(float(row[0].replace("D", "E"))))
                         if len(fitcoefficients) == 3:
                             n, l_start, l_end = fitcoefficients
+
+                            if n > max_hyd_l_n:
+                                artisatomic.log_and_print(
+                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table"
+                                )
+                                continue
+
                             if l_end > n - 1:
                                 artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
@@ -880,13 +893,10 @@ def read_phixs_tables(
                         if len(fitcoefficients) == 2:
                             scale, n = fitcoefficients
 
-                            # max_hyd_n is 30, some files have n's > 50
-                            if max_hyd_n < 0:
-                                msg = (
-                                    "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
+                            if n > max_hyd_gaunt_n:
+                                artisatomic.log_and_print(
+                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_gaunt_n}), skipping table"
                                 )
-                                raise RuntimeError(msg)
-                            if n > max_hyd_n:
                                 continue
 
                             n = int(n)
@@ -940,9 +950,10 @@ def read_phixs_tables(
                         if len(fitcoefficients) == 4:
                             n, l_start, l_end, nu_o = fitcoefficients
 
-                            # Small number of Co II have n == 40, just ignore these.
-                            if atomic_number == 27 and ion_stage == 2 and n == 40:
-                                print(f"WARNING: Encountered n={n} Co II, {lowerlevelname}. Skipping this.")
+                            if n > max_hyd_l_n:
+                                artisatomic.log_and_print(
+                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table"
+                                )
                                 continue
 
                             if l_end > n - 1:
@@ -1518,12 +1529,11 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 namefromnameto = "".join(row[:-num_expected_t_values])
                 upsilonvalues = row[-num_expected_t_values:]
 
-                assert len(row) - num_expected_t_values == 2
                 if "-" in namefromnameto:
                     namefrom, nameto = map(str.strip, namefromnameto.split("-"))
                 else:
                     # Assume there is just a space between them (as is the case in Ni XIV)
-                    namefrom, nameto = row[:2]
+                    namefrom, nameto = row[:2], f"{row, num_expected_t_values}"
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
@@ -1700,6 +1710,8 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
+                global max_hyd_l_n
+                max_hyd_l_n = max_n
 
             if " ".join(row[1:]) == "!L_ST_U":
                 l_start_u = float(row[0].replace("D", "E"))
@@ -1747,8 +1759,8 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
-                global max_hyd_n
-                max_hyd_n = max_n
+                global max_hyd_gaunt_n
+                max_hyd_gaunt_n = max_n
 
             if len(row) > 1:
                 if row[1] == "!N_ST_U":
