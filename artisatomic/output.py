@@ -36,8 +36,21 @@ def clear_files(args: argparse.Namespace) -> None:
 # The two need their own values because they are not the same quantity. f has no units and an E1
 # line carries 1e-3 to 1, so 1e-4 separates them. A is a rate in s-1 that spans many decades: a
 # forbidden line reaches ~1e2 (QUB's Co III peaks at 14), while an E1 line is 1e6 or more.
-min_f_for_deltaj_contradiction = 1e-4
-min_a_for_deltaj_contradiction = 1e5
+min_f_asserts_e1 = 1e-4
+min_a_asserts_e1 = 1e5
+
+
+def strength_asserts_e1(dftransitions_ion: pl.DataFrame) -> pl.Expr:
+    """Whether the source's own numbers claim the transition is an electric dipole line.
+
+    f where the reader gives one, else the Einstein A. Both need a size, not merely a value: a
+    forbidden line has an A, and a reader that tabulates f gives one to its forbidden lines too,
+    so "greater than zero" says nothing about which kind of transition this is.
+    """
+    if "f" in dftransitions_ion.columns:
+        return pl.col("f").fill_null(0.0).abs() > min_f_asserts_e1
+
+    return pl.col("A").fill_null(0.0).abs() > min_a_asserts_e1
 
 
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
@@ -56,13 +69,13 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     that does not carry the quantum number it needs. A data set that gives no J thus keeps the
     behaviour it had before this code read J at all.
 
-    The delta J rule applies only to a transition that came with no oscillator strength. Where
-    the source gives one, the source says the transition is E1, and that statement wins: some
-    files disagree with their own J labels. CMFGEN's provisional F III set splits a term by a
-    nominal 0.8 cm-1 and then shares the term's f over all the J pairs, so it lists delta J = 2
-    lines with f as large as 0.116. To call such a line forbidden would give a strong line the
-    forbidden collision approximation, which is worse than the label it corrects. Those
-    contradictions are counted and logged by write_output_files() instead.
+    The delta J rule yields to a transition the source made strong enough to be E1, as
+    strength_asserts_e1() judges it. Some files disagree with their own J labels: CMFGEN's
+    provisional F III set splits a term by a nominal 0.8 cm-1 and then shares the term's f over
+    all the J pairs, so it lists delta J = 2 lines with f as large as 0.116, and O II reaches
+    0.695. To call such a line forbidden would give a strong line the forbidden collision
+    approximation, which is worse than the label it corrects. write_output_files() logs those
+    instead. A weak line is not evidence of anything, so the J labels decide it.
 
     A null parity means the level has no definite parity, either because it merges sub-levels of
     both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
@@ -94,14 +107,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
 
-        # An oscillator strength is the source's statement that the transition is E1. Any f at
-        # all counts as one, because a reader that supplies f computed it for this transition.
-        # A alone does not: every radiative transition has an Einstein A, a forbidden M1 or E2
-        # line included, so only a rate too large for those is evidence of an E1 line.
-        if "f" in dftransitions_ion.columns:
-            hasoscillatorstrength = pl.col("f").fill_null(0.0).abs() > 0.0
-        else:
-            hasoscillatorstrength = pl.col("A").fill_null(0.0).abs() > min_a_for_deltaj_contradiction
+        assertse1 = strength_asserts_e1(dftransitions_ion)
 
         dftransitions_ion = (
             dftransitions_ion.join(
@@ -133,7 +139,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             # level with no J would undo what the two parities had already settled.
             .with_columns(
                 forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False)
-                | (pl.col("breaksdeltaj") & ~hasoscillatorstrength)
+                | (pl.col("breaksdeltaj") & ~assertse1)
             )
             .drop("lower_j", "upper_j")
         )
@@ -156,10 +162,9 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
 
     hasf = "f" in dftransitions_ion.columns
     strengthcol = "f" if hasf else "A"
-    minstrength = min_f_for_deltaj_contradiction if hasf else min_a_for_deltaj_contradiction
-    contradictions = dftransitions_ion.filter(
-        pl.col("breaksdeltaj") & (pl.col(strengthcol).fill_null(0.0).abs() > minstrength)
-    )
+    minstrength = min_f_asserts_e1 if hasf else min_a_asserts_e1
+    # the same test the rule used, so this reports exactly the transitions it let through
+    contradictions = dftransitions_ion.filter(pl.col("breaksdeltaj") & strength_asserts_e1(dftransitions_ion))
     if contradictions.is_empty():
         return
 

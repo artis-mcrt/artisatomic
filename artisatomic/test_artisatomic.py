@@ -807,6 +807,12 @@ def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
     nof = dftransitions.with_columns(A=0.0).drop("f")
     assert add_level_ids_forbidden(dflevels, nof)["forbidden"].to_list() == [True]
 
+    # A weak f is not evidence of an E1 line, so the J labels decide it. C IV lists
+    # 2p_2Po[1/2] -> 3d_2De[5/2] at f = 2.7e-10, and its 108 cm-1 fine structure means its J
+    # labels are sound, so that line really is forbidden.
+    weakf = dftransitions.with_columns(A=4.1, f=2.7e-10)
+    assert add_level_ids_forbidden(dflevels, weakf)["forbidden"].to_list() == [True]
+
 
 def test_log_deltaj_contradictions_judges_f_and_a_separately():
     """Only a transition strong enough to be E1 contradicts its own J labels.
@@ -827,6 +833,8 @@ def test_log_deltaj_contradictions_judges_f_and_a_separately():
     # f: a strong line contradicts the labels, a forbidden line's own small f does not
     assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [3.4e9], "f": [0.116]}))
     assert not warnings_for(pl.DataFrame({**breaksrule, "A": [1.0e-2], "f": [1.9e-9]}))
+    # ...and the quiet case is the one the rule now marks forbidden, so the two agree
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [4.1], "f": [2.7e-10]}))
 
     # A, where a forbidden line reaches 14 s-1 in QUB's Co III and must stay quiet
     assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [1.9e8]}))
