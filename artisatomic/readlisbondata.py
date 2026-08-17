@@ -104,8 +104,8 @@ def read_levels_data(dflevels):
     index label. So the map is keyed by that position, which reset_index() below makes explicit
     rather than relying on the levels CSV happening to be numbered from zero.
 
-    Every level is given a distinct parity so that add_level_ids_forbidden() marks none of the
-    transitions forbidden: this data set does not supply parities.
+    Every level's parity is null so that add_level_ids_forbidden() marks none of the transitions
+    forbidden: this data set does not supply parities, and a null one never matches another.
     """
     # sort first, so that the ids handed out below are the ones the levels keep. The index is
     # reset to the row position beforehand, so sorting leaves each level carrying its file position
@@ -114,7 +114,7 @@ def read_levels_data(dflevels):
     energy_levels = [
         EnergyLevelTuple(
             levelname=get_levelname(row),
-            parity=-levelid,  # give a unique parity so that all transitions are permitted
+            parity=None,  # no parity in this data set, so all transitions stay permitted
             g=2 * row.j + 1,
             energyabovegsinpercm=float(row.energy),
         )
@@ -157,7 +157,7 @@ class EnergyLevelTuple(t.NamedTuple):
     levelname: str
     energyabovegsinpercm: float
     g: float
-    parity: int
+    parity: int | None  # None where the data set gives no parity
 
 
 class TransitionTuple(t.NamedTuple):

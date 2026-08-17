@@ -37,7 +37,6 @@ class QUBTransitionRow(t.NamedTuple):
     nameto: str
     namefrom: str
     lambdaangstrom: float
-    coll_str: float
 
 
 class QUBEnergyLevel(t.NamedTuple):
@@ -50,15 +49,10 @@ class QUBEnergyLevel(t.NamedTuple):
     j: float
     energyabovegsinpercm: float
     g: float
-    parity: int
+    parity: int | None  # None where the configuration determines no parity
 
 
 qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
-
-
-def check_forbidden(levela: QUBEnergyLevel, levelb: QUBEnergyLevel) -> bool:
-    """Whether a transition between two levels is forbidden, i.e. they have the same parity."""
-    return levela.parity == levelb.parity
 
 
 def extend_ion_list(ion_handlers):
@@ -132,12 +126,15 @@ def read_adf04(
                     0.0,
                     0,
                 )
-            parity = artisatomic.get_parity_from_config(config)
+            # None where the configuration determines no parity. The level name keeps the old
+            # best-effort even/odd letter in that case, so that names (and the adata.txt they are
+            # written to) do not depend on this, but the parity column says what is actually known
+            parity = artisatomic.get_config_parity(config)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
                 lchars[energylevel.l],
-                ["e", "o"][parity],
+                ["e", "o"][parity if parity is not None else 0],
                 int(2 * energylevel.j),
                 energylevel.qub_id,
             )
@@ -276,18 +273,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     level_lower = qub_energylevels[id_lower]
                     levelname_upper = level_upper.levelname
                     levelname_lower = level_lower.levelname
-                    # WARNING replace with correct selection rules!
-                    forbidden = level_upper.parity == level_lower.parity
                     transition_count_of_level_name[levelname_upper] += 1
                     transition_count_of_level_name[levelname_lower] += 1
                     delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
                     lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
-                    if (id_lower, id_upper) in upsilondict:
-                        coll_str = upsilondict[id_lower, id_upper]
-                    elif forbidden:
-                        coll_str = -2.0
-                    else:
-                        coll_str = -1.0
                     transition = QUBTransitionRow(
                         lowerlevel=id_lower,
                         upperlevel=id_upper,
@@ -295,7 +284,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         nameto=levelname_upper,
                         namefrom=levelname_lower,
                         lambdaangstrom=lamdaangstrom,
-                        coll_str=coll_str,
                     )
                     qub_transitions.append(transition)
 
@@ -368,17 +356,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     level_lower = qub_energylevels[id_lower]
                     levelname_upper = level_upper.levelname
                     levelname_lower = level_lower.levelname
-                    forbidden = check_forbidden(level_upper, level_lower)
                     transition_count_of_level_name[levelname_upper] += 1
                     transition_count_of_level_name[levelname_lower] += 1
                     delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
                     lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
-                    if (id_lower, id_upper) in upsilondict:
-                        coll_str = upsilondict[id_lower, id_upper]
-                    elif forbidden:
-                        coll_str = -2.0
-                    else:
-                        coll_str = -1.0
                     transition = QUBTransitionRow(
                         lowerlevel=id_lower,
                         upperlevel=id_upper,
@@ -386,7 +367,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                         nameto=levelname_upper,
                         namefrom=levelname_lower,
                         lambdaangstrom=lamdaangstrom,
-                        coll_str=coll_str,
                     )
                     qub_transitions.append(transition)
 

@@ -35,7 +35,7 @@ class HillierEnergyLevel(t.NamedTuple):
     energyabovegsinpercm: float
     lambdaangstrom: float
     hillierlevelid: int
-    parity: int
+    parity: int | None  # None where the level has no definite parity, e.g. a merged '1___'
 
 
 class HillierTransition(t.NamedTuple):
@@ -51,7 +51,8 @@ class HillierTransition(t.NamedTuple):
     hilliertransitionid: int
 
 
-_pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64}
+# every polars column is nullable, so an optional field needs no separate dtype
+_pl_dtype_of = {str: pl.String, float: pl.Float64, int: pl.Int64, int | None: pl.Int64}
 
 # derived from the NamedTuples so the row classes stay the single source of the frame layouts
 hillier_level_schema = pl.Schema(
@@ -466,10 +467,9 @@ def read_levels_and_transitions(
 
                 if ismerged:
                     # No definite parity: a merged level, which is normal CMFGEN, or a name we
-                    # could not read. Give each one its own value so that no two of them can
-                    # compare equal and be called forbidden, whatever the consumer does with the
-                    # parity column. add_level_ids_forbidden() also rejects negatives outright.
-                    parity = -1 - len(levelrows)
+                    # could not read. Null rather than a number, so that add_level_ids_forbidden()
+                    # cannot match it against another level's absent parity.
+                    parity = None
                     levels_without_parity.append(levelname)
 
                 levelrows.append(

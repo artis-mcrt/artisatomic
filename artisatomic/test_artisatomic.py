@@ -676,36 +676,47 @@ def test_read_coldata_term_to_j_redistribution():
 
 
 def test_add_level_ids_forbidden_parity():
-    """Equal parity means forbidden, but only where both parities are real."""
+    """Equal parity means forbidden, but a null parity is absent and matches nothing, itself included."""
     dflevels = pl.DataFrame(
         {
-            "levelid": [0, 1, 2, 3],
-            "parity": [0, 1, -1, -2],  # two real parities, then two levels with no definite parity
-        }
+            "levelid": [0, 1, 2, 3, 4],
+            "parity": [0, 1, None, None, 0],  # two real parities, two absent ones, then a repeat of 0
+        },
+        schema={"levelid": pl.Int64, "parity": pl.Int64},
     )
     dftransitions = pl.DataFrame(
         {
-            "lowerlevel": [0, 0, 0, 2],
-            "upperlevel": [1, 2, 3, 3],
-            "A": [1.0, 1.0, 1.0, 1.0],
+            "lowerlevel": [0, 0, 0, 2, 0],
+            "upperlevel": [1, 2, 3, 3, 4],
+            "A": [1.0, 1.0, 1.0, 1.0, 1.0],
         }
     )
     forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
 
-    # even -> odd is permitted, and a real parity never matches an absent one
-    assert forbidden == [False, False, False, False]
+    # even -> odd permitted; a real parity never matches an absent one; two absent ones do not
+    # match each other either, which is the whole reason absence is spelled null; two real
+    # even ones do match
+    assert forbidden == [False, False, False, False, True]
 
-    # ...while two levels that really do share a parity are forbidden
-    dfsameparity = pl.DataFrame({"levelid": [0, 1], "parity": [1, 1]})
-    dftrans = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
-    assert add_level_ids_forbidden(dfsameparity, dftrans)["forbidden"].to_list() == [True]
+
+def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
+    """Absence is null and only null, so a negative number is an ordinary parity that can match.
+
+    Three readers used to spell "no parity" as the negated level id, which made level 0 come out
+    as a real even parity while every other level was unmatchable. Nothing may depend on negative
+    numbers meaning absent any more, so two levels sharing one are forbidden like any other pair.
+    """
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": [-7, -7]}, schema={"levelid": pl.Int64, "parity": pl.Int64})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
+
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [True]
 
 
 @pytest.mark.parametrize(
     ("parity", "dtype"),
     [
-        ([None, None], pl.Int64),  # forbidden would be null, which "{forbidden:d}" cannot format
-        ([float("nan"), float("nan")], pl.Float64),  # NaN == NaN and NaN >= 0 are both true
+        ([None, None], pl.Int64),  # the canonical spelling of an absent parity
+        ([float("nan"), float("nan")], pl.Float64),  # NaN compares equal to itself, so it must cast away
         (["1", "1"], pl.String),  # pandas infers text from a blank column, e.g. FAC's P
     ],
 )
@@ -731,8 +742,7 @@ def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
     _, dflevels, dftransitions, _ = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
 
     # no level has a parity that could match another's
-    assert (dflevels["parity"] < 0).all()
-    assert dflevels["parity"].n_unique() == dflevels.height
+    assert dflevels["parity"].is_null().all()
 
     dflevels = dflevels.with_row_index("levelid").with_columns(pl.col("levelid").cast(pl.Int64))
     dftransitions = add_level_ids_forbidden(dflevels, dftransitions)
@@ -744,13 +754,13 @@ def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
     assert not lymanalpha["forbidden"].item()
 
 
-def test_readboyledata_levels_get_distinct_parities(monkeypatch):
+def test_readboyledata_levels_have_no_parity(monkeypatch):
     """The AOIFE data set supplies no parities, so no transition may come out forbidden.
 
     add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity, so
     giving every level the same parity made every transition of the ion forbidden — and helium has
-    plenty of permitted ones. readlisbondata and readkuruczdata use the negated level id for
-    exactly this reason.
+    plenty of permitted ones. A null parity cannot match another, which is how readlisbondata and
+    readkuruczdata say the same thing.
 
     The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
     its README), so this builds the three tables the reader wants in memory.
@@ -796,8 +806,8 @@ def test_readboyledata_levels_get_distinct_parities(monkeypatch):
     # the other ion's level is filtered out
     assert len(energy_levels) == 3
 
-    # every level gets its own parity, so no pair of them can compare equal
-    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+    # no level has a parity, so no pair of them can compare equal
+    assert all(level.parity is None for level in energy_levels)
 
     dflevels = leveltuples_to_pldataframe(
         pl.DataFrame(
@@ -846,8 +856,8 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # levels come back in ascending energy, so the file's order is exactly reversed
     assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 5000.0]
     assert levelid_of_fileindex == {2: 0, 1: 1, 0: 2}
-    # the unique parity sentinel keeps all transitions permitted
-    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+    # a null parity never matches another, so all transitions stay permitted
+    assert all(level.parity is None for level in energy_levels)
 
     # one line from the file's level 2 (the ground state) to its level 0 (the top level)
     dflines = pd.DataFrame(

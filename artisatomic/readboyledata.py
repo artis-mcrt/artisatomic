@@ -35,7 +35,7 @@ class EnergyLevelRow(t.NamedTuple):
     g: float
     metastable: float
     energyabovegsinpercm: float
-    parity: int
+    parity: int | None  # None where the data set gives no parity
     levelname: str
 
 
@@ -103,12 +103,12 @@ def read_levels_data(atomic_number, ion_stage):
                 g=g,
                 metastable=metastable,
                 energyabovegsinpercm=energyabovegsinpercm,
-                # A DISTINCT parity per level. This data set supplies none, and
-                # add_level_ids_forbidden() marks a transition forbidden when its two levels share
-                # one, so a fixed 0 made every transition of the ion forbidden (coll_str -2) when
-                # helium has plenty of permitted ones. readlisbondata and readkuruczdata use the
-                # negated level id for the same reason.
-                parity=-int(level_number),
+                # No parity: this data set supplies none, and add_level_ids_forbidden() marks a
+                # transition forbidden when its two levels share one, so a fixed 0 made every
+                # transition of the ion forbidden (coll_str -2) when helium has plenty of
+                # permitted ones. A null parity never matches another, here as in the other
+                # readers whose data set has no parities.
+                parity=None,
                 # int() as read_lines_data() does, so the two agree on the name whatever dtype the
                 # file stores the level number in
                 levelname=f"level{int(level_number):05d}",

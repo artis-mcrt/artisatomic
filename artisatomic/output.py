@@ -36,12 +36,13 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     on here; readers that already supply ids keep them. A transition is forbidden when both of
     its levels have a known parity and it is the same one.
 
-    A negative parity means the level has no definite parity, either because it merges sub-levels
-    of both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
-    from the level name. Those never count as a match: equal parity is only evidence of
-    forbiddenness when the parities are real. Anything a reader could not give a whole number
-    for -- a null, a NaN, a string pandas inferred from a blank column -- means the same thing,
-    so the column is normalised to Int64 first and unreadable values join the negatives.
+    A null parity means the level has no definite parity, either because it merges sub-levels of
+    both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
+    from the level name. Null is the whole of that convention: polars resolves null == anything
+    to null rather than to true, so an absent parity cannot match another absent one, and no
+    sentinel number is needed for readers to spell it. Anything else a reader could not give a
+    whole number for -- a NaN, a string pandas inferred from a blank column -- casts to null and
+    is treated the same way.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -59,10 +60,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         )
 
     if "forbidden" not in dftransitions_ion.columns:
-        # -1 for anything that is not a whole number: a NaN would otherwise compare equal to
-        # itself and pass the >= 0 test, and a null would make forbidden itself null, which
-        # write_transition_data's "{forbidden:d}" cannot format.
-        knownparity = pl.col("parity").cast(pl.Int64, strict=False).fill_null(-1)
+        # null for anything that is not a whole number, so a NaN cannot compare equal to itself
+        # and a string column cannot raise against the integer parities it is compared with
+        knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         dftransitions_ion = (
             dftransitions_ion.join(
                 dfenergylevels_ion.select(pl.col("levelid").alias("lowerlevel"), knownparity.alias("lower_parity")),
@@ -72,7 +72,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
                 dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), knownparity.alias("upper_parity")),
                 on="upperlevel",
             )
-            .with_columns(forbidden=(pl.col("lower_parity") == pl.col("upper_parity")) & (pl.col("lower_parity") >= 0))
+            # an unknown parity leaves the comparison null, which is neither forbidden nor
+            # something write_transition_data's "{forbidden:d}" could format
+            .with_columns(forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False))
         )
     return dftransitions_ion
 
