@@ -228,9 +228,9 @@ ions_data = {
     (20, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (20, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Sc (only I-III are in CMFGEN)
-    # (21, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # (21, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # (21, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (21, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (21, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (21, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
     (22, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (22, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
@@ -1465,11 +1465,20 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                         f"WARNING: Expected {num_expected_t_values:d} temperature values, but header has"
                         f" {len(header_row):d} columns",
                     )
-                    num_expected_t_values = len(header_row) - 1
-                    artisatomic.log_and_print(
-                        flog,
-                        f"Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}",
-                    )
+
+                    # Sc I and III have most of their temperatures commented out, so the number of expected temperatures is actually correct
+                    # This will not catch cases with a commented header where len(header_row) == num_expected_t_values + 1 (no such cases exist as far as I am aware)
+                    if "!" in header_row:
+                        artisatomic.log_and_print(
+                            flog,
+                            f"Some temperatures are commented out, assuming header is correct, num_expected_t_values={num_expected_t_values:d}",
+                        )
+                    else:
+                        num_expected_t_values = len(header_row) - 1
+                        artisatomic.log_and_print(
+                            flog,
+                            f"Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}",
+                        )
 
                 temperatures = row[-num_expected_t_values:]
                 artisatomic.log_and_print(
