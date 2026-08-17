@@ -29,6 +29,17 @@ def clear_files(args: argparse.Namespace) -> None:
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
+# A transition this strong is an electric dipole line, whatever the level names say. Below these
+# values, one that breaks the delta J rule is simply a forbidden line that the source listed with
+# its own small strength, which agrees with the label instead of contradicting it.
+#
+# The two need their own values because they are not the same quantity. f has no units and an E1
+# line carries 1e-3 to 1, so 1e-4 separates them. A is a rate in s-1 that spans many decades: a
+# forbidden line reaches ~1e2 (QUB's Co III peaks at 14), while an E1 line is 1e6 or more.
+min_f_for_deltaj_contradiction = 1e-4
+min_a_for_deltaj_contradiction = 1e5
+
+
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     """Fill in whichever of lowerlevel, upperlevel and forbidden a reader did not supply.
 
@@ -83,10 +94,14 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
 
-        # f where the reader supplies one, else A, which is proportional to it. A transition with
-        # neither is one of the upsilon-only pairs, which no source called an E1 line.
-        strengthcol = "f" if "f" in dftransitions_ion.columns else "A"
-        hasoscillatorstrength = pl.col(strengthcol).fill_null(0.0).abs() > 0.0
+        # An oscillator strength is the source's statement that the transition is E1. Any f at
+        # all counts as one, because a reader that supplies f computed it for this transition.
+        # A alone does not: every radiative transition has an Einstein A, a forbidden M1 or E2
+        # line included, so only a rate too large for those is evidence of an E1 line.
+        if "f" in dftransitions_ion.columns:
+            hasoscillatorstrength = pl.col("f").fill_null(0.0).abs() > 0.0
+        else:
+            hasoscillatorstrength = pl.col("A").fill_null(0.0).abs() > min_a_for_deltaj_contradiction
 
         dftransitions_ion = (
             dftransitions_ion.join(
@@ -123,17 +138,6 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             .drop("lower_j", "upper_j")
         )
     return dftransitions_ion
-
-
-# A transition this strong is an electric dipole line, whatever the level names say. Below these
-# values, one that breaks the delta J rule is simply a forbidden line that the source listed with
-# its own small strength, which agrees with the label instead of contradicting it.
-#
-# The two need their own values because they are not the same quantity. f has no units and an E1
-# line carries 1e-3 to 1, so 1e-4 separates them. A is a rate in s-1 that spans many decades: a
-# forbidden line reaches ~1e2 (QUB's Co III peaks at 14), while an E1 line is 1e6 or more.
-min_f_for_deltaj_contradiction = 1e-4
-min_a_for_deltaj_contradiction = 1e5
 
 
 def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str) -> None:

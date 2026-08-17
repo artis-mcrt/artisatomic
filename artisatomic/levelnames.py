@@ -217,10 +217,11 @@ def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | 
     """Parity of a configuration (0 even, 1 odd), or None when it does not determine one.
 
     None means no orbital in the name had a readable l to sum, as for CMFGEN's merged n-levels
-    '1___' and '13___' (g = 2n^2, every l of that n) and He I's merged '8SNG' and '8TRP'. That is
-    different from the 0 those would otherwise get from an empty sum. Merge markers are left out
-    of the sum as in get_parity_from_config(), so check has_merged_orbital() as well when a level
-    with no definite parity has to be recognised.
+    '1___' and '13___' (g = 2n^2, every l of that n) and He I's merged '8SNG' and '8TRP'. An empty
+    sum is 0, which is a real parity and the wrong answer for those, so this reports None instead
+    and leaves the caller to decide. Merge markers are left out of the sum rather than making the
+    whole result None, so check has_merged_orbital() as well to recognise a level that has no
+    definite parity at all.
 
     Unreadable names are the expected case for the callers that need the None, so this is quiet
     by default; pass warn=True to get the per-orbital diagnostics.
@@ -233,13 +234,3 @@ def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | 
             readable = True
 
     return lsum % 2 if readable else None
-
-
-def get_parity_from_config(instr) -> int:
-    """Parity of a level from its configuration: the sum of l over the occupied orbitals, mod 2.
-
-    Returns 0 for even and 1 for odd. Merge markers have no definite l, so they are left out of
-    the sum rather than making the whole result unknown. Prefer get_config_parity() where a level
-    with no definite parity has to be told apart from an even one.
-    """
-    return sum(l * nelec for l, nelec, merged in _iter_occupied_orbitals(instr, warn=True) if not merged) % 2

@@ -106,45 +106,43 @@ def test_has_merged_orbital():
 
 def test_get_parity_from_multi_orbital_token():
     """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
-    from artisatomic import get_parity_from_config
+    from artisatomic import get_config_parity
 
     # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
     # Reading only the first letter and calling the rest an occupation raises on int('p').
-    assert get_parity_from_config("4sp(3P)_7Po") == 1
+    assert get_config_parity("4sp(3P)_7Po") == 1
     assert readhillierdata.get_level_parity("4sp(3P)_7Po[2]") == 1
 
 
-def test_get_parity_from_config():
+def test_get_config_parity():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
     from artisatomic import get_config_parity
-    from artisatomic import get_parity_from_config
 
     # sum of l over the occupied orbitals, mod 2
-    assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
-    assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
+    assert get_config_parity("3d64s2") == 0  # 2 * 6 = 12
+    assert get_config_parity("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
 
     # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
-    assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
-    assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
+    assert get_config_parity("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
+    assert get_config_parity("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
 
     # closed shells with two-digit occupations: a truncated '4f1' reading would give the
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
-    assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
+    assert get_config_parity("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
     # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
     # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
     # the real orbitals decide the parity.
-    assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
-    assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
+    assert get_config_parity("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
+    assert get_config_parity("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
-    # Read as name-with-a-term, a bare configuration is mistaken for a term and no orbitals come
-    # back at all, so the sum is empty and the answer is 0 whatever the orbitals said: right for
-    # '3d7' (2 * 7 = 14) only by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). Callers with
-    # a bare configuration pass hasterm=False, below.
+    # A bare configuration read as a name-with-a-term is mistaken for a term, so no orbitals come
+    # back. The sum is then empty, and 0 is a real parity that would be the wrong answer: right
+    # for '3d7' (2 * 7 = 14) only by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). None says
+    # so instead. Callers holding a bare configuration pass hasterm=False, below.
     assert interpret_configuration("3d7")[0] == []
-    assert get_parity_from_config("3d7") == 0
-    assert get_parity_from_config("5p3") == 0  # the true parity is odd
     assert get_config_parity("3d7") is None
+    assert get_config_parity("5p3") is None
 
 
 def test_parity_of_a_bare_configuration():
