@@ -81,11 +81,20 @@ class IonFiles(t.NamedTuple):
 
     folder: str
     levelstransitionsfilename: str
-    photfilenames: list[str]
+    photfilenames: tuple[str, ...] | None
     coldatafilename: str
+    photfilecount: int = 1
 
 
-default_ion_files = IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data")
+def get_photfilenames(ionfiles: IonFiles) -> list[str]:
+    """Get one ion's photoionization file names."""
+    if ionfiles.photfilenames is not None:
+        return list(ionfiles.photfilenames)
+
+    return [f"phot_data_{chr(ord('A') + file_index)}" for file_index in range(ionfiles.photfilecount)]
+
+
+default_ion_files = IonFiles("19apr23", "osc_data", None, "col_data")
 
 default_ion_stages: dict[int, t.Iterable[int]] = {
     6: range(1, 7),  # C
@@ -119,27 +128,27 @@ ions_data = {
 
 ions_data |= {
     # H
-    (1, 1): IonFiles("5dec96", "hi_osc.dat", ["hiphot.dat"], "hicol.dat"),
-    (1, 2): IonFiles("", "", [""], ""),
+    (1, 1): IonFiles("5dec96", "hi_osc.dat", ("hiphot.dat",), "hicol.dat"),
+    (1, 2): IonFiles("", "", None, "", photfilecount=0),
     # He
-    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
-    (2, 2): IonFiles("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
+    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ("heiphot_a7.dat",), "heicol.dat"),
+    (2, 2): IonFiles("5dec96", "he2_osc.dat", ("he2phot.dat",), "he2col.dat"),
     # N
-    (7, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], "col_data"),
-    (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (7, 1): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=4),
+    (7, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (7, 3): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (7, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
     # O
-    (8, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (8, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (8, 1): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (8, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
     # F
-    (9, 2): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
-    (9, 3): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""),
+    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), ""),
+    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
     # Si
-    (14, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
+    (14, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
     # Fe
-    (26, 1): IonFiles("19apr23", "osc_data", ["REV_PHOT_DATA"], "col_data"),
-    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", ["phot_data_A"], "col_data"),
+    (26, 1): IonFiles("19apr23", "osc_data", ("REV_PHOT_DATA",), "col_data"),
+    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", None, "col_data"),
     # Ti IV has dummy files with a single level.
     # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
     # V I is in CMFGEN and it has a single level.
@@ -638,7 +647,7 @@ def read_phixs_tables(
     # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file, which
     # equals the ionisation stage for every ion here)
     zion = ion_stage
-    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
+    photfilenames = get_photfilenames(ions_data[atomic_number, ion_stage])
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}

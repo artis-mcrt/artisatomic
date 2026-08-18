@@ -592,11 +592,11 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
 def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     """A level with a cross-section table in more than one phot file keeps the largest, rescaled.
 
-    Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
-    state of the upper ion, and a level is normally present in all of them: O I's phot_nosm_A and
-    phot_nosm_B share all 107 of their configuration names. Treating the second table as an error
-    made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV) unreadable, and none of
-    them was in the tests/ matrix, which was Fe/Co/Ni only.
+    Every CMFGEN ion with several phot files has one file per final state of the upper ion. A
+    level is normally present in all of them: O I's phot_nosm_A and phot_nosm_B share all 107
+    of their configuration names. Treating the second table as an error made those ions (C I,
+    C III, N I, N III, O I, O IV, F II, F III, P IV) unreadable, and none of them was in the
+    tests/ matrix, which was Fe/Co/Ni only.
 
     Only one table can be written per level, so the one with the largest threshold cross section
     wins. write_phixs_data() writes it as the level's TOTAL and splits it over the targets, so it
@@ -608,22 +608,23 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     import contextlib
 
     ionfiles = readhillierdata.ions_data[8, 1]
+    photfilenames = readhillierdata.get_photfilenames(ionfiles)
     # checked before the expensive reads below, so a change here fails as itself
-    assert len(ionfiles.photfilenames) == 2, f"O I is expected to have two phot files, got {ionfiles.photfilenames}"
+    assert len(photfilenames) == 2, f"O I is expected to have two phot files, got {photfilenames}"
 
     rhd.read_hyd_phixsdata()
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
 
     def read_phixs(photfilenames):
         """Read O I's cross sections using only the named phot files."""
-        monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=photfilenames))
+        monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=tuple(photfilenames)))
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
             _, dflevels, _, _ = rhd.read_levels_and_transitions(8, 1, flog)
             crosssections, targetconfigs, _thresholds = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
         return crosssections, targetconfigs, flog.getvalue()
 
-    file_a, file_b = ionfiles.photfilenames
+    file_a, file_b = photfilenames
     crosssections_a, targets_a, _ = read_phixs([file_a])
     crosssections_b, targets_b, _ = read_phixs([file_b])
     crosssections, targetconfigs, log = read_phixs([file_a, file_b])
