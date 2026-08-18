@@ -694,8 +694,10 @@ def read_phixs_tables(
     functions that evaluate them.
     """
     msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
-    assert max_hyd_l_n != -1, msg
-    assert max_hyd_gaunt_n != -1, msg
+    if max_hyd_l_n == -1:
+        raise RuntimeError(msg)
+    if max_hyd_gaunt_n == -1:
+        raise RuntimeError(msg)
 
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
