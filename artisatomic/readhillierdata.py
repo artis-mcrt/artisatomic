@@ -5,6 +5,7 @@ import re
 import sys
 import typing as t
 from collections import defaultdict
+from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
@@ -96,7 +97,7 @@ def get_photfilenames(ionfiles: IonFiles) -> list[str]:
 
 default_ion_files = IonFiles("19apr23", "osc_data", None, "col_data")
 
-default_ion_stages: dict[int, t.Iterable[int]] = {
+default_ion_stages: dict[int, Iterable[int]] = {
     6: range(1, 7),  # C
     7: range(5, 8),  # N
     8: (2, 3, 5, 6, 7, 8),  # O
