@@ -237,10 +237,31 @@ def read_levels_and_transitions(
                 "j_upper",
                 "wavelength_nm",
                 "loggf",
+                # kept only for the duplicate-line test below, and dropped by the final select
+                "label_lower",
+                "label_upper",
             ]
         )
         .with_columns(gf=10 ** pl.col("loggf"))
         .drop("loggf")
+        # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one
+        # (Y II has one such pair at 241.7267 and 241.7308 nm). ARTIS adds the A values of two
+        # rows that share a level pair, so a repeat would double the line. The labels have to
+        # match too: Sr I has 785 pairs that share a level pair with DIFFERENT labels, which are
+        # separate lines whose levels the (energy, J) key above merged, and dropping those would
+        # delete real transitions. Only 46 rows in Sr III are true repeats.
+        .unique(
+            [
+                "energyabovegsinpercm_lower",
+                "j_lower",
+                "energyabovegsinpercm_upper",
+                "j_upper",
+                "label_lower",
+                "label_upper",
+            ],
+            keep="first",
+            maintain_order=True,
+        )
         .join(
             dflevels.lazy().select(
                 energyabovegsinpercm_lower=pl.col("energyabovegsinpercm"),

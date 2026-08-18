@@ -253,8 +253,16 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     )
                     .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
                     .with_columns(
-                        # no upsilon for this transition: -2 marks it forbidden, -1 unknown
-                        coll_str=pl.col("upsilon").fill_null(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+                        # No usable upsilon for this transition: -2 marks it forbidden, -1 unknown.
+                        # A negative upsilon is a placeholder, not a collision strength (the CMFGEN
+                        # reader stores -2 for the J pairs within a term), so it is resolved here
+                        # like a missing one. That keeps coll_str = -2 and forbidden = 1 the same
+                        # statement: ARTIS reads coll_str < 0 and then trusts the flag, so the pair
+                        # -2 with forbidden = 0 would send a transition to van Regemorter with the
+                        # f of a level pair that has no A, i.e. to a collision rate of zero.
+                        coll_str=pl.when(pl.col("upsilon") >= 0.0)
+                        .then(pl.col("upsilon"))
+                        .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
                     )
                     .drop("upsilon")
                 )
@@ -275,6 +283,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 if dftransitions_ion.is_empty()
                 else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"))
             )
+            log_degenerate_transitions(flog, dfenergylevels_ion, dftransitions_ion)
             with (outdir / "transitiondata.txt").open("a", encoding="utf-8") as ftransitiondata:
                 write_transition_data(
                     ftransitiondata,
@@ -337,6 +346,42 @@ def write_adata(
         )
 
     fatommodels.write("\n")
+
+
+def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> None:
+    """Report the transitions whose two levels have the same energy, which ARTIS drops.
+
+    ARTIS gives every transition a frequency of (E_upper - E_lower) / h and skips the row where
+    that is not positive (input.cc), so a pair of levels the source gives the same energy is
+    silently lost, along with any collision strength it carried. Nothing here can fix that: a line
+    of zero frequency has no place in the radiation field. It should not happen quietly, though.
+    """
+    if dftransitions_ion.is_empty() or "energyabovegsinpercm" not in dfenergylevels_ion.columns:
+        return
+
+    energy = dfenergylevels_ion.select("levelid", "energyabovegsinpercm")
+    degenerate = (
+        dftransitions_ion.join(
+            energy.select(pl.col("levelid").alias("lowerlevel"), pl.col("energyabovegsinpercm").alias("e_lower")),
+            on="lowerlevel",
+        )
+        .join(
+            energy.select(pl.col("levelid").alias("upperlevel"), pl.col("energyabovegsinpercm").alias("e_upper")),
+            on="upperlevel",
+        )
+        .filter(pl.col("e_lower") == pl.col("e_upper"))
+    )
+    if degenerate.is_empty():
+        return
+
+    withcollstr = degenerate.filter(pl.col("coll_str") > 0.0).height if "coll_str" in degenerate.columns else 0
+    log_and_print(
+        flog,
+        f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
+        f" ({withcollstr:d} of them with a collision strength). ARTIS gives every transition a"
+        " frequency from the level energies and drops the ones that come out at zero, so these"
+        " are written but not used.",
+    )
 
 
 def write_transition_data(
@@ -409,36 +454,41 @@ def write_phixs_data(
 ) -> None:
     """Append one ion's photoionization cross sections to phixsdata_v2.txt.
 
-    Only levels with both targets and a threshold energy are written; the rest are counted and
-    reported. Level ids, of this ion and of the upper ion's targets, are zero-based in memory but
-    numbered from one in the output.
+    Every level with targets is written. Level ids, of this ion and of the upper ion's targets,
+    are zero-based in memory but numbered from one in the output.
+
+    The threshold energy is written for information only. ARTIS reads the column into a variable
+    it does not use (input.cc) and always takes the threshold from the difference of the level
+    energies instead, in get_phixs_threshold(). A level whose threshold could not be determined
+    therefore has a perfectly usable cross section table, and dropping it would discard real data
+    over a number the consumer ignores; such a level is written with a threshold of zero.
     """
-    # a level gets a table only if it has targets and a threshold energy. The threshold arrays
-    # start as NaN and are filled in only for levels that got a table, so NaN means "no data".
-    # A negative value is written deliberately (readqubdata): ARTIS reads it as "no value given"
-    # and takes the threshold from the difference of the level energies instead.
     # the target fractions are filled in per level by the caller, but a reader that found no
     # photoionization data at all returns the cross-section and threshold arrays still empty, so
     # bound the ids by what those arrays actually hold rather than indexing off the end
-    levelids_with_targets = [
+    levelids_to_write = [
         levelid
         for levelid, targetlist in enumerate(photoionization_targetfractions)
         if targetlist and levelid < len(photoionization_crosssections) and levelid < len(photoionization_thresholds_ev)
     ]
-    levelids_to_write = [
-        levelid for levelid in levelids_with_targets if not np.isnan(photoionization_thresholds_ev[levelid])
-    ]
-    skipped_no_threshold = len(levelids_with_targets) - len(levelids_to_write)
+    nothreshold = sum(1 for levelid in levelids_to_write if not np.isfinite(photoionization_thresholds_ev[levelid]))
 
     log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
+    if nothreshold:
+        log_and_print(
+            flog,
+            f"{nothreshold} of them have no threshold energy, and are written with a threshold of"
+            " zero. ARTIS takes the threshold from the level energies, so their cross sections are"
+            " used in full.",
+        )
     flog.write(
         f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
-    # only for a ground state that is actually being written: a level with no targets, or none
-    # left after the threshold filter, is deliberately skipped (match_hydrogenic_phixs does this
-    # for a ground state at or above the ionization energy), and that is not an error
+    # only for a ground state that is actually being written: a level with no targets is
+    # deliberately skipped (match_hydrogenic_phixs does this for a ground state at or above the
+    # ionization energy), and that is not an error
     if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
         msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
         log_and_print(flog, f"ERROR: {msg}")
@@ -448,7 +498,10 @@ def write_phixs_data(
     # memory, but the output format numbers them from one
     for lowerlevelid in levelids_to_write:
         targetlist = photoionization_targetfractions[lowerlevelid]
+        # zero where the reader could not determine one; ARTIS derives it from the level energies
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
+        if not np.isfinite(threshold_ev):
+            threshold_ev = 0.0
         if len(targetlist) == 1 and targetlist[0][1] > 0.99:
             upperionlevelid = targetlist[0][0]
 
@@ -474,12 +527,6 @@ def write_phixs_data(
         # one writelines() per table rather than a write() per point: nphixspoints lines per level,
         # 1.5M of them for the cmfgen set
         fphixs.writelines(f"{crosssection:16.8E}\n" for crosssection in photoionization_crosssections[lowerlevelid])
-
-    if skipped_no_threshold > 0:
-        log_and_print(
-            flog,
-            f"Skipped {skipped_no_threshold} levels with no photoionization threshold energy",
-        )
 
 
 def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

@@ -1327,3 +1327,67 @@ def test_get_level_valence_n():
     assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
     assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
     assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
+
+
+def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
+    """Gfall repeats some lines, and separately lists distinct lines that share a level pair.
+
+    A repeat has the same labels at both ends, and is one line given twice, once at its observed
+    wavelength and once at the Ritz one. ARTIS adds the A values of two rows that share a level
+    pair (input.cc), so keeping both would double the line.
+
+    Rows that share a level pair with DIFFERENT labels are separate transitions whose levels the
+    (energy, J) key merged into one. Sr I has 785 of those, two of them strong, and dropping them
+    would delete real lines. They are left for ARTIS to combine.
+    """
+    from artisatomic import readkuruczdata
+
+    # pin the committed sample, so the answer does not depend on which corpus is unpacked
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(39, 1))).collect()
+    levelkey = ["energyabovegsinpercm_lower", "j_lower", "energyabovegsinpercm_upper", "j_upper"]
+    # Y II holds one repeat: s5p z3P -> d5d g3D at both 241.7267 and 241.7308 nm
+    assert gfall.height - gfall.unique(levelkey).height == 1
+    assert gfall.height - gfall.unique([*levelkey, "label_lower", "label_upper"]).height == 1
+
+    _, dflevels, transitions, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+
+    # the repeat is gone, and no level pair is left with two rows for ARTIS to add up
+    assert transitions.height == gfall.height - 1
+    assert transitions.group_by(["lowerlevel", "upperlevel"]).len().filter(pl.col("len") > 1).is_empty()
+
+    # the surviving row keeps one line's A, not the sum of the two
+    levelid_of_name = dict(dflevels.select("levelname", "levelid").iter_rows())
+    lower = levelid_of_name["s5p z3P,enpercm=23776.241,j=1.0"]
+    upper = levelid_of_name["d5d g3D,enpercm=65132.0,j=1.0"]
+    kept = transitions.filter((pl.col("lowerlevel") == lower) & (pl.col("upperlevel") == upper))
+    assert kept.height == 1
+    assert kept["A"].item() == pytest.approx(3.805e8, rel=1e-3)
+
+
+def test_write_phixs_data_keeps_a_table_with_no_threshold():
+    """A cross section is real data; a threshold ARTIS never reads is not a reason to drop it."""
+    import argparse
+
+    from artisatomic import write_phixs_data
+
+    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
+    targetfractions = [[(0, 1.0)], [(0, 1.0)]]
+    thresholds = np.array([13.6, np.nan])  # the second level's threshold is unknown
+
+    out = io.StringIO()
+    write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
+    written = out.getvalue()
+
+    # one header line per level: both get a table, where level 2 used to be discarded outright
+    headers = [line for line in written.splitlines() if line.split()[0] == "8"]
+    assert len(headers) == 2
+    assert headers[0].split()[-2:] == ["1", "1.360000E+01"]
+    # the unknown threshold is written as zero, not as a NaN the reader would choke on
+    assert headers[1].split()[-2:] == ["2", "0.000000E+00"]
+    assert "nan" not in written.lower()
+
+    # ...and level 2's cross sections are all there
+    assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
