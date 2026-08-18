@@ -18,6 +18,8 @@ Write all English in ASD-STE100 (Simplified Technical English). This rule applie
 
 artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design: to change ions or data sources, you edit the Python code or supply an ion handlers JSON file.
 
+The Python package has no external API callers. Only the command-line scripts (`makeartisatomicfiles` and `makerecombratefile`) use the API, and they are internal to this repository. You can change the public API without a concern for external compatibility.
+
 ## Setup
 
 The project requires Python >= 3.13 and uses [uv](https://docs.astral.sh/uv/):
@@ -44,7 +46,7 @@ CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly erro
 
 ## Code layout
 
-- `artisatomic/__init__.py` re-exports all public names, so external code uses the flat `artisatomic.name` interface. When you add a public name to a submodule, add a matching `import x as x` re-export to `__init__.py`.
+- `artisatomic/__init__.py` re-exports all public names, so the scripts and tests use the flat `artisatomic.name` interface. When you add a public name to a submodule, add a matching `import x as x` re-export to `__init__.py`.
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionization cross sections.
