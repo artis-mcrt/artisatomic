@@ -1391,3 +1391,39 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
 
     # ...and level 2's cross sections are all there
     assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
+
+
+def test_log_degenerate_transitions():
+    """ARTIS drops a transition whose two levels have one energy, so artisatomic reports it."""
+    from artisatomic.output import log_degenerate_transitions
+
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1, 2], "energyabovegsinpercm": [0.0, 100.0, 100.0]},
+        schema={"levelid": pl.Int64, "energyabovegsinpercm": pl.Float64},
+    )
+
+    def warnings_for(dftransitions: pl.DataFrame) -> str:
+        flog = io.StringIO()
+        log_degenerate_transitions(flog, dflevels, dftransitions)
+        return flog.getvalue()
+
+    # levels 1 and 2 share an energy, so that pair is reported and the other is not
+    degenerate = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0], "coll_str": [-2.0]})
+    assert "1 transitions connect two levels of the same energy" in warnings_for(degenerate)
+    assert "(0 of them with a collision strength)" in warnings_for(degenerate)
+
+    ok = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0], "coll_str": [-1.0]})
+    assert not warnings_for(ok)
+
+    # a tabulated upsilon on such a pair is real data that ARTIS will not use, so it is counted
+    withupsilon = degenerate.with_columns(coll_str=pl.lit(0.5))
+    assert "(1 of them with a collision strength)" in warnings_for(withupsilon)
+
+    # a transitions frame with no coll_str column still reports the pair, counting none
+    nocollstr = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0]})
+    assert "(0 of them with a collision strength)" in warnings_for(nocollstr)
+
+    # a level frame with no energy column cannot be checked, and must stay silent rather than raise
+    flog = io.StringIO()
+    log_degenerate_transitions(flog, dflevels.drop("energyabovegsinpercm"), degenerate)
+    assert not flog.getvalue()
