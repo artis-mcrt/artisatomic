@@ -317,6 +317,9 @@ ions_data = {
     # (56, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
 }
 
+default_ion_files = IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data")
+ions_data = defaultdict(lambda: default_ion_files, ions_data)
+
 elsymboltohilliercode = {
     "H": "HYD",
     "He": "HE",
