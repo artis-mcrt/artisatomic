@@ -1391,3 +1391,47 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
 
     # ...and level 2's cross sections are all there
     assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
+
+
+def test_readkuruczdata_shares_a_merged_level_over_its_sublevels(monkeypatch):
+    """Levels keyed on (energy, J) can merge several, and the rate is their mean, not their sum.
+
+    Y II has three such levels in the committed sample. The merged level stands for n degenerate
+    sublevels of equal weight, so each holds 1/n of its population and the rate per atom in it is
+    sum_ij A(u_i -> l_j) / n. Summing instead handed ARTIS n times the rate, because ARTIS adds
+    the A values of two rows that share a level pair (input.cc).
+    """
+    from artisatomic import readkuruczdata
+
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    _, dflevels, transitions, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+    gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(39, 1))).collect()
+
+    merged = dflevels.filter(pl.col("nsublevels") > 1)
+    assert merged.height == 3
+    assert merged["nsublevels"].to_list() == [2, 2, 2]
+
+    # recompute the expected rate straight from gfall for every transition into a merged level
+    energyofid = dict(dflevels.select("levelid", "energyabovegsinpercm").iter_rows())
+    jofid = dict(dflevels.select("levelid", "j").iter_rows())
+    nsubofid = dict(dflevels.select("levelid", "nsublevels").iter_rows())
+
+    checked = 0
+    for lower, upper, emitted in transitions.select("lowerlevel", "upperlevel", "A").iter_rows():
+        if nsubofid[upper] == 1:
+            continue
+        rows = gfall.filter(
+            (pl.col("energyabovegsinpercm_lower") == energyofid[lower])
+            & (pl.col("j_lower") == jofid[lower])
+            & (pl.col("energyabovegsinpercm_upper") == energyofid[upper])
+            & (pl.col("j_upper") == jofid[upper])
+        )
+        a_each = rows.select(
+            a=10 ** pl.col("loggf")
+            / (1.49919e-16 * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
+        )["a"]
+        assert emitted == pytest.approx(a_each.sum() / nsubofid[upper], rel=1e-9)
+        checked += 1
+
+    assert checked > 0

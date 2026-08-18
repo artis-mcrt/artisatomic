@@ -200,6 +200,10 @@ def read_levels_and_transitions(
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
+        # how many labels share this (energy, J), i.e. how many levels the key below merges into
+        # one. Counted before the unique() drops them, and used to share a merged level's
+        # population over its sublevels when the transition rates are worked out.
+        .with_columns(nsublevels=pl.col("label").n_unique().over(["energyabovegsinpercm", "j"]))
         # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
         # without it the level names in adata.txt can differ from run to run
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
@@ -207,6 +211,7 @@ def read_levels_and_transitions(
         .select(
             pl.col("energyabovegsinpercm"),
             pl.col("j"),
+            pl.col("nsublevels"),
             levelname=(
                 pl.col("label")
                 + ",enpercm="
@@ -276,14 +281,28 @@ def read_levels_and_transitions(
                 energyabovegsinpercm_upper=pl.col("energyabovegsinpercm"),
                 j_upper=pl.col("j"),
                 levelid_upper=pl.col("levelid"),
+                nsublevels_upper=pl.col("nsublevels"),
             ),
             on=["energyabovegsinpercm_upper", "j_upper"],
             how="left",
         )
         .with_columns(
-            # wavelengths are in nanometers, so multiply by 10 to get Angstroms
-            A=pl.col("gf") / (1.49919e-16 * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
+            # wavelengths are in nanometers, so multiply by 10 to get Angstroms.
+            #
+            # Divided by the number of levels the upper (energy, J) key merged into one. Where it
+            # merged none, that is 1 and nothing changes. Where it merged n, the levels are
+            # degenerate and of equal weight, so each holds 1/n of the merged level's population,
+            # and the rate per atom in it is the mean of their rates rather than the sum:
+            #     A(L->U) = sum_ij A(u_i -> l_j) / n
+            # The sum comes from the group_by below, which also leaves one row per level pair.
+            # Without this a merged pair reached ARTIS at n times its rate, because ARTIS adds the
+            # A values of two rows that share a level pair.
+            A=pl.col("gf")
+            / (1.49919e-16 * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
+            / pl.col("nsublevels_upper")
         )
+        .group_by(["levelid_lower", "levelid_upper"], maintain_order=True)
+        .agg(A=pl.col("A").sum())
         .select(
             upperlevel=pl.col("levelid_upper"),
             lowerlevel=pl.col("levelid_lower"),
