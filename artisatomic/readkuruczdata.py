@@ -220,7 +220,9 @@ def read_levels_and_transitions(
         .collect()
     )
     dflevels = artisatomic.leveltuples_to_pldataframe(dflevels).with_columns(
-        parity=-pl.col("levelid")  # give a unique parity so that all transitions are permitted
+        # this data set supplies no parities, and a null one never matches another, so
+        # add_level_ids_forbidden() leaves every transition permitted
+        parity=pl.lit(None, dtype=pl.Int64)
     )
     artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
 

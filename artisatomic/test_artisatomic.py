@@ -37,29 +37,143 @@ def test_interpret_term():
     for unreadable in ("e2x", "o12", "3d5", "12"):
         assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
+    # The only L character can belong to a parenthesised parent term. Reporting '(4D)' would
+    # describe the parent rather than this level, so the term is unreadable -- but the trailing
+    # 'o' still gives the parity.
+    assert readhillierdata.get_term_as_tuple("3d5(4D)4po[3]") == (-1, -1, 1)
+    assert readhillierdata.get_term_as_tuple("3d4(3P2)4po[1/2]") == (-1, -1, 1)
 
-def test_get_parity_from_config():
+    # an L character at index 0 leaves no room for the multiplicity, and config[-1] would wrap
+    # round to the end of the name and read some unrelated character as it
+    assert readhillierdata.get_term_as_tuple("S2") == (-1, -1, -1)
+    assert readhillierdata.get_term_as_tuple("P2") == (-1, -1, -1)
+
+
+def test_get_level_parity():
+    """A CMFGEN level's parity comes from its 'e'/'o' suffix, and merged levels have none at all."""
+    get_level_parity = readhillierdata.get_level_parity
+
+    # the 'e'/'o' suffix, which is what nearly every name carries
+    assert get_level_parity("1s2_1Se") == 0
+    assert get_level_parity("2p_2Po") == 1
+    assert get_level_parity("3d5(6S)4s(7S)4d6De") == 0
+
+    # intermediate-coupling names, where the only term letter belongs to the parent term in
+    # parentheses. Reading the term instead of the suffix leaves these with no parity at all,
+    # and then any two of them wrongly compare equal.
+    assert get_level_parity("3d5(4D)4po[3]") == 1
+    assert get_level_parity("3d4(3P2)4po[1/2]") == 1
+    assert get_level_parity("3d6(3P2)4pbo[5/2]") == 1
+
+    # no suffix: sum l over the orbitals instead
+    assert get_level_parity("5s2.5p5") == 1  # 0*2 + 1*5
+    assert get_level_parity("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7, the parent term skipped
+
+    # ...and where there is no suffix and no readable orbital either, there is no parity
+    assert get_level_parity("Eqv st (0S ) 0s  a4P") < 0
+
+    # Levels that merge sub-levels of both parities have no parity to read, and must not be given
+    # one: '1___' and '13___' hold every l of that n (g = 2n^2), '8SNG'/'8TRP' are He I's merged
+    # singlets and triplets, and 'w'/'z' are merge markers for the high-l orbitals of a shell.
+    for merged in ("1___", "2___", "13___", "8SNG", "8TRP", "2s2_29w_2W", "10z_2Z", "2s2_2p3(4So)5z_5Z"):
+        assert get_level_parity(merged) < 0
+
+
+def test_has_merged_orbital():
+    """Merge markers are orbital letters standing for several l at once, so l >= n gives them away."""
+    from artisatomic import has_merged_orbital
+
+    assert has_merged_orbital("2s2_13w_2W")  # 'w' would be l=19, but n=13
+    assert has_merged_orbital("10z_2Z")  # 'z' would be l=22, but n=10
+    assert has_merged_orbital("2s2_2p3(4So)5z_5Z")
+
+    assert not has_merged_orbital("3d6(5D)10d_5Pe")  # 10d is a real orbital, l=2 < n=10
+    assert not has_merged_orbital("2p_2Po")
+    assert not has_merged_orbital("3d7(4F)6d_5Pbe")
+
+    # A token with no principal quantum number cannot be judged: n would default to 0 and then
+    # l >= n holds for every orbital letter, which would call the whole configuration merged and
+    # throw away the parity these names state outright with their 'o'.
+    for hasnon in ("3d8(2H)sp_2Go", "3d2(2D)sp_4Fo", "3d7(a2D)4sep_4Fo", "SEJ_s6p_7Fo", "3s2_3p_nd_a3Po"):
+        assert not has_merged_orbital(hasnon)
+        assert readhillierdata.get_level_parity(hasnon) == 1
+
+    # ...while a real merge marker still wins over an 'e'/'o' suffix, because the level really
+    # does span both parities. Al XI names one: '10z_2Zo', g=168.
+    assert has_merged_orbital("10z_2Zo")
+    assert readhillierdata.get_level_parity("10z_2Zo") < 0
+
+
+def test_get_parity_from_multi_orbital_token():
+    """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
+    from artisatomic import get_config_parity
+
+    # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
+    # Reading only the first letter and calling the rest an occupation raises on int('p').
+    assert get_config_parity("4sp(3P)_7Po") == 1
+    assert readhillierdata.get_level_parity("4sp(3P)_7Po[2]") == 1
+
+
+def test_get_config_parity():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
-    from artisatomic import get_parity_from_config
+    from artisatomic import get_config_parity
 
     # sum of l over the occupied orbitals, mod 2
-    assert get_parity_from_config("3d7") == 0  # 2 * 7 = 14
-    assert get_parity_from_config("3d64s2") == 0  # 2 * 6 = 12
-    assert get_parity_from_config("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
+    assert get_config_parity("3d64s2") == 0  # 2 * 6 = 12
+    assert get_config_parity("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
 
     # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
-    assert get_parity_from_config("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
-    assert get_parity_from_config("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
+    assert get_config_parity("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
+    assert get_config_parity("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
 
     # closed shells with two-digit occupations: a truncated '4f1' reading would give the
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
-    assert get_parity_from_config("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
+    assert get_config_parity("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
     # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
     # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
     # the real orbitals decide the parity.
-    assert get_parity_from_config("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
-    assert get_parity_from_config("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
+    assert get_config_parity("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
+    assert get_config_parity("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
+
+    # A bare configuration read as a name-with-a-term is mistaken for a term, so no orbitals come
+    # back. The sum is then empty, and 0 is a real parity that would be the wrong answer: right
+    # for '3d7' (2 * 7 = 14) only by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). None says
+    # so instead. Callers holding a bare configuration pass hasterm=False, below.
+    assert interpret_configuration("3d7")[0] == []
+    assert get_config_parity("3d7") is None
+    assert get_config_parity("5p3") is None
+
+
+def test_parity_of_a_bare_configuration():
+    """A name with no term is all configuration, and adf04 writes its orbitals in upper case."""
+    from artisatomic import get_config_parity
+
+    # the whole string is orbitals, so nothing is lost off the end and odd really reads as odd
+    assert get_config_parity("3d7", hasterm=False) == 0  # 2 * 7 = 14
+    assert get_config_parity("5s2", hasterm=False) == 0  # 0 * 2
+    assert get_config_parity("5p3", hasterm=False) == 1  # 1 * 3
+    assert get_config_parity("2p", hasterm=False) == 1  # a lone orbital with no occupation
+
+    # ADAS adf04 configurations: upper case, space separated, with the level's own index in
+    # brackets at the end. Stripping a term took the last orbital with it, so '4P1' was lost and
+    # every level of FeIII.adf04 came out even; 3s2 3p6 3d5 4p1 is 0 + 6 + 10 + 1 = 17, odd.
+    assert get_config_parity("3S2 3P6 3D5 4P1   (1)", hasterm=False) == 1
+    assert get_config_parity("3S2 3P6 3D6   (5)", hasterm=False) == 0  # 0 + 6 + 12 = 18
+    assert interpret_configuration("3S2 3P6 3D5 4P1   (1)", hasterm=False)[0] == [
+        "3S2",
+        "3P6",
+        "3D5",
+        "4P1",
+        "(1)",
+    ]
+
+    # ...but upper case is only an orbital where there is no term to confuse it with. With a term
+    # the case still matters: '8SNG' is He I's merged singlets, not an 8s orbital, and the parent
+    # term left over from '3d4(3H)s44p_x3Io' is not a merge marker.
+    assert get_config_parity("8SNG") is None
+    assert readhillierdata.get_level_parity("8SNG") < 0
+    assert readhillierdata.get_level_parity("3d4(3H)s44p_x3Io[6]") == 1
 
 
 def test_interpret_configuration():
@@ -599,13 +713,224 @@ def test_read_coldata_term_to_j_redistribution():
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
 
 
-def test_readboyledata_levels_get_distinct_parities(monkeypatch):
+def test_add_level_ids_forbidden_parity():
+    """Equal parity means forbidden, but a null parity is absent and matches nothing, itself included."""
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2, 3, 4],
+            "parity": [0, 1, None, None, 0],  # two real parities, two absent ones, then a repeat of 0
+        },
+        schema={"levelid": pl.Int64, "parity": pl.Int64},
+    )
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [0, 0, 0, 2, 0],
+            "upperlevel": [1, 2, 3, 3, 4],
+            "A": [1.0, 1.0, 1.0, 1.0, 1.0],
+        }
+    )
+    forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
+
+    # even -> odd permitted; a real parity never matches an absent one; two absent ones do not
+    # match each other either, which is the whole reason absence is spelled null; two real
+    # even ones do match
+    assert forbidden == [False, False, False, False, True]
+
+
+def test_get_level_j():
+    """J is read from the brackets a J-resolved CMFGEN level name ends with."""
+    get_level_j = readhillierdata.get_level_j
+
+    assert get_level_j("3d6_a5De[4]") == 4.0
+    assert get_level_j("3d5(4D)4po[9/2]") == 4.5
+    assert get_level_j("3d4(3P2)4po[1/2]") == 0.5
+
+    # a name with a brace and nothing after it gives J there; in pair coupling the brace holds
+    # K and the trailing bracket is J. The last group is the one read, and both come out right.
+    assert get_level_j("2s2_2p(2P<1/2>)4f_2{5/2}e") == 2.5
+    assert get_level_j("2p5(2P*<1/2>)3d_2{3/2}o[1]") == 1.0
+
+    # Not every trailing bracket is a J: Si X and S X number their levels there instead. g tells
+    # them apart, because J is only J where g == 2J + 1. A 3P term has no J = 3.
+    assert get_level_j("2p3p3Pe[3]", g=5.0) is None
+    assert get_level_j("2s2_2p3_4So[2]", g=4.0) is None
+    assert get_level_j("3d6_a5De[4]", g=9.0) == 4.0
+
+    # A term-resolved level has no J of its own -- its g counts every J of the term -- and nor
+    # does a merged level. Neither may be given one.
+    for noj in ("1___", "8SNG", "10z_2Zo", "2s2_2p3(4So)5z_5Z", "3d6(5D)4s_6De"):
+        assert get_level_j(noj) is None
+
+
+def test_add_level_ids_forbidden_delta_j():
+    """E1 needs |dJ| <= 1 and forbids J=0 -> J=0, on a transition that carries no f."""
+    # opposite parities throughout, so the Laporte rule can never fire and only dJ decides
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2, 3, 4],
+            "parity": [0, 1, 0, 1, 0],
+            "j": [1.0, 2.0, 3.0, 0.0, 0.0],
+        },
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    # A = 0 marks the upsilon-only pairs, which no source called an electric dipole line
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [0, 0, 4, 0],
+            "upperlevel": [1, 2, 3, 3],
+            "A": [0.0, 0.0, 0.0, 0.0],
+        }
+    )
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    # the joins do not keep the row order, so read the answers back by transition
+    forbidden = {(lo, up): f for lo, up, f in result[["lowerlevel", "upperlevel", "forbidden"]].iter_rows()}
+
+    assert forbidden[0, 1] is False  # J 1 -> 2, dJ = 1
+    assert forbidden[0, 2] is True  # J 1 -> 3, dJ = 2
+    assert forbidden[4, 3] is True  # J 0 -> 0, forbidden even though dJ = 0
+    assert forbidden[0, 3] is False  # J 1 -> 0, dJ = 1
+
+
+def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
+    """A source that gives the transition an f says it is E1, and that beats the J labels.
+
+    Some data sets disagree with themselves. CMFGEN's provisional F III set splits a term by a
+    nominal 0.8 cm-1 and then shares the term's f over all the J pairs, so it lists dJ = 2 lines
+    with f as large as 0.116. To call those forbidden would give a strong line the forbidden
+    collision approximation.
+    """
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [1, 0], "j": [0.5, 2.5]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [3.4e9], "f": [0.116]})
+
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+
+    # dJ = 2, so the rule is broken and reported, but the f keeps the transition permitted
+    assert result["breaksdeltaj"].to_list() == [True]
+    assert result["forbidden"].to_list() == [False]
+
+    # with no f and no A, the same pair is forbidden
+    nof = dftransitions.with_columns(A=0.0).drop("f")
+    assert add_level_ids_forbidden(dflevels, nof)["forbidden"].to_list() == [True]
+
+    # A weak f is not evidence of an E1 line, so the J labels decide it. C IV lists
+    # 2p_2Po[1/2] -> 3d_2De[5/2] at f = 2.7e-10, and its 108 cm-1 fine structure means its J
+    # labels are sound, so that line really is forbidden.
+    weakf = dftransitions.with_columns(A=4.1, f=2.7e-10)
+    assert add_level_ids_forbidden(dflevels, weakf)["forbidden"].to_list() == [True]
+
+
+def test_log_deltaj_contradictions_judges_f_and_a_separately():
+    """Only a transition strong enough to be E1 contradicts its own J labels.
+
+    f has no units and an E1 line carries 1e-3 to 1. A is a rate in s-1 over many decades, where
+    a forbidden line still reaches ~1e2, so the same cut would report every forbidden line a
+    reader supplies A for as a contradiction.
+    """
+    from artisatomic.output import log_deltaj_contradictions
+
+    def warnings_for(dftransitions: pl.DataFrame) -> str:
+        flog = io.StringIO()
+        log_deltaj_contradictions(flog, dftransitions, "Test II")
+        return flog.getvalue()
+
+    breaksrule = {"lowerlevel": [0], "upperlevel": [1], "breaksdeltaj": [True]}
+
+    # f: a strong line contradicts the labels, a forbidden line's own small f does not
+    assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [3.4e9], "f": [0.116]}))
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [1.0e-2], "f": [1.9e-9]}))
+    # ...and the quiet case is the one the rule now marks forbidden, so the two agree
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [4.1], "f": [2.7e-10]}))
+
+    # A, where a forbidden line reaches 14 s-1 in QUB's Co III and must stay quiet
+    assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [1.9e8]}))
+    assert not warnings_for(pl.DataFrame({**breaksrule, "A": [14.0]}))
+
+    # a transition that keeps the rule is never reported, however strong it is
+    assert not warnings_for(pl.DataFrame({**breaksrule, "breaksdeltaj": [False], "A": [1.9e8]}))
+
+
+def test_add_level_ids_forbidden_delta_j_needs_both_levels():
+    """A level with no J turns off the dJ rule for its transitions. It does not undo the parities."""
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1, 2], "parity": [0, 1, 1], "j": [1.0, None, 5.0]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 1], "upperlevel": [1, 2], "A": [0.0, 0.0]})
+
+    # the first pair has no J to compare and two different parities, so nothing can call it
+    # forbidden. The second pair shares a parity, which the missing J must not undo.
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, True]
+
+    # a frame with no j column at all behaves as it did before this code read J
+    nojcol = dflevels.drop("j")
+    assert add_level_ids_forbidden(nojcol, dftransitions)["forbidden"].to_list() == [False, True]
+
+
+def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
+    """Absence is null and only null, so a negative number is an ordinary parity that can match.
+
+    Three readers used to spell "no parity" as the negated level id, which made level 0 come out
+    as a real even parity while every other level was unmatchable. Nothing may depend on negative
+    numbers meaning absent any more, so two levels sharing one are forbidden like any other pair.
+    """
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": [-7, -7]}, schema={"levelid": pl.Int64, "parity": pl.Int64})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
+
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [True]
+
+
+@pytest.mark.parametrize(
+    ("parity", "dtype"),
+    [
+        ([None, None], pl.Int64),  # the canonical spelling of an absent parity
+        ([float("nan"), float("nan")], pl.Float64),  # NaN compares equal to itself, so it must cast away
+        (["1", "1"], pl.String),  # pandas infers text from a blank column, e.g. FAC's P
+    ],
+)
+def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):
+    """A parity that is not a whole number means the level has none, not that it matches itself."""
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": parity}, schema={"levelid": pl.Int64, "parity": dtype})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
+
+    forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
+
+    # a readable string parity is a real parity and still counts; the rest are unknown
+    assert forbidden == [dtype == pl.String]
+    assert forbidden[0] is not None  # would raise in write_transition_data
+
+
+def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
+    """H I is merged n-levels throughout, so nothing in it may come out forbidden.
+
+    Every H I level is named '<n>___' and holds every l of that n, giving it no definite parity.
+    Treating those as a matching parity made all 435 H I transitions forbidden, Lyman alpha
+    included -- the strongest permitted line there is, listed in hi_osc.dat with f = 0.4162.
+    """
+    _, dflevels, dftransitions, _ = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
+
+    # no level has a parity that could match another's
+    assert dflevels["parity"].is_null().all()
+
+    dflevels = dflevels.with_row_index("levelid").with_columns(pl.col("levelid").cast(pl.Int64))
+    dftransitions = add_level_ids_forbidden(dflevels, dftransitions)
+    assert not any(dftransitions["forbidden"].to_list())
+
+    lymanalpha = dftransitions.filter((pl.col("lowerlevel") == 0) & (pl.col("upperlevel") == 1))
+    assert lymanalpha.height == 1
+    assert lymanalpha["A"].item() == pytest.approx(4.696e8)
+    assert not lymanalpha["forbidden"].item()
+
+
+def test_readboyledata_levels_have_no_parity(monkeypatch):
     """The AOIFE data set supplies no parities, so no transition may come out forbidden.
 
     add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity, so
     giving every level the same parity made every transition of the ion forbidden — and helium has
-    plenty of permitted ones. readlisbondata and readkuruczdata use the negated level id for
-    exactly this reason.
+    plenty of permitted ones. A null parity cannot match another, which is how readlisbondata and
+    readkuruczdata say the same thing.
 
     The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
     its README), so this builds the three tables the reader wants in memory.
@@ -651,8 +976,8 @@ def test_readboyledata_levels_get_distinct_parities(monkeypatch):
     # the other ion's level is filtered out
     assert len(energy_levels) == 3
 
-    # every level gets its own parity, so no pair of them can compare equal
-    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+    # no level has a parity, so no pair of them can compare equal
+    assert all(level.parity is None for level in energy_levels)
 
     dflevels = leveltuples_to_pldataframe(
         pl.DataFrame(
@@ -701,8 +1026,10 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # levels come back in ascending energy, so the file's order is exactly reversed
     assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 5000.0]
     assert levelid_of_fileindex == {2: 0, 1: 1, 0: 2}
-    # the unique parity sentinel keeps all transitions permitted
-    assert len({level.parity for level in energy_levels}) == len(energy_levels)
+    # a null parity never matches another, so the Laporte rule cannot fire...
+    assert all(level.parity is None for level in energy_levels)
+    # ...and J is what the delta J rule has to go on, so it must reach the level tuple
+    assert [level.j for level in energy_levels] == [0.0, 1.0, 2.0]
 
     # one line from the file's level 2 (the ground state) to its level 0 (the top level)
     dflines = pd.DataFrame(

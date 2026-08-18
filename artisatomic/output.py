@@ -29,12 +29,66 @@ def clear_files(args: argparse.Namespace) -> None:
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
 
+# A transition this strong is an electric dipole line, whatever the level names say. Below these
+# values, one that breaks the delta J rule is taken to be a forbidden line that the source listed
+# with its own small strength, which agrees with the label instead of contradicting it.
+#
+# The two need their own values because they are not the same quantity. f has no units; A is a
+# rate in s-1 that spans many decades. Neither cut is a law of physics: a weak E1 line can sit
+# well below either (an intercombination line, or one between high levels), and a strong M1 or E2
+# line in a highly charged ion can sit above the A cut. They are where the two populations part in
+# this corpus -- forbidden lines end near f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1),
+# and the lines that contradict their own J labels start at f = 7.8e-4 (F III's smallest), only
+# eight times above the cut. A mislabelled line weaker than that falls on the wrong side, and
+# that is the accepted cost.
+min_f_asserts_e1 = 1e-4
+min_a_asserts_e1 = 1e5
+
+
+def strength_asserts_e1(dftransitions_ion: pl.DataFrame) -> pl.Expr:
+    """Whether the source's own numbers claim the transition is an electric dipole line.
+
+    f where the reader gives one, else the Einstein A. Both need a size, not merely a value: a
+    forbidden line has an A, and a reader that tabulates f gives one to its forbidden lines too,
+    so "greater than zero" says nothing about which kind of transition this is.
+    """
+    if "f" in dftransitions_ion.columns:
+        return pl.col("f").fill_null(0.0).abs() > min_f_asserts_e1
+
+    return pl.col("A").fill_null(0.0).abs() > min_a_asserts_e1
+
+
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     """Fill in whichever of lowerlevel, upperlevel and forbidden a reader did not supply.
 
     Readers that key their transitions by level name (namefrom/nameto) get the level ids joined
-    on here; readers that already supply ids keep them. A transition is forbidden when its two
-    levels have the same parity.
+    on here; readers that already supply ids keep them.
+
+    Forbidden here means "not an electric dipole transition", and two of the E1 selection rules
+    are checked, each on whichever levels carry what it needs:
+
+    - Laporte: E1 changes the parity, so two levels of the same parity cannot be E1.
+    - Delta J: E1 has |J_upper - J_lower| <= 1, and J = 0 -> J = 0 is forbidden outright.
+
+    Either rule is sufficient on its own, so the two are OR-ed. Neither rule can fire on a level
+    that does not carry the quantum number it needs. A data set that gives no J thus keeps the
+    behaviour it had before this code read J at all.
+
+    The delta J rule yields to a transition the source made strong enough to be E1, as
+    strength_asserts_e1() judges it. Some files disagree with their own J labels: CMFGEN's
+    provisional F III set splits a term by a nominal 0.8 cm-1 and then shares the term's f over
+    all the J pairs, so it lists delta J = 2 lines with f as large as 0.116, and O II reaches
+    0.695. To call such a line forbidden would give a strong line the forbidden collision
+    approximation, which is worse than the label it corrects. write_output_files() logs those
+    instead. A weak line is not evidence of anything, so the J labels decide it.
+
+    A null parity means the level has no definite parity, either because it merges sub-levels of
+    both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
+    from the level name. Null is the whole of that convention: polars resolves null == anything
+    to null rather than to true, so an absent parity cannot match another absent one, and no
+    sentinel number is needed for readers to spell it. A null J means the same, and both are
+    resolved the same way: anything a reader could not give a number for -- a NaN, a string
+    pandas inferred from a blank column -- casts to null and disables only its own rule.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -52,22 +106,81 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         )
 
     if "forbidden" not in dftransitions_ion.columns:
+        # null for anything that is not a number, so a NaN cannot compare equal to itself and a
+        # string column cannot raise against the numbers it is compared with
+        knownparity = pl.col("parity").cast(pl.Int64, strict=False)
+        hasj = "j" in dfenergylevels_ion.columns
+        knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
+
+        assertse1 = strength_asserts_e1(dftransitions_ion)
+
         dftransitions_ion = (
             dftransitions_ion.join(
                 dfenergylevels_ion.select(
-                    pl.col("levelid").alias("lowerlevel"), pl.col("parity").alias("lower_parity")
+                    pl.col("levelid").alias("lowerlevel"),
+                    knownparity.alias("lower_parity"),
+                    knownj.alias("lower_j"),
                 ),
                 on="lowerlevel",
             )
             .join(
                 dfenergylevels_ion.select(
-                    pl.col("levelid").alias("upperlevel"), pl.col("parity").alias("upper_parity")
+                    pl.col("levelid").alias("upperlevel"),
+                    knownparity.alias("upper_parity"),
+                    knownj.alias("upper_j"),
                 ),
                 on="upperlevel",
             )
-            .with_columns(forbidden=pl.col("lower_parity") == pl.col("upper_parity"))
+            # The delta J rule is kept as its own column, because write_output_files() reports
+            # the transitions that break it while the source still gives them an f.
+            .with_columns(
+                breaksdeltaj=(
+                    ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
+                    | ((pl.col("lower_j") == 0) & (pl.col("upper_j") == 0))
+                ).fill_null(False)
+            )
+            # Each rule gets fill_null(False) on its own, before the or. A null would otherwise
+            # spread and make forbidden itself null, which "{forbidden:d}" cannot format, and a
+            # level with no J would undo what the two parities had already settled.
+            .with_columns(
+                forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False)
+                | (pl.col("breaksdeltaj") & ~assertse1)
+            )
+            .drop("lower_j", "upper_j")
         )
     return dftransitions_ion
+
+
+def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str) -> None:
+    """Report the transitions whose J labels and oscillator strength contradict each other.
+
+    A transition with |delta J| > 1, or with J = 0 at both ends, is not an electric dipole
+    transition. A large oscillator strength says that it is. add_level_ids_forbidden() lets the
+    oscillator strength win, so the transition stays permitted, and this reports how often a data
+    set needed that.
+
+    CMFGEN's provisional F III set is the known example: it splits a term by a nominal 0.8 cm-1
+    and shares the term's f over all the J pairs, so a delta J = 2 line can carry f = 0.116.
+    """
+    if "breaksdeltaj" not in dftransitions_ion.columns:
+        return
+
+    hasf = "f" in dftransitions_ion.columns
+    strengthcol = "f" if hasf else "A"
+    minstrength = min_f_asserts_e1 if hasf else min_a_asserts_e1
+    # the same test the rule used, so this reports exactly the transitions it let through
+    contradictions = dftransitions_ion.filter(pl.col("breaksdeltaj") & strength_asserts_e1(dftransitions_ion))
+    if contradictions.is_empty():
+        return
+
+    largest = contradictions[strengthcol].abs().max()
+    log_and_print(
+        flog,
+        f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
+        f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
+        f" {strengthcol} values of this data set disagree. The {strengthcol} values are used, so"
+        f" these stay permitted.",
+    )
 
 
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
@@ -96,6 +209,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 unused_upsilon_transitions = set()
             else:
                 dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
+                log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
                 unused_upsilon_transitions = set(upsilondict.keys()).difference(
                     dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
                 )
