@@ -108,8 +108,8 @@ ions_data = {
     (8, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (8, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     # F
-    # (9, 2): IonFiles('tst', 'fin_osc', ['phot_data_a', 'phot_data_b', 'phot_data_c'], ''),
-    # (9, 3): IonFiles('tst', 'fin_osc', ['phot_data_a', 'phot_data_b', 'phot_data_c', 'phot_data_d'], ''),
+    (9, 2): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
+    (9, 3): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""),
     # Ne
     (10, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
     (10, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
