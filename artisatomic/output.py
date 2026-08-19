@@ -193,6 +193,10 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
     outdir = Path(args.output_folder)
     log_folder = outdir / args.output_folder_logs
 
+    # a level's photoionisation threshold reaches into the ion above it, so keep the whole
+    # element to hand rather than only the ion being written
+    iondata_of_ion_stage = {iondata.ion_stage: iondata for iondata in iondatalist}
+
     for iondata in iondatalist:
         ion_stage = iondata.ion_stage
         upsilondict = iondata.upsilondict
@@ -311,7 +315,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         ion_stage,
                         iondata.photoionization_crosssections,
                         iondata.photoionization_targetfractions,
-                        iondata.photoionization_thresholds_ev,
+                        fill_missing_phixs_thresholds(iondata, iondata_of_ion_stage.get(ion_stage + 1), flog),
                         args,
                         flog,
                     )
@@ -440,6 +444,56 @@ def write_transition_data(
         f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
         f" {num_collision_strengths_applied:d} have collision strengths",
     )
+
+
+def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None, flog) -> npt.NDArray[np.float64]:
+    """Work out a photoionisation threshold for the levels whose reader gave none.
+
+    Returns the ion's threshold array with its unreadable entries replaced, and the rest as they
+    were. This is the same quantity ARTIS derives in get_phixs_threshold(), where a level's
+    epsilon carries the ionization energies of every stage below it:
+
+        threshold = ionization energy of this ion + E(target level) - E(this level)
+
+    with both level energies above their own ion's ground state. The target is the first one, as
+    ARTIS uses phixstargetindex 0 for a level's continuum edge (input.cc).
+
+    A threshold that does not come out positive is left alone: the level is then at or above the
+    continuum, which is not something a photoionisation edge can describe.
+    """
+    thresholds = iondata.photoionization_thresholds_ev.copy()
+    missing = [levelid for levelid, threshold in enumerate(thresholds) if not np.isfinite(threshold)]
+    if not missing or upperiondata is None:
+        return thresholds
+
+    energy_ev = [hc_in_ev_cm * energy for energy in iondata.dfenergylevels["energyabovegsinpercm"]]
+    upper_energy_ev = [hc_in_ev_cm * energy for energy in upperiondata.dfenergylevels["energyabovegsinpercm"]]
+
+    filled = 0
+    for levelid in missing:
+        targetlist = (
+            iondata.photoionization_targetfractions[levelid]
+            if levelid < len(iondata.photoionization_targetfractions)
+            else []
+        )
+        if not targetlist or levelid >= len(energy_ev):
+            continue
+        targetlevelid = targetlist[0][0]
+        if targetlevelid >= len(upper_energy_ev):
+            continue
+
+        threshold_ev = iondata.ionization_energy_ev + upper_energy_ev[targetlevelid] - energy_ev[levelid]
+        if threshold_ev > 0.0:
+            thresholds[levelid] = threshold_ev
+            filled += 1
+
+    if filled:
+        log_and_print(
+            flog,
+            f"Worked out a photoionization threshold for {filled} levels whose reader gave none,"
+            " from the ionization energy and the two level energies, as ARTIS does",
+        )
+    return thresholds
 
 
 def write_phixs_data(

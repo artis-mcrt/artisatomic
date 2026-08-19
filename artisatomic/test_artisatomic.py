@@ -1351,11 +1351,23 @@ def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
     assert gfall.height - gfall.unique(levelkey).height == 1
     assert gfall.height - gfall.unique([*levelkey, "label_lower", "label_upper"]).height == 1
 
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
     _, dflevels, transitions, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
 
     # the repeat is gone, and no level pair is left with two rows for ARTIS to add up
     assert transitions.height == gfall.height - 1
     assert transitions.group_by(["lowerlevel", "upperlevel"]).len().filter(pl.col("len") > 1).is_empty()
+
+    # Sr II in the zztar layout has five groups that match on the levels AND both labels but
+    # whose loggf differs, by as much as -2.848 against -1.547. Those are separate lines, and
+    # keeping the first would discard the stronger of the two, so the strength is part of the key.
+    srii = readkuruczdata.parse_gfall(
+        str(PYDIR / ".." / "atomic-data-kurucz" / "test_sample" / "zztar" / "gf3801.all.zst")
+    ).collect()
+    withlabels = [*levelkey, "label_lower", "label_upper"]
+    assert srii.height - srii.unique(withlabels).height == 5
+    assert srii.height - srii.unique([*withlabels, "loggf"]).height == 0
 
     # the surviving row keeps one line's A, not the sum of the two
     levelid_of_name = dict(dflevels.select("levelname", "levelid").iter_rows())
@@ -1427,3 +1439,45 @@ def test_log_degenerate_transitions():
     flog = io.StringIO()
     log_degenerate_transitions(flog, dflevels.drop("energyabovegsinpercm"), degenerate)
     assert not flog.getvalue()
+
+
+def test_fill_missing_phixs_thresholds():
+    """A threshold the reader could not give is worked out the way ARTIS derives it."""
+    from artisatomic.iondata import IonData
+    from artisatomic.output import fill_missing_phixs_thresholds
+
+    def makeion(ion_stage, ionpot, energiespercm, targets, thresholds):
+        return IonData(
+            ion_stage=ion_stage,
+            handler="test",
+            is_top_ion=False,
+            ionization_energy_ev=ionpot,
+            dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
+            dftransitions=pl.DataFrame(),
+            transition_count_of_level_name={},
+            upsilondict={},
+            hillier_photoion_targetconfigs=None,
+            photoionization_crosssections=np.zeros((len(energiespercm), 1)),
+            photoionization_targetfractions=targets,
+            photoionization_thresholds_ev=np.array(thresholds),
+        )
+
+    percm_per_ev = 1.0 / hc_in_ev_cm
+    # this ion: ground state and a level 2 eV up. Upper ion: ground state and a level 1 eV up.
+    ion = makeion(1, 10.0, [0.0, 2.0 * percm_per_ev], [[(0, 1.0)], [(1, 1.0)]], [np.nan, np.nan])
+    upperion = makeion(2, 25.0, [0.0, 1.0 * percm_per_ev], [], [])
+
+    filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
+
+    # ionization energy + target level energy - this level's energy
+    assert filled[0] == pytest.approx(10.0 + 0.0 - 0.0)
+    assert filled[1] == pytest.approx(10.0 + 1.0 - 2.0)
+
+    # a threshold the reader did give is left alone, and so is one with no upper ion to look in
+    given = makeion(1, 10.0, [0.0], [[(0, 1.0)]], [7.5])
+    assert fill_missing_phixs_thresholds(given, upperion, io.StringIO())[0] == pytest.approx(7.5)
+    assert np.isnan(fill_missing_phixs_thresholds(ion, None, io.StringIO())[0])
+
+    # a level at or above the continuum has no edge to describe, so it keeps its NaN
+    above = makeion(1, 1.0, [5.0 * percm_per_ev], [[(0, 1.0)]], [np.nan])
+    assert np.isnan(fill_missing_phixs_thresholds(above, upperion, io.StringIO())[0])
