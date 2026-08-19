@@ -114,7 +114,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    transition_tables = []
+    transition_tables: list[pl.DataFrame] = []
 
     for transition_file in transition_files:
         dashrowcount = 0
