@@ -471,12 +471,10 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
 
     filled = 0
     for levelid in missing:
-        targetlist = (
-            iondata.photoionization_targetfractions[levelid]
-            if levelid < len(iondata.photoionization_targetfractions)
-            else []
-        )
-        if not targetlist or levelid >= len(energy_ev):
+        if levelid >= len(iondata.photoionization_targetfractions) or levelid >= len(energy_ev):
+            continue
+        targetlist = iondata.photoionization_targetfractions[levelid]
+        if not targetlist:
             continue
         targetlevelid = targetlist[0][0]
         if targetlevelid >= len(upper_energy_ev):
