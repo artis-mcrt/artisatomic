@@ -237,10 +237,31 @@ def read_levels_and_transitions(
                 "j_upper",
                 "wavelength_nm",
                 "loggf",
+                # kept only for the duplicate-line test below, and dropped by the final select
+                "label_lower",
+                "label_upper",
+                "isotope",
+                "isotope2",
+                "log_f_hyperfine",
+                "hyperfine_f_lower",
+                "hyperfine_f_upper",
+                "hyper_shift_lower",
+                "hyper_shift_upper",
             ]
         )
+        # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one
+        # (Y II has one such pair at 241.7267 and 241.7308 nm, both loggf = 0). ARTIS adds the A
+        # values of two rows that share a level pair, so a repeat would double the line.
+        #
+        # A row only counts as a repeat if the levels, the labels AND the strength all match.
+        # Each on its own keeps rows that are separate lines:
+        #  - Sr I has 785 rows sharing a level pair with different labels, whose strengths follow
+        #    the spin rule, so they are lines whose levels the (energy, J) key above merged.
+        #  - Sr III has 46 rows sharing a level pair and both labels whose loggf still differs,
+        #    by as much as -1.911 against -5.742, and Sr II in the zztar layout has five more.
+        # Dropping either kind would delete a real transition, and in Sr III would keep the
+        # weaker of the two.
         .with_columns(gf=10 ** pl.col("loggf"))
-        .drop("loggf")
         .join(
             dflevels.lazy().select(
                 energyabovegsinpercm_lower=pl.col("energyabovegsinpercm"),
@@ -263,13 +284,42 @@ def read_levels_and_transitions(
             # wavelengths are in nanometers, so multiply by 10 to get Angstroms
             A=pl.col("gf") / (1.49919e-16 * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
         )
-        .select(
-            upperlevel=pl.col("levelid_upper"),
-            lowerlevel=pl.col("levelid_lower"),
-            A=pl.col("A"),
-            coll_str=pl.lit(-1),
-        )
         .collect()
+    )
+
+    transitions_in = transitions.height
+    transitions = transitions.unique(
+        [
+            "energyabovegsinpercm_lower",
+            "j_lower",
+            "energyabovegsinpercm_upper",
+            "j_upper",
+            "label_lower",
+            "label_upper",
+            "loggf",
+            # an isotope or hyperfine component is its own line and can share everything above
+            # with another, so the fields that tell them apart belong in the identity too
+            "isotope",
+            "isotope2",
+            "log_f_hyperfine",
+            "hyperfine_f_lower",
+            "hyperfine_f_upper",
+            "hyper_shift_lower",
+            "hyper_shift_upper",
+        ],
+        keep="first",
+        maintain_order=True,
+    )
+    if transitions.height < transitions_in:
+        artisatomic.log_and_print(
+            flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once"
+        )
+
+    transitions = transitions.select(
+        upperlevel=pl.col("levelid_upper"),
+        lowerlevel=pl.col("levelid_lower"),
+        A=pl.col("A"),
+        coll_str=pl.lit(-1),
     )
 
     transition_count_of_levelid: dict[int, int] = dict(
