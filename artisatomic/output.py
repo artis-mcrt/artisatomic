@@ -183,6 +183,30 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
     )
 
 
+def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
+    """Turn the joined upsilon column into coll_str, and let a negative one set the forbidden flag.
+
+    A negative upsilon is not a collision strength. It is the reader's mark for "this pair is
+    forbidden and I have no value", and readhillierdata writes -2 for the J pairs within a term.
+    So it sets the flag rather than the parities alone. A merged term has no parity, and the pair
+    would then come out permitted. Those pairs carry no A, so van Regemorter would get an
+    oscillator strength of zero, which is no collisional coupling at all. The -2 asks instead for
+    Axelrod's approximation.
+
+    coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
+    reaches the -1, because a negative one has already made the flag true.
+    """
+    return (
+        dftransitions_ion.with_columns(forbidden=pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False))
+        .with_columns(
+            coll_str=pl.when(pl.col("upsilon") >= 0.0)
+            .then(pl.col("upsilon"))
+            .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+        )
+        .drop("upsilon")
+    )
+
+
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
@@ -256,25 +280,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
                     )
                     .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
-                    # A negative upsilon is the reader saying this pair is forbidden and it has no
-                    # value for it: readhillierdata stores -2 for the J pairs within a term. Take
-                    # that as the statement it is, rather than leaving the parities to reach the
-                    # same answer -- a merged term has none, and the pair would then be called
-                    # permitted and sent to van Regemorter with the f of levels that have no A.
-                    .with_columns(forbidden=pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False))
-                    .with_columns(
-                        # No usable upsilon for this transition: -2 marks it forbidden, -1 unknown.
-                        # A negative upsilon is a placeholder, not a collision strength (the CMFGEN
-                        # reader stores -2 for the J pairs within a term), so it is resolved here
-                        # like a missing one. That keeps coll_str = -2 and forbidden = 1 the same
-                        # statement: ARTIS reads coll_str < 0 and then trusts the flag, so the pair
-                        # -2 with forbidden = 0 would send a transition to van Regemorter with the
-                        # f of a level pair that has no A, i.e. to a collision rate of zero.
-                        coll_str=pl.when(pl.col("upsilon") >= 0.0)
-                        .then(pl.col("upsilon"))
-                        .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
-                    )
-                    .drop("upsilon")
+                    .pipe(resolve_coll_str)
                 )
 
             with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
@@ -470,6 +476,10 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     thresholds = iondata.photoionization_thresholds_ev.copy()
     missing = [levelid for levelid, threshold in enumerate(thresholds) if not np.isfinite(threshold)]
     if not missing or upperiondata is None:
+        return thresholds
+    if "energyabovegsinpercm" not in iondata.dfenergylevels.columns:
+        return thresholds
+    if "energyabovegsinpercm" not in upperiondata.dfenergylevels.columns:
         return thresholds
 
     energy_ev = [hc_in_ev_cm * energy for energy in iondata.dfenergylevels["energyabovegsinpercm"]]

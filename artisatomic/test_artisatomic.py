@@ -1483,34 +1483,45 @@ def test_fill_missing_phixs_thresholds():
     assert np.isnan(fill_missing_phixs_thresholds(above, upperion, io.StringIO())[0])
 
 
-def test_add_level_ids_forbidden_negative_upsilon_is_a_forbidden_marker():
+def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
     """A reader's negative upsilon says "forbidden, no value", and must not be read as permitted.
 
-    readhillierdata stores -2 for the J pairs within a term. Those pairs carry no A, so calling
-    them permitted would send them to van Regemorter with a zero oscillator strength, i.e. to no
-    collisional coupling at all, where -2 asks for Axelrod's approximation.
+    readhillierdata writes -2 for the J pairs within a term. Those pairs carry no A, so a
+    permitted flag would send them to van Regemorter with an oscillator strength of zero, which is
+    no collisional coupling at all. The -2 asks for Axelrod's approximation instead.
     """
-    # both levels have no parity and no J, so nothing but the upsilon can decide
+    from artisatomic.output import resolve_coll_str
+
+    # neither level has a parity or a J, so nothing but the upsilon can decide
     dflevels = pl.DataFrame(
         {"levelid": [0, 1], "parity": [None, None], "j": [None, None]},
         schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
     )
     dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [0.0]})
+    joined = add_level_ids_forbidden(dflevels, dftransitions)
 
     # add_level_ids_forbidden() cannot tell on its own
-    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False]
+    assert joined["forbidden"].to_list() == [False]
 
-    # ...and write_output_files() resolves it from the upsilon, giving coll_str = -2 to match
-    forbidden = pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False)
-    resolved = (
-        add_level_ids_forbidden(dflevels, dftransitions)
-        .with_columns(upsilon=pl.lit(-2.0))
-        .with_columns(forbidden=forbidden)
-        .with_columns(
-            coll_str=pl.when(pl.col("upsilon") >= 0.0)
-            .then(pl.col("upsilon"))
-            .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
-        )
-    )
+    # a negative upsilon makes the flag true, and coll_str repeats it
+    resolved = resolve_coll_str(joined.with_columns(upsilon=pl.lit(-2.0)))
     assert resolved["forbidden"].to_list() == [True]
     assert resolved["coll_str"].to_list() == [-2.0]
+    assert "upsilon" not in resolved.columns
+
+    # a real upsilon passes through and leaves the flag alone
+    real = resolve_coll_str(joined.with_columns(upsilon=pl.lit(0.5)))
+    assert real["forbidden"].to_list() == [False]
+    assert real["coll_str"].to_list() == [0.5]
+
+    # only a missing upsilon reaches -1, and a zero is a real collision strength
+    assert resolve_coll_str(joined.with_columns(upsilon=pl.lit(None, dtype=pl.Float64)))["coll_str"].to_list() == [-1.0]
+    assert resolve_coll_str(joined.with_columns(upsilon=pl.lit(0.0)))["coll_str"].to_list() == [0.0]
+
+    # ...and a missing upsilon on a pair the parities already forbid gives -2
+    sameparity = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [1, 1], "j": [None, None]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    forbidden = add_level_ids_forbidden(sameparity, dftransitions).with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
+    assert resolve_coll_str(forbidden)["coll_str"].to_list() == [-2.0]
