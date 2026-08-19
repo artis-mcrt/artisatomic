@@ -1481,3 +1481,36 @@ def test_fill_missing_phixs_thresholds():
     # a level at or above the continuum has no edge to describe, so it keeps its NaN
     above = makeion(1, 1.0, [5.0 * percm_per_ev], [[(0, 1.0)]], [np.nan])
     assert np.isnan(fill_missing_phixs_thresholds(above, upperion, io.StringIO())[0])
+
+
+def test_add_level_ids_forbidden_negative_upsilon_is_a_forbidden_marker():
+    """A reader's negative upsilon says "forbidden, no value", and must not be read as permitted.
+
+    readhillierdata stores -2 for the J pairs within a term. Those pairs carry no A, so calling
+    them permitted would send them to van Regemorter with a zero oscillator strength, i.e. to no
+    collisional coupling at all, where -2 asks for Axelrod's approximation.
+    """
+    # both levels have no parity and no J, so nothing but the upsilon can decide
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [None, None], "j": [None, None]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [0.0]})
+
+    # add_level_ids_forbidden() cannot tell on its own
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False]
+
+    # ...and write_output_files() resolves it from the upsilon, giving coll_str = -2 to match
+    forbidden = pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False)
+    resolved = (
+        add_level_ids_forbidden(dflevels, dftransitions)
+        .with_columns(upsilon=pl.lit(-2.0))
+        .with_columns(forbidden=forbidden)
+        .with_columns(
+            coll_str=pl.when(pl.col("upsilon") >= 0.0)
+            .then(pl.col("upsilon"))
+            .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+        )
+    )
+    assert resolved["forbidden"].to_list() == [True]
+    assert resolved["coll_str"].to_list() == [-2.0]

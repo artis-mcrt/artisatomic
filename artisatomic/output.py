@@ -256,6 +256,12 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
                     )
                     .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
+                    # A negative upsilon is the reader saying this pair is forbidden and it has no
+                    # value for it: readhillierdata stores -2 for the J pairs within a term. Take
+                    # that as the statement it is, rather than leaving the parities to reach the
+                    # same answer -- a merged term has none, and the pair would then be called
+                    # permitted and sent to van Regemorter with the f of levels that have no A.
+                    .with_columns(forbidden=pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False))
                     .with_columns(
                         # No usable upsilon for this transition: -2 marks it forbidden, -1 unknown.
                         # A negative upsilon is a placeholder, not a collision strength (the CMFGEN

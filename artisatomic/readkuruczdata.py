@@ -240,6 +240,13 @@ def read_levels_and_transitions(
                 # kept only for the duplicate-line test below, and dropped by the final select
                 "label_lower",
                 "label_upper",
+                "isotope",
+                "isotope2",
+                "log_f_hyperfine",
+                "hyperfine_f_lower",
+                "hyperfine_f_upper",
+                "hyper_shift_lower",
+                "hyper_shift_upper",
             ]
         )
         # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one
@@ -290,6 +297,15 @@ def read_levels_and_transitions(
             "label_lower",
             "label_upper",
             "loggf",
+            # an isotope or hyperfine component is its own line and can share everything above
+            # with another, so the fields that tell them apart belong in the identity too
+            "isotope",
+            "isotope2",
+            "log_f_hyperfine",
+            "hyperfine_f_lower",
+            "hyperfine_f_upper",
+            "hyper_shift_lower",
+            "hyper_shift_upper",
         ],
         keep="first",
         maintain_order=True,
