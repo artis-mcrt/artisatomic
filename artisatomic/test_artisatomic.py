@@ -1525,3 +1525,41 @@ def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
     )
     forbidden = add_level_ids_forbidden(sameparity, dftransitions).with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
     assert resolve_coll_str(forbidden)["coll_str"].to_list() == [-2.0]
+
+
+def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
+    """A reader marks a threshold it does not have in two ways, and both have to count.
+
+    The arrays start as NaN, and readqubdata writes -1.0 to say that the threshold comes from the
+    level energies rather than from its cross-section table. Only NaN counted at first, which left
+    every QUB level with its -1 and made the calculation dead code for the one reader that asks
+    for it.
+    """
+    from artisatomic.iondata import IonData
+    from artisatomic.output import fill_missing_phixs_thresholds
+
+    def makeion(ion_stage, ionpot, energiespercm, targets, thresholds):
+        return IonData(
+            ion_stage=ion_stage,
+            handler="test",
+            is_top_ion=False,
+            ionization_energy_ev=ionpot,
+            dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
+            dftransitions=pl.DataFrame(),
+            transition_count_of_level_name={},
+            upsilondict={},
+            hillier_photoion_targetconfigs=None,
+            photoionization_crosssections=np.zeros((len(energiespercm), 1)),
+            photoionization_targetfractions=targets,
+            photoionization_thresholds_ev=np.array(thresholds),
+        )
+
+    upperion = makeion(2, 25.0, [0.0], [], [])
+    # the two ways of saying "no value": NaN and readqubdata's -1
+    ion = makeion(1, 17.084, [0.0, 0.0], [[(0, 1.0)], [(0, 1.0)]], [np.nan, -1.0])
+
+    filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
+
+    # a ground state ionizing to the upper ion's ground state has the ionization energy itself
+    assert filled[0] == pytest.approx(17.084)
+    assert filled[1] == pytest.approx(17.084)

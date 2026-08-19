@@ -470,11 +470,17 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     with both level energies above their own ion's ground state. The target is the first one, as
     ARTIS uses phixstargetindex 0 for a level's continuum edge (input.cc).
 
+    A reader marks a threshold it does not have in two ways, and both count as missing here: NaN,
+    which is what the arrays start as, and a negative value, which readqubdata writes to say that
+    the threshold comes from the level energies rather than from its cross-section table.
+
     A threshold that does not come out positive is left alone: the level is then at or above the
     continuum, which is not something a photoionisation edge can describe.
     """
     thresholds = iondata.photoionization_thresholds_ev.copy()
-    missing = [levelid for levelid, threshold in enumerate(thresholds) if not np.isfinite(threshold)]
+    missing = [
+        levelid for levelid, threshold in enumerate(thresholds) if not np.isfinite(threshold) or threshold <= 0.0
+    ]
     if not missing or upperiondata is None:
         return thresholds
     if "energyabovegsinpercm" not in iondata.dfenergylevels.columns:
