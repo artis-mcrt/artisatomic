@@ -1629,3 +1629,45 @@ def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
     assert autoreverse_of_reaction[32, 3, 1, 1] == 1
     # Ge0 + H+ -> Ge+1 + H0 has the Table 4 row of Ge+1 as its explicit reverse
     assert autoreverse_of_reaction[1, 2, 32, 1] == 0
+
+
+def _cloudy_table(magic: str, ncols: int, rows: dict[tuple[int, int], list[float]]) -> str:
+    """Build the text of a Cloudy charge transfer file, with an empty row for each ion not given."""
+    lines = [f"  {magic}"]
+    lines += [
+        "  ".join(f"{value:.5e}" for value in rows.get((atomic_number, ionindex), [0.0] * ncols))
+        for atomic_number in range(1, 31)
+        for ionindex in range(1, 5)
+    ]
+    return "\n".join(lines)
+
+
+def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
+    """A Cloudy reaction keeps autoreverse=1 unless the files hold a fit for its reverse.
+
+    Cloudy leaves an empty row for a reaction that it does not carry, in either direction. Such a
+    row gives no reverse fit, so the code must add the reverse reaction from detailed balance.
+    """
+    fit = [2.0, 0.5, 0.0, 0.0]
+    tables = {
+        # S+1 + H0 -> S0 + H+ and Fe+3 + H0 -> Fe+2 + H+
+        "ctrecombdata.dat": _cloudy_table(
+            "201903042", 7, {(16, 1): [*fit, 1e3, 3e4, 1.0], (26, 3): [*fit, 1e3, 3e4, 1.0]}
+        ),
+        # S0 + H+ -> S+1 + H0 and Li0 + H+ -> Li+1 + H0
+        "ctiondata.dat": _cloudy_table(
+            "201903041", 8, {(16, 1): [*fit, 1e3, 3e4, 0.0, 1.0], (3, 1): [*fit, 1e3, 3e4, 0.0, 1.0]}
+        ),
+    }
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+
+    entries, _report = makechargetransferfile.get_kf96_h_entries(tmp_path)
+    autoreverse_of_reaction = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse for e in entries}
+
+    # the S reactions are a pair, so each one is the explicit reverse of the other
+    assert autoreverse_of_reaction[16, 2, 1, 1] == 0
+    assert autoreverse_of_reaction[1, 2, 16, 1] == 0
+    # Fe+3 + H0 -> Fe+2 + H+ has no ionisation row for Fe+2, and Li0 + H+ -> Li+1 + H0 has no
+    # recombination row for Li+1
+    assert autoreverse_of_reaction[26, 4, 1, 1] == 1
+    assert autoreverse_of_reaction[1, 2, 3, 1] == 1

@@ -286,6 +286,8 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
 
     # the ionisation rows define which recombination rows have an explicit reverse fit
     ion_keys = {(z, q1 - 1) for (z, q1), vals in ion.items() if vals[0] != 0.0}
+    # a recombination row that Cloudy leaves empty gives no reverse fit to an ionisation row
+    rec_keys = {(z, q) for (z, q), vals in rec.items() if vals[5] != 0.0}
 
     entries = []
     for (z, q), vals in sorted(rec.items()):
@@ -330,7 +332,8 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
             note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
         comment = f"{label}; energy deficit={fnum(deficit_ev)} eV; {note}"
-        entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, 0, comment))
+        autoreverse = 0 if (z, q + 1) in rec_keys else 1
+        entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, autoreverse, comment))
 
     return entries, report
 
