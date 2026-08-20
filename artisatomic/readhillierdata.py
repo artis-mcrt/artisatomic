@@ -5,8 +5,10 @@ import re
 import sys
 import typing as t
 from collections import defaultdict
+from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+from string import ascii_uppercase
 
 import numpy as np
 import numpy.typing as npt
@@ -75,246 +77,88 @@ hillier_transition_schema = pl.Schema(
 hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname not in {"parity", "j"})
 
 
-# keys are (atomic number, ion stage)
 class IonFiles(t.NamedTuple):
     """The CMFGEN files holding one ion's levels, cross sections and collision data."""
 
     folder: str
     levelstransitionsfilename: str
-    photfilenames: list[str]
+    photfilenames: tuple[str, ...]
     coldatafilename: str
 
 
+def phot_data_names(count: int) -> tuple[str, ...]:
+    """Get the standard CMFGEN photoionisation file names for one ion."""
+    return tuple(f"phot_data_{ascii_uppercase[index]}" for index in range(count))
+
+
+default_ion_files = IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data")
+
+default_ion_stages: dict[int, Iterable[int]] = {
+    6: range(1, 7),  # C
+    7: range(5, 8),  # N
+    8: (2, 3, 5, 6, 7, 8),  # O
+    10: range(1, 9),  # Ne
+    11: range(1, 10),  # Na
+    12: range(1, 11),  # Mg
+    13: range(1, 12),  # Al
+    14: (1, *range(3, 13)),  # Si
+    15: range(2, 12),  # P (I not in CMFGEN)
+    16: range(1, 11),  # S
+    17: range(4, 8),  # Cl (only ions IV to VII)
+    18: range(1, 11),  # Ar
+    19: range(1, 12),  # K
+    20: range(1, 12),  # Ca
+    21: range(1, 4),  # Sc (only I-III are in CMFGEN)
+    22: range(2, 4),  # Ti (only II and III are in CMFGEN)
+    24: range(1, 15),  # Cr
+    25: range(2, 8),  # Mn (Mn I is not in CMFGEN)
+    26: (2, 3, *range(5, 17)),  # Fe
+    27: range(1, 10),  # Co
+    28: range(1, 17),  # Ni
+}
+
 ions_data = {
+    (atomic_number, ion_stage): default_ion_files
+    for atomic_number, ion_stages in default_ion_stages.items()
+    for ion_stage in ion_stages
+}
+
+# keys are (atomic number, ion stage)
+ions_data |= {
     # H
-    (1, 1): IonFiles("5dec96", "hi_osc.dat", ["hiphot.dat"], "hicol.dat"),
-    (1, 2): IonFiles("", "", [""], ""),
+    (1, 1): IonFiles("5dec96", "hi_osc.dat", ("hiphot.dat",), "hicol.dat"),
+    (1, 2): IonFiles("", "", (), ""),
     # He
-    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ["heiphot_a7.dat"], "heicol.dat"),
-    (2, 2): IonFiles("5dec96", "he2_osc.dat", ["he2phot.dat"], "he2col.dat"),
+    (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ("heiphot_a7.dat",), "heicol.dat"),
+    (2, 2): IonFiles("5dec96", "he2_osc.dat", ("he2phot.dat",), "he2col.dat"),
     # C
-    (6, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (6, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (6, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (6, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (6, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (6, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (6, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (6, 3): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # N
-    (7, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"], "col_data"),
-    (7, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 3): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (7, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (7, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (7, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (7, 1): IonFiles("19apr23", "osc_data", phot_data_names(4), "col_data"),
+    (7, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (7, 3): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (7, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # O
-    (8, 1): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (8, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 4): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (8, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (8, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (8, 1): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (8, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # F
-    (9, 2): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c"], ""),
-    (9, 3): IonFiles("tst", "fin_osc", ["phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"], ""),
-    # Ne
-    (10, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (10, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Na
-    (11, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (11, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Mg
-    (12, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (12, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Al
-    (13, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (13, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), ""),
+    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
     # Si
-    (14, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 2): IonFiles("19apr23", "osc_data", ["phot_data_A", "phot_data_B"], "col_data"),
-    (14, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (14, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # P (I not in CMFGEN)  # ruff: ignore[commented-out-code]
-    (15, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (15, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # S
-    (16, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (16, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Cl (only ions IV to VII)
-    (17, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (17, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (17, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (17, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Ar
-    (18, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (18, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # K
-    (19, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (19, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Ca
-    (20, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (20, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Sc (only I-III are in CMFGEN)
-    (21, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (21, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (21, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Ti (only II and III are in CMFGEN, IV has dummy files with a single level)
-    (22, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (22, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
+    (14, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    # P
+    (15, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    # Ti IV has dummy files with a single level.
+    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ("phot_data.dat",), "col_guess.dat"),
     # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): IonFiles("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
-    # Cr
-    (24, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (24, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Mn (Mn I is not in CMFGEN)
-    (25, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (25, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (25, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (25, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (25, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (25, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot.dat",), "col_guess.dat"),
     # Fe
-    (26, 1): IonFiles("19apr23", "osc_data", ["REV_PHOT_DATA"], "col_data"),
-    (26, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", ["phot_data_A"], "col_data"),
-    (26, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 15): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (26, 16): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Co
-    (27, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (27, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    # Ni
-    (28, 1): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 3): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 4): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 5): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 6): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 7): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 8): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 9): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 10): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 11): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 12): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 13): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 14): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 15): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
-    (28, 16): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    (26, 1): IonFiles("19apr23", "osc_data", ("REV_PHOT_DATA",), "col_data"),
+    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", phot_data_names(1), "col_data"),
     # Cu, Zn and above are not in CMGFEN?
     # Ba
-    # (56, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # (56, 2): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
 }
 
 elsymboltohilliercode = {
@@ -826,8 +670,6 @@ def read_phixs_tables(
     phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
-        if not photfilename:
-            continue
         filename = Path(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )

@@ -624,9 +624,9 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
         return crosssections, targetconfigs, flog.getvalue()
 
     file_a, file_b = ionfiles.photfilenames
-    crosssections_a, targets_a, _ = read_phixs([file_a])
-    crosssections_b, targets_b, _ = read_phixs([file_b])
-    crosssections, targetconfigs, log = read_phixs([file_a, file_b])
+    crosssections_a, targets_a, _ = read_phixs((file_a,))
+    crosssections_b, targets_b, _ = read_phixs((file_b,))
+    crosssections, targetconfigs, log = read_phixs((file_a, file_b))
 
     # the duplicates are reported rather than raised
     assert "has a cross section table in more than one photoionisation file" in log
@@ -1163,6 +1163,75 @@ def test_split_element_ionstage_str():
 
     with pytest.raises(ValueError, match="Could not split"):
         split_element_ionstage_str("NotAnIon")
+
+
+def test_hillier_ions_data_matches_the_cmfgen_corpus():
+    """ions_data holds one entry for every CMFGEN ion, with the phot file names of that ion.
+
+    The ion stages come from ranges, so a wrong bound drops an ion without a syntax error.
+    extend_ion_list() then never offers that ion, and the checksum tests do not find the
+    mistake: the two CMFGEN sets read 31 of the 199 ions. This test pins the full list.
+    """
+    expected_ion_stages = {
+        1: [1, 2],  # H
+        2: [1, 2],  # He
+        6: [1, 2, 3, 4, 5, 6],  # C
+        7: [1, 2, 3, 4, 5, 6, 7],  # N
+        8: [1, 2, 3, 4, 5, 6, 7, 8],  # O
+        9: [2, 3],  # F
+        10: [1, 2, 3, 4, 5, 6, 7, 8],  # Ne
+        11: [1, 2, 3, 4, 5, 6, 7, 8, 9],  # Na
+        12: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  # Mg
+        13: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],  # Al
+        14: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],  # Si
+        15: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11],  # P
+        16: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  # S
+        17: [4, 5, 6, 7],  # Cl
+        18: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],  # Ar
+        19: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],  # K
+        20: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],  # Ca
+        21: [1, 2, 3],  # Sc
+        22: [2, 3],  # Ti
+        24: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14],  # Cr
+        25: [2, 3, 4, 5, 6, 7],  # Mn
+        26: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],  # Fe
+        27: [1, 2, 3, 4, 5, 6, 7, 8, 9],  # Co
+        28: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16],  # Ni
+    }
+    ion_stages = {
+        atomic_number: sorted(
+            stage for (found_atomic_number, stage) in readhillierdata.ions_data if found_atomic_number == atomic_number
+        )
+        for atomic_number in sorted({atomic_number for atomic_number, _ in readhillierdata.ions_data})
+    }
+    assert ion_stages == expected_ion_stages
+
+    # every ion whose phot files are not the single default file. H II is the bare top ion, so
+    # it has no files at all.
+    expected_photfilenames = {
+        (1, 1): ("hiphot.dat",),
+        (1, 2): (),
+        (2, 1): ("heiphot_a7.dat",),
+        (2, 2): ("he2phot.dat",),
+        (6, 2): ("phot_data_A", "phot_data_B"),
+        (6, 3): ("phot_data_A", "phot_data_B"),
+        (7, 1): ("phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"),
+        (7, 2): ("phot_data_A", "phot_data_B"),
+        (7, 3): ("phot_data_A", "phot_data_B"),
+        (7, 4): ("phot_data_A", "phot_data_B"),
+        (8, 1): ("phot_data_A", "phot_data_B"),
+        (8, 4): ("phot_data_A", "phot_data_B"),
+        (9, 2): ("phot_data_a", "phot_data_b", "phot_data_c"),
+        (9, 3): ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"),
+        (14, 2): ("phot_data_A", "phot_data_B"),
+        (15, 4): ("phot_data_A", "phot_data_B"),
+        (26, 1): ("REV_PHOT_DATA",),
+    }
+    assert {
+        ion: ionfiles.photfilenames
+        for ion, ionfiles in readhillierdata.ions_data.items()
+        if ionfiles.photfilenames != ("phot_data_A",)
+    } == expected_photfilenames
 
 
 def test_hillier_extend_ion_list():
