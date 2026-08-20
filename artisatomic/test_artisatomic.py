@@ -1577,11 +1577,13 @@ def test_makechargetransferfile_cds_totals_and_fit():
     """read_cds_totals adds the channels above the radiative floor, and the fit recovers a power law."""
     powerlaw = [3.0e-10 * (temp / 1e4) ** 0.5 for temp in makechargetransferfile.SS11_TGRID]
     floor = [1.00e-14] * len(makechargetransferfile.SS11_TGRID)
+    subfloor = [5.00e-21] * len(makechargetransferfile.SS11_TGRID)
     text = "\n".join(
         [
             _ss11_cds_line("Ge", 1, "4s^2^4p^2^ ^3^P", powerlaw),
             _ss11_cds_line("Ge", 1, "4s^2^4p^2^ ^1^D", floor),
             _ss11_cds_line("Ge", 2, "4s^2^4p ^2^P^o^", floor),
+            _ss11_cds_line("Ge", 3, "4s4p ^1^P^o^", subfloor),
         ]
     )
     totals = makechargetransferfile.read_cds_totals(text)
@@ -1590,6 +1592,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
     assert totals["Ge", 1] == pytest.approx(powerlaw, rel=0.01)
     # every channel on the floor gives the floor itself, not zero
     assert totals["Ge", 2] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
+    # the paper floors the total, so a sum below the floor also becomes the floor
+    assert totals["Ge", 3] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
 
     a, b, eexp, maxerr, npts = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
     assert a == pytest.approx(3.0e-10, rel=0.01)

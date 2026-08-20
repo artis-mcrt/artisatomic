@@ -427,7 +427,7 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
 
     The CDS tables floor each channel at the radiative rate 1e-14 cm3/s, while the paper floors the
     total. To reproduce the totals printed in the paper, exclude the channel values that sit exactly
-    on the floor, then floor the sum when a channel was excluded.
+    on the floor, then floor the sum.
     """
     channelvalues: dict[tuple[str, int], list[list[float]]] = {}
     for rawline in text.split("\n"):
@@ -446,11 +446,8 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     for key, cols in channelvalues.items():
         row = []
         for col in cols:
-            genuine = [v for v in col if v != 1.00e-14]
-            total = sum(genuine)
-            if len(genuine) < len(col):
-                total = max(total, 1.00e-14)
-            row.append(total)
+            total = sum(v for v in col if v != 1.00e-14)
+            row.append(max(total, 1.00e-14))
         totals[key] = row
     return totals
 
