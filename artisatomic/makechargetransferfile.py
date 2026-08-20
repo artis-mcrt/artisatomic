@@ -13,11 +13,11 @@ writes one file with one reaction for each line. The sources are:
 - The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11) for the n-capture elements
   Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no fit
   coefficients, so the script fits their tables over 1e3 to 4e4 K.
-- Estimates for the reactions of a heavy ion with a neutral heavy atom, which the kilonova
-  ejecta need because those ejecta hold no hydrogen. No publication gives these rates. The
-  script takes the ionization energies of Sc to U from the NIST ASD, keeps the exothermic
-  reactions with a small energy defect, and gives each one the near-resonant rate of
-  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
+- Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
+  hold no hydrogen and need these reactions. No publication gives these rates, so the script
+  takes the ionization energies of Sc to U from the NIST ASD. It keeps the exothermic
+  reactions with a small energy defect. Each one gets the near-resonant rate of 1e-9 cm3/s
+  (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -375,11 +375,11 @@ def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CT
     """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
 
     The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
-    occur there. No publication gives the heavy-element rates. An exothermic reaction with an
-    energy defect below METAL_METAL_MAX_DEFECT_EV can reach a level of the products near
-    resonance, because the heavy species have many low levels. Such a reaction gets the
-    near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral: the Coulomb
-    repulsion between two positive ions makes their reactions slow.
+    occur there. No publication gives the heavy-element rates. The heavy species have many low
+    levels. An exothermic reaction with an energy defect below METAL_METAL_MAX_DEFECT_EV can
+    therefore reach a level of the products near resonance. Such a reaction gets the
+    near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
+    Coulomb repulsion between two positive ions makes their reactions slow.
     """
     energies = read_nist_ionisation_energies(download("nist_ie_sc_to_u.dat", cachedir, refresh=refresh))
     donors = sorted(z for (z, charge) in energies if charge == 0)
