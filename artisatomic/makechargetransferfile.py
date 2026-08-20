@@ -5,14 +5,14 @@ The script downloads the published fits and rate tables, converts them into one 
 writes one file with one reaction for each line. The sources are:
 
 - The Cloudy master data files ctrecombdata.dat and ctiondata.dat (gitlab.nublado.org). They carry
-  the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) for reactions with hydrogen, plus the
-  later updates that Cloudy applies to individual reactions. The script compares each row against
-  the KF96 paper tables (transcribed below) and names each update in the comment of its line.
+  the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) for reactions with hydrogen. Cloudy
+  adds later updates to individual reactions. The script compares each row against the KF96 paper
+  tables (transcribed below) and names each update in the comment of its line.
 - The table of Arnaud & Rothenflug (1985), A&AS, 60, 425 (AR85) for recombination with neutral
   helium, from the ASCII file ct2.dat of D. Verner (pa.uky.edu/~verner).
-- The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11) for the n-capture elements
-  Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no fit
-  coefficients, so the script fits their tables over 1e3 to 4e4 K.
+- The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11). They cover the n-capture
+  elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
+  fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 - Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
   hold no hydrogen and need these reactions. No publication gives these rates, so the script
   takes the ionization energies of Sc to U from the NIST ASD. It keeps the exothermic
@@ -197,8 +197,8 @@ MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the repo
 # The unit is 1e-9 cm3/s, which is the unit of the fit coefficient a.
 METAL_METAL_RATE = 1.0
 # An exothermic reaction with an energy defect up to this value gets the estimate. A larger
-# defect can not reach a level of the products near resonance, so the reaction stays slow and
-# ARTIS makes its own Landau-Zener estimate instead.
+# defect can not reach a level of the products near resonance. The reaction then stays slow,
+# and ARTIS makes its own Landau-Zener estimate.
 METAL_METAL_MAX_DEFECT_EV = 4.0
 # the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
 METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
@@ -467,13 +467,13 @@ class SS11Fit(t.NamedTuple):
 def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve.
 
-    The usable points lie between 1e3 and 4e4 K and above the 1e-14 floor: charge transfer
-    competes with the other processes only in the nebular low-temperature regime, and the fit
+    The usable points lie between 1e3 and 4e4 K and above the 1e-14 floor. Charge transfer
+    competes with the other processes only in the nebular low-temperature regime. Also, the fit
     form cannot span the floor-then-steep-rise shape of some reactions over the full tabulated
     range. tmin and tmax hold the span of the usable points. Below tmin, the reader clamps t4
     and the Boltzmann factor keeps the true temperature, so the rate falls like the tabulated
     values do. A curve with fewer than four usable points gets the flat value of its 2e4 K
-    entry, together with the error of that value over the usable points.
+    entry. The result includes the error of that value over the usable points.
     """
     pts = [(temp, k) for temp, k in zip(SS11_TGRID, ks, strict=True) if 1000 <= temp <= 40000 and k > 1.2e-14]
     if len(pts) < 4:
