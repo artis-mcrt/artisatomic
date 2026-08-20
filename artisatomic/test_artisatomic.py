@@ -1330,3 +1330,239 @@ def test_get_level_valence_n():
     assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
     assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
     assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
+
+
+def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
+    """Gfall repeats some lines, and separately lists distinct lines that share a level pair.
+
+    A repeat has the same labels at both ends, and is one line given twice, once at its observed
+    wavelength and once at the Ritz one. ARTIS adds the A values of two rows that share a level
+    pair (input.cc), so keeping both would double the line.
+
+    Rows that share a level pair with DIFFERENT labels are separate transitions whose levels the
+    (energy, J) key merged into one. Sr I has 785 of those, two of them strong, and dropping them
+    would delete real lines. They are left for ARTIS to combine.
+    """
+    from artisatomic import readkuruczdata
+
+    # pin the committed sample, so the answer does not depend on which corpus is unpacked
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(39, 1))).collect()
+    levelkey = ["energyabovegsinpercm_lower", "j_lower", "energyabovegsinpercm_upper", "j_upper"]
+    # Y II holds one repeat: s5p z3P -> d5d g3D at both 241.7267 and 241.7308 nm
+    assert gfall.height - gfall.unique(levelkey).height == 1
+    assert gfall.height - gfall.unique([*levelkey, "label_lower", "label_upper"]).height == 1
+
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    _, dflevels, transitions, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+
+    # the repeat is gone, and no level pair is left with two rows for ARTIS to add up
+    assert transitions.height == gfall.height - 1
+    assert transitions.group_by(["lowerlevel", "upperlevel"]).len().filter(pl.col("len") > 1).is_empty()
+
+    # Sr II in the zztar layout has five groups that match on the levels AND both labels but
+    # whose loggf differs, by as much as -2.848 against -1.547. Those are separate lines, and
+    # keeping the first would discard the stronger of the two, so the strength is part of the key.
+    srii = readkuruczdata.parse_gfall(
+        str(PYDIR / ".." / "atomic-data-kurucz" / "test_sample" / "zztar" / "gf3801.all.zst")
+    ).collect()
+    withlabels = [*levelkey, "label_lower", "label_upper"]
+    assert srii.height - srii.unique(withlabels).height == 5
+    assert srii.height - srii.unique([*withlabels, "loggf"]).height == 0
+
+    # the surviving row keeps one line's A, not the sum of the two
+    levelid_of_name = dict(dflevels.select("levelname", "levelid").iter_rows())
+    lower = levelid_of_name["s5p z3P,enpercm=23776.241,j=1.0"]
+    upper = levelid_of_name["d5d g3D,enpercm=65132.0,j=1.0"]
+    kept = transitions.filter((pl.col("lowerlevel") == lower) & (pl.col("upperlevel") == upper))
+    assert kept.height == 1
+    assert kept["A"].item() == pytest.approx(3.805e8, rel=1e-3)
+
+
+def test_write_phixs_data_keeps_a_table_with_no_threshold():
+    """A cross section is real data; a threshold ARTIS never reads is not a reason to drop it."""
+    import argparse
+
+    from artisatomic import write_phixs_data
+
+    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
+    targetfractions = [[(0, 1.0)], [(0, 1.0)]]
+    thresholds = np.array([13.6, np.nan])  # the second level's threshold is unknown
+
+    out = io.StringIO()
+    write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
+    written = out.getvalue()
+
+    # one header line per level: both get a table, where level 2 used to be discarded outright
+    headers = [line for line in written.splitlines() if line.split()[0] == "8"]
+    assert len(headers) == 2
+    assert headers[0].split()[-2:] == ["1", "1.360000E+01"]
+    # the unknown threshold is written as zero, not as a NaN the reader would choke on
+    assert headers[1].split()[-2:] == ["2", "0.000000E+00"]
+    assert "nan" not in written.lower()
+
+    # ...and level 2's cross sections are all there
+    assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
+
+
+def test_log_degenerate_transitions():
+    """ARTIS drops a transition whose two levels have one energy, so artisatomic reports it."""
+    from artisatomic.output import log_degenerate_transitions
+
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1, 2], "energyabovegsinpercm": [0.0, 100.0, 100.0]},
+        schema={"levelid": pl.Int64, "energyabovegsinpercm": pl.Float64},
+    )
+
+    def warnings_for(dftransitions: pl.DataFrame) -> str:
+        flog = io.StringIO()
+        log_degenerate_transitions(flog, dflevels, dftransitions)
+        return flog.getvalue()
+
+    # levels 1 and 2 share an energy, so that pair is reported and the other is not
+    degenerate = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0], "coll_str": [-2.0]})
+    assert "1 transitions connect two levels of the same energy" in warnings_for(degenerate)
+    assert "(0 of them with a collision strength)" in warnings_for(degenerate)
+
+    ok = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0], "coll_str": [-1.0]})
+    assert not warnings_for(ok)
+
+    # a tabulated upsilon on such a pair is real data that ARTIS will not use, so it is counted
+    withupsilon = degenerate.with_columns(coll_str=pl.lit(0.5))
+    assert "(1 of them with a collision strength)" in warnings_for(withupsilon)
+
+    # a transitions frame with no coll_str column still reports the pair, counting none
+    nocollstr = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0]})
+    assert "(0 of them with a collision strength)" in warnings_for(nocollstr)
+
+    # a level frame with no energy column cannot be checked, and must stay silent rather than raise
+    flog = io.StringIO()
+    log_degenerate_transitions(flog, dflevels.drop("energyabovegsinpercm"), degenerate)
+    assert not flog.getvalue()
+
+
+def test_fill_missing_phixs_thresholds():
+    """A threshold the reader could not give is worked out the way ARTIS derives it."""
+    from artisatomic.iondata import IonData
+    from artisatomic.output import fill_missing_phixs_thresholds
+
+    def makeion(ion_stage, ionpot, energiespercm, targets, thresholds):
+        return IonData(
+            ion_stage=ion_stage,
+            handler="test",
+            is_top_ion=False,
+            ionization_energy_ev=ionpot,
+            dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
+            dftransitions=pl.DataFrame(),
+            transition_count_of_level_name={},
+            upsilondict={},
+            hillier_photoion_targetconfigs=None,
+            photoionization_crosssections=np.zeros((len(energiespercm), 1)),
+            photoionization_targetfractions=targets,
+            photoionization_thresholds_ev=np.array(thresholds),
+        )
+
+    percm_per_ev = 1.0 / hc_in_ev_cm
+    # this ion: ground state and a level 2 eV up. Upper ion: ground state and a level 1 eV up.
+    ion = makeion(1, 10.0, [0.0, 2.0 * percm_per_ev], [[(0, 1.0)], [(1, 1.0)]], [np.nan, np.nan])
+    upperion = makeion(2, 25.0, [0.0, 1.0 * percm_per_ev], [], [])
+
+    filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
+
+    # ionization energy + target level energy - this level's energy
+    assert filled[0] == pytest.approx(10.0 + 0.0 - 0.0)
+    assert filled[1] == pytest.approx(10.0 + 1.0 - 2.0)
+
+    # a threshold the reader did give is left alone, and so is one with no upper ion to look in
+    given = makeion(1, 10.0, [0.0], [[(0, 1.0)]], [7.5])
+    assert fill_missing_phixs_thresholds(given, upperion, io.StringIO())[0] == pytest.approx(7.5)
+    assert np.isnan(fill_missing_phixs_thresholds(ion, None, io.StringIO())[0])
+
+    # a level at or above the continuum has no edge to describe, so it keeps its NaN
+    above = makeion(1, 1.0, [5.0 * percm_per_ev], [[(0, 1.0)]], [np.nan])
+    assert np.isnan(fill_missing_phixs_thresholds(above, upperion, io.StringIO())[0])
+
+
+def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
+    """A reader's negative upsilon says "forbidden, no value", and must not be read as permitted.
+
+    readhillierdata writes -2 for the J pairs within a term. Those pairs carry no A, so a
+    permitted flag would send them to van Regemorter with an oscillator strength of zero, which is
+    no collisional coupling at all. The -2 asks for Axelrod's approximation instead.
+    """
+    from artisatomic.output import resolve_coll_str
+
+    # neither level has a parity or a J, so nothing but the upsilon can decide
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [None, None], "j": [None, None]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [0.0]})
+    joined = add_level_ids_forbidden(dflevels, dftransitions)
+
+    # add_level_ids_forbidden() cannot tell on its own
+    assert joined["forbidden"].to_list() == [False]
+
+    # a negative upsilon makes the flag true, and coll_str repeats it
+    resolved = resolve_coll_str(joined.with_columns(upsilon=pl.lit(-2.0)))
+    assert resolved["forbidden"].to_list() == [True]
+    assert resolved["coll_str"].to_list() == [-2.0]
+    assert "upsilon" not in resolved.columns
+
+    # a real upsilon passes through and leaves the flag alone
+    real = resolve_coll_str(joined.with_columns(upsilon=pl.lit(0.5)))
+    assert real["forbidden"].to_list() == [False]
+    assert real["coll_str"].to_list() == [0.5]
+
+    # only a missing upsilon reaches -1, and a zero is a real collision strength
+    assert resolve_coll_str(joined.with_columns(upsilon=pl.lit(None, dtype=pl.Float64)))["coll_str"].to_list() == [-1.0]
+    assert resolve_coll_str(joined.with_columns(upsilon=pl.lit(0.0)))["coll_str"].to_list() == [0.0]
+
+    # ...and a missing upsilon on a pair the parities already forbid gives -2
+    sameparity = pl.DataFrame(
+        {"levelid": [0, 1], "parity": [1, 1], "j": [None, None]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64},
+    )
+    forbidden = add_level_ids_forbidden(sameparity, dftransitions).with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
+    assert resolve_coll_str(forbidden)["coll_str"].to_list() == [-2.0]
+
+
+def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
+    """A reader marks a threshold it does not have in two ways, and both have to count.
+
+    The arrays start as NaN, and readqubdata writes -1.0 to say that the threshold comes from the
+    level energies rather than from its cross-section table. Only NaN counted at first, which left
+    every QUB level with its -1 and made the calculation dead code for the one reader that asks
+    for it.
+    """
+    from artisatomic.iondata import IonData
+    from artisatomic.output import fill_missing_phixs_thresholds
+
+    def makeion(ion_stage, ionpot, energiespercm, targets, thresholds):
+        return IonData(
+            ion_stage=ion_stage,
+            handler="test",
+            is_top_ion=False,
+            ionization_energy_ev=ionpot,
+            dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
+            dftransitions=pl.DataFrame(),
+            transition_count_of_level_name={},
+            upsilondict={},
+            hillier_photoion_targetconfigs=None,
+            photoionization_crosssections=np.zeros((len(energiespercm), 1)),
+            photoionization_targetfractions=targets,
+            photoionization_thresholds_ev=np.array(thresholds),
+        )
+
+    upperion = makeion(2, 25.0, [0.0], [], [])
+    # the two ways of saying "no value": NaN and readqubdata's -1
+    ion = makeion(1, 17.084, [0.0, 0.0], [[(0, 1.0)], [(0, 1.0)]], [np.nan, -1.0])
+
+    filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
+
+    # a ground state ionizing to the upper ion's ground state has the ionization energy itself
+    assert filled[0] == pytest.approx(17.084)
+    assert filled[1] == pytest.approx(17.084)
