@@ -8,6 +8,7 @@ from collections import defaultdict
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+from string import ascii_uppercase
 
 import numpy as np
 import numpy.typing as npt
@@ -81,20 +82,16 @@ class IonFiles(t.NamedTuple):
 
     folder: str
     levelstransitionsfilename: str
-    photfilenames: tuple[str, ...] | None
+    photfilenames: tuple[str, ...]
     coldatafilename: str
-    photfilecount: int = 1
 
 
-def get_photfilenames(ionfiles: IonFiles) -> list[str]:
-    """Get one ion's photoionization file names."""
-    if ionfiles.photfilenames is not None:
-        return list(ionfiles.photfilenames)
-
-    return [f"phot_data_{chr(ord('A') + file_index)}" for file_index in range(ionfiles.photfilecount)]
+def phot_data_names(count: int) -> tuple[str, ...]:
+    """Get the standard CMFGEN photoionisation file names for one ion."""
+    return tuple(f"phot_data_{ascii_uppercase[index]}" for index in range(count))
 
 
-default_ion_files = IonFiles("19apr23", "osc_data", None, "col_data")
+default_ion_files = IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data")
 
 default_ion_stages: dict[int, Iterable[int]] = {
     6: range(1, 7),  # C
@@ -130,37 +127,38 @@ ions_data = {
 ions_data |= {
     # H
     (1, 1): IonFiles("5dec96", "hi_osc.dat", ("hiphot.dat",), "hicol.dat"),
-    (1, 2): IonFiles("", "", None, "", photfilecount=0),
+    (1, 2): IonFiles("", "", (), ""),
     # He
     (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ("heiphot_a7.dat",), "heicol.dat"),
     (2, 2): IonFiles("5dec96", "he2_osc.dat", ("he2phot.dat",), "he2col.dat"),
     # C
-    (6, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
-    (6, 3): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (6, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (6, 3): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # N
-    (7, 1): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=4),
-    (7, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
-    (7, 3): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
-    (7, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (7, 1): IonFiles("19apr23", "osc_data", phot_data_names(4), "col_data"),
+    (7, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (7, 3): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (7, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # O
-    (8, 1): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
-    (8, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (8, 1): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    (8, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # F
     (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), ""),
     (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
     # Si
-    (14, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (14, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # P
-    (15, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (15, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
+    # Ti IV has dummy files with a single level.
+    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ("phot_data.dat",), "col_guess.dat"),
+    # V (only V I is in CMFGEN and it has a single level)
+    # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot.dat",), "col_guess.dat"),
     # Fe
     (26, 1): IonFiles("19apr23", "osc_data", ("REV_PHOT_DATA",), "col_data"),
-    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", None, "col_data"),
-    # Ti IV has dummy files with a single level.
-    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): IonFiles("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
+    (26, 4): IonFiles("19apr23", "feiv_osc_rev2", phot_data_names(1), "col_data"),
     # Cu, Zn and above are not in CMGFEN?
-    # (56, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
+    # Ba
+    # (56, 2): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
 }
 
 elsymboltohilliercode = {
@@ -653,7 +651,7 @@ def read_phixs_tables(
     # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file, which
     # equals the ionisation stage for every ion here)
     zion = ion_stage
-    photfilenames = get_photfilenames(ions_data[atomic_number, ion_stage])
+    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     phixstables = [{} for _ in photfilenames]
     phixstargets = ["" for _ in photfilenames]
     reduced_phixs_dict = {}
@@ -672,8 +670,6 @@ def read_phixs_tables(
     phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
     unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
-        if not photfilename:
-            continue
         filename = Path(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
