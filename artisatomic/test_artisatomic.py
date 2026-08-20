@@ -1595,15 +1595,29 @@ def test_makechargetransferfile_cds_totals_and_fit():
     # the paper floors the total, so a sum below the floor also becomes the floor
     assert totals["Ge", 3] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
 
-    a, b, eexp, maxerr, npts = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
-    assert a == pytest.approx(3.0e-10, rel=0.01)
-    assert b == pytest.approx(0.5, rel=0.01)
-    assert eexp == 0.0
-    assert maxerr < 0.01
-    assert npts == 8
+    fit = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
+    assert fit.a == pytest.approx(3.0e-10, rel=0.01)
+    assert fit.b == pytest.approx(0.5, rel=0.01)
+    assert fit.eexp == 0.0
+    assert fit.maxerr < 0.01
+    assert fit.npts == 8
+    # the eight usable points span the full window, so the fit is valid over all of it
+    assert (fit.tmin, fit.tmax) == (1000, 40000)
 
     # the floor curve has no usable points, so the fit is flat at the 2e4 K value
-    assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0)
+    assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0.0, 20000, 20000)
+
+    # a curve with fewer than four usable points gets the flat 2e4 K value, and the error of
+    # that value over the usable points must not be hidden
+    steep = [
+        2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.00e-14)
+        for temp in makechargetransferfile.SS11_TGRID
+    ]
+    fallback = makechargetransferfile.fit_ss11_curve(steep)
+    assert fallback.a == pytest.approx(5.0e-14)
+    assert fallback.npts == 2
+    assert fallback.maxerr == pytest.approx(0.8)
+    assert (fallback.tmin, fallback.tmax) == (20000, 20000)
 
 
 def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):

@@ -452,17 +452,34 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     return totals
 
 
-def fit_ss11_curve(ks: list[float]) -> tuple[float, float, float, float, int]:
-    """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve. Return (a, b, eexp, maxerr, npts).
+class SS11Fit(t.NamedTuple):
+    """One fit of a tabulated SS11 rate curve, with its quality and its validity range."""
 
-    The fit window is 1e3 to 4e4 K: charge transfer competes with the other processes only in the
-    nebular low-temperature regime, and the fit form cannot span the floor-then-steep-rise shape of
-    some reactions over the full tabulated range. Points at the 1e-14 radiative floor are excluded.
-    A curve with fewer than four usable points gets a flat fit at its 2e4 K value.
+    a: float  # in cm3/s
+    b: float
+    eexp: float  # in K
+    maxerr: float  # the largest relative error over the usable points
+    npts: int  # the count of usable points; below four, a is a flat value and not a fit
+    tmin: float  # the span of the usable points, which the output clamps T into
+    tmax: float
+
+
+def fit_ss11_curve(ks: list[float]) -> SS11Fit:
+    """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve.
+
+    The usable points lie between 1e3 and 4e4 K and above the 1e-14 floor: charge transfer
+    competes with the other processes only in the nebular low-temperature regime, and the fit
+    form cannot span the floor-then-steep-rise shape of some reactions over the full tabulated
+    range. tmin and tmax hold the span of the usable points. Below tmin, the reader clamps t4
+    and the Boltzmann factor keeps the true temperature, so the rate falls like the tabulated
+    values do. A curve with fewer than four usable points gets the flat value of its 2e4 K
+    entry, together with the error of that value over the usable points.
     """
     pts = [(temp, k) for temp, k in zip(SS11_TGRID, ks, strict=True) if 1000 <= temp <= 40000 and k > 1.2e-14]
     if len(pts) < 4:
-        return ks[SS11_TGRID.index(20000)], 0.0, 0.0, 0.0, 0
+        flat = ks[SS11_TGRID.index(20000)]
+        maxerr = max((abs(flat / k - 1.0) for _, k in pts), default=0.0)
+        return SS11Fit(flat, 0.0, 0.0, maxerr, len(pts), 20000, 20000)
 
     def solve_normal_equations(use_eexp: bool) -> list[float]:
         ncoeff = 3 if use_eexp else 2
@@ -501,7 +518,7 @@ def fit_ss11_curve(ks: list[float]) -> tuple[float, float, float, float, int]:
     if eexp < 1e-3:
         eexp = 0.0
     maxerr = max(abs((a * (temp / 1e4) ** b * math.exp(-eexp / temp)) / k - 1.0) for temp, k in pts)
-    return a, b, eexp, maxerr, len(pts)
+    return SS11Fit(a, b, eexp, maxerr, len(pts), pts[0][0], pts[-1][0])
 
 
 def get_ss11_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTEntry], list[str]]:
@@ -513,25 +530,33 @@ def get_ss11_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTE
     for totals, is_recombination in ((rec_totals, True), (ion_totals, False)):
         for (elsymbol, q), ks in sorted(totals.items(), key=lambda kv: (SS11_ZNUM[kv[0][0]], kv[0][1])):
             z = SS11_ZNUM[elsymbol]
-            a, b, eexp, maxerr, npts = fit_ss11_curve(ks)
+            fit = fit_ss11_curve(ks)
             direction = "rec" if is_recombination else "ion"
-            warning = "  WARNING: the fit error is large" if maxerr > MAXERR_WARN else ""
+            warning = "  WARNING: the fit error is large" if fit.maxerr > MAXERR_WARN else ""
             report.append(
-                f"{direction} {elsymbol} q={q}: a={a:.3e} b={b:.3f} eexp={eexp:.0f}"
-                f" maxerr={maxerr * 100:.0f}% npts={npts}{warning}"
+                f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f} eexp={fit.eexp:.0f}"
+                f" maxerr={fit.maxerr * 100:.0f}% npts={fit.npts}{warning}"
             )
             label = (
                 f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
                 if is_recombination
                 else f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
             )
-            if npts > 0:
-                source = f"fit to their tabulated k(T) over 1e3-4e4 K, max fit error {maxerr * 100:.0f}%"
+            if fit.npts >= 4:
+                source = (
+                    f"fit to their tabulated k(T) over {fnum(fit.tmin)}-{fnum(fit.tmax)} K,"
+                    f" max fit error {fit.maxerr * 100:.0f}%"
+                )
+            elif fit.npts > 0:
+                source = (
+                    f"flat value from their 2e4 K entry"
+                    f" ({fit.npts} usable points over 1e3-4e4 K, max error {fit.maxerr * 100:.0f}%)"
+                )
             else:
                 source = "flat value from their 2e4 K entry (no usable fit points over 1e3-4e4 K)"
             comment = f"SS11; {label}; {source}"
             reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
-            entries.append(CTEntry(*reaction, a / 1e-9, b, 0.0, 0.0, eexp, 1000, 40000, comment))
+            entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, 0.0, 0.0, fit.eexp, fit.tmin, fit.tmax, comment))
     return entries, report
 
 
