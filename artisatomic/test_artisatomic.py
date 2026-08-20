@@ -615,9 +615,11 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     rhd.read_hyd_phixsdata()
     args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
 
-    def read_phixs(photfilenames):
+    def read_phixs(named_photfilenames):
         """Read O I's cross sections using only the named phot files."""
-        monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=tuple(photfilenames)))
+        monkeypatch.setitem(
+            readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=tuple(named_photfilenames))
+        )
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
             _, dflevels, _, _ = rhd.read_levels_and_transitions(8, 1, flog)
