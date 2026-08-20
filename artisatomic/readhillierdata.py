@@ -134,6 +134,9 @@ ions_data |= {
     # He
     (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ("heiphot_a7.dat",), "heicol.dat"),
     (2, 2): IonFiles("5dec96", "he2_osc.dat", ("he2phot.dat",), "he2col.dat"),
+    # C
+    (6, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    (6, 3): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
     # N
     (7, 1): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=4),
     (7, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
@@ -147,6 +150,8 @@ ions_data |= {
     (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
     # Si
     (14, 2): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
+    # P
+    (15, 4): IonFiles("19apr23", "osc_data", None, "col_data", photfilecount=2),
     # Fe
     (26, 1): IonFiles("19apr23", "osc_data", ("REV_PHOT_DATA",), "col_data"),
     (26, 4): IonFiles("19apr23", "feiv_osc_rev2", None, "col_data"),
