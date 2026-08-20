@@ -214,14 +214,14 @@ class CTEntry(t.NamedTuple):
     eexp: float  # in K
     tmin: float
     tmax: float
-    autoreverse: int
     comment: str
+    autoreverse: int = 1  # set_autoreverse_flags() gives the value that the output file holds
 
 
-def download(filekey: str, cachedir: Path) -> str:
+def download(filekey: str, cachedir: Path, *, refresh: bool = False) -> str:
     """Return the text of a source file, from the cache folder or from a fresh download."""
     cachefile = cachedir / filekey
-    if cachefile.is_file():
+    if cachefile.is_file() and not refresh:
         print(f"  using cached {cachefile}")
         return cachefile.read_text(encoding="utf-8")
     url = SOURCE_URLS[filekey]
@@ -275,20 +275,14 @@ def ionlabel(z: int, q: int) -> str:
     return f"{elsymbols[z]}{'+' + str(q) if q > 0 else '0'}"
 
 
-def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
+def get_kf96_h_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTEntry], list[str]]:
     """Build the entries for the reactions with hydrogen from the Cloudy data files.
 
     Also return a report that lists each Cloudy row that differs from the KF96 paper value.
     """
-    rec = read_cloudy_table(download("ctrecombdata.dat", cachedir), 7)
-    ion = read_cloudy_table(download("ctiondata.dat", cachedir), 8)
+    rec = read_cloudy_table(download("ctrecombdata.dat", cachedir, refresh=refresh), 7)
+    ion = read_cloudy_table(download("ctiondata.dat", cachedir, refresh=refresh), 8)
     report = []
-
-    # the ionisation rows define which recombination rows have an explicit reverse fit
-    ion_keys = {(z, q1 - 1) for (z, q1), vals in ion.items() if vals[0] != 0.0}
-    # a recombination row that Cloudy leaves empty gives no reverse fit to an ionisation row
-    rec_keys = {(z, q) for (z, q), vals in rec.items() if vals[5] != 0.0}
-
     entries = []
     for (z, q), vals in sorted(rec.items()):
         a, b, c, d, tmin, tmax, deltae_ev = vals
@@ -309,9 +303,8 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
             published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf, strict=True))
             note = f"Cloudy update; KF96 published {published}"
             report.append(f"rec Z={z} q={q}: {note}")
-        autoreverse = 0 if (z, q - 1) in ion_keys else 1
         comment = f"{label}; deltaE={fnum(deltae_ev)} eV; {note}"
-        entries.append(CTEntry(z, q + 1, 1, 1, a, b, c, d, 0.0, tmin, tmax, autoreverse, comment))
+        entries.append(CTEntry(z, q + 1, 1, 1, a, b, c, d, 0.0, tmin, tmax, comment))
 
     for (z, q1), vals in sorted(ion.items()):
         a, b, c, d, tmin, tmax, de4, deficit_ev = vals
@@ -332,16 +325,15 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
             note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
         comment = f"{label}; energy deficit={fnum(deficit_ev)} eV; {note}"
-        autoreverse = 0 if (z, q + 1) in rec_keys else 1
-        entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, autoreverse, comment))
+        entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
 
     return entries, report
 
 
-def get_he_entries(cachedir: Path) -> list[CTEntry]:
+def get_he_entries(cachedir: Path, *, refresh: bool = False) -> list[CTEntry]:
     """Build the entries for recombination with neutral helium from the AR85 table."""
     entries = []
-    for line in download("ar85_ct2.dat", cachedir).split("\n"):
+    for line in download("ar85_ct2.dat", cachedir, refresh=refresh).split("\n"):
         if not line.strip():
             continue
         parts = line.split()
@@ -351,7 +343,7 @@ def get_he_entries(cachedir: Path) -> list[CTEntry]:
         label = f"{ionlabel(z, q)} + He0 -> {ionlabel(z, q - 1)} + He+"
         note = CLOUDY_HE_NOTES.get((z, q), "")
         comment = f"AR85; {label}" + (f"; {note}" if note else "")
-        entries.append(CTEntry(z, q + 1, 2, 1, a, b, c, d, 0.0, tmin, tmax, 1, comment))
+        entries.append(CTEntry(z, q + 1, 2, 1, a, b, c, d, 0.0, tmin, tmax, comment))
     return entries
 
 
@@ -366,7 +358,8 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     for rawline in text.split("\n"):
         if not rawline.strip():
             continue
-        line = rawline.rstrip("\n").ljust(212)
+        line = rawline.rstrip().ljust(212)
+        assert len(line) == 212, f"unexpected line length in the CDS table: {rawline}"
         elsymbol = line[0:2].strip()
         q = int(line[3])
         vals = [float(line[33 + 9 * i : 41 + 9 * i]) for i in range(len(SS11_TGRID))]
@@ -439,10 +432,10 @@ def fit_ss11_curve(ks: list[float]) -> tuple[float, float, float, float, int]:
     return a, b, eexp, maxerr, len(pts)
 
 
-def get_ss11_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
+def get_ss11_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTEntry], list[str]]:
     """Build the n-capture element entries from fits to the SS11 CDS rate tables."""
-    rec_totals = read_cds_totals(download("ss11_table4.dat", cachedir))
-    ion_totals = read_cds_totals(download("ss11_table5.dat", cachedir))
+    rec_totals = read_cds_totals(download("ss11_table4.dat", cachedir, refresh=refresh))
+    ion_totals = read_cds_totals(download("ss11_table5.dat", cachedir, refresh=refresh))
     entries = []
     report = []
     for totals, is_recombination in ((rec_totals, True), (ion_totals, False)):
@@ -455,26 +448,37 @@ def get_ss11_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
                 f"{direction} {elsymbol} q={q}: a={a:.3e} b={b:.3f} eexp={eexp:.0f}"
                 f" maxerr={maxerr * 100:.0f}% npts={npts}{warning}"
             )
-            if is_recombination:
-                label = f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
-                # the reverse reaction is the loss of the electron by the product ion. SS11 give a
-                # fit for it only when the product is the neutral atom, so detailed balance covers
-                # the higher ion stages.
-                autoreverse = 0 if (elsymbol, q - 1) in ion_totals else 1
-            else:
-                label = f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
-                autoreverse = 0 if (elsymbol, q + 1) in rec_totals else 1
+            label = (
+                f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
+                if is_recombination
+                else f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
+            )
             if npts > 0:
                 source = f"fit to their tabulated k(T) over 1e3-4e4 K, max fit error {maxerr * 100:.0f}%"
             else:
                 source = "flat value from their 2e4 K entry (no usable fit points over 1e3-4e4 K)"
             comment = f"SS11; {label}; {source}"
-            a_e9 = a / 1e-9
-            if is_recombination:
-                entries.append(CTEntry(z, q + 1, 1, 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, autoreverse, comment))
-            else:
-                entries.append(CTEntry(1, 2, z, q + 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, autoreverse, comment))
+            reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
+            entries.append(CTEntry(*reaction, a / 1e-9, b, 0.0, 0.0, eexp, 1000, 40000, comment))
     return entries, report
+
+
+def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
+    """Set the reverse reaction flag of each entry from the other reactions that the file holds.
+
+    The reverse of "A + D -> A(-1) + D(+1)" is "D(+1) + A(-1) -> D + A". An entry whose reverse
+    reaction has its own fit gets a zero, which stops the ARTIS code from adding that reverse a
+    second time. Every other entry gets a one, so detailed balance supplies its reverse.
+    """
+    reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in entries}
+    return [
+        entry._replace(
+            autoreverse=0
+            if (entry.z_don, entry.ionstage_don + 1, entry.z_acc, entry.ionstage_acc - 1) in reactions
+            else 1
+        )
+        for entry in entries
+    ]
 
 
 def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
@@ -498,14 +502,15 @@ def main() -> None:
     defaultcachedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
     parser.add_argument("-outputfile", default=defaultoutpath, type=Path, help="path of the output file")
     parser.add_argument("-cachedir", default=defaultcachedir, type=Path, help="folder for the downloaded source files")
+    parser.add_argument("-refresh", action="store_true", help="download the source files again and replace the cache")
     args = parser.parse_args()
 
     print("Reactions with hydrogen (Cloudy carrying KF96 plus updates):")
-    kf96_entries, kf96_report = get_kf96_h_entries(args.cachedir)
+    kf96_entries, kf96_report = get_kf96_h_entries(args.cachedir, refresh=args.refresh)
     print("Recombination with neutral helium (AR85):")
-    he_entries = get_he_entries(args.cachedir)
+    he_entries = get_he_entries(args.cachedir, refresh=args.refresh)
     print("n-capture elements with hydrogen (SS11):")
-    ss11_entries, ss11_report = get_ss11_entries(args.cachedir)
+    ss11_entries, ss11_report = get_ss11_entries(args.cachedir, refresh=args.refresh)
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
     for line in kf96_report:
@@ -516,7 +521,8 @@ def main() -> None:
     print()
 
     args.outputfile.parent.mkdir(parents=True, exist_ok=True)
-    write_chargetransfer_file(kf96_entries + he_entries + ss11_entries, args.outputfile)
+    entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
+    write_chargetransfer_file(entries, args.outputfile)
 
 
 if __name__ == "__main__":

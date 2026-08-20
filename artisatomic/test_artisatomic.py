@@ -1618,10 +1618,13 @@ def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
         ),
         "ss11_table5.dat": _ss11_cds_line("Ge", 0, "4s^2^4p ^2^P^o^", rates),
     }
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: tables[filekey])  # ruff: ignore[unused-lambda-argument]
 
     entries, _report = makechargetransferfile.get_ss11_entries(tmp_path)
-    autoreverse_of_reaction = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse for e in entries}
+    autoreverse_of_reaction = {
+        (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse
+        for e in makechargetransferfile.set_autoreverse_flags(entries)
+    }
 
     # Ge+1 + H0 -> Ge0 + H+ has the Table 5 row of Ge0 as its explicit reverse
     assert autoreverse_of_reaction[32, 2, 1, 1] == 0
@@ -1659,10 +1662,13 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
             "201903041", 8, {(16, 1): [*fit, 1e3, 3e4, 0.0, 1.0], (3, 1): [*fit, 1e3, 3e4, 0.0, 1.0]}
         ),
     }
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: tables[filekey])  # ruff: ignore[unused-lambda-argument]
 
     entries, _report = makechargetransferfile.get_kf96_h_entries(tmp_path)
-    autoreverse_of_reaction = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse for e in entries}
+    autoreverse_of_reaction = {
+        (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse
+        for e in makechargetransferfile.set_autoreverse_flags(entries)
+    }
 
     # the S reactions are a pair, so each one is the explicit reverse of the other
     assert autoreverse_of_reaction[16, 2, 1, 1] == 0
@@ -1671,3 +1677,19 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
     # recombination row for Li+1
     assert autoreverse_of_reaction[26, 4, 1, 1] == 1
     assert autoreverse_of_reaction[1, 2, 3, 1] == 1
+
+
+def test_makechargetransferfile_ar85_helium_entries(monkeypatch, tmp_path):
+    """The AR85 file gives the electron count of the product ion, which needs a conversion."""
+    text = " 8  6  1.00E+00  0.00E+00  1.25E+00 -5.80E+00  1.00E+03  3.00E+04"
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: text)  # ruff: ignore[unused-lambda-argument]
+
+    (entry,) = makechargetransferfile.set_autoreverse_flags(makechargetransferfile.get_he_entries(tmp_path))
+
+    # the product O+2 holds the six electrons of the file, so O+3 is the ion that captures one
+    assert (entry.z_acc, entry.ionstage_acc, entry.z_don, entry.ionstage_don) == (8, 4, 2, 1)
+    assert "O+3 + He0 -> O+2 + He+" in entry.comment
+    assert (entry.a, entry.b, entry.c, entry.d) == (1.0, 0.0, 1.25, -5.8)
+    assert (entry.tmin, entry.tmax) == (1000.0, 30000.0)
+    # the file holds no fit for He+ + O+2, so the code must add that reverse reaction
+    assert entry.autoreverse == 1
