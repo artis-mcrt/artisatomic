@@ -1693,3 +1693,36 @@ def test_makechargetransferfile_ar85_helium_entries(monkeypatch, tmp_path):
     assert (entry.tmin, entry.tmax) == (1000.0, 30000.0)
     # the file holds no fit for He+ + O+2, so the code must add that reverse reaction
     assert entry.autoreverse == 1
+
+
+def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
+    """The heavy-element estimates keep the exothermic reactions with a small energy defect."""
+    # the row of Fe III has no value, and the parser must skip it
+    text = (
+        "At. num\tSp. Name\tIon Charge\tPrefix\tIonization Energy (eV)\tSuffix\t\n"
+        '"26"\t"Fe I"\t"0"\t""\t"7.9"\t""\t\n'
+        '"26"\t"Fe II"\t"+1"\t""\t"10.0"\t""\t\n'
+        '"26"\t"Fe III"\t"+2"\t""\t""\t""\t\n'
+        '"57"\t"La I"\t"0"\t"["\t"5.58"\t"]"\t\n'
+        "Notes:\n"
+        "(a) Uncertainty of the listed value is unknown. "
+    )
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: text)  # ruff: ignore[unused-lambda-argument]
+
+    energies = makechargetransferfile.read_nist_ionisation_energies(text)
+    assert energies == {(26, 0): 7.9, (26, 1): 10.0, (57, 0): 5.58}
+
+    entries = makechargetransferfile.get_metal_metal_entries(tmp_path)
+    reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e for e in entries}
+
+    # Fe+1 + La0 -> Fe0 + La+1 releases 7.9 - 5.58 = 2.32 eV, which is inside the window
+    assert (26, 2, 57, 1) in reactions
+    assert "deltaE=2.32 eV" in reactions[26, 2, 57, 1].comment
+    assert reactions[26, 2, 57, 1].a == makechargetransferfile.METAL_METAL_RATE
+    # Fe+2 + Fe0 -> Fe+1 + Fe+1 releases 10.0 - 7.9 = 2.1 eV
+    assert (26, 3, 26, 1) in reactions
+    # the excluded reactions:
+    #   La+1 + Fe0 is endothermic;
+    #   Fe+2 + La0 releases 4.42 eV, which is above the window;
+    #   Fe+1 + Fe0 changes nothing
+    assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}

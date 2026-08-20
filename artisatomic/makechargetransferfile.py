@@ -13,6 +13,11 @@ writes one file with one reaction for each line. The sources are:
 - The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11) for the n-capture elements
   Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no fit
   coefficients, so the script fits their tables over 1e3 to 4e4 K.
+- Estimates for the reactions of a heavy ion with a neutral heavy atom, which the kilonova
+  ejecta need because those ejecta hold no hydrogen. No publication gives these rates. The
+  script takes the ionization energies of Sc to U from the NIST ASD, keeps the exothermic
+  reactions with a small energy defect, and gives each one the near-resonant rate of
+  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -36,6 +41,10 @@ SOURCE_URLS = {
     "ar85_ct2.dat": "https://www.pa.uky.edu/~verner/dima/ct/ct2.dat",
     "ss11_table4.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table4.dat",
     "ss11_table5.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
+    "nist_ie_sc_to_u.dat": (
+        "https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data"
+        "&units=1&format=3&order=0&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
+    ),
 }
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
@@ -184,6 +193,16 @@ SS11_TGRID = [
 # the n-capture elements that SS11 cover
 MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the report
 
+# The near-resonant rate estimate for a reaction between two heavy species (Melius 1974).
+# The unit is 1e-9 cm3/s, which is the unit of the fit coefficient a.
+METAL_METAL_RATE = 1.0
+# An exothermic reaction with an energy defect up to this value gets the estimate. A larger
+# defect can not reach a level of the products near resonance, so the reaction stays slow and
+# ARTIS makes its own Landau-Zener estimate instead.
+METAL_METAL_MAX_DEFECT_EV = 4.0
+# the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
+METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
+
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
 
 OUTPUT_HEADER = """\
@@ -328,6 +347,62 @@ def get_kf96_h_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[C
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
 
     return entries, report
+
+
+def read_nist_ionisation_energies(text: str) -> dict[tuple[int, int], float]:
+    """Parse a NIST ASD tab-delimited ionization energy table into {(Z, ion charge): energy in eV}.
+
+    The prefix and suffix columns mark an interpolated or theoretical value. The estimates that
+    use this table accept those values.
+    """
+    energies = {}
+    lines = text.splitlines()
+    assert lines[0].startswith("At. num"), "unexpected NIST ASD header"
+    for line in lines[1:]:
+        if line.startswith("Notes:"):
+            break  # the footnotes of the table follow the data rows
+        if not line.strip():
+            continue
+        fields = [field.strip().strip('"') for field in line.split("\t")]
+        z, charge, energy = fields[0], fields[2], fields[4]
+        if not energy:
+            continue
+        energies[int(z), int(charge.removeprefix("+"))] = float(energy)
+    return energies
+
+
+def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CTEntry]:
+    """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
+
+    The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
+    occur there. No publication gives the heavy-element rates. An exothermic reaction with an
+    energy defect below METAL_METAL_MAX_DEFECT_EV can reach a level of the products near
+    resonance, because the heavy species have many low levels. Such a reaction gets the
+    near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral: the Coulomb
+    repulsion between two positive ions makes their reactions slow.
+    """
+    energies = read_nist_ionisation_energies(download("nist_ie_sc_to_u.dat", cachedir, refresh=refresh))
+    donors = sorted(z for (z, charge) in energies if charge == 0)
+    entries = []
+    for z_acc in donors:
+        for charge_acc in METAL_METAL_ACCEPTOR_CHARGES:
+            if (z_acc, charge_acc - 1) not in energies:
+                continue
+            # the capture releases the ionization energy of the product ion
+            for z_don in donors:
+                if z_don == z_acc and charge_acc == 1:
+                    continue  # the products equal the reactants, so the reaction changes nothing
+                deltae_ev = energies[z_acc, charge_acc - 1] - energies[z_don, 0]
+                if not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
+                    continue
+                label = f"{ionlabel(z_acc, charge_acc)} + {ionlabel(z_don, 0)} -> {ionlabel(z_acc, charge_acc - 1)} + {ionlabel(z_don, 1)}"
+                comment = (
+                    f"{label}; deltaE={fnum(deltae_ev)} eV; near-resonant estimate (Melius 1974), NIST ASD energies"
+                )
+                entries.append(
+                    CTEntry(z_acc, charge_acc + 1, z_don, 1, METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, 1000, 40000, comment)
+                )
+    return entries
 
 
 def get_he_entries(cachedir: Path, *, refresh: bool = False) -> list[CTEntry]:
@@ -511,6 +586,9 @@ def main() -> None:
     he_entries = get_he_entries(args.cachedir, refresh=args.refresh)
     print("n-capture elements with hydrogen (SS11):")
     ss11_entries, ss11_report = get_ss11_entries(args.cachedir, refresh=args.refresh)
+    print("Heavy ion with neutral heavy atom (near-resonant estimates):")
+    metal_entries = get_metal_metal_entries(args.cachedir, refresh=args.refresh)
+    print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
     for line in kf96_report:
@@ -521,7 +599,7 @@ def main() -> None:
     print()
 
     args.outputfile.parent.mkdir(parents=True, exist_ok=True)
-    entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
+    entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries + metal_entries)
     write_chargetransfer_file(entries, args.outputfile)
 
 
