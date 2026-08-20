@@ -64,6 +64,7 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
+makechargetransferfile = "artisatomic.makechargetransferfile:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
 
 [tool.mypy]
