@@ -14,6 +14,7 @@ from artisatomic import add_level_ids_forbidden
 from artisatomic import hc_in_ev_cm
 from artisatomic import interpret_configuration
 from artisatomic import leveltuples_to_pldataframe
+from artisatomic import makechargetransferfile
 from artisatomic import match_hydrogenic_phixs
 from artisatomic import PYDIR
 from artisatomic import readfacdata
@@ -1563,3 +1564,68 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     # a ground state ionizing to the upper ion's ground state has the ionization energy itself
     assert filled[0] == pytest.approx(17.084)
     assert filled[1] == pytest.approx(17.084)
+
+
+def _ss11_cds_line(elsymbol: str, q: int, label: str, rates: list[float]) -> str:
+    """Build one fixed-column line of an SS11 CDS table."""
+    header = f"{elsymbol:<2} {q}    {label}".ljust(32)
+    assert len(header) == 32, "the label must fit in the fixed columns of the CDS format"
+    return header + "".join(f" {rate:.2E}" for rate in rates)
+
+
+def test_makechargetransferfile_cds_totals_and_fit():
+    """read_cds_totals adds the channels above the radiative floor, and the fit recovers a power law."""
+    powerlaw = [3.0e-10 * (temp / 1e4) ** 0.5 for temp in makechargetransferfile.SS11_TGRID]
+    floor = [1.00e-14] * len(makechargetransferfile.SS11_TGRID)
+    text = "\n".join(
+        [
+            _ss11_cds_line("Ge", 1, "4s^2^4p^2^ ^3^P", powerlaw),
+            _ss11_cds_line("Ge", 1, "4s^2^4p^2^ ^1^D", floor),
+            _ss11_cds_line("Ge", 2, "4s^2^4p ^2^P^o^", floor),
+        ]
+    )
+    totals = makechargetransferfile.read_cds_totals(text)
+
+    # a channel that sits on the floor carries no rate, so only the other channel counts
+    assert totals["Ge", 1] == pytest.approx(powerlaw, rel=0.01)
+    # every channel on the floor gives the floor itself, not zero
+    assert totals["Ge", 2] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
+
+    a, b, eexp, maxerr, npts = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
+    assert a == pytest.approx(3.0e-10, rel=0.01)
+    assert b == pytest.approx(0.5, rel=0.01)
+    assert eexp == 0.0
+    assert maxerr < 0.01
+    assert npts == 8
+
+    # the floor curve has no usable points, so the fit is flat at the 2e4 K value
+    assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0)
+
+
+def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
+    """A SS11 reaction keeps autoreverse=1 unless the tables hold a fit for its reverse.
+
+    SS11 Table 5 gives the loss of an electron only for the neutral atom, so every recombination
+    above the first ion stage needs detailed balance for its reverse reaction.
+    """
+    rates = [3.0e-10 * (temp / 1e4) ** 0.5 for temp in makechargetransferfile.SS11_TGRID]
+    tables = {
+        "ss11_table4.dat": "\n".join(
+            [
+                _ss11_cds_line("Ge", 1, "4s^2^4p^2^ ^3^P", rates),
+                _ss11_cds_line("Ge", 2, "4s^2^4p ^2^P^o^", rates),
+            ]
+        ),
+        "ss11_table5.dat": _ss11_cds_line("Ge", 0, "4s^2^4p ^2^P^o^", rates),
+    }
+    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+
+    entries, _report = makechargetransferfile.get_ss11_entries(tmp_path)
+    autoreverse_of_reaction = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse for e in entries}
+
+    # Ge+1 + H0 -> Ge0 + H+ has the Table 5 row of Ge0 as its explicit reverse
+    assert autoreverse_of_reaction[32, 2, 1, 1] == 0
+    # Ge+2 + H0 -> Ge+1 + H+ has no fit for the reverse, so the code must add it
+    assert autoreverse_of_reaction[32, 3, 1, 1] == 1
+    # Ge0 + H+ -> Ge+1 + H0 has the Table 4 row of Ge+1 as its explicit reverse
+    assert autoreverse_of_reaction[1, 2, 32, 1] == 0

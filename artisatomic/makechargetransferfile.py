@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write the charge transfer rate file for ARTIS (data/chargetransfer.txt in the artis repository).
+"""Write the file of charge transfer rates for ARTIS (data/chargetransfer.txt in the artis repository).
 
 The script downloads the published fits and rate tables, converts them into one fit form, and
 writes one file with one reaction for each line. The sources are:
@@ -28,6 +28,8 @@ from pathlib import Path
 
 import requests
 
+from artisatomic.base import elsymbols
+
 SOURCE_URLS = {
     "ctrecombdata.dat": "https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctrecombdata.dat",
     "ctiondata.dat": "https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctiondata.dat",
@@ -35,13 +37,6 @@ SOURCE_URLS = {
     "ss11_table4.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table4.dat",
     "ss11_table5.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
 }
-
-ELSYMBOLS = {
-    1: "H", 2: "He", 3: "Li", 4: "Be", 5: "B", 6: "C", 7: "N", 8: "O", 9: "F", 10: "Ne",
-    11: "Na", 12: "Mg", 13: "Al", 14: "Si", 15: "P", 16: "S", 17: "Cl", 18: "Ar", 19: "K",
-    20: "Ca", 21: "Sc", 22: "Ti", 23: "V", 24: "Cr", 25: "Mn", 26: "Fe", 27: "Co", 28: "Ni",
-    29: "Cu", 30: "Zn", 32: "Ge", 34: "Se", 35: "Br", 36: "Kr", 37: "Rb", 54: "Xe",
-}  # fmt: skip
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
 # q is the ion charge before the electron capture, and a is in 1e-9 cm3/s. The script uses these
@@ -186,10 +181,13 @@ SS11_TGRID = [
     10000, 20000, 40000, 60000, 80000, 100000, 200000, 400000, 600000, 800000,
 ]  # fmt: skip
 
-SS11_ZNUM = {"Ge": 32, "Se": 34, "Br": 35, "Kr": 36, "Rb": 37, "Xe": 54}
+# the n-capture elements that SS11 cover
+MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the report
+
+SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
 
 OUTPUT_HEADER = """\
-# Charge transfer reaction rate coefficient fits. See chargetransfer-reference.txt for the sources.
+# Fits of the rate coefficients for charge transfer. The comment of each line names its source.
 # The artisatomic script makechargetransferfile downloads the sources and generates this file.
 # The first non-comment line gives the number of reactions.
 # Each reaction line has the columns:
@@ -230,6 +228,10 @@ def download(filekey: str, cachedir: Path) -> str:
     print(f"  downloading {url}")
     response = requests.get(url, timeout=120)
     response.raise_for_status()
+    # a server that sends an error page with a 200 status must not poison the cache folder
+    if response.text.lstrip().startswith("<"):
+        msg = f"{url} returned markup instead of data"
+        raise RuntimeError(msg)
     cachedir.mkdir(parents=True, exist_ok=True)
     cachefile.write_text(response.text, encoding="utf-8")
     return response.text
@@ -270,7 +272,7 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
 
 def ionlabel(z: int, q: int) -> str:
     """Return a label like Fe+2 or Fe0 for an element with the given charge."""
-    return f"{ELSYMBOLS[z]}{'+' + str(q) if q > 0 else '0'}"
+    return f"{elsymbols[z]}{'+' + str(q) if q > 0 else '0'}"
 
 
 def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
@@ -293,7 +295,9 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
         label = f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
         kf = KF96_REC.get((z, q))
         if a == 0.0 and (z, q) in KF96_ENDOTHERMIC:
-            note = f"endothermic, no fit (KF96 Table 4: deltaE = {KF96_ENDOTHERMIC[z, q]} eV)"
+            # Cloudy leaves the energy column at zero for these rows, so take the paper value
+            deltae_ev = KF96_ENDOTHERMIC[z, q]
+            note = "endothermic, no fit (KF96 Table 4)"
         elif kf is None:
             note = "no KF96 entry"
             report.append(f"rec Z={z} q={q}: Cloudy addition with no KF96 entry")
@@ -313,17 +317,17 @@ def get_kf96_h_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
             continue
         q = q1 - 1  # the charge before the ion loses the electron
         label = f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
-        kf = KF96_ION.get((z, q))
-        if kf is None:
+        kf_ion = KF96_ION.get((z, q))
+        if kf_ion is None:
             note = "no KF96 entry (Cloudy addition)"
             report.append(f"ion Z={z} q={q}: Cloudy addition with no KF96 entry")
-        elif all(starmap(isclose_published, zip((a, b, c, d), kf[:4], strict=True))) and (
-            de4 == kf[4] or isclose_published(de4, kf[4])
+        elif all(starmap(isclose_published, zip((a, b, c, d), kf_ion[:4], strict=True))) and isclose_published(
+            de4, kf_ion[4]
         ):
             note = "KF96 Table 3"
         else:
-            published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf[:4], strict=True))
-            note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf[4])}(1e4 K)"
+            published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf_ion[:4], strict=True))
+            note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
         comment = f"{label}; energy deficit={fnum(deficit_ev)} eV; {note}"
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, 0, comment))
@@ -434,26 +438,39 @@ def fit_ss11_curve(ks: list[float]) -> tuple[float, float, float, float, int]:
 
 def get_ss11_entries(cachedir: Path) -> tuple[list[CTEntry], list[str]]:
     """Build the n-capture element entries from fits to the SS11 CDS rate tables."""
+    rec_totals = read_cds_totals(download("ss11_table4.dat", cachedir))
+    ion_totals = read_cds_totals(download("ss11_table5.dat", cachedir))
     entries = []
     report = []
-    for filekey, is_recombination in (("ss11_table4.dat", True), ("ss11_table5.dat", False)):
-        totals = read_cds_totals(download(filekey, cachedir))
+    for totals, is_recombination in ((rec_totals, True), (ion_totals, False)):
         for (elsymbol, q), ks in sorted(totals.items(), key=lambda kv: (SS11_ZNUM[kv[0][0]], kv[0][1])):
             z = SS11_ZNUM[elsymbol]
             a, b, eexp, maxerr, npts = fit_ss11_curve(ks)
             direction = "rec" if is_recombination else "ion"
+            warning = "  WARNING: the fit error is large" if maxerr > MAXERR_WARN else ""
             report.append(
-                f"{direction} {elsymbol} q={q}: a={a:.3e} b={b:.3f} eexp={eexp:.0f} maxerr={maxerr * 100:.0f}% npts={npts}"
+                f"{direction} {elsymbol} q={q}: a={a:.3e} b={b:.3f} eexp={eexp:.0f}"
+                f" maxerr={maxerr * 100:.0f}% npts={npts}{warning}"
             )
-            if npts > 0:
-                comment = f"SS11 fit to their tabulated k(T) over 1e3-4e4 K, max fit error {maxerr * 100:.0f}%"
+            if is_recombination:
+                label = f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
+                # the reverse reaction is the loss of the electron by the product ion. SS11 give a
+                # fit for it only when the product is the neutral atom, so detailed balance covers
+                # the higher ion stages.
+                autoreverse = 0 if (elsymbol, q - 1) in ion_totals else 1
             else:
-                comment = "SS11; flat value from their 2e4 K entry (no usable fit points over 1e3-4e4 K)"
+                label = f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
+                autoreverse = 0 if (elsymbol, q + 1) in rec_totals else 1
+            if npts > 0:
+                source = f"fit to their tabulated k(T) over 1e3-4e4 K, max fit error {maxerr * 100:.0f}%"
+            else:
+                source = "flat value from their 2e4 K entry (no usable fit points over 1e3-4e4 K)"
+            comment = f"SS11; {label}; {source}"
             a_e9 = a / 1e-9
             if is_recombination:
-                entries.append(CTEntry(z, q + 1, 1, 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, 0, comment))
+                entries.append(CTEntry(z, q + 1, 1, 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, autoreverse, comment))
             else:
-                entries.append(CTEntry(1, 2, z, q + 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, 0, comment))
+                entries.append(CTEntry(1, 2, z, q + 1, a_e9, b, 0.0, 0.0, eexp, 1000, 40000, autoreverse, comment))
     return entries, report
 
 
@@ -472,7 +489,7 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
 
 
 def main() -> None:
-    """Download the charge transfer rate sources and write chargetransfer.txt for ARTIS."""
+    """Download the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
     parser = argparse.ArgumentParser(description=__doc__)
     defaultoutpath = Path(__file__).parent.parent.absolute() / "artis_files" / "data" / "chargetransfer.txt"
     defaultcachedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
