@@ -1607,8 +1607,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
     # the floor curve has no usable points, so the fit is flat at the 2e4 K value
     assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0.0, 20000, 20000)
 
-    # a curve with fewer than four usable points gets the flat 2e4 K value, and the error of
-    # that value over the usable points must not be hidden
+    # a curve with fewer than four usable points gets the flat 2e4 K value. The error of that
+    # value over the usable points must not be hidden.
     steep = [
         2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.00e-14)
         for temp in makechargetransferfile.SS11_TGRID
@@ -1623,8 +1623,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
 def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
     """A SS11 reaction keeps autoreverse=1 unless the tables hold a fit for its reverse.
 
-    SS11 Table 5 gives the loss of an electron only for the neutral atom, so every recombination
-    above the first ion stage needs detailed balance for its reverse reaction.
+    SS11 Table 5 gives the loss of an electron only for the neutral atom. Every recombination
+    above the first ion stage therefore needs detailed balance for its reverse reaction.
     """
     rates = [3.0e-10 * (temp / 1e4) ** 0.5 for temp in makechargetransferfile.SS11_TGRID]
     tables = {
@@ -1691,8 +1691,8 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
     # the S reactions are a pair, so each one is the explicit reverse of the other
     assert autoreverse_of_reaction[16, 2, 1, 1] == 0
     assert autoreverse_of_reaction[1, 2, 16, 1] == 0
-    # Fe+3 + H0 -> Fe+2 + H+ has no ionisation row for Fe+2, and Li0 + H+ -> Li+1 + H0 has no
-    # recombination row for Li+1
+    # Fe+3 + H0 -> Fe+2 + H+ has no ionisation row for Fe+2. Li0 + H+ -> Li+1 + H0 has no
+    # recombination row for Li+1.
     assert autoreverse_of_reaction[26, 4, 1, 1] == 1
     assert autoreverse_of_reaction[1, 2, 3, 1] == 1
 
