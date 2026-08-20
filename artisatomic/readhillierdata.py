@@ -76,7 +76,6 @@ hillier_transition_schema = pl.Schema(
 hillier_required_filecolumns = tuple(colname for colname in hillier_level_schema if colname not in {"parity", "j"})
 
 
-# keys are (atomic number, ion stage)
 class IonFiles(t.NamedTuple):
     """The CMFGEN files holding one ion's levels, cross sections and collision data."""
 
@@ -127,6 +126,7 @@ ions_data = {
     for ion_stage in ion_stages
 }
 
+# keys are (atomic number, ion stage)
 ions_data |= {
     # H
     (1, 1): IonFiles("5dec96", "hi_osc.dat", ("hiphot.dat",), "hicol.dat"),
@@ -157,7 +157,7 @@ ions_data |= {
     (26, 4): IonFiles("19apr23", "feiv_osc_rev2", None, "col_data"),
     # Ti IV has dummy files with a single level.
     # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ["phot_data.dat"], "col_guess.dat"),
-    # V I is in CMFGEN and it has a single level.
+    # V (only V I is in CMFGEN and it has a single level)
     # (23, 1): IonFiles("27may10", "vi_osc", ["vi_phot.dat"], "col_guess.dat"),
     # Cu, Zn and above are not in CMGFEN?
     # (56, 2): IonFiles("19apr23", "osc_data", ["phot_data_A"], "col_data"),
