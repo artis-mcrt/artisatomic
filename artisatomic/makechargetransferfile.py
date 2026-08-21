@@ -16,7 +16,7 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 - Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
   hold no hydrogen and need these reactions. No publication gives these rates, so the script
-  takes the ionization energies of Sc to U from the NIST ASD. It keeps the exothermic
+  takes the ionization energies of Sc to U from the NIST table of this package. It keeps the exothermic
   reactions with a small energy defect. Each one gets the near-resonant rate of 1e-9 cm3/s
   (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
@@ -38,6 +38,7 @@ import numpy as np
 
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
+from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
@@ -203,6 +204,9 @@ METAL_METAL_RATE = 1.0
 METAL_METAL_MAX_DEFECT_EV = 4.0
 # the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
 METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
+# the elements that get an estimate, Sc to U
+METAL_METAL_ZMIN = 21
+METAL_METAL_ZMAX = 92
 # The range of use of the estimates [K]. A flat value has no temperature dependence, so the clamp
 # has no effect; the values document the nebular range only.
 METAL_METAL_TMIN = 1000
@@ -248,11 +252,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
         "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
         "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
-        "  energies of the NIST Atomic Spectra Database",
-        (
-            "  https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data&units=1&format=3&order=0"
-            "&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
-        ),
+        "  energies of the NIST Atomic Spectra Database, in the file nist_ionization.txt of artisatomic. The",
+        f"  elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[METAL_METAL_ZMAX]} (Z = {METAL_METAL_ZMIN} to {METAL_METAL_ZMAX}).",
         "",
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
@@ -407,31 +408,7 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     return entries, report
 
 
-def read_nist_ionization_energies(text: str) -> dict[tuple[int, int], float]:
-    """Parse the tab-delimited export of ionization energies from the NIST ASD into {(Z, charge): eV}.
-
-    The prefix and suffix columns mark an interpolated or theoretical value. The estimates that
-    use this table accept those values.
-    """
-    energies = {}
-    lines = text.splitlines()
-    assert lines[0].startswith("At. num"), "unexpected NIST ASD header"
-    for line in lines[1:]:
-        if line.startswith("Notes:"):
-            break  # the footnotes of the table follow the data rows
-        if not line.strip():
-            continue
-        fields = [field.strip().strip('"') for field in line.split("\t")]
-        z, charge, energy = fields[0], fields[2], fields[4]
-        if not energy:
-            continue
-        energies[int(z), int(charge.removeprefix("+"))] = float(energy)
-    return energies
-
-
-def get_metal_metal_entries(
-    sourcedir: Path, covered: AbstractSet[tuple[int, int, int, int]] = frozenset()
-) -> list[CTEntry]:
+def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = frozenset()) -> list[CTEntry]:
     """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
 
     The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
@@ -442,9 +419,14 @@ def get_metal_metal_entries(
     Coulomb repulsion between two positive ions makes their reactions slow.
 
     A reaction in `covered`, the keys (Z_acc, stage_acc, Z_don, stage_don) of the other sources,
-    gets no estimate. A published rate therefore replaces its estimate.
+    gets no estimate. A published rate therefore replaces its estimate. The ionization energies
+    come from the NIST table that the package ships, artisatomic/nist_ionization.txt.
     """
-    energies = read_nist_ionization_energies(read_source("nist_ie_sc_to_u.dat", sourcedir))
+    energies = {
+        (z, stage - 1): energy_ev
+        for (z, stage), energy_ev in get_nist_ionization_energies_ev().items()
+        if METAL_METAL_ZMIN <= z <= METAL_METAL_ZMAX and math.isfinite(energy_ev)
+    }
     donors = sorted(z for (z, charge) in energies if charge == 0)
     entries = []
     for z_acc in donors:
@@ -686,7 +668,7 @@ def main() -> None:
     print("Heavy ion with neutral heavy atom (near-resonant estimates):")
     published_entries = kf96_entries + he_entries + ss11_entries
     covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published_entries}
-    metal_entries = get_metal_metal_entries(args.sourcedir, covered)
+    metal_entries = get_metal_metal_entries(covered)
     print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")

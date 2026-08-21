@@ -180,24 +180,16 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
     assert entry.autoreverse == 1
 
 
-def test_makechargetransferfile_metal_metal_estimates(patch_sources, tmp_path):
+def test_makechargetransferfile_metal_metal_estimates(monkeypatch):
     """The heavy-element estimates keep the exothermic reactions with a small energy defect."""
-    # the row of Fe III has no value, and the parser must skip it
-    text = (
-        "At. num\tSp. Name\tIon Charge\tPrefix\tIonization Energy (eV)\tSuffix\t\n"
-        '"26"\t"Fe I"\t"0"\t""\t"7.9"\t""\t\n'
-        '"26"\t"Fe II"\t"+1"\t""\t"10.0"\t""\t\n'
-        '"26"\t"Fe III"\t"+2"\t""\t""\t""\t\n'
-        '"57"\t"La I"\t"0"\t"["\t"5.58"\t"]"\t\n'
-        "Notes:\n"
-        "(a) Uncertainty of the listed value is unknown. "
+    # the NIST table keys by ion stage; the value of Fe IV is missing, and the code must skip it
+    monkeypatch.setattr(
+        makechargetransferfile,
+        "get_nist_ionization_energies_ev",
+        lambda: {(26, 1): 7.9, (26, 2): 10.0, (26, 3): float("nan"), (57, 1): 5.58},
     )
-    patch_sources({"nist_ie_sc_to_u.dat": text})
 
-    energies = makechargetransferfile.read_nist_ionization_energies(text)
-    assert energies == {(26, 0): 7.9, (26, 1): 10.0, (57, 0): 5.58}
-
-    entries = makechargetransferfile.get_metal_metal_entries(tmp_path)
+    entries = makechargetransferfile.get_metal_metal_entries()
     reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e for e in entries}
 
     # Fe+1 + La0 -> Fe0 + La+1 releases 7.9 - 5.58 = 2.32 eV, which is inside the window
@@ -209,11 +201,12 @@ def test_makechargetransferfile_metal_metal_estimates(patch_sources, tmp_path):
     # the excluded reactions:
     #   La+1 + Fe0 is endothermic;
     #   Fe+2 + La0 releases 4.42 eV, which is above the window;
-    #   Fe+1 + Fe0 changes nothing
+    #   Fe+1 + Fe0 changes nothing;
+    #   Fe+3 has no energy value
     assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}
 
     # a reaction that another source covers gets no estimate
-    remaining = makechargetransferfile.get_metal_metal_entries(tmp_path, covered={(26, 2, 57, 1)})
+    remaining = makechargetransferfile.get_metal_metal_entries(covered={(26, 2, 57, 1)})
     assert [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in remaining] == [(26, 3, 26, 1)]
 
 
@@ -236,7 +229,7 @@ def test_committed_source_files_build_the_expected_entries():
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
     published = kf96_entries + he_entries + ss11_entries
     covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published}
-    metal_entries = makechargetransferfile.get_metal_metal_entries(sourcedir, covered)
+    metal_entries = makechargetransferfile.get_metal_metal_entries(covered)
 
     assert (len(kf96_entries), len(he_entries), len(ss11_entries), len(metal_entries)) == (100, 21, 36, 2899)
     entries = makechargetransferfile.set_autoreverse_flags(published + metal_entries)
