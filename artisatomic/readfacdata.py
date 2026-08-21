@@ -1,4 +1,8 @@
+"""Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data."""
+
+import os
 import re
+import string
 import typing as t
 from collections import defaultdict
 from pathlib import Path
@@ -7,17 +11,19 @@ import pandas as pd
 
 import artisatomic
 
-# from astropy import units as u
-# import os.path
-# import pandas as pd
-# from carsus.util import parse_selected_species
-
 USE_CALIBRATED = True
 
-BASEPATH = str(
-    Path.home()
-    / f"Google Drive/Shared drives/Atomic Data Group/OptimizedFACdata/OptimizedFAC_lanthanides{'_calibrated' if USE_CALIBRATED else ''}"
-)
+
+def get_basepath() -> Path:
+    """Directory holding the OptimizedFAC lanthanide data.
+
+    Not part of this repository, so ARTISATOMIC_FAC_PATH overrides where it is looked for, as
+    ARTISATOMIC_LISBON_PATH does for the Lisbon files. The default is the Google Drive mount
+    path, which is where the shared drive appears on the machine this was written for.
+    """
+    calibstr = "_calibrated" if USE_CALIBRATED else ""
+    default = Path.home() / "Google Drive/Shared drives/Atomic Data Group/OptimizedFACdata"
+    return Path(os.environ.get("ARTISATOMIC_FAC_PATH", default)) / f"OptimizedFAC_lanthanides{calibstr}"
 
 
 # Constants
@@ -29,7 +35,8 @@ echarge = 4.8e-10  # statC
 hc = 4.1357e-15 * cspeed
 
 
-def GetLevels_FAC(filename: Path) -> pd.DataFrame:
+def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
 
@@ -46,10 +53,12 @@ def GetLevels_FAC(filename: Path) -> pd.DataFrame:
     levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: s.replace("1", ""))
     levels_FAC["energypercm"] = levels_FAC["Energy_ev"] / hc
 
+    assert isinstance(levels_FAC, pd.DataFrame)
     return levels_FAC
 
 
-def GetLevels_cFAC(filename: Path) -> pd.DataFrame:
+def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the level table of a cFAC ascii output file, whose columns differ from FAC's."""
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
     names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
 
@@ -65,27 +74,23 @@ def GetLevels_cFAC(filename: Path) -> pd.DataFrame:
     levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: s.replace("1", ""))
     levels_cFAC["energypercm"] = [en_ev / hc for en_ev in levels_cFAC["Energy_ev"]]
 
+    assert isinstance(levels_cFAC, pd.DataFrame)
     return levels_cFAC
 
 
-def GetLevels(filename: Path, Z: int, ionization_energy_in_ev: float) -> pd.DataFrame:
-    """Returns a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files of the data.
+def GetLevels(filename: Path | str, ionization_energy_in_ev: float) -> pd.DataFrame:
+    """Get a dataframe of the energy levels extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
-    data : str
+    filename : str
         Filename of cFAC ascii output for the energy levels
-
-    Z: int
-        Ion atomic number
-
     """
     headerlines: list[str] = []
-    with open(filename) as f:
+    with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(10))
 
-    GState = headerlines[7][8:]
-    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    # headerlines[7] holds the ground state and headerlines[5] the ion charge; neither is needed here
     version_FAC = headerlines[0].split(" ")[0]
     print("FAC/cFAC: ", version_FAC)
     if version_FAC == "FAC":
@@ -93,14 +98,17 @@ def GetLevels(filename: Path, Z: int, ionization_energy_in_ev: float) -> pd.Data
     elif version_FAC == "cFAC":
         levels = GetLevels_cFAC(filename)
     else:
-        raise ValueError("No FAC-like code detected on output file")
+        msg = "No FAC-like code detected on output file"
+        raise ValueError(msg)
 
     levels = levels[levels["energypercm"] <= (ionization_energy_in_ev / hc)]
+    assert isinstance(levels, pd.DataFrame)
 
     return levels
 
 
-def GetLines_FAC(filename: Path) -> pd.DataFrame:
+def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the transition table of an FAC ascii output file."""
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
@@ -109,10 +117,12 @@ def GetLines_FAC(filename: Path) -> pd.DataFrame:
     trans_FAC["DeltaE[cm^-1]"] = trans_FAC["DeltaE[eV]"] / hc
     trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
     trans_FAC = trans_FAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    assert isinstance(trans_FAC, pd.DataFrame)
     return trans_FAC
 
 
-def GetLines_cFAC(filename: Path) -> pd.DataFrame:
+def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
+    """Parse the transition table of a cFAC ascii output file."""
     names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
 
     widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
@@ -120,27 +130,22 @@ def GetLines_cFAC(filename: Path) -> pd.DataFrame:
     trans_cFAC["Wavelength[Ang]"] = trans_cFAC["DeltaE[eV]"].apply(lambda en_ev: (hc / en_ev) * 1e8)
     trans_cFAC["DeltaE[cm^-1]"] = trans_cFAC["DeltaE[eV]"] / hc
     trans_cFAC = trans_cFAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    assert isinstance(trans_cFAC, pd.DataFrame)
     return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
 
-def GetLines(filename: Path, Z: int) -> pd.DataFrame:
-    """Returns a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files of the data.
+def GetLines(filename: Path | str) -> pd.DataFrame:
+    """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
     ----------
-    data : str
+    filename : str
         Filename of cFAC ascii output for the transitions
-
-    Z: int
-        Ion atomic number
-
     """
     headerlines: list[str] = []
-    with open(filename) as f:
+    with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
-    GState = headerlines[8][8:]
-    Multi = headerlines[10][9:]
-    IonStage = Z - int(float(headerlines[5][6:].strip()))
+    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge; none is needed here
     version_FAC = headerlines[0].split(" ")[0]
 
     if version_FAC == "FAC":
@@ -148,42 +153,36 @@ def GetLines(filename: Path, Z: int) -> pd.DataFrame:
     elif version_FAC == "cFAC":
         lines = GetLines_cFAC(filename)
     else:
-        raise ValueError("No FAC-like code detected on output file")
+        msg = "No FAC-like code detected on output file"
+        raise ValueError(msg)
 
     return lines
 
 
 def extend_ion_list(ion_handlers):
-    assert Path(BASEPATH).is_dir()
-    for s in Path(BASEPATH).glob("**/*.lev.asc"):
-        ionstr = s.parts[-1].lstrip("0123456789").removesuffix(".lev.asc").removesuffix("_calib")
-        elsym = ionstr.rstrip("IVX")
-        ion_stage_roman = ionstr.removeprefix(elsym)
-        atomic_number = artisatomic.elsymbols.index(elsym)
+    """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
+    basepath = get_basepath()
+    # not an assert: this reports a missing data directory and must survive python -O, and it
+    # names the environment variable rather than just failing the glob silently
+    if not basepath.is_dir():
+        msg = (
+            f"FAC data directory {basepath} not found."
+            " Set ARTISATOMIC_FAC_PATH to the directory holding the OptimizedFAC_lanthanides* folders."
+        )
+        raise FileNotFoundError(msg)
 
-        ion_stage = artisatomic.roman_numerals.index(ion_stage_roman)
+    for s in basepath.glob("**/*.lev.asc"):
+        ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
+        atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
-        found_element = False
-        for tmp_atomic_number, list_ions in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                if ion_stage not in [x[0] if len(x) > 0 else x for x in list_ions]:
-                    list_ions.append((ion_stage, "fac"))
-                    list_ions.sort()
-                found_element = True
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "fac")],
-                )
-            )
-
-    ion_handlers.sort(key=lambda x: x[0])
-    # print(ion_handlers)
+    # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return ion_handlers
 
 
 class FACEnergyLevel(t.NamedTuple):
+    """One energy level of an FAC calculation."""
+
     levelname: str
     energyabovegsinpercm: float
     g: float
@@ -191,41 +190,55 @@ class FACEnergyLevel(t.NamedTuple):
 
 
 def read_levels_data(dflevels):
-    energy_levels = []
-    ilev_enlevelindex_map = {}
+    """Convert the FAC level table to level tuples, in the energy order of the sorted frame.
 
-    dflevels = dflevels.sort_values(by="energypercm", ignore_index=True)
-    for index, row in dflevels.iterrows():
-        ilev_enlevelindex_map[int(row["Ilev"])] = index
+    Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
+    needs because sorting by energy reorders the levels.
+    """
+    # astype(float) first: the level order is now the frame's order alone, and sorting a column
+    # that arrived as strings (pd.read_fwf can yield those) would order it lexicographically
+    dflevels = dflevels.astype({"energypercm": float}).sort_values(by="energypercm", ignore_index=True)
 
-        newlevel = FACEnergyLevel(
-            levelname=row["Config rel"], parity=row["P"], g=row["g"], energyabovegsinpercm=float(row["energypercm"])
+    energy_levels = [
+        # Config is not unique (levels of one configuration differ in J), so append the FAC level
+        # index. The configuration stays first, for get_level_valence_n() and the adata.txt comment.
+        FACEnergyLevel(
+            levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
+            parity=row["P"],
+            g=row["g"],
+            energyabovegsinpercm=float(row["energypercm"]),
         )
-        energy_levels.append(newlevel)
+        for _index, row in dflevels.iterrows()
+    ]
 
-    energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
-
-    return [None, *energy_levels], ilev_enlevelindex_map
+    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
 
 
 class FACTransition(t.NamedTuple):
+    """One bound-bound transition of an FAC calculation, keyed by zero-based level id."""
+
     lowerlevel: int
     upperlevel: int
     A: float
     coll_str: float
 
 
-def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
+def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
+    """Convert FAC lines to transitions referencing zero-based level ids.
+
+    A line naming an Ilev with no level is an error rather than something to skip, and the two
+    levels are ordered lower id first. Returns the transitions and the number of them touching
+    each level name.
+    """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for index, row in dflines.iterrows():
-        try:
-            lowerlevel = ilev_enlevelindex_map[int(row["Lower"])] + 1
-            upperlevel = ilev_enlevelindex_map[int(row["Upper"])] + 1
-        except KeyError:
-            continue
-        assert lowerlevel < upperlevel
+    for _, row in dflines.iterrows():
+        # not an assert: this decides which levels a transition is written between, so it must
+        # survive python -O, and it names the offending Ilev values rather than just failing
+        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+            row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
+        )
 
         transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
 
@@ -238,45 +251,64 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog):
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    # ion_charge = ion_stage - 1
+    """Read one ion from the FAC data set, an early version of the Floers+25 calibrated data."""
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
 
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}{'_calib' if USE_CALIBRATED else ''}"
-    ion_folder = BASEPATH + f"/{ionstr}"
-    levels_file = ion_folder + f"/{ionstr}.lev.asc"
-    lines_file = ion_folder + f"/{ionstr}.tr.asc"
+    ion_folder = get_basepath() / ionstr
+    levels_file = ion_folder / f"{ionstr}.lev.asc"
+    lines_file = ion_folder / f"{ionstr}.tr.asc"
 
-    if atomic_number == 92 and ion_stage in [2, 3]:
-        ion_folder = str(
-            Path.home()
-            / f"Google Drive/Shared drives/Atomic Data Group/Paper_Nd_U/FAC/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
-        )
-        levels_file = f"{ion_folder}/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.lev.asc"
-        lines_file = f"{ion_folder}/{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated.tr.asc"
+    if atomic_number == 92 and ion_stage in {2, 3}:
+        # U II and U III come from a separate convergence study, which sits beside the
+        # OptimizedFAC folders rather than inside them
+        ionstr = f"{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
+        ion_folder = get_basepath().parent.parent / "Paper_Nd_U" / "FAC" / ionstr
+        levels_file = ion_folder / f"{ionstr}.lev.asc"
+        lines_file = ion_folder / f"{ionstr}.tr.asc"
 
     artisatomic.log_and_print(
         flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {ion_folder}",
+        f" {artisatomic.path_for_log(ion_folder)}",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
+    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
-    assert Path(levels_file).exists()
-    dflevels = GetLevels(filename=levels_file, Z=atomic_number, ionization_energy_in_ev=ionization_energy_in_ev)
-    # print(dflevels)
+    if not levels_file.is_file():
+        msg = f"FAC levels file {levels_file} not found"
+        raise FileNotFoundError(msg)
+    dflevels = GetLevels(filename=levels_file, ionization_energy_in_ev=ionization_energy_in_ev)
 
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels[1:]):d} levels")
+    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
-    assert Path(lines_file).exists()
-    dflines = GetLines(filename=lines_file, Z=atomic_number)
+    if not lines_file.is_file():
+        msg = f"FAC transitions file {lines_file} not found"
+        raise FileNotFoundError(msg)
+    dflines = GetLines(filename=lines_file)
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map, flog)
+    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map)
 
     artisatomic.log_and_print(flog, f"Read {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+
+
+def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from an FAC level name.
+
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
+    """
+    # level names are "<configuration> Ilev=<index>" and the configuration is itself
+    # space-separated, so drop the index suffix before taking the last orbital
+    part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
+    if part[-1] not in "spdfg":
+        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
+        assert part[-1].isdigit()
+        part = part.rstrip(string.digits)
+    return int(part.rstrip("spdfg"))

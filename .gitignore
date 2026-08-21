@@ -12,14 +12,23 @@ Icon?
 .pytest_cache
 output.txt
 
-atomic-data-qub/1
-
 *.nosync
 
-recombination_rates/phixs.pdf
 .DS_Store
 .idea
 .tags*
 testoutput
 testoutput/*
+# written by the checksum verification runs in tests/*/
+tests/*/output/
 _version.py
+build
+.venv
+
+# coverage
+coverage.xml
+# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms,
+# but not the .coveragerc config file that the glob would otherwise swallow
+.coverage*
+!.coveragerc
+htmlcov/

@@ -1,106 +1,160 @@
 [build-system]
-requires = ["psutil>=5.9.0", "setuptools>=68", "setuptools_scm[toml]>=8.0", "wheel"]
+requires = [
+    "setuptools>=82.0.1",
+    "setuptools_scm>=10.0.5",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "artisatomic"
 authors = [
-    {name = "Luke J. Shingles", email = "luke.shingles@gmail.com"},
-    {name = "ARTIS Collaboration", email = "luke.shingles@gmail.com"},
+    { name = "Luke J. Shingles", email = "luke.shingles@gmail.com" },
+    { name = "ARTIS Collaboration", email = "luke.shingles@gmail.com" },
 ]
-description="Tools to create an atomic database for use with ARTIS."
+description = "Tools to create an atomic database for use with ARTIS."
 classifiers = [
     "Intended Audience :: Science/Research",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-license = {text = "MIT"}
-dynamic = ["version", "dependencies"]
-requires-python = ">=3.10"
-readme = {file = "README.md", content-type='text/markdown'}
+requires-python = ">=3.13"
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+dynamic = ["version"]
+readme = { file = "README.md", content-type = 'text/markdown' }
+dependencies = [
+    "argcomplete>=3.5.1",
+    "artistools>=2026.4.14",
+    "chiantipy>=0.15.1",
+    "h5py>=3.10.0",
+    "numpy>=2.2.6",
+    "pandas[compression,hdf5]>=3.0.3",
+    "polars>=1.37.1",
+    "pyarrow>=18.1.0",
+    "requests>=2.34.0",
+    "scipy>=1.15.3",
+    "tqdm>=4.70.0",
+    "xopen>=2.1.0",
+]
+
+[dependency-groups]
+# its own group so the workflow's combine job can install the coverage the lockfile pinned without
+# building the project and its 76 packages to run one tool
+coverage = ["coverage>=7.15.3"]
+dev = [
+    { include-group = "coverage" },
+    "matplotlib>=3.10.7",
+    "pandas-stubs>=3.0.0.260204",
+    "pip>=25.2",
+    "prek>=0.1.6",
+    "pyrefly>=1.2.0",
+    "pytest>=8.3.3",
+    "ruff>=0.16.1",
+    "ty>=0.0.65",
+    "types-pytz>=2025.2.0.20250809",
+    "types-requests>=2.32.0.20241016",
+    "types-tqdm>=4.70.0.20260731",
+]
 
 [project.urls]
-Repository ="https://www.github.com/artis-mcrt/artisatomic"
+Repository = "https://www.github.com/artis-mcrt/artisatomic"
+Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
+makechargetransferfile = "artisatomic.makechargetransferfile:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
 
-[tool.black]
-line-length = 120
+[tool.pyrefly]
+preset = "strict"
+project-excludes = [
+    '**/node_modules',
+    '**/__pycache__',
+    '**/.*',
+    'build',
+    'dist',
+    'target',
+    '**/_version.py',
+    '**/.venv',
+    '**/rd_cmfgen.py',
+]
+python-interpreter-path = ".venv/bin/python3"
 
-[tool.mypy]
-python_version = '3.11'
-exclude = "(build)|(tests)"
-packages = "artisatomic"
-ignore_missing_imports = true
-warn_unused_configs = true
-
-[tool.pylint]
-max-line-length = 120
-errors-only = true
-
-[tool.pylint.typecheck]
-ignored-modules = ["astropy", "extinction"]
+[tool.pyrefly.errors]
+# these stay off because they fire in the hundreds on unannotated function parameters and
+# lambdas, which ruff's ANN001 also allows; everything else in the strict preset is enabled
+# and individual exceptions are suppressed at the line that needs them
+implicit-any-parameter = false
+implicit-any-lambda = false
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+fix = true
+show-fixes = true
+extend-exclude = ["_version.py"]
 
 [tool.ruff.lint]
-select = [
-    #"ALL",
-    "A", "B", "C", "D", "E", "F", "G", "N", "Q", "W", "ARG", "BLE", "DJ", "DTZ", "EM", "ERA", "EXE",
-    "ICN", "INP", "ISC", "NPY", "PD", "PGH", "PIE", "PL", "PT", "PYI", "RET", "RSE", "RUF",
-    "SIM", "SLF", "TCH", "TID", "TRY", "UP", "YTT"
-]
+preview = true
+select = ["ALL"]
 ignore = [
-    "A001",
-    "ARG001", # ignored because variables in df.eval() are not detected
-    "B005",
-    "B007", # variable not used in loop body (but sometimes it is with eval)
-    "BLE001",
-    "C9",
-    "COM812",
-    "D100", "D101", "D102", "D103", "D104", "D107", "D203", "D205", "D213", "D401", "D417",
-    "E501", "E741",
-    "EM101","EM102",
-    "ERA001",
-    "F401",
-    "F841", # ignored because variables in df.eval() are not detected
-    "ISC001",
-    "N802", "N803", "N806", "N999","N816",
-    "PD002",
-    "PD901",
-    "PGH003",
-    "PLR0911", "PLR0912", "PLR0913", "PLR0915", "PLR2004",
-    "PLR5501",
-    "PLW0603",
-    "PLW2901",
-    "PT011",
-    "PYI024",
-    "RET504",
-    "S307",
-    "SIM115",
-    "SLF001",
-    "TCH005",
-    "TRY003",
-    "TRY301",
-    "UP032",
+    # every float comparison here is deliberate: a divide-by-zero guard, a validation of an exact
+    # value read from a data file, or a test for a cross section that is zero everywhere
+    "float-equality-comparison",
+    "missing-type-function-argument",
+    "missing-return-type-undocumented-public-function",
+    "missing-return-type-private-function",
+    "any-type",
+    "strip-with-multi-characters",
+    "complex-structure",
+    "missing-trailing-comma",
+    "missing-copyright-notice",
+    "line-too-long",
+    # a Google-style Returns:/Yields:/Raises: section is nearly always a restatement of the summary
+    # line for these functions, so say it once in prose instead
+    "docstring-missing-returns",
+    "docstring-missing-yields",
+    "docstring-missing-exception",
+    "ambiguous-variable-name",
+    "FBT",
+    "line-contains-todo",
+    "invalid-function-name",
+    "invalid-argument-name",
+    "non-lowercase-variable-in-function",
+    "mixed-case-variable-in-global-scope",
+    "try-except-in-loop",
+    "import-outside-top-level",
+    "too-many-locals",
+    "too-many-positional-arguments",
+    "too-many-nested-blocks",
+    "too-many-return-statements",
+    "too-many-branches",
+    "too-many-arguments",
+    "too-many-statements",
+    "magic-value-comparison",
+    "global-statement",
+    "redefined-loop-name",
+    "glob",
+    "assert",
+    "hardcoded-password-string",
+    "print",
+    "missing-todo-author",
+    "missing-todo-link",
+    "missing-todo-colon",
+    "missing-todo-description",
 ]
 fixable = ["ALL"]
 unfixable = [
-    "COM812",  # missing-trailing-comma
-    "ERA001",  # commented-out-code (will just delete it!)
-    "F841",  # unused-variable
-    "RUF100", # unused-noqa
-    "SIM222", # expr-or-true
-    "SIM223", # expr-and-false
-    "TCH005", # empty-type-checking-block
-    "F401",
+    "unused-noqa",
+    "expr-or-true",
+    "expr-and-false",
+    "empty-type-checking-block",
+    "unused-import",
 ]
+
+[tool.ruff.lint.pydocstyle]
+# Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and
+# leaves Args/Returns/Raises sections optional.
+convention = "pep257"
 
 [tool.ruff.lint.isort]
 force-single-line = true
@@ -108,17 +162,25 @@ order-by-type = false
 
 [tool.setuptools]
 include-package-data = true
-license-files = ["LICENSE.txt"]
 
 [tool.setuptools.packages.find]
-namespaces = true
 where = ["."]
-include = ["*", "**/matplotlibrc", "**/data"]
-exclude = ["tests", "**/dist", "**/lib", "**/build", "*.egg-info", "**/.*"]
-
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+include = ["artisatomic*"]
 
 [tool.setuptools_scm]
 write_to = "_version.py"
 local_scheme = "no-local-version"
+
+[tool.ty.rules]
+unused-ignore-comment = "ignore"
+
+[tool.coverage.run]
+source = ["artisatomic"]
+omit = ["artisatomic/test_artisatomic.py", "artisatomic/test_chargetransfer.py"]
+# separate runners' paths only line up in the combined report if they are relative
+relative_files = true
+# parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a
+# spawned child starts with no tracer, so without this those lines are measured nowhere. Note this
+# also puts coverage in parallel mode always, so a local run needs `coverage combine` before
+# `coverage report` finds anything.
+concurrency = ["multiprocessing"]

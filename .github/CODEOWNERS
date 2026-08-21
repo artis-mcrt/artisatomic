@@ -1,0 +1,5 @@
+*       @lukeshingles
+.github/workflows/**
+pyproject.toml
+**/*.lock
+.pre-commit-config.yaml

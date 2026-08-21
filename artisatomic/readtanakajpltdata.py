@@ -1,72 +1,51 @@
-import typing as t
-from collections import defaultdict
+"""Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
+
+import re
 from pathlib import Path
 
 import pandas as pd
-from astropy import constants as const
-from xopen import xopen
+import polars as pl
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
 
-# from astropy import units as u
-
-# the h5 file comes from Andreas Floers's DREAM parser
-jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v1.1").resolve()
-hc_in_ev_cm = (const.h * const.c).to("eV cm").value
+jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
 
-class EnergyLevel(t.NamedTuple):
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: float
-
-
-class TransitionTuple(t.NamedTuple):
-    lowerlevel: int
-    upperlevel: int
-    A: float
-    coll_str: float
-
-
-def extend_ion_list(ion_handlers):
+def extend_ion_list(ion_handlers, maxionstage=None):
+    """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     tanakaions = sorted(
         [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
+    if maxionstage is not None:
+        tanakaions = [ion for ion in tanakaions if ion[1] <= maxionstage]
 
     for atomic_number, ion_stage in tanakaions:
-        found_element = False
-        for tmp_atomic_number, list_ions_handlers in ion_handlers:
-            if tmp_atomic_number == atomic_number:
-                # add an ion that is not present in the element's list
-                if ion_stage not in [x[0] if hasattr(x, "__getitem__") else x for x in list_ions_handlers]:
-                    list_ions_handlers.append((ion_stage, "tanakajplt"))
-                    list_ions_handlers.sort(key=lambda x: x[0] if hasattr(x, "__getitem__") else x)
-                found_element = True
-
-        if not found_element:
-            ion_handlers.append(
-                (
-                    atomic_number,
-                    [(ion_stage, "tanakajplt")],
-                )
-            )
-
-    ion_handlers.sort(key=lambda x: x[0])
+        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
 
     return ion_handlers
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    """Read one ion from the Tanaka et al. Japan-Lithuania database.
+
+    Levels and transitions are returned as DataFrames. The file numbers levels from one and
+    quotes g_u * A rather than A, so ids are shifted to the zero-based convention used in
+    memory and the rate is divided by the upper level's statistical weight. Self-transitions
+    (equal upper and lower level) appear in some files and are dropped with a warning.
+    """
     filename = f"{atomic_number}_{ion_stage}.txt"
-    if Path(jpltpath / f"{filename}.zst").is_file():
-        filename = f"{filename}.zst"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    with xopen(jpltpath / filename) as fin:
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        artisatomic.log_and_print(flog, fin.readline().strip())
-        assert fin.readline().strip() == f"# {atomic_number} {ion_stage}"
+    with artisatomic.xopen_check_extension(jpltpath / filename) as fin:
+        readlinein = ""
+        for linenumber in range(7):
+            readlinein = fin.readline().strip()
+            if linenumber < 3:
+                artisatomic.log_and_print(flog, readlinein)
+
+            if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
+                break
+        assert readlinein == f"# {atomic_number} {ion_stage}"
         levelcount, transitioncount = (int(x) for x in fin.readline().removeprefix("# ").split())
         artisatomic.log_and_print(flog, f"levels: {levelcount}")
         artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
@@ -76,60 +55,98 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
         artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
         assert fin.readline().strip() == "# Energy levels"
-        assert fin.readline().strip() == "# num  weight parity      E(eV)      configuration"
+        expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
+        read_column_headers = fin.readline().strip().split()  # v2.1 has extra column
+        assert all(item in read_column_headers for item in expected_column_headers)
 
         with pd.read_fwf(
             fin,
             chunksize=levelcount,
             nrows=levelcount,
-            colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, None)],
-            names=["num", "weight", "parity", "energy_ev", "configuration"],
+            colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, 34 + 5000)],
+            names=["levelid", "g", "parity", "energy_ev", "configuration"],
         ) as reader:
-            # dflevels = pd.concat(reader, ignore_index=True)
+            dflevels = pl.from_pandas(reader.get_chunk(levelcount)).select(
+                energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
+                parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
+                g=pl.col("g").cast(pl.Float64),
+                # Every expression in one select() reads the INPUT frame, so both columns below
+                # are the file's own values, not the ones being computed alongside them: the name
+                # gets the file's 1-based number rather than the zero-based levelid, and the
+                # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
+                # a human-readable comment in adata.txt — and read_fwf() has already stripped the
+                # text, so this is deliberate rather than the shadowing accident it resembles.
+                levelname=pl.format(
+                    "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
+                ),
+                levelid=pl.col("levelid").cast(pl.Int64) - 1,
+            )
 
-            dflevels = reader.get_chunk(levelcount)
-            # print(dflevels)
-
-            energy_levels = [None]
-            for row in dflevels.itertuples(index=False):
-                parity = 1 if row.parity.strip() == "odd" else 0
-                energyabovegsinpercm = float(row.energy_ev / hc_in_ev_cm)
-                g = float(row.weight)
-
-                levelname = f"{row.num},{row.parity},{row.configuration.strip()}"
-                energy_levels.append(
-                    EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
-                )
-                # print(energy_levels[-1])
-        assert len(energy_levels[1:]) == levelcount
+        assert dflevels.height == levelcount
 
         line = fin.readline().strip()
-        assert line in ("# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)")
+        assert line in {"# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"}
         if line == "# Transitions":
             assert fin.readline().strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
-        dftransitions = pd.read_fwf(
-            fin,
-            colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, None)],
-            names=["num_u", "num_l", "wavelength", "g_u_times_A", "log(g_l*f)"],
+        dftransitions = pl.from_pandas(
+            pd.read_fwf(
+                fin,
+                colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, 43 + 5000)],
+                names=["upperlevel", "lowerlevel", "wavelength", "g_u_times_A", "log(g_l*f)"],
+                dtype_backend="pyarrow",
+            )
+        ).select(
+            # the file numbers levels from one; level ids are zero-based in memory
+            pl.col("lowerlevel").cast(pl.Int64) - 1,
+            pl.col("upperlevel").cast(pl.Int64) - 1,
+            pl.col("g_u_times_A").cast(pl.Float64),
         )
-        # dftransitions = reader.get_chunk(transitioncount)
 
-        # print(dftransitions)
-        transitions = []
-        transition_count_of_level_name = defaultdict(int)
+    transition_count_of_levelid: dict[int, int] = dict(
+        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
+    )
+    transition_count_of_level_name = {
+        levelname: transition_count_of_levelid.get(levelid, 0)
+        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
+    }
+    assert dftransitions.height == transitioncount
 
-        for row in dftransitions.itertuples(index=False):
-            A = float(row.g_u_times_A) / energy_levels[row.num_u].g
-            coll_str = -1 if (energy_levels[row.num_u].parity != energy_levels[row.num_l].parity) else -2
-            transitions.append(TransitionTuple(lowerlevel=row.num_l, upperlevel=row.num_u, A=A, coll_str=coll_str))
+    dftransitions = (
+        dftransitions.join(
+            dflevels.select(g_u=pl.col("g"), upperlevel=pl.col("levelid")),
+            on="upperlevel",
+            how="left",
+            maintain_order="left",
+        )
+        .with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
+        .select(["lowerlevel", "upperlevel", "A"])
+    )
+    dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
+    if dftransitions.height != dftransitions_filtered.height:
+        artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        dftransitions = dftransitions_filtered
 
-            transition_count_of_level_name[energy_levels[row.num_u].levelname] += 1
-            transition_count_of_level_name[energy_levels[row.num_l].levelname] += 1
+    return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 
-            # print(transitions[-1])
 
-        assert len(transitions) == transitioncount
+def get_level_valence_n(levelname: str):
+    """Principal quantum number of the valence electron, read from a JPLT level name.
 
-    # artisatomic.log_and_print(flog, f'Read {len(energy_levels[1:]):d} levels')
+    Kept separate from the other readers' versions: each data source names its levels
+    differently, so a shared parser would have to guess which convention it is looking at.
 
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    data_v2.1 mixes two conventions: the original relativistic one, "{  4s+ 2  4p- 1 }",
+    where the valence orbital heads the last double-space-separated token, and the
+    LS-coupled one of the 2024 Ge-sequence files, "3s(2).3p(6).3d(10).4s.4p(3)2D_3D",
+    where it is the last dot-separated shell before the term label.
+    """
+    if "{" in levelname:
+        n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+    else:
+        lastshell = levelname.rsplit(" ", maxsplit=1)[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0]
+        nmatch = re.match(r"\d+", lastshell)
+        assert nmatch is not None, f"Could not parse valence n from level name: {levelname}"
+        n = int(nmatch.group())
+    assert n >= 0
+    assert n < 20
+    return n

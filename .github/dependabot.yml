@@ -1,0 +1,31 @@
+---
+version: 2
+updates:
+
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: monthly
+      groups:
+          github-actions:
+              patterns:
+                  - '*'
+
+    - package-ecosystem: uv
+      directory: /
+      versioning-strategy: lockfile-only
+      schedule:
+          interval: monthly
+      groups:
+          lockfile:
+              patterns:
+                  - '*'
+
+    - package-ecosystem: pre-commit
+      directory: /
+      schedule:
+          interval: monthly
+      groups:
+          pre-commit:
+              patterns:
+                  - '*'

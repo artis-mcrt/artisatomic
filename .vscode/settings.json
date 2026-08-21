@@ -7,6 +7,5 @@
             "source.organizeImports": "explicit"
         },
         "editor.defaultFormatter": "charliermarsh.ruff"
-    },
-    "python.analysis.typeCheckingMode": "off"
+    }
 }

@@ -1,119 +1,237 @@
 ---
 name: Test
-
+permissions:
+    contents: read
 on:
     push:
     merge_group:
     schedule:
         - cron: 0 13 * * 1
+    workflow_dispatch:
 
+env:
+    RUFF_OUTPUT_FORMAT: github
+    UV_FROZEN: 1
+    ARTISATOMIC_TESTMODE: 1
 jobs:
-    pytest:
-        runs-on: ubuntu-latest
+    lint:
+        name: Format, lint, and type check
+        runs-on: ubuntu-26.04-arm
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v5
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
               with:
-                  cache: pip
-                  python-version-file: .python-version
-
-            - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip wheel setuptools
-                  python -m pip install -r requirements.txt
+                  activate-environment: true
 
             - name: Install artisatomic
+              run: uv sync --compile-bytecode
+
+            - name: Run Ruff
+              if: always()
               run: |
-                  python -m pip install -e .
+                  uv run -- ruff --version
+                  uv run -- ruff check --exit-non-zero-on-fix --no-fix
+
+            - name: Run Ruff Format
+              if: always()
+              run: uv run -- ruff format --check --exit-non-zero-on-format
+
+            - name: Run pyrefly
+              if: always()
+              run: uv run -- pyrefly check --output-format github
+
+            - name: Run ty
+              if: always()
+              run: uv run -- ty check
+
+            - name: Run prek pre-commit checks
+              uses: j178/prek-action@v2.0.6
+
+    pytest:
+        runs-on: ubuntu-26.04-arm
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            - name: Install artisatomic
+              run: uv sync --compile-bytecode
 
             - name: Cache CMFGEN atomic data
-              uses: actions/cache@v3
+              uses: actions/cache@v6
               id: cache-cmfgendata
               with:
-                  path: atomic-data-hillier/atomic_data_15nov16.tar.xz
-                  key: atomic-data-hillier/atomic_data_15nov16.tar.xz
+                  path: atomic-data-hillier/atomic_21jun23/**
+                  key: atomic-data-hillier/atomic_data_21jun23/files
 
             - name: Download/extract CMFGEN atomic data
+              if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # -p gives each data file a unique name, so this one and every tests/ matrix job's
+            # survive being downloaded into a single directory. There are more files than jobs
+            # (each spawned phixs worker writes its own), and combine reporting some as skipped
+            # means their measured lines were identical, not that data was lost.
             - name: Test with pytest
-              run: pytest
+              run: uv run coverage run -p -m pytest
+
+            - name: Upload coverage data
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-pytest
+                  path: .coverage.*
+                  include-hidden-files: true
+
+
+    upload-coverage-python:
+        # needs the matrix so its artifacts exist, but requires only pytest to have passed, so one
+        # red leg cannot take the whole report down. Naming a status function is what disables the
+        # implicit success() over all of needs.
+        needs: [pytest, tests, chargetransfer]
+        if: ${{ !cancelled() && needs.pytest.result == 'success' }}
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            code-quality: write
+            pull-requests: read
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v7
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            # coverage refuses to read a data file whose schema version differs from its own, so the
+            # reader comes from the same lockfile that pinned the writers rather than from an
+            # unpinned uvx
+            - name: Install coverage
+              run: uv sync --only-group coverage
+
+            - name: Download coverage data
+              uses: actions/download-artifact@v8
+              with:
+                  pattern: coverage-data-*
+                  merge-multiple: true
+
+            - name: Combine coverage and report
+              # without this, uv run rebuilds the project and re-syncs the default groups that the
+              # install step above just skipped
+              env:
+                  UV_NO_SYNC: 1
+              run: |
+                  uv run coverage combine
+                  uv run coverage xml
+                  uv run coverage report
+
+            - name: Check for a pull request associated with this commit
+              id: haspr
+              if: github.ref != 'refs/heads/main'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: echo "found=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq 'length > 0')" >> "$GITHUB_OUTPUT"
+
+            - uses: actions/upload-code-coverage@v1
+              if: github.ref == 'refs/heads/main' || steps.haspr.outputs.found == 'true'
+              with:
+                  file: coverage.xml
+                  language: Python
+                  label: code-coverage-agent
 
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, jplt, mons]
+                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons, qub]
             fail-fast: false
-
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
         name: test ${{ matrix.testname }}
 
         steps:
             - name: Checkout Code
-              uses: actions/checkout@v4
+              uses: actions/checkout@v7
               with:
                   fetch-depth: 0
 
-            - name: Set up Python
-              uses: actions/setup-python@v5
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
               with:
-                  cache: pip
-                  python-version: '3.11'
-
-            - name: Install dependencies
-              run: |
-                  python -m pip install --upgrade pip wheel setuptools
-                  python -m pip install -r requirements.txt
+                  activate-environment: true
 
             - name: Install artisatomic
-              run: |
-                  python -m pip install -e .
+              run: uv sync --compile-bytecode
 
+            # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
+            # hydrogenic photoionisation tables from HYD/I on any run without -nophixs, so gating this
+            # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
-              uses: actions/cache@v3
+              uses: actions/cache@v6
               id: cache-cmfgendata
               with:
-                  path: atomic-data-hillier/atomic_data_15nov16.tar.xz
-                  key: atomic-data-hillier/atomic_data_15nov16.tar.xz
+                  path: atomic-data-hillier/atomic_21jun23/**
+                  key: atomic-data-hillier/atomic_data_21jun23/files
 
             - name: Download/extract CMFGEN atomic data
+              if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
+            # no-ops when the data is there, while setup_cmfgen_data.sh curls and extracts anyway
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
-              uses: actions/cache@v3
-              id: cache-jpltdata
+              uses: actions/cache@v6
               with:
-                  path: atomic-data-tanaka-jplt/data_v1.1/**
-                  key: atomic-data-tanaka-jplt/data_v1.1
+                  path: atomic-data-tanaka-jplt/data_v2.1/**
+                  key: atomic-data-tanaka-jplt-files-v2.1
 
             - name: Download/extract JPLT atomic data
               if: matrix.testname == 'jplt'
               working-directory: atomic-data-tanaka-jplt/
               run: source ./setup_jplt_data.sh
-            # ARTISATOMIC_TESTMODE=1 makes the MONS reader use the committed atomic-data-mons/test_sample
+
+            - name: Extract Floers25 atomic data
+              if: matrix.testname == 'floers25'
+              working-directory: atomic-data-floers25/
+              run: tar -xJvf testdata.tar.xz
+
             - name: Generate artis atomic data files
-              env:
-                  ARTISATOMIC_TESTMODE: 1
               run: |
                   cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  makeartisatomicfiles -output_folder tests/${{ matrix.testname }}/output
+                  uv run coverage run -p -m artisatomic -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output
               run: |
                   cat compositiondata.txt
-                  cat *.json
+                  cat atomic_data_logs/*.json
+                  echo
                   md5sum *.txt
                   md5sum -c ../checksums.txt
+
+            # after the checksum, so an artifact-service failure cannot fail the leg before the
+            # assertion this job exists for has run
+            - name: Upload coverage data
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-${{ matrix.testname }}
+                  path: .coverage.*
+                  include-hidden-files: true
+                  # a leg that measured nothing is a regression, not a warning
+                  if-no-files-found: error
 
             - name: tar and zip output files
               if: always()
@@ -122,7 +240,45 @@ jobs:
 
             - name: Upload output files
               if: always()
-              uses: actions/upload-artifact@v3
+              uses: actions/upload-artifact@v7
               with:
                   name: artis_files_${{ matrix.testname }}.tar.gz
                   path: artis_files_${{ matrix.testname }}.tar.gz
+
+    chargetransfer:
+        name: test chargetransfer
+        runs-on: ubuntu-26.04-arm
+        timeout-minutes: 15
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            - name: Install artisatomic
+              run: uv sync --compile-bytecode
+
+            # the source files are tracked in atomic-data-chargetransfer, so this job downloads nothing
+            - name: Generate the charge transfer file
+              run: uv run coverage run -p -m artisatomic.makechargetransferfile -outputfile tests/chargetransfer/output/chargetransfer.txt
+
+            - name: Checksum the output file
+              working-directory: tests/chargetransfer/output
+              run: |
+                  head -70 chargetransfer.txt
+                  echo
+                  md5sum chargetransfer.txt
+                  md5sum -c ../checksums.txt
+
+            - name: Upload coverage data
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-chargetransfer
+                  path: .coverage.*
+                  include-hidden-files: true
+                  if-no-files-found: error

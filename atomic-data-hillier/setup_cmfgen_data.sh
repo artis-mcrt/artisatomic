@@ -2,10 +2,16 @@
 
 set -x
 
-if [ ! -f atomic_data_15nov16.tar.xz ]; then curl -O https://theory.gsi.de/~lshingle/artis_http_public/artisatomic/atomic-data-hillier/atomic_data_15nov16.tar.xz; fi
+# version="15nov16"
+version="21jun23"
 
-md5sum -c atomic_data_15nov16.tar.xz.md5
-tar -xf atomic_data_15nov16.tar.xz
-rsync -a atomic_diff/ atomic/
+if [ ! -f atomic_data_$version.tar.xz ]; then curl -O -L https://github.com/artis-mcrt/artisatomic/releases/download/v2026.5.17/atomic_data_$version.tar.xz; fi
+
+md5sum -c atomic_data_$version.tar.xz.md5
+tar -xJf atomic_data_$version.tar.xz
+mv atomic/ atomic_$version/
+# rsync -a atomic_diff/ atomic_$version/
+
+find atomic_$version ! -name "*.zst" -size +10M -exec zstd -12 -v -T0 --rm {} \; || true
 
 set +x
