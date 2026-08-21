@@ -15,10 +15,11 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
   elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 - Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
-  hold no hydrogen and need these reactions. No publication gives these rates, so the script
-  takes the ionization energies of Sc to U from the NIST table of this package. It keeps the
-  exothermic reactions with a small energy defect. Each one gets the near-resonant rate of
-  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
+  consist mostly of heavy elements, so these reactions matter there. No publication gives these
+  rates, so the script takes the ionization energies of Sc to U from the NIST table of this
+  package. It keeps the exothermic reactions with a small energy defect. Each one gets the
+  near-resonant rate of 1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed
+  balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -250,8 +251,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "  https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
         "  SS11 publish tabulated k(T) values and no fit coefficients. This script fits their tables, see",
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
-        f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova",
-        "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
+        f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova ejecta,",
+        "  which consist mostly of heavy elements. No publication gives these rates. Each exothermic reaction with a",
         "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
         "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
         "  energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
@@ -417,8 +418,8 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
 def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = frozenset()) -> list[CTEntry]:
     """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
 
-    The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
-    occur there. No publication gives the heavy-element rates. The heavy species have many low
+    The kilonova ejecta consist mostly of heavy elements, so the reactions between heavy species
+    matter there. No publication gives the heavy-element rates. The heavy species have many low
     levels. An exothermic reaction with an energy defect below METAL_METAL_MAX_DEFECT_EV can
     therefore reach a level of the products near resonance. Such a reaction gets the
     near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
