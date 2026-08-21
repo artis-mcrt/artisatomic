@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Write the file of charge transfer rates for ARTIS (data/chargetransfer.txt in the artis repository).
 
-The script downloads the published fits and rate tables, converts them into one fit form, and
-writes one file with one reaction for each line. The sources are:
+The script reads the published fits and rate tables from the folder atomic-data-chargetransfer.
+It converts them into one fit form and writes one reaction for each line. The script
+setup_chargetransfer_data.sh in that folder downloads the tables. The sources are:
 
 - The Cloudy master data files ctrecombdata.dat and ctiondata.dat (gitlab.nublado.org). They carry
   the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) for reactions with hydrogen. Cloudy
@@ -31,21 +32,7 @@ import typing as t
 from itertools import starmap
 from pathlib import Path
 
-import requests
-
 from artisatomic.base import elsymbols
-
-SOURCE_URLS = {
-    "ctrecombdata.dat": "https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctrecombdata.dat",
-    "ctiondata.dat": "https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctiondata.dat",
-    "ar85_ct2.dat": "https://www.pa.uky.edu/~verner/dima/ct/ct2.dat",
-    "ss11_table4.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table4.dat",
-    "ss11_table5.dat": "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
-    "nist_ie_sc_to_u.dat": (
-        "https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data"
-        "&units=1&format=3&order=0&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
-    ),
-}
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
 # q is the ion charge before the electron capture, and a is in 1e-9 cm3/s. The script uses these
@@ -217,7 +204,6 @@ SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "B
 
 def format_header(source_counts: dict[str, int]) -> str:
     """Build the comment block of the output file: the format, the sources, and the parameters."""
-    urls = SOURCE_URLS
     lines = [
         "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
         "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
@@ -234,24 +220,27 @@ def format_header(source_counts: dict[str, int]) -> str:
         "",
         "SOURCES",
         f"Cloudy ({source_counts['Cloudy']} reactions): reactions with hydrogen, from the Cloudy data files",
-        f"  {urls['ctrecombdata.dat']}",
-        f"  {urls['ctiondata.dat']}",
+        "  https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctrecombdata.dat",
+        "  https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctiondata.dat",
         "  They hold the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) plus the later updates of",
         "  Cloudy. The comment of a line names each update, with the values that KF96 published.",
         f"AR85 ({source_counts['AR85']} reactions): recombination with neutral helium, from the table of",
         "  Arnaud & Rothenflug (1985), A&AS, 60, 425, in the file ct2.dat of D. Verner",
-        f"  {urls['ar85_ct2.dat']}",
+        "  https://www.pa.uky.edu/~verner/dima/ct/ct2.dat",
         f"SS11 ({source_counts['SS11']} reactions): Ge, Se, Br, Kr, Rb, and Xe with hydrogen, from the CDS tables of",
         "  Sterling & Stancil (2011), A&A, 535, A117",
-        f"  {urls['ss11_table4.dat']}",
-        f"  {urls['ss11_table5.dat']}",
+        "  https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table4.dat",
+        "  https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
         "  SS11 publish tabulated k(T) values and no fit coefficients. This script fits their tables, see",
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
         f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova",
         "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
         "  small energy defect gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692. The",
         "  energy defect comes from the ground-state ionization energies of the NIST Atomic Spectra Database",
-        f"  {urls['nist_ie_sc_to_u.dat']}",
+        (
+            "  https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data&units=1&format=3&order=0"
+            "&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
+        ),
         "",
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
@@ -286,23 +275,17 @@ class CTEntry(t.NamedTuple):
     autoreverse: int = 1  # set_autoreverse_flags() gives the value that the output file holds
 
 
-def download(filekey: str, cachedir: Path, *, refresh: bool = False) -> str:
-    """Return the text of a source file, from the cache folder or from a fresh download."""
-    cachefile = cachedir / filekey
-    if cachefile.is_file() and not refresh:
-        print(f"  using cached {cachefile}")
-        return cachefile.read_text(encoding="utf-8")
-    url = SOURCE_URLS[filekey]
-    print(f"  downloading {url}")
-    response = requests.get(url, timeout=120)
-    response.raise_for_status()
-    # a server that sends an error page with a 200 status must not poison the cache folder
-    if response.text.lstrip().startswith("<"):
-        msg = f"{url} returned markup instead of data"
-        raise RuntimeError(msg)
-    cachedir.mkdir(parents=True, exist_ok=True)
-    cachefile.write_text(response.text, encoding="utf-8")
-    return response.text
+def read_source(filekey: str, sourcedir: Path) -> str:
+    """Return the text of one source file from the data folder."""
+    sourcefile = sourcedir / filekey
+    if not sourcefile.is_file():
+        msg = (
+            f"{sourcefile} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer,"
+            " which downloads the source files."
+        )
+        raise FileNotFoundError(msg)
+    print(f"  reading {sourcefile}")
+    return sourcefile.read_text(encoding="utf-8")
 
 
 def fnum(x: float) -> str:
@@ -343,13 +326,13 @@ def ionlabel(z: int, q: int) -> str:
     return f"{elsymbols[z]}{'+' + str(q) if q > 0 else '0'}"
 
 
-def get_kf96_h_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTEntry], list[str]]:
+def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     """Build the entries for the reactions with hydrogen from the Cloudy data files.
 
     Also return a report that lists each Cloudy row that differs from the KF96 paper value.
     """
-    rec = read_cloudy_table(download("ctrecombdata.dat", cachedir, refresh=refresh), 7)
-    ion = read_cloudy_table(download("ctiondata.dat", cachedir, refresh=refresh), 8)
+    rec = read_cloudy_table(read_source("ctrecombdata.dat", sourcedir), 7)
+    ion = read_cloudy_table(read_source("ctiondata.dat", sourcedir), 8)
     report = []
     entries = []
     for (z, q), vals in sorted(rec.items()):
@@ -420,7 +403,7 @@ def read_nist_ionisation_energies(text: str) -> dict[tuple[int, int], float]:
     return energies
 
 
-def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CTEntry]:
+def get_metal_metal_entries(sourcedir: Path) -> list[CTEntry]:
     """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
 
     The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
@@ -430,7 +413,7 @@ def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CT
     near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
     Coulomb repulsion between two positive ions makes their reactions slow.
     """
-    energies = read_nist_ionisation_energies(download("nist_ie_sc_to_u.dat", cachedir, refresh=refresh))
+    energies = read_nist_ionisation_energies(read_source("nist_ie_sc_to_u.dat", sourcedir))
     donors = sorted(z for (z, charge) in energies if charge == 0)
     entries = []
     for z_acc in donors:
@@ -452,10 +435,10 @@ def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CT
     return entries
 
 
-def get_he_entries(cachedir: Path, *, refresh: bool = False) -> list[CTEntry]:
+def get_he_entries(sourcedir: Path) -> list[CTEntry]:
     """Build the entries for recombination with neutral helium from the AR85 table."""
     entries = []
-    for line in download("ar85_ct2.dat", cachedir, refresh=refresh).split("\n"):
+    for line in read_source("ar85_ct2.dat", sourcedir).split("\n"):
         if not line.strip():
             continue
         parts = line.split()
@@ -572,10 +555,10 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     return SS11Fit(a, b, eexp, maxerr, len(pts), pts[0][0], pts[-1][0])
 
 
-def get_ss11_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTEntry], list[str]]:
+def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     """Build the n-capture element entries from fits to the SS11 CDS rate tables."""
-    rec_totals = read_cds_totals(download("ss11_table4.dat", cachedir, refresh=refresh))
-    ion_totals = read_cds_totals(download("ss11_table5.dat", cachedir, refresh=refresh))
+    rec_totals = read_cds_totals(read_source("ss11_table4.dat", sourcedir))
+    ion_totals = read_cds_totals(read_source("ss11_table5.dat", sourcedir))
     entries = []
     report = []
     for totals, is_recombination in ((rec_totals, True), (ion_totals, False)):
@@ -645,23 +628,27 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path, source_coun
 
 
 def main() -> None:
-    """Download the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
+    """Read the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
     parser = argparse.ArgumentParser(description=__doc__)
     defaultoutpath = Path(__file__).parent.parent.absolute() / "artis_files" / "data" / "chargetransfer.txt"
-    defaultcachedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
+    defaultsourcedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
     parser.add_argument("-outputfile", default=defaultoutpath, type=Path, help="path of the output file")
-    parser.add_argument("-cachedir", default=defaultcachedir, type=Path, help="folder for the downloaded source files")
-    parser.add_argument("-refresh", action="store_true", help="download the source files again and replace the cache")
+    parser.add_argument(
+        "-sourcedir",
+        default=defaultsourcedir,
+        type=Path,
+        help="folder of the source files; setup_chargetransfer_data.sh in that folder downloads them",
+    )
     args = parser.parse_args()
 
     print("Reactions with hydrogen (Cloudy carrying KF96 plus updates):")
-    kf96_entries, kf96_report = get_kf96_h_entries(args.cachedir, refresh=args.refresh)
+    kf96_entries, kf96_report = get_kf96_h_entries(args.sourcedir)
     print("Recombination with neutral helium (AR85):")
-    he_entries = get_he_entries(args.cachedir, refresh=args.refresh)
+    he_entries = get_he_entries(args.sourcedir)
     print("n-capture elements with hydrogen (SS11):")
-    ss11_entries, ss11_report = get_ss11_entries(args.cachedir, refresh=args.refresh)
+    ss11_entries, ss11_report = get_ss11_entries(args.sourcedir)
     print("Heavy ion with neutral heavy atom (near-resonant estimates):")
-    metal_entries = get_metal_metal_entries(args.cachedir, refresh=args.refresh)
+    metal_entries = get_metal_metal_entries(args.sourcedir)
     print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")

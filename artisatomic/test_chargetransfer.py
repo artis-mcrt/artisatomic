@@ -1,7 +1,7 @@
 """Tests of makechargetransferfile, the generator of the ARTIS charge transfer rate file.
 
-The tests build small source tables in memory and patch download(), so they need no network
-access and no file in atomic-data-chargetransfer.
+The tests build small source tables in memory and patch read_source(), so they need no file
+in atomic-data-chargetransfer.
 """
 
 import pytest
@@ -79,7 +79,7 @@ def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
         ),
         "ss11_table5.dat": _ss11_cds_line("Ge", 0, "4s^2^4p ^2^P^o^", rates),
     }
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
 
     entries, _report = makechargetransferfile.get_ss11_entries(tmp_path)
     autoreverse_of_reaction = {
@@ -123,7 +123,7 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
             "201903041", 8, {(16, 1): [*fit, 1e3, 3e4, 0.0, 1.0], (3, 1): [*fit, 1e3, 3e4, 0.0, 1.0]}
         ),
     }
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
 
     entries, _report = makechargetransferfile.get_kf96_h_entries(tmp_path)
     autoreverse_of_reaction = {
@@ -143,7 +143,7 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
 def test_makechargetransferfile_ar85_helium_entries(monkeypatch, tmp_path):
     """The AR85 file gives the electron count of the product ion, which needs a conversion."""
     text = " 8  6  1.00E+00  0.00E+00  1.25E+00 -5.80E+00  1.00E+03  3.00E+04"
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: text)  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: text)  # ruff: ignore[unused-lambda-argument]
 
     (entry,) = makechargetransferfile.set_autoreverse_flags(makechargetransferfile.get_he_entries(tmp_path))
 
@@ -168,7 +168,7 @@ def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
         "Notes:\n"
         "(a) Uncertainty of the listed value is unknown. "
     )
-    monkeypatch.setattr(makechargetransferfile, "download", lambda filekey, cachedir, refresh=False: text)  # ruff: ignore[unused-lambda-argument]
+    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: text)  # ruff: ignore[unused-lambda-argument]
 
     energies = makechargetransferfile.read_nist_ionisation_energies(text)
     assert energies == {(26, 0): 7.9, (26, 1): 10.0, (57, 0): 5.58}
