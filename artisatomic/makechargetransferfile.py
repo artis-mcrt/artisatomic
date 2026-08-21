@@ -29,8 +29,12 @@ reads the file and generates Landau-Zener estimates for the reactions that the f
 import argparse
 import math
 import typing as t
+from collections import Counter
+from collections.abc import Set as AbstractSet
 from itertools import starmap
 from pathlib import Path
+
+import numpy as np
 
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
@@ -38,7 +42,7 @@ from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
 # q is the ion charge before the electron capture, and a is in 1e-9 cm3/s. The script uses these
-# values only to detect and name the Cloudy updates, so the temperature ranges are not stored.
+# values only to detect and name the Cloudy updates, so the table omits the temperature ranges.
 KF96_REC = {
     (2, 1): (7.47e-6, 2.06, 9.93, -3.89),
     (2, 2): (1.00e-5, 0.00, 0.00, 0.00),
@@ -147,8 +151,8 @@ KF96_ION = {
     (27, 1): (1.20e-2, 3.49, 24.41, -1.26, 4.044),
 }
 
-# Notes on the AR85 helium rows where the Cloudy source uses a different expression, decoded from
-# the Cloudy file source/atmdat_char_tran.cpp: (Z, q) -> note
+# Notes on the AR85 helium rows where the Cloudy source uses a different expression. The notes
+# come from the Cloudy file source/atmdat_char_tran.cpp: (Z, q) -> note
 CLOUDY_HE_NOTES = {
     (6, 2): "absent in Cloudy (no CharExcRecTo[He][C][1] entry)",
     (6, 3): "Cloudy: 4.6e-19*Te^2 (Butler & Dalgarno 1980b) = AR85",
@@ -179,7 +183,6 @@ SS11_TGRID = [
     10000, 20000, 40000, 60000, 80000, 100000, 200000, 400000, 600000, 800000,
 ]  # fmt: skip
 
-# the n-capture elements that SS11 cover
 MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the report
 
 # The fit window of the SS11 curves [K]. Charge transfer competes with the other processes only
@@ -200,11 +203,16 @@ METAL_METAL_RATE = 1.0
 METAL_METAL_MAX_DEFECT_EV = 4.0
 # the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
 METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
+# The range of use of the estimates [K]. A flat value has no temperature dependence, so the clamp
+# has no effect; the values document the nebular range only.
+METAL_METAL_TMIN = 1000
+METAL_METAL_TMAX = 40000
 
+# the n-capture elements that SS11 cover
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
 
 
-def format_header(source_counts: dict[str, int]) -> str:
+def format_header(source_counts: Counter[str]) -> str:
     """Build the comment block of the output file: the format, the sources, and the parameters."""
     lines = [
         "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
@@ -216,6 +224,7 @@ def format_header(source_counts: dict[str, int]) -> str:
         "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
         "The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].",
         "t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.",
+        "For a flat entry (b = c = eexp = 0) the clamp has no effect.",
         "autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward",
         "reaction releases energy. It is 0 when this file holds a fit for the reverse reaction.",
         "The comment of each line starts with the tag of its source, then names the reaction.",
@@ -237,8 +246,9 @@ def format_header(source_counts: dict[str, int]) -> str:
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
         f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova",
         "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
-        "  small energy defect gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692. The",
-        "  energy defect comes from the ground-state ionization energies of the NIST Atomic Spectra Database",
+        "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
+        "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
+        "  energies of the NIST Atomic Spectra Database",
         (
             "  https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data&units=1&format=3&order=0"
             "&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
@@ -247,13 +257,17 @@ def format_header(source_counts: dict[str, int]) -> str:
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
         f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total at",
-        f"  {SS11_FLOOR:g} cm3/s. tmin and tmax of an entry span the points that its fit used. A curve with fewer",
-        f"  than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K entry. The comment of each",
-        "  line gives the largest relative error of the fit or the flat value over the usable points.",
+        f"  {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that the fit used. A curve with",
+        f"  fewer than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K entry, with tmin = tmax =",
+        f"  {SS11_FLAT_TEMP} K. The comment of each line gives the largest relative error of the fit or the flat value",
+        "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
+        "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
         f"Estimates: rate {METAL_METAL_RATE:g}e-9 cm3/s, flat in T, for an exothermic reaction with an energy defect",
         f"  in (0, {METAL_METAL_MAX_DEFECT_EV:g}] eV. The acceptor charge is one of {METAL_METAL_ACCEPTOR_CHARGES}. The donor",
         "  is always neutral, because the Coulomb repulsion between two positive ions makes their reactions",
-        "  slow. ARTIS makes a Landau-Zener estimate for every reaction that this file does not hold.",
+        "  slow. The estimate assumes that a level of the products lies near the energy defect; it does not",
+        f"  check the level lists. tmin and tmax are {METAL_METAL_TMIN}-{METAL_METAL_TMAX} K, the range of use.",
+        "  ARTIS makes a Landau-Zener estimate for every reaction that this file does not hold.",
         "autoreverse: set from the full list of reactions in this file, not from one source alone.",
     ]
     return "".join(f"# {line}".rstrip() + "\n" for line in lines)
@@ -282,8 +296,8 @@ def read_source(filekey: str, sourcedir: Path) -> str:
     sourcefile = find_file_check_extension(sourcedir / filekey)
     if sourcefile is None:
         msg = (
-            f"{sourcedir / filekey} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer,"
-            " which downloads the source files."
+            f"{sourcedir / filekey} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer."
+            " The script downloads the source files."
         )
         raise FileNotFoundError(msg)
     print(f"  reading {sourcefile}")
@@ -292,28 +306,38 @@ def read_source(filekey: str, sourcedir: Path) -> str:
 
 
 def fnum(x: float) -> str:
-    """Format a number with up to six significant digits, matching the source file precision."""
+    """Format a number with up to six significant digits, the precision of the source files."""
     return f"{x:.6g}"
 
 
 def isclose_published(x: float, y: float) -> bool:
-    """Report whether a Cloudy value matches a paper value to the printed precision."""
-    if x == y:
-        return True
-    if x == 0.0 or y == 0.0:
-        return False
-    return abs(x - y) <= 5e-3 * max(abs(x), abs(y))
+    """Report whether a Cloudy value matches a paper value to the printed precision.
+
+    The tolerance is the half-ulp of a three-digit value near 1.0. A two-digit paper value can fail
+    it when Cloudy holds more digits than the paper printed; the current files hold no such row.
+    """
+    return math.isclose(x, y, rel_tol=5e-3)
+
+
+def matches_kf96(values: tuple[float, ...], published: tuple[float, ...]) -> bool:
+    """Report whether the Cloudy values match the published values to the printed precision."""
+    return all(starmap(isclose_published, zip(values, published, strict=True)))
+
+
+def kf96_published_text(published: tuple[float, ...]) -> str:
+    """Name the published fit values, for the comment of a row that Cloudy changed."""
+    return " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", published, strict=True))
 
 
 def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float]]:
-    """Parse a Cloudy charge transfer data file into {(Z, rowindex + 1): column values}.
+    """Parse one charge transfer file of Cloudy into {(Z, rowindex + 1): column values}.
 
     The files hold four rows for each element from H to Zn, after a magic number line. For the
-    recombination file, the row index + 1 is the ion charge before the capture. For the ionisation
+    recombination file, the row index + 1 is the ion charge before the capture. For the ionization
     file, the row index + 1 is the charge after the electron loss.
     """
     lines = text.split("\n")
-    assert lines[0].split()[0] in {"201903041", "201903042"}, "unexpected Cloudy data file magic number"
+    assert lines[0].split()[0] in {"201903041", "201903042"}, "unexpected magic number in the Cloudy file"
     rows = {}
     for k, line in enumerate(line for line in lines[1:] if line.strip()):
         vals = [float(x) for x in line.split()]
@@ -342,22 +366,24 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
         a, b, c, d, tmin, tmax, deltae_ev = vals
         if tmax == 0.0:
             continue  # Cloudy has no entry for this (Z, q)
+        if a == 0.0:
+            # KF96 Table 4 lists these endothermic reactions with no fit. A zero rate in the file
+            # would stop ARTIS from its own estimate, so the file holds no entry for them.
+            paper_deltae = KF96_ENDOTHERMIC.get((z, q), "unknown")
+            report.append(f"rec Z={z} q={q}: endothermic, no fit (KF96 Table 4, deltaE={paper_deltae} eV); not written")
+            continue
         label = f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
         kf = KF96_REC.get((z, q))
-        if a == 0.0 and (z, q) in KF96_ENDOTHERMIC:
-            # Cloudy leaves the energy column at zero for these rows, so take the paper value
-            deltae_ev = KF96_ENDOTHERMIC[z, q]
-            note = "endothermic, no fit (KF96 Table 4)"
-        elif kf is None:
+        if kf is None:
             note = "no KF96 entry"
             report.append(f"rec Z={z} q={q}: Cloudy addition with no KF96 entry")
-        elif all(starmap(isclose_published, zip((a, b, c, d), kf, strict=True))):
+        elif matches_kf96((a, b, c, d), kf):
             note = "KF96"
         else:
-            published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf, strict=True))
-            note = f"Cloudy update; KF96 published {published}"
+            note = f"Cloudy update; KF96 published {kf96_published_text(kf)}"
             report.append(f"rec Z={z} q={q}: {note}")
-        comment = f"Cloudy; {label}; deltaE={fnum(deltae_ev)} eV; {note}"
+        # the energy column of Cloudy is the defect of the dominant channel, with the sign of the file
+        comment = f"Cloudy; {label}; Cloudy deltaE={fnum(deltae_ev)} eV; {note}"
         entries.append(CTEntry(z, q + 1, 1, 1, a, b, c, d, 0.0, tmin, tmax, comment))
 
     for (z, q1), vals in sorted(ion.items()):
@@ -370,13 +396,10 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
         if kf_ion is None:
             note = "no KF96 entry (Cloudy addition)"
             report.append(f"ion Z={z} q={q}: Cloudy addition with no KF96 entry")
-        elif all(starmap(isclose_published, zip((a, b, c, d), kf_ion[:4], strict=True))) and isclose_published(
-            de4, kf_ion[4]
-        ):
+        elif matches_kf96((a, b, c, d, de4), kf_ion):
             note = "KF96 Table 3"
         else:
-            published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf_ion[:4], strict=True))
-            note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf_ion[4])}(1e4 K)"
+            note = f"Cloudy update; KF96 published {kf96_published_text(kf_ion[:4])} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
         comment = f"Cloudy; {label}; energy deficit={fnum(deficit_ev)} eV; {note}"
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
@@ -384,8 +407,8 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     return entries, report
 
 
-def read_nist_ionisation_energies(text: str) -> dict[tuple[int, int], float]:
-    """Parse a NIST ASD tab-delimited ionization energy table into {(Z, ion charge): energy in eV}.
+def read_nist_ionization_energies(text: str) -> dict[tuple[int, int], float]:
+    """Parse the tab-delimited export of ionization energies from the NIST ASD into {(Z, charge): eV}.
 
     The prefix and suffix columns mark an interpolated or theoretical value. The estimates that
     use this table accept those values.
@@ -406,7 +429,9 @@ def read_nist_ionisation_energies(text: str) -> dict[tuple[int, int], float]:
     return energies
 
 
-def get_metal_metal_entries(sourcedir: Path) -> list[CTEntry]:
+def get_metal_metal_entries(
+    sourcedir: Path, covered: AbstractSet[tuple[int, int, int, int]] = frozenset()
+) -> list[CTEntry]:
     """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
 
     The kilonova ejecta hold no hydrogen, so the reactions of this file's other sources do not
@@ -415,8 +440,11 @@ def get_metal_metal_entries(sourcedir: Path) -> list[CTEntry]:
     therefore reach a level of the products near resonance. Such a reaction gets the
     near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
     Coulomb repulsion between two positive ions makes their reactions slow.
+
+    A reaction in `covered`, the keys (Z_acc, stage_acc, Z_don, stage_don) of the other sources,
+    gets no estimate. A published rate therefore replaces its estimate.
     """
-    energies = read_nist_ionisation_energies(read_source("nist_ie_sc_to_u.dat", sourcedir))
+    energies = read_nist_ionization_energies(read_source("nist_ie_sc_to_u.dat", sourcedir))
     donors = sorted(z for (z, charge) in energies if charge == 0)
     entries = []
     for z_acc in donors:
@@ -424,16 +452,33 @@ def get_metal_metal_entries(sourcedir: Path) -> list[CTEntry]:
             if (z_acc, charge_acc - 1) not in energies:
                 continue
             # the capture releases the ionization energy of the product ion
+            energy_released_ev = energies[z_acc, charge_acc - 1]
+            acceptor, product = ionlabel(z_acc, charge_acc), ionlabel(z_acc, charge_acc - 1)
             for z_don in donors:
                 if z_don == z_acc and charge_acc == 1:
                     continue  # the products equal the reactants, so the reaction changes nothing
-                deltae_ev = energies[z_acc, charge_acc - 1] - energies[z_don, 0]
+                if (z_acc, charge_acc + 1, z_don, 1) in covered:
+                    continue
+                deltae_ev = energy_released_ev - energies[z_don, 0]
                 if not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
                     continue
-                label = f"{ionlabel(z_acc, charge_acc)} + {ionlabel(z_don, 0)} -> {ionlabel(z_acc, charge_acc - 1)} + {ionlabel(z_don, 1)}"
+                label = f"{acceptor} + {ionlabel(z_don, 0)} -> {product} + {ionlabel(z_don, 1)}"
                 comment = f"Estimate; {label}; deltaE={fnum(deltae_ev)} eV; near-resonant rate, NIST ASD energies"
                 entries.append(
-                    CTEntry(z_acc, charge_acc + 1, z_don, 1, METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, 1000, 40000, comment)
+                    CTEntry(
+                        z_acc,
+                        charge_acc + 1,
+                        z_don,
+                        1,
+                        METAL_METAL_RATE,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        METAL_METAL_TMIN,
+                        METAL_METAL_TMAX,
+                        comment,
+                    )
                 )
     return entries
 
@@ -445,6 +490,7 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
         if not line.strip():
             continue
         parts = line.split()
+        assert len(parts) == 8, f"expected 8 columns in the AR85 table: {line}"
         z, nelectrons = int(parts[0]), int(parts[1])
         a, b, c, d, tmin, tmax = (float(x) for x in parts[2:8])
         q = z - nelectrons + 1  # the file lists the electron count of the product ion
@@ -459,8 +505,8 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     """Sum the final-state resolved channels of an SS11 CDS table into rates for each (element, charge).
 
     The CDS tables floor each channel at the radiative rate 1e-14 cm3/s, while the paper floors the
-    total. To reproduce the totals printed in the paper, exclude the channel values that sit exactly
-    on the floor, then floor the sum.
+    total. The code excludes the channel values that sit exactly on the floor. Then it floors the
+    sum. This reproduces the totals that the paper prints.
     """
     channelvalues: dict[tuple[str, int], list[list[float]]] = {}
     for rawline in text.split("\n"):
@@ -492,7 +538,7 @@ class SS11Fit(t.NamedTuple):
     b: float
     eexp: float  # in K
     maxerr: float  # the largest relative error over the usable points
-    npts: int  # the count of usable points; below four, a is a flat value and not a fit
+    npts: int  # the count of usable points; below SS11_MIN_POINTS, a is a flat value and not a fit
     tmin: float  # the span of the usable points, which the output clamps T into
     tmax: float
 
@@ -500,13 +546,16 @@ class SS11Fit(t.NamedTuple):
 def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve.
 
-    The usable points lie between 1e3 and 4e4 K and above the 1e-14 floor. Charge transfer
-    competes with the other processes only in the nebular low-temperature regime. Also, the fit
-    form cannot span the floor-then-steep-rise shape of some reactions over the full tabulated
-    range. tmin and tmax hold the span of the usable points. Below tmin, the reader clamps t4
-    and the Boltzmann factor keeps the true temperature, so the rate falls like the tabulated
-    values do. A curve with fewer than four usable points gets the flat value of its 2e4 K
-    entry. The result includes the error of that value over the usable points.
+    The usable points lie in the fit window and above SS11_USABLE_MIN. Charge transfer competes
+    with the other processes only in the nebular low-temperature regime. Also, the fit form cannot
+    span the floor-then-steep-rise shape of some reactions over the full tabulated range. tmin and
+    tmax hold the span of the usable points.
+
+    Below tmin, the reader clamps t4 and the Boltzmann factor keeps the true temperature. A fit
+    with eexp > 0 therefore keeps falling, like the tabulated values; a fit with eexp = 0 holds
+    its value at tmin. A curve with fewer than SS11_MIN_POINTS usable points gets the flat value
+    of its SS11_FLAT_TEMP entry, with tmin = tmax = SS11_FLAT_TEMP. The result includes the error
+    of that value over the usable points.
     """
     pts = [
         (temp, k)
@@ -518,38 +567,16 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
         maxerr = max((abs(flat / k - 1.0) for _, k in pts), default=0.0)
         return SS11Fit(flat, 0.0, 0.0, maxerr, len(pts), SS11_FLAT_TEMP, SS11_FLAT_TEMP)
 
-    def solve_normal_equations(use_eexp: bool) -> list[float]:
-        ncoeff = 3 if use_eexp else 2
-        ata = [[0.0] * ncoeff for _ in range(ncoeff)]
-        aty = [0.0] * ncoeff
-        for temp, k in pts:
-            row = [1.0, math.log(temp / 1e4)] + ([-1.0 / temp] if use_eexp else [])
-            y = math.log(k)
-            for i in range(ncoeff):
-                for j in range(ncoeff):
-                    ata[i][j] += row[i] * row[j]
-                aty[i] += row[i] * y
-        for i in range(ncoeff):
-            pivot = max(range(i, ncoeff), key=lambda r: abs(ata[r][i]))
-            ata[i], ata[pivot] = ata[pivot], ata[i]
-            aty[i], aty[pivot] = aty[pivot], aty[i]
-            for r in range(i + 1, ncoeff):
-                factor = ata[r][i] / ata[i][i]
-                for col in range(i, ncoeff):
-                    ata[r][col] -= factor * ata[i][col]
-                aty[r] -= factor * aty[i]
-        x = [0.0] * ncoeff
-        for i in reversed(range(ncoeff)):
-            x[i] = (aty[i] - sum(ata[i][j] * x[j] for j in range(i + 1, ncoeff))) / ata[i][i]
-        return x
-
-    lna, b, eexp = solve_normal_equations(use_eexp=True)
+    temps = np.array([temp for temp, _ in pts], dtype=float)
+    logk = np.log([k for _, k in pts])
+    design = np.column_stack([np.ones_like(temps), np.log(temps / 1e4), -1.0 / temps])
+    lna, b, eexp = map(float, np.linalg.lstsq(design, logk, rcond=None)[0])
     if eexp < 0.0:
         # a negative Boltzmann temperature would grow without limit towards low T, so drop the term
-        lna, b = solve_normal_equations(use_eexp=False)
+        lna, b = map(float, np.linalg.lstsq(design[:, :2], logk, rcond=None)[0])
         eexp = 0.0
     a = math.exp(lna)
-    # snap the degenerate values of a flat curve to zero
+    # set the degenerate values of a flat curve to zero
     if abs(b) < 1e-6:
         b = 0.0
     if eexp < 1e-3:
@@ -602,10 +629,14 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     """Set the reverse reaction flag of each entry from the other reactions that the file holds.
 
     The reverse of "A + D -> A(-1) + D(+1)" is "D(+1) + A(-1) -> D + A". An entry whose reverse
-    reaction has its own fit gets a zero, which stops the ARTIS code from adding that reverse a
-    second time. Every other entry gets a one, so detailed balance supplies its reverse.
+    reaction has its own fit gets a zero, so the ARTIS code does not add that reverse a second
+    time. Every other entry gets a one, so detailed balance supplies its reverse. The file must
+    hold each reaction once, because the reader takes the first fit that it finds.
     """
-    reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in entries}
+    keys = [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in entries]
+    duplicates = [key for key, count in Counter(keys).items() if count > 1]
+    assert not duplicates, f"reactions that appear more than once: {duplicates[:5]}"
+    reactions = set(keys)
     return [
         entry._replace(
             autoreverse=0
@@ -616,8 +647,10 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     ]
 
 
-def write_chargetransfer_file(entries: list[CTEntry], outpath: Path, source_counts: dict[str, int]) -> None:
-    """Write the assembled entries in the format that the ARTIS chargetransfer.cc reader expects."""
+def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
+    """Write the assembled entries in the format that chargetransfer.cc of ARTIS reads."""
+    # each comment starts with the tag of its source, so the header counts come from the entries
+    source_counts = Counter(e.comment.split(";", 1)[0] for e in entries)
     with outpath.open("w", encoding="utf-8") as fout:
         fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
@@ -651,7 +684,9 @@ def main() -> None:
     print("n-capture elements with hydrogen (SS11):")
     ss11_entries, ss11_report = get_ss11_entries(args.sourcedir)
     print("Heavy ion with neutral heavy atom (near-resonant estimates):")
-    metal_entries = get_metal_metal_entries(args.sourcedir)
+    published_entries = kf96_entries + he_entries + ss11_entries
+    covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published_entries}
+    metal_entries = get_metal_metal_entries(args.sourcedir, covered)
     print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
@@ -663,14 +698,8 @@ def main() -> None:
     print()
 
     args.outputfile.parent.mkdir(parents=True, exist_ok=True)
-    entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries + metal_entries)
-    source_counts = {
-        "Cloudy": len(kf96_entries),
-        "AR85": len(he_entries),
-        "SS11": len(ss11_entries),
-        "Estimate": len(metal_entries),
-    }
-    write_chargetransfer_file(entries, args.outputfile, source_counts)
+    entries = set_autoreverse_flags(published_entries + metal_entries)
+    write_chargetransfer_file(entries, args.outputfile)
 
 
 if __name__ == "__main__":

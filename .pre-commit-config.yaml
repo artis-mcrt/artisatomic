@@ -17,6 +17,8 @@ repos:
           - id: forbid-new-submodules
           - id: mixed-line-ending
             args: [--fix=lf]
+            # the downloaded source files must stay byte-identical to the published data
+            exclude: ^atomic-data-chargetransfer/
           - id: name-tests-test
           - id: trailing-whitespace
             # the downloaded source files must stay byte-identical to the published data

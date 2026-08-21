@@ -1,13 +1,26 @@
-"""Tests of makechargetransferfile, the generator of the ARTIS charge transfer rate file.
+"""Tests of makechargetransferfile, the generator of the charge transfer file for ARTIS.
 
-The tests build small source tables in memory and patch read_source(), so they need no file
-in atomic-data-chargetransfer.
+Most tests build small source tables in memory and patch read_source(). One test reads the
+committed files in atomic-data-chargetransfer, so a change of their format fails here.
 """
+
+from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from xopen import xopen
 
 from artisatomic import makechargetransferfile
+
+
+@pytest.fixture
+def patch_sources(monkeypatch) -> Callable[[dict[str, str]], None]:
+    """Give a function that makes read_source() return the given text for each file name."""
+
+    def _patch(tables: dict[str, str]) -> None:
+        monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, _sourcedir: tables[filekey])
+
+    return _patch
 
 
 def _ss11_cds_line(elsymbol: str, q: int, label: str, rates: list[float]) -> str:
@@ -51,8 +64,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
     # the floor curve has no usable points, so the fit is flat at the 2e4 K value
     assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0.0, 20000, 20000)
 
-    # a curve with fewer than four usable points gets the flat 2e4 K value. The error of that
-    # value over the usable points must not be hidden.
+    # a curve with fewer than four usable points gets the flat 2e4 K value. The result must
+    # report the error of that value over the usable points.
     steep = [
         2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.00e-14)
         for temp in makechargetransferfile.SS11_TGRID
@@ -64,7 +77,7 @@ def test_makechargetransferfile_cds_totals_and_fit():
     assert (fallback.tmin, fallback.tmax) == (20000, 20000)
 
 
-def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
+def test_makechargetransferfile_ss11_autoreverse(patch_sources, tmp_path):
     """A SS11 reaction keeps autoreverse=1 unless the tables hold a fit for its reverse.
 
     SS11 Table 5 gives the loss of an electron only for the neutral atom. Every recombination
@@ -80,7 +93,7 @@ def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
         ),
         "ss11_table5.dat": _ss11_cds_line("Ge", 0, "4s^2^4p ^2^P^o^", rates),
     }
-    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    patch_sources(tables)
 
     entries, _report = makechargetransferfile.get_ss11_entries(tmp_path)
     autoreverse_of_reaction = {
@@ -97,7 +110,7 @@ def test_makechargetransferfile_ss11_autoreverse(monkeypatch, tmp_path):
 
 
 def _cloudy_table(magic: str, ncols: int, rows: dict[tuple[int, int], list[float]]) -> str:
-    """Build the text of a Cloudy charge transfer file, with an empty row for each ion not given."""
+    """Build the text of a charge transfer file of Cloudy, with an empty row for each ion not given."""
     lines = [f"  {magic}"]
     lines += [
         "  ".join(f"{value:.5e}" for value in rows.get((atomic_number, ionindex), [0.0] * ncols))
@@ -107,26 +120,33 @@ def _cloudy_table(magic: str, ncols: int, rows: dict[tuple[int, int], list[float
     return "\n".join(lines)
 
 
-def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
+def test_makechargetransferfile_kf96_autoreverse(patch_sources, tmp_path):
     """A Cloudy reaction keeps autoreverse=1 unless the files hold a fit for its reverse.
 
     Cloudy leaves an empty row for a reaction that it does not carry, in either direction. Such a
-    row gives no reverse fit, so the code must add the reverse reaction from detailed balance.
+    row gives no reverse fit, so the code must add the reverse reaction from detailed balance. A
+    KF96 Table 4 row (a zero rate with a temperature range) gets no entry at all.
     """
     fit = [2.0, 0.5, 0.0, 0.0]
     tables = {
-        # S+1 + H0 -> S0 + H+ and Fe+3 + H0 -> Fe+2 + H+
+        # S+1 + H0 -> S0 + H+, Fe+3 + H0 -> Fe+2 + H+, and the endothermic Ca+2 + H0 with no fit
         "ctrecombdata.dat": _cloudy_table(
-            "201903042", 7, {(16, 1): [*fit, 1e3, 3e4, 1.0], (26, 3): [*fit, 1e3, 3e4, 1.0]}
+            "201903042",
+            7,
+            {
+                (16, 1): [*fit, 1e3, 3e4, 1.0],
+                (26, 3): [*fit, 1e3, 3e4, 1.0],
+                (20, 2): [0.0, 0.0, 0.0, 0.0, 10.0, 1e9, 0.0],
+            },
         ),
         # S0 + H+ -> S+1 + H0 and Li0 + H+ -> Li+1 + H0
         "ctiondata.dat": _cloudy_table(
             "201903041", 8, {(16, 1): [*fit, 1e3, 3e4, 0.0, 1.0], (3, 1): [*fit, 1e3, 3e4, 0.0, 1.0]}
         ),
     }
-    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: tables[filekey])  # ruff: ignore[unused-lambda-argument]
+    patch_sources(tables)
 
-    entries, _report = makechargetransferfile.get_kf96_h_entries(tmp_path)
+    entries, report = makechargetransferfile.get_kf96_h_entries(tmp_path)
     autoreverse_of_reaction = {
         (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e.autoreverse
         for e in makechargetransferfile.set_autoreverse_flags(entries)
@@ -135,16 +155,19 @@ def test_makechargetransferfile_kf96_autoreverse(monkeypatch, tmp_path):
     # the S reactions are a pair, so each one is the explicit reverse of the other
     assert autoreverse_of_reaction[16, 2, 1, 1] == 0
     assert autoreverse_of_reaction[1, 2, 16, 1] == 0
-    # Fe+3 + H0 -> Fe+2 + H+ has no ionisation row for Fe+2. Li0 + H+ -> Li+1 + H0 has no
+    # Fe+3 + H0 -> Fe+2 + H+ has no ionization row for Fe+2. Li0 + H+ -> Li+1 + H0 has no
     # recombination row for Li+1.
     assert autoreverse_of_reaction[26, 4, 1, 1] == 1
     assert autoreverse_of_reaction[1, 2, 3, 1] == 1
+    # a zero rate would stop ARTIS from its own estimate, so the Ca+2 row is reported and not written
+    assert (20, 3, 1, 1) not in autoreverse_of_reaction
+    assert any("Z=20 q=2" in line and "Table 4" in line for line in report)
 
 
-def test_makechargetransferfile_ar85_helium_entries(monkeypatch, tmp_path):
+def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
     """The AR85 file gives the electron count of the product ion, which needs a conversion."""
     text = " 8  6  1.00E+00  0.00E+00  1.25E+00 -5.80E+00  1.00E+03  3.00E+04"
-    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: text)  # ruff: ignore[unused-lambda-argument]
+    patch_sources({"ar85_ct2.dat": text})
 
     (entry,) = makechargetransferfile.set_autoreverse_flags(makechargetransferfile.get_he_entries(tmp_path))
 
@@ -157,7 +180,7 @@ def test_makechargetransferfile_ar85_helium_entries(monkeypatch, tmp_path):
     assert entry.autoreverse == 1
 
 
-def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
+def test_makechargetransferfile_metal_metal_estimates(patch_sources, tmp_path):
     """The heavy-element estimates keep the exothermic reactions with a small energy defect."""
     # the row of Fe III has no value, and the parser must skip it
     text = (
@@ -169,9 +192,9 @@ def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
         "Notes:\n"
         "(a) Uncertainty of the listed value is unknown. "
     )
-    monkeypatch.setattr(makechargetransferfile, "read_source", lambda filekey, sourcedir: text)  # ruff: ignore[unused-lambda-argument]
+    patch_sources({"nist_ie_sc_to_u.dat": text})
 
-    energies = makechargetransferfile.read_nist_ionisation_energies(text)
+    energies = makechargetransferfile.read_nist_ionization_energies(text)
     assert energies == {(26, 0): 7.9, (26, 1): 10.0, (57, 0): 5.58}
 
     entries = makechargetransferfile.get_metal_metal_entries(tmp_path)
@@ -188,6 +211,36 @@ def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
     #   Fe+2 + La0 releases 4.42 eV, which is above the window;
     #   Fe+1 + Fe0 changes nothing
     assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}
+
+    # a reaction that another source covers gets no estimate
+    remaining = makechargetransferfile.get_metal_metal_entries(tmp_path, covered={(26, 2, 57, 1)})
+    assert [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in remaining] == [(26, 3, 26, 1)]
+
+
+def test_set_autoreverse_flags_rejects_a_duplicate_reaction():
+    """The assembled list must hold each reaction once, because the reader takes the first fit."""
+    entry = makechargetransferfile.CTEntry(26, 2, 1, 1, 1.0, 0.0, 0.0, 0.0, 0.0, 1e3, 4e4, "Test; Fe+1 + H0")
+    with pytest.raises(AssertionError, match=r"more than once"):
+        makechargetransferfile.set_autoreverse_flags([entry, entry])
+
+
+def test_committed_source_files_build_the_expected_entries():
+    """The committed source files parse, and the assembled list holds the expected count for each source.
+
+    This test fails when a new download changes the format of a table, which the other tests
+    cannot see because they patch read_source().
+    """
+    sourcedir = Path(makechargetransferfile.__file__).parent.parent / "atomic-data-chargetransfer"
+    kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
+    he_entries = makechargetransferfile.get_he_entries(sourcedir)
+    ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
+    published = kf96_entries + he_entries + ss11_entries
+    covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published}
+    metal_entries = makechargetransferfile.get_metal_metal_entries(sourcedir, covered)
+
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries), len(metal_entries)) == (100, 21, 36, 2899)
+    entries = makechargetransferfile.set_autoreverse_flags(published + metal_entries)
+    assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11", "Estimate"} for e in entries)
 
 
 def test_read_source_reads_the_compressed_file(tmp_path):

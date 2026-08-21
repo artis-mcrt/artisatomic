@@ -15,8 +15,10 @@ download() {
   fi
   echo "downloading $file"
   curl -fsSL --retry 3 -o "$file.part" "$url"
-  # a server that sends an error page with a 200 status must not leave a bad file behind
-  if [ "$(head -c 1 "$file.part")" = "<" ]; then
+  # a server that sends an error page with a 200 status must not leave a bad file behind. The
+  # check skips blanks and a byte order mark before the first character.
+  firstchar=$(head -c 64 "$file.part" | LC_ALL=C tr -d ' \t\r\n\357\273\277' | head -c 1)
+  if [ "$firstchar" = "<" ]; then
     rm -f "$file.part"
     echo "ERROR: $url returned markup instead of data" >&2
     exit 1
