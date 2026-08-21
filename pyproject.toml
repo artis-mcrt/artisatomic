@@ -43,9 +43,7 @@ dependencies = [
 coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
-    "basedpyright>=1.39.3",
     "matplotlib>=3.10.7",
-    "mypy>=2.1.0",
     "pandas-stubs>=3.0.0.260204",
     "pip>=25.2",
     "prek>=0.1.6",
@@ -66,14 +64,6 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 makeartisatomicfiles = "artisatomic:main"
 makechargetransferfile = "artisatomic.makechargetransferfile:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
-
-[tool.mypy]
-python_executable = ".venv/bin/python3"
-python_version = '3.13'
-exclude = "(build)|(tests)"
-packages = "artisatomic"
-ignore_missing_imports = true
-warn_unused_configs = true
 
 [tool.pyrefly]
 preset = "strict"
@@ -96,34 +86,6 @@ python-interpreter-path = ".venv/bin/python3"
 # and individual exceptions are suppressed at the line that needs them
 implicit-any-parameter = false
 implicit-any-lambda = false
-
-[tool.pyright]
-deprecateTypingAliases = true
-enableTypeIgnoreComments = false # leave these for mypy to interpret
-exclude = [
-    '**/node_modules',
-    '**/__pycache__',
-    '**/.*',
-    'build',
-    'dist',
-    'target',
-    '**/_version.py',
-    '.venv',
-]
-reportAttributeAccessIssue = true
-reportCallIssue = true
-reportDeprecated = true
-reportMissingImports = true
-reportMissingTypeStubs = true
-reportOptionalMemberAccess = true
-reportPossiblyUnboundVariable = true
-reportUnnecessaryTypeIgnoreComment = true
-# the untyped parts of the pandas/numpy/polars APIs make this ~450 errors of pure noise
-reportUnknownVariableType = false
-reportUnreachable = true
-typeCheckingMode = "standard"
-useLibraryCodeForTypes = true
-pythonVersion = "3.13"
 
 [tool.ruff]
 line-length = 120

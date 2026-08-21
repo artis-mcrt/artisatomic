@@ -7,7 +7,7 @@ import sys
 import typing as t
 from pathlib import Path
 
-import ChiantiPy.core as ch  # pyright: ignore[reportMissingTypeStubs]
+import ChiantiPy.core as ch
 import numpy as np
 import pandas as pd
 from artistools import get_composition_data
