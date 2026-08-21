@@ -252,7 +252,7 @@ def format_header(source_counts: Counter[str]) -> str:
         "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
         "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
         "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
-        "  energies of the NIST Atomic Spectra Database, in the file nist_ionization.txt of artisatomic. The",
+        "  energies of the NIST Atomic Spectra Database, in the file nist_ionization.txt.zst of artisatomic. The",
         f"  elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[METAL_METAL_ZMAX]} (Z = {METAL_METAL_ZMIN} to {METAL_METAL_ZMAX}).",
         "",
         "PARAMETERS",
@@ -420,7 +420,7 @@ def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = fr
 
     A reaction in `covered`, the keys (Z_acc, stage_acc, Z_don, stage_don) of the other sources,
     gets no estimate. A published rate therefore replaces its estimate. The ionization energies
-    come from the NIST table that the package ships, artisatomic/nist_ionization.txt.
+    come from the NIST table that the package ships, artisatomic/nist_ionization.txt.zst.
     """
     energies = {
         (z, stage - 1): energy_ev

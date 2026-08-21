@@ -217,12 +217,16 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
 
 @lru_cache(maxsize=1)
 def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
-    """Get a dictionary where dictioniz[(atomic_number, ion_sage)] = ionization_energy_ev."""
-    dfnist = pd.read_csv(
-        PYDIR / "nist_ionization.txt",
-        sep="\t",
-        usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-    )
+    """Get a dictionary where dictioniz[(atomic_number, ion_stage)] = ionization_energy_ev.
+
+    The package ships the NIST table as nist_ionization.txt.zst; the plain file also works.
+    """
+    with xopen_check_extension(PYDIR / "nist_ionization.txt") as fnist:
+        dfnist = pd.read_csv(
+            fnist,
+            sep="\t",
+            usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+        )
 
     dictioniz = {}
     for atomic_number, ion_charge, ioniz_ev in dfnist[
