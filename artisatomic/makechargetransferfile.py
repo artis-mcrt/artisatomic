@@ -14,12 +14,12 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
 - The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11). They cover the n-capture
   elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
-- Estimates for the reactions of a heavy ion with a neutral heavy atom, and for the reactions
-  of any element with hydrogen that the sources above do not cover. The kilonova ejecta consist
-  mostly of heavy elements, so these reactions matter there. No publication gives these rates,
-  so the script takes the ionization energies from the NIST table of this package. It keeps the
-  exothermic reactions with a small energy defect. Each one gets the near-resonant rate of
-  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
+- Estimates for the reactions of a heavy ion with a neutral heavy atom. The estimates also
+  cover the reactions of any element with hydrogen that the sources above omit. The kilonova
+  ejecta consist mostly of heavy elements, so these reactions matter there. No publication gives
+  these rates, so the script takes the ionization energies from the NIST table of this package.
+  It keeps the exothermic reactions with a small energy defect. Each one gets the near-resonant
+  rate of 1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
