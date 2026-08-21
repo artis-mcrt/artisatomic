@@ -4,6 +4,8 @@ Most tests build small source tables in memory and patch read_source(). One test
 committed files in atomic-data-chargetransfer, so a change of their format fails here.
 """
 
+import hashlib
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -244,3 +246,18 @@ def test_read_source_reads_the_compressed_file(tmp_path):
 
     with pytest.raises(FileNotFoundError, match=r"setup_chargetransfer_data\.sh"):
         makechargetransferfile.read_source("absent.dat", tmp_path)
+
+
+def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
+    """main() writes the file that tests/chargetransfer/checksums.txt records, byte for byte.
+
+    The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
+    after a deliberate change of the output; tests/README.md gives the commands.
+    """
+    outpath = tmp_path / "chargetransfer.txt"
+    monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-outputfile", str(outpath)])
+    makechargetransferfile.main()
+
+    checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"
+    expected = {name: digest for digest, name in (line.split() for line in checksumfile.read_text().splitlines())}
+    assert hashlib.md5(outpath.read_bytes(), usedforsecurity=False).hexdigest() == expected["chargetransfer.txt"]
