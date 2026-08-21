@@ -1,4 +1,6 @@
-https://doi.org/10.5281/zenodo.10635803
-
-# No need to unzip files - artisatomic reads the zip archives
-
+# Carvajal Gallego et al. lanthanide (La-Lu) V-VII atomic data, University of Mons
+# Zenodo record: https://doi.org/10.5281/zenodo.10635803
+# The zip archives do not need to be extracted. artisatomic reads the members directly.
+https://zenodo.org/records/10635803/files/outglv_Ln_V--VII.zip
+https://zenodo.org/records/10635803/files/outggf_Ln_V--VII.zip
+https://zenodo.org/records/10635803/files/readme.txt

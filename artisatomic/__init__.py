@@ -1023,7 +1023,8 @@ def reduce_phixs_tables_worker(
 
 
 def check_forbidden(levela, levelb) -> bool:
-    if levela is None or levela.parity is None or levelb.parity is None:
+    # a data source with E1 transitions only (e.g. MONS) gives no parity, so every transition is permitted
+    if levela.parity is None or levelb.parity is None:
         return False
     return levela.parity == levelb.parity
 

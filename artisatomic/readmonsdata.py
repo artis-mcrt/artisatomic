@@ -5,9 +5,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from astropy import constants as const
-from astropy import units as u
 
 import artisatomic
 
@@ -19,7 +17,7 @@ class EnergyLevel(t.NamedTuple):
     levelname: str
     energyabovegsinpercm: float
     g: float
-    parity: float
+    parity: float | None
 
 
 class TransitionTuple(t.NamedTuple):
@@ -30,7 +28,12 @@ class TransitionTuple(t.NamedTuple):
 
 
 datafilepath = Path(os.path.dirname(os.path.abspath(__file__)), "..", "atomic-data-mons")
+if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
+    # a reduced Ce V and Ce VI model cut from the full archives (see atomic-data-mons/readme.txt)
+    datafilepath /= "test_sample"
 
+# Carvajal Gallego et al. (University of Mons) lanthanide La-Lu V-VII data, https://doi.org/10.5281/zenodo.10635803
+#
 # outggf_Ln_V-VII.zip folder:
 #     45 files outggf for each lanthanide between the V and VII spectra:
 #     first column is wavelength of the E1 transition (A),
@@ -72,27 +75,39 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
-def read_levels_and_transitions(atomic_number, ion_stage, flog):
-    # Read first file
-    ziparchive_outglv = zipfile.ZipFile(datafilepath / "outglv_Ln_V--VII.zip", "r")
-    datafilename_energylevels = (
-        f"outglv_Ln_V--VII/outglv_0_{artisatomic.elsymbols[atomic_number]}_{artisatomic.roman_numerals[ion_stage]}"
-    )
+def get_nearest_level_indices(sorted_energies: np.ndarray, energies: np.ndarray) -> np.ndarray:
+    """Return the index of the closest value in sorted_energies for each value in energies.
 
-    with ziparchive_outglv.open(datafilename_energylevels) as datafile_energylevels:
+    The transition file gives the lower level energy and the wavelength, so both levels of a transition
+    are found by their energy. The search is binary, so the full data set (up to ten million transitions
+    per ion) does not need a distance matrix. A tie goes to the lower index, the same as argmin().
+    """
+    idx_right = np.searchsorted(sorted_energies, energies).clip(1, len(sorted_energies) - 1)
+    idx_left = idx_right - 1
+    dist_left = np.abs(energies - sorted_energies[idx_left])
+    dist_right = np.abs(energies - sorted_energies[idx_right])
+    return np.where(dist_left <= dist_right, idx_left, idx_right)
+
+
+def read_levels_and_transitions(atomic_number, ion_stage, flog):
+    elsym = artisatomic.elsymbols[atomic_number]
+    ionstr = artisatomic.roman_numerals[ion_stage]
+
+    with (
+        zipfile.ZipFile(datafilepath / "outglv_Ln_V--VII.zip", "r") as ziparchive_outglv,
+        ziparchive_outglv.open(f"outglv_Ln_V--VII/outglv_0_{elsym}_{ionstr}") as datafile_energylevels,
+    ):
         energy_levels1000percm, j_arr = np.loadtxt(datafile_energylevels, unpack=True, delimiter=",")
     artisatomic.log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
 
-    # Sort table by energy levels
-    dfenergylevels = pd.DataFrame.from_dict(
-        {"energiesabovegsinpercm": energy_levels1000percm * 1000, "g": 2 * j_arr + 1}
-    ).sort_values("energiesabovegsinpercm")
-
-    energiesabovegsinpercm = dfenergylevels["energiesabovegsinpercm"].to_numpy()
-    g_arr = dfenergylevels["g"].to_numpy()
+    # the file is not sorted by energy
+    sortorder = np.argsort(energy_levels1000percm, kind="stable")
+    energiesabovegsinpercm = energy_levels1000percm[sortorder] * 1000
+    g_arr = 2 * j_arr[sortorder] + 1
 
     parity = None  # Only E1 so always allowed transitions.
 
+    # index zero is a dummy entry, so that the level ids in the output files start at one
     energy_levels = [None] + [
         EnergyLevel(
             levelname=str(energyabovegsinpercm),
@@ -103,27 +118,17 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         for g, energyabovegsinpercm in zip(g_arr, energiesabovegsinpercm, strict=True)
     ]
 
-    # Read next file
-    ziparchive_outggf = zipfile.ZipFile(datafilepath / "outggf_Ln_V--VII.zip", "r")
-    datafilename_transitions = (
-        f"outggf_Ln_V--VII/outggf_sorted_{artisatomic.elsymbols[atomic_number]}_{artisatomic.roman_numerals[ion_stage]}"
-    )
-
-    with ziparchive_outggf.open(datafilename_transitions) as datafile_transitions:
+    with (
+        zipfile.ZipFile(datafilepath / "outggf_Ln_V--VII.zip", "r") as ziparchive_outggf,
+        ziparchive_outggf.open(f"outggf_Ln_V--VII/outggf_sorted_{elsym}_{ionstr}") as datafile_transitions,
+    ):
         transition_wavelength_A, energy_levels_lower_1000percm, oscillator_strength = np.loadtxt(
             datafile_transitions, unpack=True, delimiter=","
         )
     artisatomic.log_and_print(flog, f"transitions: {len(energy_levels_lower_1000percm)}")
 
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
-
-    # Get index of lower level of transition
-    lowerlevels = [
-        (
-            np.abs(energiesabovegsinpercm - energylevellower)  # get closest energy in energy level array to lower level
-        ).argmin()  # then get the index with argmin()
-        for energylevellower in energy_levels_lower_percm
-    ]
+    lowerlevels = get_nearest_level_indices(energiesabovegsinpercm, energy_levels_lower_percm)
 
     ionization_energy_in_ev_nist = artisatomic.get_nist_ionization_energies_ev()[(atomic_number, ion_stage)]
 
@@ -145,25 +150,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels_upper_ev = transitionenergyev + energy_levels_lower_ev
     energy_levels_upper_percm = energy_levels_upper_ev / hc_in_ev_cm
-
-    # Get index of upper level of transition
-    upperlevels = [
-        (
-            np.abs(energiesabovegsinpercm - energylevelupper)  # get closest energy in energy level array
-        ).argmin()  # then get the index with argmin()
-        for energylevelupper in energy_levels_upper_percm
-    ]
+    upperlevels = get_nearest_level_indices(energiesabovegsinpercm, energy_levels_upper_percm)
 
     # Get A value from oscillator strength
     OSCSTRENGTHCONVERSION = 1.3473837e21
     c_angps = 2.99792458e18
-    A_ul = np.array(
-        [
-            osc / (g_arr[upper] / g_arr[lower] * OSCSTRENGTHCONVERSION / (c_angps / lambda_A) ** 2)
-            for lambda_A, osc, lower, upper in zip(
-                transition_wavelength_A, oscillator_strength, lowerlevels, upperlevels, strict=False
-            )
-        ]
+    A_ul = oscillator_strength / (
+        g_arr[upperlevels] / g_arr[lowerlevels] * OSCSTRENGTHCONVERSION / (c_angps / transition_wavelength_A) ** 2
     )
 
     transitions = [
@@ -173,7 +166,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             A=A,
             coll_str=-1,
         )
-        for A, lower, upper in zip(A_ul, lowerlevels, upperlevels, strict=False)
+        for A, lower, upper in zip(A_ul, lowerlevels, upperlevels, strict=True)
     ]
 
     transition_count_of_level_name = defaultdict(int)
@@ -181,11 +174,4 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         transition_count_of_level_name[energy_levels[lower + 1].levelname] += 1
         transition_count_of_level_name[energy_levels[upper + 1].levelname] += 1
 
-    assert len(transitions) == len(
-        energy_levels_lower_1000percm
-    )  # check number of transitions is the same as the number read in
-
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
-
-
-# read_levels_and_transitions(atomic_number=57, ion_stage=5, flog=None)
