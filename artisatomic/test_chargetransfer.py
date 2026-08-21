@@ -182,33 +182,44 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
     assert entry.autoreverse == 1
 
 
-def test_makechargetransferfile_metal_metal_estimates(monkeypatch):
-    """The heavy-element estimates keep the exothermic reactions with a small energy defect."""
+def test_makechargetransferfile_estimates(monkeypatch):
+    """The estimates keep the exothermic reactions with a small energy defect, with a heavy atom or hydrogen."""
     # the NIST table keys by ion stage
     monkeypatch.setattr(
         makechargetransferfile,
         "get_nist_ionization_energies_ev",
-        lambda: {(26, 1): 7.9, (26, 2): 10.0, (57, 1): 5.58},
+        lambda: {(1, 1): 13.6, (26, 1): 7.9, (26, 2): 10.0, (26, 3): 16.2, (53, 1): 10.45, (57, 1): 5.58},
     )
 
-    entries = makechargetransferfile.get_metal_metal_entries()
+    entries = makechargetransferfile.get_estimate_entries()
     reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e for e in entries}
 
     # Fe+1 + La0 -> Fe0 + La+1 releases 7.9 - 5.58 = 2.32 eV, which is inside the window
     assert (26, 2, 57, 1) in reactions
     assert "deltaE=2.32 eV" in reactions[26, 2, 57, 1].comment
     assert reactions[26, 2, 57, 1].a == makechargetransferfile.METAL_METAL_RATE
-    # Fe+2 + Fe0 -> Fe+1 + Fe+1 releases 10.0 - 7.9 = 2.1 eV
+    # Fe+2 + Fe0 -> Fe+1 + Fe+1 releases 10.0 - 7.9 = 2.1 eV, and I+1 + Fe0 releases 2.55 eV
     assert (26, 3, 26, 1) in reactions
+    assert (53, 2, 26, 1) in reactions
+    # Fe+3 + H0 -> Fe+2 + H+ releases 16.2 - 13.6 = 2.6 eV
+    assert (26, 4, 1, 1) in reactions
+    assert "Fe+3 + H0 -> Fe+2 + H+" in reactions[26, 4, 1, 1].comment
+    # H+ + I0 -> H0 + I+1 releases 13.6 - 10.45 = 3.15 eV
+    assert (1, 2, 53, 1) in reactions
+    assert "H+1 + I0 -> H0 + I+1" in reactions[1, 2, 53, 1].comment
     # the excluded reactions:
-    #   La+1 + Fe0 is endothermic;
-    #   Fe+2 + La0 releases 4.42 eV, which is above the window;
+    #   La+1 + Fe0 and Fe+1 + H0 are endothermic;
+    #   Fe+2 + La0 releases 4.42 eV and H+ + Fe0 releases 5.7 eV, which are above the window;
     #   Fe+1 + Fe0 changes nothing
-    assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}
+    assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1), (53, 2, 26, 1), (26, 4, 1, 1), (1, 2, 53, 1)}
 
     # a reaction that another source covers gets no estimate
-    remaining = makechargetransferfile.get_metal_metal_entries(covered={(26, 2, 57, 1)})
-    assert [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in remaining] == [(26, 3, 26, 1)]
+    remaining = makechargetransferfile.get_estimate_entries(covered={(26, 2, 57, 1), (1, 2, 53, 1)})
+    assert {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in remaining} == {
+        (26, 3, 26, 1),
+        (53, 2, 26, 1),
+        (26, 4, 1, 1),
+    }
 
 
 def test_set_autoreverse_flags_rejects_a_duplicate_reaction():
@@ -230,9 +241,9 @@ def test_committed_source_files_build_the_expected_entries():
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
     published = kf96_entries + he_entries + ss11_entries
     covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published}
-    metal_entries = makechargetransferfile.get_metal_metal_entries(covered)
+    metal_entries = makechargetransferfile.get_estimate_entries(covered)
 
-    assert (len(kf96_entries), len(he_entries), len(ss11_entries), len(metal_entries)) == (100, 21, 36, 2899)
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries), len(metal_entries)) == (100, 21, 36, 3913)
     entries = makechargetransferfile.set_autoreverse_flags(published + metal_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11", "Estimate"} for e in entries)
 

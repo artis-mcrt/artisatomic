@@ -14,12 +14,12 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
 - The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11). They cover the n-capture
   elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
-- Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
-  consist mostly of heavy elements, so these reactions matter there. No publication gives these
-  rates, so the script takes the ionization energies of Sc to U from the NIST table of this
-  package. It keeps the exothermic reactions with a small energy defect. Each one gets the
-  near-resonant rate of 1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed
-  balance in ARTIS.
+- Estimates for the reactions of a heavy ion with a neutral heavy atom, and for the reactions
+  of any element with hydrogen that the sources above do not cover. The kilonova ejecta consist
+  mostly of heavy elements, so these reactions matter there. No publication gives these rates,
+  so the script takes the ionization energies from the NIST table of this package. It keeps the
+  exothermic reactions with a small energy defect. Each one gets the near-resonant rate of
+  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -205,11 +205,11 @@ METAL_METAL_RATE = 1.0
 METAL_METAL_MAX_DEFECT_EV = 4.0
 # the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
 METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
-# The elements that get an estimate, Sc to U. The range is a parameter of this script: the NIST
-# table covers Z = 1 to 110, the other sources cover the light elements with hydrogen and helium,
-# and the estimates target the r-process elements of the kilonova models.
+# The elements of the estimates. The bounds are parameters of this script. The estimates with a
+# neutral heavy atom start at Sc, because the light elements have few low levels. Both kinds end
+# at Lr, the last actinide.
 METAL_METAL_ZMIN = 21
-METAL_METAL_ZMAX = 92
+ESTIMATE_ZMAX = 103
 # The range of use of the estimates [K]. A flat value has no temperature dependence, so the clamp
 # has no effect; the values document the nebular range only.
 METAL_METAL_TMIN = 1000
@@ -252,14 +252,14 @@ def format_header(source_counts: Counter[str]) -> str:
         "  SS11 publish tabulated k(T) values and no fit coefficients. This script fits their tables, see",
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
         f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova ejecta,",
-        "  which consist mostly of heavy elements. No publication gives these rates. Each exothermic reaction with a",
-        "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
-        "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
+        "  which consist mostly of heavy elements, and any ion with a hydrogen atom or a proton with any neutral",
+        "  atom. No publication gives these rates. Each exothermic reaction with a small energy defect, which no",
+        "  other source of this file covers, gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692.",
+        "  The energy defect comes from the ground-state ionization",
         "  energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
         *[f"    {line}" for line in get_nist_ionization_provenance()],
-        f"  The elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[METAL_METAL_ZMAX]} (Z = {METAL_METAL_ZMIN} to {METAL_METAL_ZMAX}).",
-        "  The range is a parameter of the script: the other sources cover the light elements, and the",
-        "  estimates target the r-process elements of the kilonova models.",
+        f"  With a neutral heavy atom, the elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[ESTIMATE_ZMAX]} (Z = {METAL_METAL_ZMIN} to {ESTIMATE_ZMAX}). With hydrogen,",
+        f"  the elements are He to {elsymbols[ESTIMATE_ZMAX]}.",
         "",
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
@@ -270,8 +270,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
         "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
         f"Estimates: rate {METAL_METAL_RATE:g}e-9 cm3/s, flat in T, for an exothermic reaction with an energy defect",
-        f"  in (0, {METAL_METAL_MAX_DEFECT_EV:g}] eV. The acceptor charge is one of {METAL_METAL_ACCEPTOR_CHARGES}. The donor",
-        "  is always neutral, because the Coulomb repulsion between two positive ions makes their reactions",
+        f"  in (0, {METAL_METAL_MAX_DEFECT_EV:g}] eV. The acceptor charge is one of {METAL_METAL_ACCEPTOR_CHARGES}, or 1 for a proton. The",
+        "  donor is always neutral, because the Coulomb repulsion between two positive ions makes their reactions",
         "  slow. The estimate assumes that a level of the products lies near the energy defect; it does not",
         f"  check the level lists. tmin and tmax are {METAL_METAL_TMIN}-{METAL_METAL_TMAX} K, the range of use.",
         "  ARTIS makes a Landau-Zener estimate for every reaction that this file does not hold.",
@@ -415,8 +415,8 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     return entries, report
 
 
-def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = frozenset()) -> list[CTEntry]:
-    """Build estimates for the capture of an electron by a heavy ion from a neutral heavy atom.
+def get_estimate_entries(covered: AbstractSet[tuple[int, int, int, int]] = frozenset()) -> list[CTEntry]:
+    """Build estimates for the capture of an electron from a neutral atom, with a small energy defect.
 
     The kilonova ejecta consist mostly of heavy elements, so the reactions between heavy species
     matter there. No publication gives the heavy-element rates. The heavy species have many low
@@ -425,50 +425,63 @@ def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = fr
     near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
     Coulomb repulsion between two positive ions makes their reactions slow.
 
+    Three kinds of reaction get an estimate:
+
+    - a heavy ion (Sc to Lr) captures from a neutral heavy atom (Sc to Lr);
+    - an ion of any element up to Lr captures from a hydrogen atom;
+    - a proton captures from a neutral atom of any element up to Lr.
+
     A reaction in `covered`, the keys (Z_acc, stage_acc, Z_don, stage_don) of the other sources,
     gets no estimate. A published rate therefore replaces its estimate. The ionization energies
     come from the NIST table that the package ships, artisatomic/nist_ionization.txt.zst.
     """
-    energies = {
-        (z, stage - 1): energy_ev
-        for (z, stage), energy_ev in get_nist_ionization_energies_ev().items()
-        if METAL_METAL_ZMIN <= z <= METAL_METAL_ZMAX
-    }
-    donors = sorted(z for (z, charge) in energies if charge == 0)
+    energies = {(z, stage - 1): energy_ev for (z, stage), energy_ev in get_nist_ionization_energies_ev().items()}
+    ie_hydrogen_ev = energies[1, 0]
     entries = []
-    for z_acc in donors:
+
+    def add(z_acc: int, charge_acc: int, z_don: int, deltae_ev: float) -> None:
+        """Add the capture by (z_acc, charge_acc) from the neutral atom z_don when the defect is small."""
+        if (z_acc, charge_acc + 1, z_don, 1) in covered or not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
+            return
+        label = f"{ionlabel(z_acc, charge_acc)} + {ionlabel(z_don, 0)} -> {ionlabel(z_acc, charge_acc - 1)} + {ionlabel(z_don, 1)}"
+        comment = f"Estimate; {label}; deltaE={fnum(deltae_ev)} eV; near-resonant rate, NIST ASD energies"
+        entries.append(
+            CTEntry(
+                z_acc,
+                charge_acc + 1,
+                z_don,
+                1,
+                METAL_METAL_RATE,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                METAL_METAL_TMIN,
+                METAL_METAL_TMAX,
+                comment,
+            )
+        )
+
+    heavy = [z for (z, charge) in sorted(energies) if charge == 0 and METAL_METAL_ZMIN <= z <= ESTIMATE_ZMAX]
+    for z_acc in heavy:
         for charge_acc in METAL_METAL_ACCEPTOR_CHARGES:
             if (z_acc, charge_acc - 1) not in energies:
                 continue
             # the capture releases the ionization energy of the product ion
             energy_released_ev = energies[z_acc, charge_acc - 1]
-            acceptor, product = ionlabel(z_acc, charge_acc), ionlabel(z_acc, charge_acc - 1)
-            for z_don in donors:
+            for z_don in heavy:
                 if z_don == z_acc and charge_acc == 1:
                     continue  # the products equal the reactants, so the reaction changes nothing
-                if (z_acc, charge_acc + 1, z_don, 1) in covered:
-                    continue
-                deltae_ev = energy_released_ev - energies[z_don, 0]
-                if not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
-                    continue
-                label = f"{acceptor} + {ionlabel(z_don, 0)} -> {product} + {ionlabel(z_don, 1)}"
-                comment = f"Estimate; {label}; deltaE={fnum(deltae_ev)} eV; near-resonant rate, NIST ASD energies"
-                entries.append(
-                    CTEntry(
-                        z_acc,
-                        charge_acc + 1,
-                        z_don,
-                        1,
-                        METAL_METAL_RATE,
-                        0.0,
-                        0.0,
-                        0.0,
-                        0.0,
-                        METAL_METAL_TMIN,
-                        METAL_METAL_TMAX,
-                        comment,
-                    )
-                )
+                add(z_acc, charge_acc, z_don, energy_released_ev - energies[z_don, 0])
+
+    for z in sorted({z for (z, charge) in energies if 1 < z <= ESTIMATE_ZMAX}):
+        # an ion captures from a hydrogen atom
+        for charge_acc in METAL_METAL_ACCEPTOR_CHARGES:
+            if (z, charge_acc - 1) in energies:
+                add(z, charge_acc, 1, energies[z, charge_acc - 1] - ie_hydrogen_ev)
+        # a proton captures from the neutral atom
+        if (z, 0) in energies:
+            add(1, 1, z, ie_hydrogen_ev - energies[z, 0])
     return entries
 
 
@@ -672,10 +685,10 @@ def main() -> None:
     he_entries = get_he_entries(args.sourcedir)
     print("n-capture elements with hydrogen (SS11):")
     ss11_entries, ss11_report = get_ss11_entries(args.sourcedir)
-    print("Heavy ion with neutral heavy atom (near-resonant estimates):")
+    print("Near-resonant estimates (heavy ion with neutral heavy atom, and any element with hydrogen):")
     published_entries = kf96_entries + he_entries + ss11_entries
     covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published_entries}
-    metal_entries = get_metal_metal_entries(covered)
+    metal_entries = get_estimate_entries(covered)
     print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
