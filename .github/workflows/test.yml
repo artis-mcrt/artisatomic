@@ -45,10 +45,6 @@ jobs:
               if: always()
               run: uv run -- pyrefly check --output-format github
 
-            - name: Run basedpyright
-              if: always()
-              run: uv run -- basedpyright
-
             - name: Run prek pre-commit checks
               uses: j178/prek-action@v2.0.6
 

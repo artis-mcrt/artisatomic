@@ -39,10 +39,10 @@ Run all commands through uv so they use the locked environment:
 - Tests: `uv run -m pytest`
 - Lint and autofix: `uv run ruff check --fix .`
 - Format: `uv run ruff format .`
-- Type checks (CI runs all of these): `uv run pyrefly check`, `uv run basedpyright`, `uv run mypy`, `uv run ty check`
+- Type checks (CI runs both of these): `uv run pyrefly check`, `uv run ty check`
 - Pre-commit hooks: `prek install` once, then hooks run on each commit
 
-CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly errors, basedpyright errors, and test failures. Run these checks locally before you push.
+CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly errors, ty errors, and test failures. Run these checks locally before you push.
 
 ## Code layout
 

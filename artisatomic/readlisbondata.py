@@ -82,8 +82,8 @@ class LisbonReader:
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
         levels = pd.concat(lvl_list)
-        # pd.concat() of the untyped list above narrows to Never, so pyright reads this as dead
-        lines = pd.concat(lns_list)  # pyright: ignore[reportUnreachable]
+        # pd.concat() of the untyped list above narrows to Never, so a type checker reads this as dead
+        lines = pd.concat(lns_list)
         self.levels = levels
         self.lines = lines
 

@@ -18,7 +18,7 @@ def get_aoife_dataset():
     this data set is unavailable.
     """
     try:
-        import h5py  # pyright: ignore[reportMissingTypeStubs]
+        import h5py
     except ModuleNotFoundError:
         return None
 
@@ -61,7 +61,7 @@ def read_ionization_data(atomic_number, ion_stage):
     ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
-    for atomic_num, ion_number, ionization_energy in ionization_data:  # pyright: ignore[reportGeneralTypeIssues]
+    for atomic_num, ion_number, ionization_energy in ionization_data:
         ion_dict = {ion_number: ionization_energy}
         if atomic_num in ionization_dict:
             ionization_dict[atomic_num].update(ion_dict)
@@ -85,7 +85,7 @@ def read_levels_data(atomic_number, ion_stage):
 
     energy_levels: list[EnergyLevelRow] = []
 
-    for rowtuple in levels_data:  # pyright: ignore[reportGeneralTypeIssues]
+    for rowtuple in levels_data:
         atomic_num, ion_number, level_number, energyabovegsinpercm, g, metastable = rowtuple
 
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
@@ -132,7 +132,7 @@ def read_lines_data(atomic_number, ion_stage):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for rowtuple in lines_data:  # pyright: ignore[reportGeneralTypeIssues]
+    for rowtuple in lines_data:
         (
             _line_id,
             wavelength,

@@ -935,7 +935,7 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
     The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
     its README), so this builds the three tables the reader wants in memory.
     """
-    import h5py  # pyright: ignore[reportMissingTypeStubs]
+    import h5py
 
     from artisatomic import readboyledata
 
