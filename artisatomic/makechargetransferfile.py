@@ -33,6 +33,8 @@ from itertools import starmap
 from pathlib import Path
 
 from artisatomic.base import elsymbols
+from artisatomic.base import find_file_check_extension
+from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
 # q is the ion charge before the electron capture, and a is in 1e-9 cm3/s. The script uses these
@@ -276,16 +278,17 @@ class CTEntry(t.NamedTuple):
 
 
 def read_source(filekey: str, sourcedir: Path) -> str:
-    """Return the text of one source file from the data folder."""
-    sourcefile = sourcedir / filekey
-    if not sourcefile.is_file():
+    """Return the text of one source file from the data folder, plain or zstd compressed."""
+    sourcefile = find_file_check_extension(sourcedir / filekey)
+    if sourcefile is None:
         msg = (
-            f"{sourcefile} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer,"
+            f"{sourcedir / filekey} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer,"
             " which downloads the source files."
         )
         raise FileNotFoundError(msg)
     print(f"  reading {sourcefile}")
-    return sourcefile.read_text(encoding="utf-8")
+    with xopen_check_extension(sourcefile, encoding="utf-8") as f:
+        return f.read()
 
 
 def fnum(x: float) -> str:

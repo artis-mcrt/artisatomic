@@ -5,6 +5,7 @@ in atomic-data-chargetransfer.
 """
 
 import pytest
+from xopen import xopen
 
 from artisatomic import makechargetransferfile
 
@@ -187,3 +188,14 @@ def test_makechargetransferfile_metal_metal_estimates(monkeypatch, tmp_path):
     #   Fe+2 + La0 releases 4.42 eV, which is above the window;
     #   Fe+1 + Fe0 changes nothing
     assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}
+
+
+def test_read_source_reads_the_compressed_file(tmp_path):
+    """read_source finds the zstd compressed form of a source file, and names the setup script otherwise."""
+    with xopen(tmp_path / "table.dat.zst", "wt", encoding="utf-8") as f:
+        f.write("1 2 3\n")
+
+    assert makechargetransferfile.read_source("table.dat", tmp_path) == "1 2 3\n"
+
+    with pytest.raises(FileNotFoundError, match=r"setup_chargetransfer_data\.sh"):
+        makechargetransferfile.read_source("absent.dat", tmp_path)

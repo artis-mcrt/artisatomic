@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 # Download the source files of makechargetransferfile. The script skips a file that exists.
-# To download a file again, delete it first.
+# To download a file again, delete it first. The NIST file is large, so zstd compresses it.
 
 set -e
 cd "$(dirname "$0")"
@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 download() {
   local file=$1
   local url=$2
-  if [ -f "$file" ]; then
+  if [ -f "$file" ] || [ -f "$file.zst" ]; then
     echo "$file exists, skipped"
     return
   fi
@@ -37,3 +37,4 @@ download ss11_table5.dat "https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table
 
 # NIST Atomic Spectra Database: the ground-state ionization energies of Sc to U
 download nist_ie_sc_to_u.dat "https://physics.nist.gov/cgi-bin/ASD/ie.pl?spectra=Sc-U&submit=Retrieve+Data&units=1&format=3&order=0&at_num_out=on&sp_name_out=on&ion_charge_out=on&e_out=0"
+if [ -f nist_ie_sc_to_u.dat ]; then zstd --rm -f -T0 -15 nist_ie_sc_to_u.dat; fi
