@@ -1,7 +1,8 @@
 #!/usr/bin/env zsh
 
-# Download the source files of makechargetransferfile. The script skips a file that exists.
-# To download a file again, delete it first.
+# Download the source files of makechargetransferfile. The repository tracks the files, so the
+# script is for an update. It skips a file that exists in plain or compressed form. To download
+# a file again, delete it first.
 
 set -e
 cd "$(dirname "$0")"
@@ -9,7 +10,7 @@ cd "$(dirname "$0")"
 download() {
   local file=$1
   local url=$2
-  if [ -f "$file" ]; then
+  if [ -f "$file" ] || [ -f "$file.zst" ]; then
     echo "$file exists, skipped"
     return
   fi

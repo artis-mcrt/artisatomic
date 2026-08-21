@@ -1,7 +1,9 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
+import io
 import itertools
+import math
 import multiprocessing as mp
 import sys
 import typing as t
@@ -214,32 +216,66 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     return xopen(filepath, **kwargs)
 
 
-@lru_cache(maxsize=1)
-def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
-    """Get a dictionary where dictioniz[(atomic_number, ion_stage)] = ionization_energy_ev.
+NIST_IONIZATION_PATH = PYDIR / "nist_ionization.txt.zst"
 
-    The package ships the NIST table as nist_ionization.txt.zst; the plain file also works.
+
+def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, int], float]]:
+    """Parse the tab-separated NIST table of ionization energies.
+
+    The result holds the provenance lines at the top of the table (the lines that start with "#")
+    and the energies, keyed by (atomic_number, ion_stage). The footnotes of the table follow the
+    data rows, after a line that starts with "Notes:". A blank energy means that NIST lists none,
+    so the ion gets no entry. Any other row that does not parse raises a ValueError.
     """
-    with xopen_check_extension(PYDIR / "nist_ionization.txt") as fnist:
-        dfnist = pd.read_csv(
-            fnist,
-            sep="\t",
-            usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-            dtype=str,
-            keep_default_na=False,
-        )
+    lines = text.splitlines()
+    provenance = [line.removeprefix("#").strip() for line in lines if line.startswith("#")]
+    datalines = [line for line in lines if not line.startswith("#")]
+    for index, line in enumerate(datalines):
+        if line.startswith("Notes:"):
+            datalines = datalines[:index]
+            break
 
-    # the footnotes of the NIST export follow the data rows, in the first column
-    footnote_rows = dfnist.index[dfnist["At. num"].str.startswith("Notes:")]
-    if len(footnote_rows) > 0:
-        dfnist = dfnist.iloc[: footnote_rows[0]]
-
-    dictioniz = {}
+    dfnist = pd.read_csv(
+        io.StringIO("\n".join(datalines)),
+        sep="\t",
+        usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+        dtype=str,
+        keep_default_na=False,
+    )
+    energies = {}
     for atomic_number, ion_charge, ioniz_ev in dfnist.itertuples(index=False):
         if not ioniz_ev:
-            continue  # NIST leaves the energy blank when it is unknown, so the ion has no entry
-        dictioniz[int(atomic_number), int(ion_charge) + 1] = float(ioniz_ev)
-    return dictioniz
+            continue  # a blank energy means that NIST lists none
+        try:
+            key = (int(atomic_number), int(ion_charge) + 1)
+            energy_ev = float(ioniz_ev)
+        except ValueError as err:
+            msg = f"The NIST table has a row that does not parse: {atomic_number!r} {ion_charge!r} {ioniz_ev!r}"
+            raise ValueError(msg) from err
+        if not math.isfinite(energy_ev):
+            msg = f"The NIST table has a non-finite energy for Z={atomic_number} charge {ion_charge}"
+            raise ValueError(msg)
+        energies[key] = energy_ev
+    return provenance, energies
+
+
+@lru_cache(maxsize=1)
+def _read_nist_ionization_table() -> tuple[list[str], dict[tuple[int, int], float]]:
+    """Read the NIST table that the package ships, artisatomic/nist_ionization.txt.zst."""
+    from xopen import xopen
+
+    with xopen(NIST_IONIZATION_PATH, encoding="utf-8") as fnist:
+        return parse_nist_ionization_table(fnist.read())
+
+
+def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
+    """Get a dictionary where dictioniz[(atomic_number, ion_stage)] = ionization_energy_ev."""
+    return _read_nist_ionization_table()[1]
+
+
+def get_nist_ionization_provenance() -> list[str]:
+    """Get the provenance lines of the NIST table: the source, the query, and the date."""
+    return _read_nist_ionization_table()[0]
 
 
 _process_pool: ProcessPoolExecutor | None = None

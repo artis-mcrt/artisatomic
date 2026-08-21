@@ -16,9 +16,9 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 - Estimates for the reactions of a heavy ion with a neutral heavy atom. The kilonova ejecta
   hold no hydrogen and need these reactions. No publication gives these rates, so the script
-  takes the ionization energies of Sc to U from the NIST table of this package. It keeps the exothermic
-  reactions with a small energy defect. Each one gets the near-resonant rate of 1e-9 cm3/s
-  (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
+  takes the ionization energies of Sc to U from the NIST table of this package. It keeps the
+  exothermic reactions with a small energy defect. Each one gets the near-resonant rate of
+  1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -37,8 +37,8 @@ from pathlib import Path
 import numpy as np
 
 from artisatomic.base import elsymbols
-from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import get_nist_ionization_provenance
 from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
@@ -204,7 +204,9 @@ METAL_METAL_RATE = 1.0
 METAL_METAL_MAX_DEFECT_EV = 4.0
 # the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
 METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
-# the elements that get an estimate, Sc to U
+# The elements that get an estimate, Sc to U. The range is a parameter of this script: the NIST
+# table covers Z = 1 to 110, the other sources cover the light elements with hydrogen and helium,
+# and the estimates target the r-process elements of the kilonova models.
 METAL_METAL_ZMIN = 21
 METAL_METAL_ZMAX = 92
 # The range of use of the estimates [K]. A flat value has no temperature dependence, so the clamp
@@ -252,8 +254,11 @@ def format_header(source_counts: Counter[str]) -> str:
         "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
         "  small energy defect, which no other source of this file covers, gets the near-resonant rate of",
         "  Melius (1974), J. Phys. B, 7, 1692. The energy defect comes from the ground-state ionization",
-        "  energies of the NIST Atomic Spectra Database, in the file nist_ionization.txt.zst of artisatomic. The",
-        f"  elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[METAL_METAL_ZMAX]} (Z = {METAL_METAL_ZMIN} to {METAL_METAL_ZMAX}).",
+        "  energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
+        *[f"    {line}" for line in get_nist_ionization_provenance()],
+        f"  The elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[METAL_METAL_ZMAX]} (Z = {METAL_METAL_ZMIN} to {METAL_METAL_ZMAX}).",
+        "  The range is a parameter of the script: the other sources cover the light elements, and the",
+        "  estimates target the r-process elements of the kilonova models.",
         "",
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
@@ -294,16 +299,17 @@ class CTEntry(t.NamedTuple):
 
 def read_source(filekey: str, sourcedir: Path) -> str:
     """Return the text of one source file from the data folder, plain or zstd compressed."""
-    sourcefile = find_file_check_extension(sourcedir / filekey)
-    if sourcefile is None:
+    try:
+        with xopen_check_extension(sourcedir / filekey, encoding="utf-8") as f:
+            text = f.read()
+    except FileNotFoundError as err:
         msg = (
-            f"{sourcedir / filekey} is missing. Run setup_chargetransfer_data.sh in atomic-data-chargetransfer."
-            " The script downloads the source files."
+            f"{err} The repository tracks the source files, so the checkout is incomplete."
+            " Run setup_chargetransfer_data.sh in atomic-data-chargetransfer. The script downloads the file again."
         )
-        raise FileNotFoundError(msg)
-    print(f"  reading {sourcefile}")
-    with xopen_check_extension(sourcefile, encoding="utf-8") as f:
-        return f.read()
+        raise FileNotFoundError(msg) from err
+    print(f"  read {filekey} from {sourcedir}")
+    return text
 
 
 def fnum(x: float) -> str:
