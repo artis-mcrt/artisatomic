@@ -1563,3 +1563,21 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     # a ground state ionizing to the upper ion's ground state has the ionization energy itself
     assert filled[0] == pytest.approx(17.084)
     assert filled[1] == pytest.approx(17.084)
+
+
+def test_get_nist_ionization_energies_ev():
+    """The NIST loader gives a float for each known energy, and no entry for an unknown one.
+
+    The NIST export ends with footnotes and leaves the energy blank when only the ground state is
+    known. Both must stay out of the table, so a caller gets a KeyError and not a NaN.
+    """
+    from artisatomic.base import get_nist_ionization_energies_ev
+
+    energies = get_nist_ionization_energies_ev()
+
+    assert energies[1, 1] == pytest.approx(13.598434599702)
+    assert energies[26, 2] == pytest.approx(16.19920)
+    assert all(isinstance(z, int) and isinstance(stage, int) for z, stage in energies)
+    assert all(isinstance(value, float) and np.isfinite(value) for value in energies.values())
+    # Rf XV has no listed energy
+    assert (104, 15) not in energies

@@ -425,7 +425,7 @@ def get_metal_metal_entries(covered: AbstractSet[tuple[int, int, int, int]] = fr
     energies = {
         (z, stage - 1): energy_ev
         for (z, stage), energy_ev in get_nist_ionization_energies_ev().items()
-        if METAL_METAL_ZMIN <= z <= METAL_METAL_ZMAX and math.isfinite(energy_ev)
+        if METAL_METAL_ZMIN <= z <= METAL_METAL_ZMAX
     }
     donors = sorted(z for (z, charge) in energies if charge == 0)
     entries = []

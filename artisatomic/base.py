@@ -1,7 +1,6 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
-import contextlib
 import itertools
 import multiprocessing as mp
 import sys
@@ -226,15 +225,20 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
             fnist,
             sep="\t",
             usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+            dtype=str,
+            keep_default_na=False,
         )
 
+    # the footnotes of the NIST export follow the data rows, in the first column
+    footnote_rows = dfnist.index[dfnist["At. num"].str.startswith("Notes:")]
+    if len(footnote_rows) > 0:
+        dfnist = dfnist.iloc[: footnote_rows[0]]
+
     dictioniz = {}
-    for atomic_number, ion_charge, ioniz_ev in dfnist[
-        ["At. num", "Ion Charge", "Ionization Energy (a) (eV)"]
-    ].itertuples(index=False):
-        with contextlib.suppress(ValueError):
-            ion_stage = int(ion_charge) + 1
-            dictioniz[int(atomic_number), ion_stage] = ioniz_ev
+    for atomic_number, ion_charge, ioniz_ev in dfnist.itertuples(index=False):
+        if not ioniz_ev:
+            continue  # NIST leaves the energy blank when it is unknown, so the ion has no entry
+        dictioniz[int(atomic_number), int(ion_charge) + 1] = float(ioniz_ev)
     return dictioniz
 
 

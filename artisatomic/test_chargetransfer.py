@@ -182,11 +182,11 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
 
 def test_makechargetransferfile_metal_metal_estimates(monkeypatch):
     """The heavy-element estimates keep the exothermic reactions with a small energy defect."""
-    # the NIST table keys by ion stage; the value of Fe IV is missing, and the code must skip it
+    # the NIST table keys by ion stage
     monkeypatch.setattr(
         makechargetransferfile,
         "get_nist_ionization_energies_ev",
-        lambda: {(26, 1): 7.9, (26, 2): 10.0, (26, 3): float("nan"), (57, 1): 5.58},
+        lambda: {(26, 1): 7.9, (26, 2): 10.0, (57, 1): 5.58},
     )
 
     entries = makechargetransferfile.get_metal_metal_entries()
@@ -201,8 +201,7 @@ def test_makechargetransferfile_metal_metal_estimates(monkeypatch):
     # the excluded reactions:
     #   La+1 + Fe0 is endothermic;
     #   Fe+2 + La0 releases 4.42 eV, which is above the window;
-    #   Fe+1 + Fe0 changes nothing;
-    #   Fe+3 has no energy value
+    #   Fe+1 + Fe0 changes nothing
     assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1)}
 
     # a reaction that another source covers gets no estimate
