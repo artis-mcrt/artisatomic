@@ -16,7 +16,7 @@ Write all English in ASD-STE100 (Simplified Technical English). This rule applie
 
 ## What this project is
 
-artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design: to change ions or data sources, you edit the Python code or supply an ion handlers JSON file.
+artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design: to change ions or data sources, you edit the Python code or supply an ion handlers JSON file.
 
 The Python package has no external API callers. Only the command-line scripts (`makeartisatomicfiles`, `makerecombratefile`, and `makechargetransferfile`) use the API, and they are internal to this repository. You can change the public API without a concern for external compatibility.
 

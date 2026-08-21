@@ -18,14 +18,14 @@ rm artisatomicionhandlers.json
 (cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
 ```
 
-`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz and QUB readers to their committed
+`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, QUB and MONS readers to their committed
 `test_sample/` directories, so it is required — the workflow sets it globally. The `rm` matters:
 `get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
 repository root silently overrides the built-in ion selection of every later local run.
 
 **Every** set needs the CMFGEN corpus, not just the `cmfgen` ones, which is why the workflow's
 CMFGEN setup step is the one not gated on `matrix.testname` (the comment there says why). `jplt`
-downloads its own corpus on top; Kurucz, QUB and Floers+25 come from committed samples. When a set
+downloads its own corpus on top; Kurucz, QUB, MONS and Floers+25 come from committed samples. When a set
 needs a new ion, prefer adding it to a committed sample over introducing another download: the
 published Floers+25 corpus is 5.5 GiB, but `testdata.tar.xz` carries only the ions the tests name.
 
@@ -41,6 +41,7 @@ trimming a set for speed can silently delete coverage while looking like a routi
 | `floers25` | La III (uncalibrated), Yb II–III (calibrated) | Both Floers+25 branches — the reader opens a different pair of filenames for each. **Yb II** is deliberately not a top ion, so the floers25 level names are also exercised through the hydrogenic phixs estimate. These are the smallest ions that cover both branches — 176 KB of `testdata.tar.xz`, against 73 MB of transitions for Dy III alone. |
 | `jplt` | Se I–IV + Se V, Nb I–IV | **Se II and III** are the only ions in the matrix using the v2.1 LS-term level-name format; Se I, Se IV and all of Nb use the older format. This matters beyond level names: JPLT supplies no photoionisation data, so `get_level_valence_n()` feeds the hydrogenic estimate written to `phixsdata_v2.txt`. **Se V** is read by `gsnist`, which is both that handler's only coverage and the only element read by two handlers. |
 | `kurucz` | Sr I–II, Y I–II | The Kurucz gfall reader, from the committed `test_sample/`. |
+| `mons` | Ce V–VI | The MONS lanthanide reader, from the committed `test_sample/`. `atomic-data-mons/make_test_sample.py` cut the sample from the 21.7 GB archive. It holds the lowest 450 levels of Ce V and 400 of Ce VI. It also holds every transition between two of those levels. The set has two ions, so Ce VI is the top ion. The level names carry no configuration, so artisatomic writes no hydrogenic phixs estimate. |
 | `qub` | Co II–IV | The `qub_cobalt` handler, from the committed `co_tyndall_test_sample/`. Co II comes from CMFGEN, Co III–IV from the QUB adf04 files. |
 
 ## Adding a set

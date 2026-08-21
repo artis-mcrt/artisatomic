@@ -1,0 +1,5 @@
+# Carvajal Gallego et al. lanthanide (La-Lu) V-VII atomic data, University of Mons
+# Zenodo record: https://doi.org/10.5281/zenodo.10635803
+# setup_mons_data.sh downloads the two archives. artisatomic reads them in place.
+https://zenodo.org/records/10635803/files/outglv_Ln_V--VII.zip
+https://zenodo.org/records/10635803/files/outggf_Ln_V--VII.zip

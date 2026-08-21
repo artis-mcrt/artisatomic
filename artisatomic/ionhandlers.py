@@ -38,7 +38,7 @@ def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
 
     # include everything we have data for.
     # The first to associate with an ion will be the handler used, so the order of these calls matters.
-    # readdreamdata, readfacdata and groundstatesonlynist also offer extend_ion_list(), and can be
+    # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(), and can be
     # added to this sequence to pull in everything they have data for.
     ion_handlers = readqubdata.extend_ion_list(ion_handlers)
     ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=True)

@@ -19,6 +19,7 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readkuruczdata
 from artisatomic import readlisbondata
+from artisatomic import readmonsdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
@@ -70,6 +71,7 @@ simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
         atomic_number, ion_stage, flog, calibrated=False
     ),
     "fac": readfacdata.read_levels_and_transitions,  # early version of floers25 calib data
+    "mons": readmonsdata.read_levels_and_transitions,  # Carvajal Gallego et al. (University of Mons) lanthanides V-VII
     "tanakajplt": readtanakajpltdata.read_levels_and_transitions,  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
     "gsnist": groundstatesonlynist.read_ground_levels,  # ground states taken from NIST
     "qub_data": readqubdata.read_qub_levels_and_transitions,  # also returns an upsilondict
