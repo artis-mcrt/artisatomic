@@ -18,7 +18,7 @@ Write all English in ASD-STE100 (Simplified Technical English). This rule applie
 
 artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design: to change ions or data sources, you edit the Python code or supply an ion handlers JSON file.
 
-The Python package has no external API callers. Only the command-line scripts (`makeartisatomicfiles` and `makerecombratefile`) use the API, and they are internal to this repository. You can change the public API without a concern for external compatibility.
+The Python package has no external API callers. Only the command-line scripts (`makeartisatomicfiles`, `makerecombratefile`, and `makechargetransferfile`) use the API, and they are internal to this repository. You can change the public API without a concern for external compatibility.
 
 ## Setup
 
@@ -30,7 +30,7 @@ source .venv/bin/activate
 uv pip install -e .[dev]
 ```
 
-Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data.
+Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The exception is `atomic-data-chargetransfer`, whose source files are small and tracked.
 
 ## Commands
 
@@ -50,7 +50,7 @@ CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly erro
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionization cross sections.
-- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makerecombratefile` entry point.
+- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makerecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makechargetransferfile` entry point.
 - `tests/` contains test configurations and reference checksums for each data source. `artisatomic/test_artisatomic.py` contains the test functions.
 
 ## Code style

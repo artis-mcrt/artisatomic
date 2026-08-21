@@ -99,7 +99,7 @@ jobs:
         # needs the matrix so its artifacts exist, but requires only pytest to have passed, so one
         # red leg cannot take the whole report down. Naming a status function is what disables the
         # implicit success() over all of needs.
-        needs: [pytest, tests]
+        needs: [pytest, tests, chargetransfer]
         if: ${{ !cancelled() && needs.pytest.result == 'success' }}
         runs-on: ubuntu-latest
         permissions:
@@ -244,3 +244,41 @@ jobs:
               with:
                   name: artis_files_${{ matrix.testname }}.tar.gz
                   path: artis_files_${{ matrix.testname }}.tar.gz
+
+    chargetransfer:
+        name: test chargetransfer
+        runs-on: ubuntu-26.04-arm
+        timeout-minutes: 15
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+              with:
+                  activate-environment: true
+
+            - name: Install artisatomic
+              run: uv sync --compile-bytecode
+
+            # the source files are tracked in atomic-data-chargetransfer, so this job downloads nothing
+            - name: Generate the charge transfer file
+              run: uv run coverage run -p -m artisatomic.makechargetransferfile -outputfile tests/chargetransfer/output/chargetransfer.txt
+
+            - name: Checksum the output file
+              working-directory: tests/chargetransfer/output
+              run: |
+                  head -70 chargetransfer.txt
+                  echo
+                  md5sum chargetransfer.txt
+                  md5sum -c ../checksums.txt
+
+            - name: Upload coverage data
+              uses: actions/upload-artifact@v7
+              with:
+                  name: coverage-data-chargetransfer
+                  path: .coverage.*
+                  include-hidden-files: true
+                  if-no-files-found: error

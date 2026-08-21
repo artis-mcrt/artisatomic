@@ -62,6 +62,7 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic:main"
+makechargetransferfile = "artisatomic.makechargetransferfile:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
 
 [tool.pyrefly]
@@ -175,7 +176,7 @@ unused-ignore-comment = "ignore"
 
 [tool.coverage.run]
 source = ["artisatomic"]
-omit = ["artisatomic/test_artisatomic.py"]
+omit = ["artisatomic/test_artisatomic.py", "artisatomic/test_chargetransfer.py"]
 # separate runners' paths only line up in the combined report if they are relative
 relative_files = true
 # parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a

@@ -1632,3 +1632,43 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     # a ground state ionizing to the upper ion's ground state has the ionization energy itself
     assert filled[0] == pytest.approx(17.084)
     assert filled[1] == pytest.approx(17.084)
+
+
+def test_get_nist_ionization_energies_ev():
+    """The NIST loader gives a float for each listed energy, and no entry for a blank one.
+
+    The NIST table ends with footnotes and leaves the energy blank when NIST lists none. Both
+    must stay out of the result, so a caller gets a KeyError and not a NaN.
+    """
+    from artisatomic.base import get_nist_ionization_energies_ev
+    from artisatomic.base import get_nist_ionization_provenance
+
+    energies = get_nist_ionization_energies_ev()
+
+    assert energies[1, 1] == pytest.approx(13.598434599702)
+    assert energies[26, 2] == pytest.approx(16.19921)
+    assert all(isinstance(z, int) and isinstance(stage, int) for z, stage in energies)
+    assert all(isinstance(value, float) and np.isfinite(value) for value in energies.values())
+    # Rf XV has a blank energy
+    assert (104, 15) not in energies
+    # the table names its source, so the output files can quote it
+    assert any("NIST" in line for line in get_nist_ionization_provenance())
+
+
+def test_parse_nist_ionization_table():
+    """The parser keeps the provenance lines, stops at the footnotes, and rejects a row that does not parse."""
+    from artisatomic.base import parse_nist_ionization_table
+
+    header = "At. num\tSp. Name\tIon Charge\tPrefix\tIonization Energy (a) (eV)\tSuffix\n"
+    rows = '"26"\t"Fe I"\t"0"\t""\t"7.9"\t""\n"26"\t"Fe II"\t"+1"\t""\t"16.2"\t""\n"26"\t"Fe III"\t"+2"\t""\t""\t""\n'
+    # the footnote holds a tab, which would break the column count if the parser reached it
+    footer = "Notes:\n(a) Uncertainty\tof the listed value is unknown.\n"
+
+    provenance, energies = parse_nist_ionization_table("# Source: NIST ASD\n# Date: 2022\n" + header + rows + footer)
+    assert provenance == ["Source: NIST ASD", "Date: 2022"]
+    assert energies == {(26, 1): 7.9, (26, 2): 16.2}
+
+    with pytest.raises(ValueError, match="does not parse"):
+        parse_nist_ionization_table(header + rows + '"26"\t"Fe IV"\t"+3"\t""\t"abc"\t""\n')
+    with pytest.raises(ValueError, match="non-finite"):
+        parse_nist_ionization_table(header + rows + '"26"\t"Fe IV"\t"+3"\t""\t"nan"\t""\n')
