@@ -193,6 +193,15 @@ SS11_TGRID = [
 # the n-capture elements that SS11 cover
 MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the report
 
+# The fit window of the SS11 curves [K]. Charge transfer competes with the other processes only
+# in the nebular low-temperature regime.
+SS11_FIT_TMIN = 1000
+SS11_FIT_TMAX = 40000
+SS11_FLOOR = 1.00e-14  # the radiative floor of the SS11 tables [cm3/s]
+SS11_USABLE_MIN = 1.2e-14  # a tabulated total above this value is a usable fit point [cm3/s]
+SS11_MIN_POINTS = 4  # a curve with fewer usable points gets a flat value instead of a fit
+SS11_FLAT_TEMP = 20000  # the entry that supplies the flat value [K]
+
 # The near-resonant rate estimate for a reaction between two heavy species (Melius 1974).
 # The unit is 1e-9 cm3/s, which is the unit of the fit coefficient a.
 METAL_METAL_RATE = 1.0
@@ -205,18 +214,58 @@ METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
 
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
 
-OUTPUT_HEADER = """\
-# Fits of the rate coefficients for charge transfer. The comment of each line names its source.
-# The artisatomic script makechargetransferfile downloads the sources and generates this file.
-# The first non-comment line gives the number of reactions.
-# Each reaction line has the columns:
-#   Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse
-# The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).
-# The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].
-# t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.
-# autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward
-# reaction releases energy. Use 0 when the file holds an explicit fit for the reverse direction.
-"""
+
+def format_header(source_counts: dict[str, int]) -> str:
+    """Build the comment block of the output file: the format, the sources, and the parameters."""
+    urls = SOURCE_URLS
+    lines = [
+        "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
+        "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
+        "",
+        "FORMAT",
+        "The first non-comment line gives the number of reactions. Each reaction line has the columns:",
+        "  Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse",
+        "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
+        "The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].",
+        "t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.",
+        "autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward",
+        "reaction releases energy. It is 0 when this file holds a fit for the reverse reaction.",
+        "The comment of each line starts with the tag of its source, then names the reaction.",
+        "",
+        "SOURCES",
+        f"Cloudy ({source_counts['Cloudy']} reactions): reactions with hydrogen, from the Cloudy data files",
+        f"  {urls['ctrecombdata.dat']}",
+        f"  {urls['ctiondata.dat']}",
+        "  They hold the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) plus the later updates of",
+        "  Cloudy. The comment of a line names each update, with the values that KF96 published.",
+        f"AR85 ({source_counts['AR85']} reactions): recombination with neutral helium, from the table of",
+        "  Arnaud & Rothenflug (1985), A&AS, 60, 425, in the file ct2.dat of D. Verner",
+        f"  {urls['ar85_ct2.dat']}",
+        f"SS11 ({source_counts['SS11']} reactions): Ge, Se, Br, Kr, Rb, and Xe with hydrogen, from the CDS tables of",
+        "  Sterling & Stancil (2011), A&A, 535, A117",
+        f"  {urls['ss11_table4.dat']}",
+        f"  {urls['ss11_table5.dat']}",
+        "  SS11 publish tabulated k(T) values and no fit coefficients. This script fits their tables, see",
+        "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
+        f"Estimate ({source_counts['Estimate']} reactions): a heavy ion with a neutral heavy atom, for the kilonova",
+        "  ejecta, which hold no hydrogen. No publication gives these rates. Each exothermic reaction with a",
+        "  small energy defect gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692. The",
+        "  energy defect comes from the ground-state ionization energies of the NIST Atomic Spectra Database",
+        f"  {urls['nist_ie_sc_to_u.dat']}",
+        "",
+        "PARAMETERS",
+        "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
+        f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total at",
+        f"  {SS11_FLOOR:g} cm3/s. tmin and tmax of an entry span the points that its fit used. A curve with fewer",
+        f"  than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K entry. The comment of each",
+        "  line gives the largest relative error of the fit or the flat value over the usable points.",
+        f"Estimates: rate {METAL_METAL_RATE:g}e-9 cm3/s, flat in T, for an exothermic reaction with an energy defect",
+        f"  in (0, {METAL_METAL_MAX_DEFECT_EV:g}] eV. The acceptor charge is one of {METAL_METAL_ACCEPTOR_CHARGES}. The donor",
+        "  is always neutral, because the Coulomb repulsion between two positive ions makes their reactions",
+        "  slow. ARTIS makes a Landau-Zener estimate for every reaction that this file does not hold.",
+        "autoreverse: set from the full list of reactions in this file, not from one source alone.",
+    ]
+    return "".join(f"# {line}".rstrip() + "\n" for line in lines)
 
 
 class CTEntry(t.NamedTuple):
@@ -322,7 +371,7 @@ def get_kf96_h_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[C
             published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf, strict=True))
             note = f"Cloudy update; KF96 published {published}"
             report.append(f"rec Z={z} q={q}: {note}")
-        comment = f"{label}; deltaE={fnum(deltae_ev)} eV; {note}"
+        comment = f"Cloudy; {label}; deltaE={fnum(deltae_ev)} eV; {note}"
         entries.append(CTEntry(z, q + 1, 1, 1, a, b, c, d, 0.0, tmin, tmax, comment))
 
     for (z, q1), vals in sorted(ion.items()):
@@ -343,7 +392,7 @@ def get_kf96_h_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[C
             published = " ".join(f"{name}={fnum(val)}" for name, val in zip("abcd", kf_ion[:4], strict=True))
             note = f"Cloudy update; KF96 published {published} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
-        comment = f"{label}; energy deficit={fnum(deficit_ev)} eV; {note}"
+        comment = f"Cloudy; {label}; energy deficit={fnum(deficit_ev)} eV; {note}"
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
 
     return entries, report
@@ -396,9 +445,7 @@ def get_metal_metal_entries(cachedir: Path, *, refresh: bool = False) -> list[CT
                 if not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
                     continue
                 label = f"{ionlabel(z_acc, charge_acc)} + {ionlabel(z_don, 0)} -> {ionlabel(z_acc, charge_acc - 1)} + {ionlabel(z_don, 1)}"
-                comment = (
-                    f"{label}; deltaE={fnum(deltae_ev)} eV; near-resonant estimate (Melius 1974), NIST ASD energies"
-                )
+                comment = f"Estimate; {label}; deltaE={fnum(deltae_ev)} eV; near-resonant rate, NIST ASD energies"
                 entries.append(
                     CTEntry(z_acc, charge_acc + 1, z_don, 1, METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, 1000, 40000, comment)
                 )
@@ -446,8 +493,8 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     for key, cols in channelvalues.items():
         row = []
         for col in cols:
-            total = sum(v for v in col if v != 1.00e-14)
-            row.append(max(total, 1.00e-14))
+            total = sum(v for v in col if v != SS11_FLOOR)
+            row.append(max(total, SS11_FLOOR))
         totals[key] = row
     return totals
 
@@ -475,11 +522,15 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     values do. A curve with fewer than four usable points gets the flat value of its 2e4 K
     entry. The result includes the error of that value over the usable points.
     """
-    pts = [(temp, k) for temp, k in zip(SS11_TGRID, ks, strict=True) if 1000 <= temp <= 40000 and k > 1.2e-14]
-    if len(pts) < 4:
-        flat = ks[SS11_TGRID.index(20000)]
+    pts = [
+        (temp, k)
+        for temp, k in zip(SS11_TGRID, ks, strict=True)
+        if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX and k > SS11_USABLE_MIN
+    ]
+    if len(pts) < SS11_MIN_POINTS:
+        flat = ks[SS11_TGRID.index(SS11_FLAT_TEMP)]
         maxerr = max((abs(flat / k - 1.0) for _, k in pts), default=0.0)
-        return SS11Fit(flat, 0.0, 0.0, maxerr, len(pts), 20000, 20000)
+        return SS11Fit(flat, 0.0, 0.0, maxerr, len(pts), SS11_FLAT_TEMP, SS11_FLAT_TEMP)
 
     def solve_normal_equations(use_eexp: bool) -> list[float]:
         ncoeff = 3 if use_eexp else 2
@@ -542,18 +593,19 @@ def get_ss11_entries(cachedir: Path, *, refresh: bool = False) -> tuple[list[CTE
                 if is_recombination
                 else f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
             )
-            if fit.npts >= 4:
+            window = f"{fnum(SS11_FIT_TMIN)}-{fnum(SS11_FIT_TMAX)} K"
+            if fit.npts >= SS11_MIN_POINTS:
                 source = (
                     f"fit to their tabulated k(T) over {fnum(fit.tmin)}-{fnum(fit.tmax)} K,"
                     f" max fit error {fit.maxerr * 100:.0f}%"
                 )
             elif fit.npts > 0:
                 source = (
-                    f"flat value from their 2e4 K entry"
-                    f" ({fit.npts} usable points over 1e3-4e4 K, max error {fit.maxerr * 100:.0f}%)"
+                    f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry"
+                    f" ({fit.npts} usable points over {window}, max error {fit.maxerr * 100:.0f}%)"
                 )
             else:
-                source = "flat value from their 2e4 K entry (no usable fit points over 1e3-4e4 K)"
+                source = f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry (no usable fit points over {window})"
             comment = f"SS11; {label}; {source}"
             reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
             entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, 0.0, 0.0, fit.eexp, fit.tmin, fit.tmax, comment))
@@ -578,10 +630,10 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     ]
 
 
-def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
+def write_chargetransfer_file(entries: list[CTEntry], outpath: Path, source_counts: dict[str, int]) -> None:
     """Write the assembled entries in the format that the ARTIS chargetransfer.cc reader expects."""
     with outpath.open("w", encoding="utf-8") as fout:
-        fout.write(OUTPUT_HEADER)
+        fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
         for e in entries:
             fout.write(
@@ -622,7 +674,13 @@ def main() -> None:
 
     args.outputfile.parent.mkdir(parents=True, exist_ok=True)
     entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries + metal_entries)
-    write_chargetransfer_file(entries, args.outputfile)
+    source_counts = {
+        "Cloudy": len(kf96_entries),
+        "AR85": len(he_entries),
+        "SS11": len(ss11_entries),
+        "Estimate": len(metal_entries),
+    }
+    write_chargetransfer_file(entries, args.outputfile, source_counts)
 
 
 if __name__ == "__main__":
