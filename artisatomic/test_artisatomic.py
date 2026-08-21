@@ -1676,35 +1676,47 @@ def test_parse_nist_ionization_table():
 
 
 def test_readmonsdata_reads_the_sample(monkeypatch):
-    """Read Ce V from the committed sample and check the first level and transition against the raw files."""
+    """Read Ce V from the committed sample and check the first level and transition."""
     monkeypatch.setattr(readmonsdata, "datafilepath", PYDIR / ".." / "atomic-data-mons" / "test_sample")
     ionization_energy_ev, dflevels, dftransitions, transition_count_of_level_name = (
         readmonsdata.read_levels_and_transitions(58, 5, io.StringIO())
     )
 
-    assert ionization_energy_ev == pytest.approx(65.55)
+    assert ionization_energy_ev == 65.55  # the NIST table gives Ce V exactly this value
     assert dflevels.height == 450
     assert dftransitions.height == 17139
-    # the level file is not sorted, so the ground state is found by energy
+    # the level file has no energy order, so the reader finds the ground state by its energy
     assert dflevels["energyabovegsinpercm"][0] == 0.0
     assert dflevels["g"][0] == 1.0
+    assert dflevels["j"][0] == 0.0
     assert dflevels["energyabovegsinpercm"][1] == pytest.approx(123734.52825648028)
     assert dflevels["g"][1] == 3.0
+    assert dflevels["j"][1] == 1.0
     assert dflevels["parity"].is_null().all()
 
-    # first line of the transition file: 269.5076 Angstrom from the ground state, f=2.588659e-03,
-    # so the upper level is the highest level of the sample (371047.04 cm^-1, g=3)
+    # first line of the transition file: 269.5076 Angstrom from the ground state with gf=2.588659e-03,
+    # so the upper level is the highest level of the sample (371047.04 cm^-1, g=3). A = gf / (1.49919e-16
+    # g_upper lambda^2), which the third column of the file gives as gf and not as f.
     first = dftransitions.row(0, named=True)
     assert first["lowerlevel"] == 0
     assert first["upperlevel"] == 449
-    assert first["A"] == pytest.approx(7.924313e07, rel=1e-6)
+    assert first["A"] == pytest.approx(7.9241887e07, rel=1e-6)
 
+    # 32 lines of the sample transition file have the ground state as their lower level, and none
+    # has it as the upper level
     assert transition_count_of_level_name[dflevels["levelname"][0]] == 32
     assert sum(transition_count_of_level_name.values()) == 2 * dftransitions.height
 
 
 def test_get_nearest_level_indices():
-    """Check the binary search for the closest level, including the ends of the range and a tie."""
+    """Check the binary search for the two closest levels, including the ends of the range and a tie."""
     sorted_energies = np.array([0.0, 10.0, 20.0, 30.0])
     energies = np.array([-5.0, 0.4, 4.9, 5.0, 5.1, 19.9, 35.0])
-    assert readmonsdata.get_nearest_level_indices(sorted_energies, energies).tolist() == [0, 0, 0, 0, 1, 2, 3]
+    nearest, secondnearest = readmonsdata.get_nearest_level_indices(sorted_energies, energies)
+    assert nearest.tolist() == [0, 0, 0, 0, 1, 2, 3]
+    assert secondnearest.tolist() == [1, 1, 1, 1, 0, 1, 2]
+
+    # a table of one level cannot give an index of minus one
+    onelevel, onelevel_second = readmonsdata.get_nearest_level_indices(np.array([5.0]), np.array([1.0, 9.0]))
+    assert onelevel.tolist() == [0, 0]
+    assert onelevel_second.tolist() == [0, 0]
