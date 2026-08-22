@@ -647,7 +647,7 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
     with outpath.open("w", encoding="utf-8") as fout:
         fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
-        fout.write(f"# {COLUMN_NAMES}\n")
+        fout.write(f"#{COLUMN_NAMES}\n")
         for e in entries:
             cols = (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don)
             coeffs = (e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax)
