@@ -256,15 +256,16 @@ def test_read_source_reads_the_compressed_file(tmp_path):
 
 
 def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
-    """main() writes the file that tests/chargetransfer/checksums.txt records, byte for byte.
+    """main() writes the files that tests/chargetransfer/checksums.txt records, byte for byte.
 
-    The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
+    The CI job 'test chargetransfer' checks the same files with md5sum. Regenerate the checksums
     after a deliberate change of the output; tests/README.md gives the commands.
     """
-    outpath = tmp_path / "chargetransfer.txt"
-    monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-outputfile", str(outpath)])
+    monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-output_folder", str(tmp_path)])
     makechargetransferfile.main()
 
     checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"
     expected = {name: digest for digest, name in (line.split() for line in checksumfile.read_text().splitlines())}
-    assert hashlib.md5(outpath.read_bytes(), usedforsecurity=False).hexdigest() == expected["chargetransfer.txt"]
+    assert set(expected) == {"chargetransfer.txt", "chargetransfer_estimates.txt"}
+    for name, digest in expected.items():
+        assert hashlib.md5((tmp_path / name).read_bytes(), usedforsecurity=False).hexdigest() == digest, name

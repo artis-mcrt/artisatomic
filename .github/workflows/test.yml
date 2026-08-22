@@ -264,15 +264,15 @@ jobs:
               run: uv sync --compile-bytecode
 
             # the source files are tracked in atomic-data-chargetransfer, so this job downloads nothing
-            - name: Generate the charge transfer file
-              run: uv run coverage run -p -m artisatomic.makechargetransferfile -outputfile tests/chargetransfer/output/chargetransfer.txt
+            - name: Generate the charge transfer files
+              run: uv run coverage run -p -m artisatomic.makechargetransferfile -output_folder tests/chargetransfer/output
 
-            - name: Checksum the output file
+            - name: Checksum the output files
               working-directory: tests/chargetransfer/output
               run: |
-                  head -70 chargetransfer.txt
+                  head -70 *.txt
                   echo
-                  md5sum chargetransfer.txt
+                  md5sum *.txt
                   md5sum -c ../checksums.txt
 
             - name: Upload coverage data
