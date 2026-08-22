@@ -175,7 +175,6 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
 
     # the product O+2 holds the six electrons of the file, so O+3 is the ion that captures one
     assert (entry.z_acc, entry.ionstage_acc, entry.z_don, entry.ionstage_don) == (8, 4, 2, 1)
-    assert "O+3 + He0 -> O+2 + He+" in entry.comment
     assert (entry.a, entry.b, entry.c, entry.d) == (1.0, 0.0, 1.25, -5.8)
     assert (entry.tmin, entry.tmax) == (1000.0, 30000.0)
     # the file holds no fit for He+ + O+2, so the code must add that reverse reaction
@@ -203,10 +202,10 @@ def test_makechargetransferfile_estimates(monkeypatch):
     assert (53, 2, 26, 1) in reactions
     # Fe+3 + H0 -> Fe+2 + H+ releases 16.2 - 13.6 = 2.6 eV
     assert (26, 4, 1, 1) in reactions
-    assert "Fe+3 + H0 -> Fe+2 + H+" in reactions[26, 4, 1, 1].comment
+    assert "deltaE=2.6 eV" in reactions[26, 4, 1, 1].comment
     # H+ + I0 -> H0 + I+1 releases 13.6 - 10.45 = 3.15 eV
     assert (1, 2, 53, 1) in reactions
-    assert "H+1 + I0 -> H0 + I+1" in reactions[1, 2, 53, 1].comment
+    assert "deltaE=3.15 eV" in reactions[1, 2, 53, 1].comment
     # the excluded reactions:
     #   La+1 + Fe0 and Fe+1 + H0 are endothermic;
     #   Fe+2 + La0 releases 4.42 eV and H+ + Fe0 releases 5.7 eV, which are above the window;

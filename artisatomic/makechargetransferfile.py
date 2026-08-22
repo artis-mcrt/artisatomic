@@ -226,7 +226,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
         "",
         "FORMAT",
-        "The first non-comment line gives the number of reactions. Each reaction line has the columns:",
+        "The first non-comment line gives the number of reactions. Each reaction line holds 12 columns",
+        "that one or more spaces separate:",
         "  Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse",
         "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
         "The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].",
@@ -234,7 +235,9 @@ def format_header(source_counts: Counter[str]) -> str:
         "For a flat entry (b = c = eexp = 0) the clamp has no effect.",
         "autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward",
         "reaction releases energy. It is 0 when this file holds a fit for the reverse reaction.",
-        "The comment of each line starts with the tag of its source, then names the reaction.",
+        "A comment follows the columns. It starts with the tag of the source, then gives the values that",
+        "are specific to the reaction. The four Z and ionstage columns identify the reaction, so the",
+        "comment does not repeat it, and SOURCES below gives the text that all lines of a source share.",
         "",
         "SOURCES",
         f"Cloudy ({source_counts['Cloudy']} reactions): reactions with hydrogen, from the Cloudy data files",
@@ -255,8 +258,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "  which consist mostly of heavy elements, and any ion with a hydrogen atom or a proton with any neutral",
         "  atom. No publication gives these rates. Each exothermic reaction with a small energy defect, which no",
         "  other source of this file covers, gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692.",
-        "  The energy defect comes from the ground-state ionization",
-        "  energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
+        "  The comment of a line gives the energy defect only. The defect comes from the ground-state",
+        "  ionization energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
         *[f"    {line}" for line in get_nist_ionization_provenance()],
         f"  With a neutral heavy atom, the elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[ESTIMATE_ZMAX]} (Z = {METAL_METAL_ZMIN} to {ESTIMATE_ZMAX}). With hydrogen,",
         f"  the elements are He to {elsymbols[ESTIMATE_ZMAX]}.",
@@ -356,11 +359,6 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
     return rows
 
 
-def ionlabel(z: int, q: int) -> str:
-    """Return a label like Fe+2 or Fe0 for an element with the given charge."""
-    return f"{elsymbols[z]}{'+' + str(q) if q > 0 else '0'}"
-
-
 def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
     """Build the entries for the reactions with hydrogen from the Cloudy data files.
 
@@ -380,7 +378,6 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             paper_deltae = KF96_ENDOTHERMIC.get((z, q), "unknown")
             report.append(f"rec Z={z} q={q}: endothermic, no fit (KF96 Table 4, deltaE={paper_deltae} eV); not written")
             continue
-        label = f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
         kf = KF96_REC.get((z, q))
         if kf is None:
             note = "no KF96 entry"
@@ -391,7 +388,7 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             note = f"Cloudy update; KF96 published {kf96_published_text(kf)}"
             report.append(f"rec Z={z} q={q}: {note}")
         # the energy column of Cloudy is the defect of the dominant channel, with the sign of the file
-        comment = f"Cloudy; {label}; Cloudy deltaE={fnum(deltae_ev)} eV; {note}"
+        comment = f"Cloudy; Cloudy deltaE={fnum(deltae_ev)} eV; {note}"
         entries.append(CTEntry(z, q + 1, 1, 1, a, b, c, d, 0.0, tmin, tmax, comment))
 
     for (z, q1), vals in sorted(ion.items()):
@@ -399,7 +396,6 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
         if a == 0.0:
             continue
         q = q1 - 1  # the charge before the ion loses the electron
-        label = f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
         kf_ion = KF96_ION.get((z, q))
         if kf_ion is None:
             note = "no KF96 entry (Cloudy addition)"
@@ -409,7 +405,7 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
         else:
             note = f"Cloudy update; KF96 published {kf96_published_text(kf_ion[:4])} dE/k={fnum(kf_ion[4])}(1e4 K)"
             report.append(f"ion Z={z} q={q}: {note}")
-        comment = f"Cloudy; {label}; energy deficit={fnum(deficit_ev)} eV; {note}"
+        comment = f"Cloudy; energy deficit={fnum(deficit_ev)} eV; {note}"
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
 
     return entries, report
@@ -443,8 +439,7 @@ def get_estimate_entries(covered: AbstractSet[tuple[int, int, int, int]] = froze
         """Add the capture by (z_acc, charge_acc) from the neutral atom z_don when the defect is small."""
         if (z_acc, charge_acc + 1, z_don, 1) in covered or not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
             return
-        label = f"{ionlabel(z_acc, charge_acc)} + {ionlabel(z_don, 0)} -> {ionlabel(z_acc, charge_acc - 1)} + {ionlabel(z_don, 1)}"
-        comment = f"Estimate; {label}; deltaE={fnum(deltae_ev)} eV; near-resonant rate, NIST ASD energies"
+        comment = f"Estimate; deltaE={deltae_ev:.3g} eV"
         entries.append(
             CTEntry(
                 z_acc,
@@ -496,9 +491,8 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
         z, nelectrons = int(parts[0]), int(parts[1])
         a, b, c, d, tmin, tmax = (float(x) for x in parts[2:8])
         q = z - nelectrons + 1  # the file lists the electron count of the product ion
-        label = f"{ionlabel(z, q)} + He0 -> {ionlabel(z, q - 1)} + He+"
         note = CLOUDY_HE_NOTES.get((z, q), "")
-        comment = f"AR85; {label}" + (f"; {note}" if note else "")
+        comment = "AR85" + (f"; {note}" if note else "")
         entries.append(CTEntry(z, q + 1, 2, 1, a, b, c, d, 0.0, tmin, tmax, comment))
     return entries
 
@@ -603,11 +597,6 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                 f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f} eexp={fit.eexp:.0f}"
                 f" maxerr={fit.maxerr * 100:.0f}% npts={fit.npts}{warning}"
             )
-            label = (
-                f"{ionlabel(z, q)} + H0 -> {ionlabel(z, q - 1)} + H+"
-                if is_recombination
-                else f"{ionlabel(z, q)} + H+ -> {ionlabel(z, q + 1)} + H0"
-            )
             window = f"{fnum(SS11_FIT_TMIN)}-{fnum(SS11_FIT_TMAX)} K"
             if fit.npts >= SS11_MIN_POINTS:
                 source = (
@@ -621,7 +610,7 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                 )
             else:
                 source = f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry (no usable fit points over {window})"
-            comment = f"SS11; {label}; {source}"
+            comment = f"SS11; {source}"
             reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
             entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, 0.0, 0.0, fit.eexp, fit.tmin, fit.tmax, comment))
     return entries, report
@@ -657,10 +646,11 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
         fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
         for e in entries:
+            cols = (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don)
+            coeffs = (e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax)
             fout.write(
-                f"{e.z_acc:3d} {e.ionstage_acc:2d} {e.z_don:3d} {e.ionstage_don:2d} {e.a:12.6g} {e.b:10.6g}"
-                f" {e.c:10.6g} {e.d:10.6g} {e.eexp:9.6g} {e.tmin:8.6g} {e.tmax:8.6g} {e.autoreverse}"
-                f" # {e.comment}\n"
+                " ".join([*(str(x) for x in cols), *(fnum(x) for x in coeffs), str(e.autoreverse)])
+                + f" # {e.comment}\n"
             )
     print(f"wrote {len(entries)} reactions to {outpath}")
 
