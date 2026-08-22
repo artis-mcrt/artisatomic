@@ -215,6 +215,9 @@ ESTIMATE_ZMAX = 103
 METAL_METAL_TMIN = 1000
 METAL_METAL_TMAX = 40000
 
+# the columns of a reaction line, in their order
+COLUMN_NAMES = "Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse"
+
 # the n-capture elements that SS11 cover
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
 
@@ -227,8 +230,7 @@ def format_header(source_counts: Counter[str]) -> str:
         "",
         "FORMAT",
         "The first non-comment line gives the number of reactions. Each reaction line holds 12 columns",
-        "that one or more spaces separate:",
-        "  Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse",
+        "that one or more spaces separate. The comment line above the first reaction names the columns.",
         "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
         "The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].",
         "t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.",
@@ -645,6 +647,7 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
     with outpath.open("w", encoding="utf-8") as fout:
         fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
+        fout.write(f"# {COLUMN_NAMES}\n")
         for e in entries:
             cols = (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don)
             coeffs = (e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax)
