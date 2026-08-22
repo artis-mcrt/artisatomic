@@ -195,17 +195,14 @@ def test_makechargetransferfile_estimates(monkeypatch):
 
     # Fe+1 + La0 -> Fe0 + La+1 releases 7.9 - 5.58 = 2.32 eV, which is inside the window
     assert (26, 2, 57, 1) in reactions
-    assert "deltaE=2.32 eV" in reactions[26, 2, 57, 1].comment
     assert reactions[26, 2, 57, 1].a == makechargetransferfile.METAL_METAL_RATE
     # Fe+2 + Fe0 -> Fe+1 + Fe+1 releases 10.0 - 7.9 = 2.1 eV, and I+1 + Fe0 releases 2.55 eV
     assert (26, 3, 26, 1) in reactions
     assert (53, 2, 26, 1) in reactions
     # Fe+3 + H0 -> Fe+2 + H+ releases 16.2 - 13.6 = 2.6 eV
     assert (26, 4, 1, 1) in reactions
-    assert "deltaE=2.6 eV" in reactions[26, 4, 1, 1].comment
     # H+ + I0 -> H0 + I+1 releases 13.6 - 10.45 = 3.15 eV
     assert (1, 2, 53, 1) in reactions
-    assert "deltaE=3.15 eV" in reactions[1, 2, 53, 1].comment
     # the excluded reactions:
     #   La+1 + Fe0 and Fe+1 + H0 are endothermic;
     #   Fe+2 + La0 releases 4.42 eV and H+ + Fe0 releases 5.7 eV, which are above the window;

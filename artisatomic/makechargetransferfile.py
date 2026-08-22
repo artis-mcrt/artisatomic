@@ -260,8 +260,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "  which consist mostly of heavy elements, and any ion with a hydrogen atom or a proton with any neutral",
         "  atom. No publication gives these rates. Each exothermic reaction with a small energy defect, which no",
         "  other source of this file covers, gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692.",
-        "  The comment of a line gives the energy defect only. The defect comes from the ground-state",
-        "  ionization energies of the NIST table that artisatomic ships (nist_ionization.txt.zst):",
+        "  The energy defect comes from the ground-state ionization energies of the NIST table that",
+        "  artisatomic ships (nist_ionization.txt.zst):",
         *[f"    {line}" for line in get_nist_ionization_provenance()],
         f"  With a neutral heavy atom, the elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[ESTIMATE_ZMAX]} (Z = {METAL_METAL_ZMIN} to {ESTIMATE_ZMAX}). With hydrogen,",
         f"  the elements are He to {elsymbols[ESTIMATE_ZMAX]}.",
@@ -441,7 +441,7 @@ def get_estimate_entries(covered: AbstractSet[tuple[int, int, int, int]] = froze
         """Add the capture by (z_acc, charge_acc) from the neutral atom z_don when the defect is small."""
         if (z_acc, charge_acc + 1, z_don, 1) in covered or not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
             return
-        comment = f"Estimate; deltaE={deltae_ev:.3g} eV"
+        comment = "Estimate"
         entries.append(
             CTEntry(
                 z_acc,
