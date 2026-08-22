@@ -215,9 +215,6 @@ ESTIMATE_ZMAX = 103
 METAL_METAL_TMIN = 1000
 METAL_METAL_TMAX = 40000
 
-# The columns of the output file. The first table holds the reactions with their own fit. The
-# second table holds the estimates, which share one set of coefficients. That set appears once,
-# above the table, so each estimate line holds the ion columns and the autoreverse flag only.
 ION_COLUMNS = "Z_acc ionstage_acc Z_don ionstage_don"
 COEFF_COLUMNS = "a b c d eexp tmin tmax"
 ESTIMATE_COEFFS = (METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, METAL_METAL_TMIN, METAL_METAL_TMAX)
@@ -250,7 +247,7 @@ def format_header(source_counts: Counter[str]) -> str:
         "reaction releases energy. It is 0 when this file holds a fit for the reverse reaction.",
         "A comment follows the columns. It starts with the tag of the source, then gives the values that",
         "are specific to the reaction. The four Z and ionstage columns identify the reaction, so the",
-        "comment does not repeat it, and SOURCES below gives the text that all lines of a source share.",
+        "comment does not repeat it. SOURCES below gives the text that all lines of a source share.",
         "",
         "SOURCES",
         f"Cloudy ({source_counts['Cloudy']} reactions): reactions with hydrogen, from the Cloudy data files",
