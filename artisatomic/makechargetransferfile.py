@@ -187,7 +187,6 @@ SS11_USABLE_MIN = 1.2e-14  # a tabulated total above this value is a usable fit 
 SS11_MIN_POINTS = 4  # a curve with fewer usable points gets a flat value instead of a fit
 SS11_FLAT_TEMP = 20000  # the entry that supplies the flat value [K]
 
-# the columns of a reaction line, in their order
 COLUMN_NAMES = "Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse"
 
 # the n-capture elements that SS11 cover
