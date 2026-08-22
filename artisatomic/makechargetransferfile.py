@@ -215,9 +215,8 @@ ESTIMATE_ZMAX = 103
 METAL_METAL_TMIN = 1000
 METAL_METAL_TMAX = 40000
 
-ION_COLUMNS = "Z_acc ionstage_acc Z_don ionstage_don"
-COEFF_COLUMNS = "a b c d eexp tmin tmax"
-ESTIMATE_COEFFS = (METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, METAL_METAL_TMIN, METAL_METAL_TMAX)
+# the columns of a reaction line, in their order
+COLUMN_NAMES = "Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse"
 
 # the n-capture elements that SS11 cover
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
@@ -230,15 +229,8 @@ def format_header(source_counts: Counter[str]) -> str:
         "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
         "",
         "FORMAT",
-        "The file holds two tables. One or more spaces separate the columns of a line, and a comment line",
-        "above each table names its columns. The first table starts with the number of its reactions, and",
-        "each of its lines holds a reaction with its own fit:",
-        f"  {ION_COLUMNS} {COEFF_COLUMNS} autoreverse",
-        "The second table holds the estimates, which all share one set of coefficients. It starts with",
-        "the number of its reactions, then one line with the shared coefficients:",
-        f"  {COEFF_COLUMNS}",
-        "and then one line for each reaction:",
-        f"  {ION_COLUMNS} autoreverse",
+        "The first non-comment line gives the number of reactions. Each reaction line holds 12 columns",
+        "that one or more spaces separate. The comment line above the first reaction names the columns.",
         "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
         "The rate coefficient is k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T) [cm3/s].",
         "t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.",
@@ -652,28 +644,18 @@ def write_chargetransfer_file(entries: list[CTEntry], outpath: Path) -> None:
     """Write the assembled entries in the format that chargetransfer.cc of ARTIS reads."""
     # each comment starts with the tag of its source, so the header counts come from the entries
     source_counts = Counter(e.comment.split(";", 1)[0] for e in entries)
-    fitted = [e for e in entries if not e.comment.startswith("Estimate")]
-    estimates = [e for e in entries if e.comment.startswith("Estimate")]
-    # the reader applies one set of coefficients to the whole second table
-    assert all((e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax) == ESTIMATE_COEFFS for e in estimates)
     with outpath.open("w", encoding="utf-8") as fout:
         fout.write(format_header(source_counts))
-        fout.write(f"{len(fitted)}\n")
-        fout.write(f"#{ION_COLUMNS} {COEFF_COLUMNS} autoreverse\n")
-        for e in fitted:
+        fout.write(f"{len(entries)}\n")
+        fout.write(f"#{COLUMN_NAMES}\n")
+        for e in entries:
             cols = (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don)
             coeffs = (e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax)
             fout.write(
                 " ".join([*(str(x) for x in cols), *(fnum(x) for x in coeffs), str(e.autoreverse)])
                 + f" # {e.comment}\n"
             )
-        fout.write(f"{len(estimates)}\n")
-        fout.write(f"#{COEFF_COLUMNS}\n")
-        fout.write(" ".join(fnum(x) for x in ESTIMATE_COEFFS) + "\n")
-        fout.write(f"#{ION_COLUMNS} autoreverse\n")
-        for e in estimates:
-            fout.write(f"{e.z_acc} {e.ionstage_acc} {e.z_don} {e.ionstage_don} {e.autoreverse}\n")
-    print(f"wrote {len(fitted)} fitted reactions and {len(estimates)} estimates to {outpath}")
+    print(f"wrote {len(entries)} reactions to {outpath}")
 
 
 def main() -> None:
