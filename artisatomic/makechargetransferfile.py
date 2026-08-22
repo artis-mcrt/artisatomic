@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Write the charge transfer rate files for ARTIS: data/chargetransfer.txt and data/chargetransfer_estimates.txt.
+"""Write the file of charge transfer rates for ARTIS (data/chargetransfer.txt in the artis repository).
 
 The script reads the published fits and rate tables from the folder atomic-data-chargetransfer.
-It converts them into one fit form and writes one reaction for each line. The published fits go
-into chargetransfer.txt. The estimates go into chargetransfer_estimates.txt, which holds the ion
-columns only, because ARTIS applies one rate to all of them. The script
+It converts them into one fit form and writes one reaction for each line. The script
 setup_chargetransfer_data.sh in that folder downloads the tables. The sources are:
 
 - The Cloudy master data files ctrecombdata.dat and ctiondata.dat (gitlab.nublado.org). They carry
@@ -16,32 +14,23 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
 - The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11). They cover the n-capture
   elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
   fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
-- Estimates for the reactions of a heavy ion with a neutral heavy atom. The estimates also
-  cover the reactions of any element with hydrogen that the sources above omit. The kilonova
-  ejecta consist mostly of heavy elements, so these reactions matter there. No publication gives
-  these rates, so the script takes the ionization energies from the NIST table of this package.
-  It keeps the exothermic reactions with a small energy defect. Each one gets the near-resonant
-  rate of 1e-9 cm3/s (Melius 1974). The reverse reactions come from detailed balance in ARTIS.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
 See the header of the output file for the column definitions. The chargetransfer.cc module of ARTIS
-reads the file and generates Landau-Zener estimates for the reactions that the file does not cover.
+reads the file and makes its own estimates for the reactions that the file does not cover.
 """
 
 import argparse
 import math
 import typing as t
 from collections import Counter
-from collections.abc import Set as AbstractSet
 from itertools import starmap
 from pathlib import Path
 
 import numpy as np
 
 from artisatomic.base import elsymbols
-from artisatomic.base import get_nist_ionization_energies_ev
-from artisatomic.base import get_nist_ionization_provenance
 from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
@@ -198,29 +187,8 @@ SS11_USABLE_MIN = 1.2e-14  # a tabulated total above this value is a usable fit 
 SS11_MIN_POINTS = 4  # a curve with fewer usable points gets a flat value instead of a fit
 SS11_FLAT_TEMP = 20000  # the entry that supplies the flat value [K]
 
-# The near-resonant rate estimate for a reaction between two heavy species (Melius 1974).
-# The unit is 1e-9 cm3/s, which is the unit of the fit coefficient a.
-METAL_METAL_RATE = 1.0
-# An exothermic reaction with an energy defect up to this value gets the estimate. A larger
-# defect can not reach a level of the products near resonance. The reaction then stays slow,
-# and ARTIS makes its own Landau-Zener estimate.
-METAL_METAL_MAX_DEFECT_EV = 4.0
-# the acceptor charges of the estimate; higher stages are rare in the kilonova nebular phase
-METAL_METAL_ACCEPTOR_CHARGES = (1, 2, 3)
-# The elements of the estimates. The bounds are parameters of this script. The estimates with a
-# neutral heavy atom start at Sc, because the light elements have few low levels. Both kinds end
-# at Lr, the last actinide.
-METAL_METAL_ZMIN = 21
-ESTIMATE_ZMAX = 103
-# The range of use of the estimates [K]. A flat value has no temperature dependence, so the clamp
-# has no effect; the values document the nebular range only.
-METAL_METAL_TMIN = 1000
-METAL_METAL_TMAX = 40000
-
-ION_COLUMNS = "Z_acc ionstage_acc Z_don ionstage_don"
-FIT_COLUMNS = "a b c d eexp tmin tmax"
-# ARTIS holds these values for every estimate, so the estimates file does not carry them
-ESTIMATE_COEFFS = (METAL_METAL_RATE, 0.0, 0.0, 0.0, 0.0, METAL_METAL_TMIN, METAL_METAL_TMAX)
+# the columns of a reaction line, in their order
+COLUMN_NAMES = "Z_acc ionstage_acc Z_don ionstage_don a b c d eexp tmin tmax autoreverse"
 
 # the n-capture elements that SS11 cover
 SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "Br", "Kr", "Rb", "Xe")}
@@ -231,12 +199,12 @@ def comment_block(lines: list[str]) -> str:
     return "".join(f"# {line}".rstrip() + "\n" for line in lines)
 
 
-def format_fits_header(source_counts: Counter[str]) -> str:
-    """Build the comment block of the fits file: the format, the sources, and the parameters."""
+def format_header(source_counts: Counter[str]) -> str:
+    """Build the comment block of the output file: the format, the sources, and the parameters."""
     lines = [
         "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
         "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
-        "The file chargetransfer_estimates.txt holds the near-resonant estimates for the other reactions.",
+        "ARTIS makes its own estimates for the reactions that this file does not cover.",
         "",
         "FORMAT",
         "The first non-comment line gives the number of reactions. Each reaction line holds 12 columns",
@@ -246,7 +214,7 @@ def format_fits_header(source_counts: Counter[str]) -> str:
         "t4 is T/1e4 K with T clamped into [tmin, tmax]; the factor exp(-eexp/T) uses the true T, and eexp is in K.",
         "For a flat entry (b = c = eexp = 0) the clamp has no effect.",
         "autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward",
-        "reaction releases energy. It is 0 when one of the two files holds the reverse reaction.",
+        "reaction releases energy. It is 0 when this file holds a fit for the reverse reaction.",
         "A comment follows the columns. It starts with the tag of the source, then gives the values that",
         "are specific to the reaction. The four Z and ionstage columns identify the reaction, so the",
         "comment does not repeat it. SOURCES below gives the text that all lines of a source share.",
@@ -275,46 +243,7 @@ def format_fits_header(source_counts: Counter[str]) -> str:
         f"  {SS11_FLAT_TEMP} K. The comment of each line gives the largest relative error of the fit or the flat value",
         "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
         "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
-        "autoreverse: set from the reactions of this file and of chargetransfer_estimates.txt together.",
-    ]
-    return comment_block(lines)
-
-
-def format_estimates_header(nestimates: int) -> str:
-    """Build the comment block of the estimates file: the format, the source, and the parameters."""
-    lines = [
-        "Near-resonant estimates of the rate coefficients for charge transfer, for chargetransfer.cc of ARTIS.",
-        "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
-        "The file chargetransfer.txt holds the published fits.",
-        "",
-        "FORMAT",
-        "The first non-comment line gives the number of reactions. Each reaction line holds 5 columns",
-        "that one or more spaces separate. The comment line above the first reaction names the columns.",
-        "The acceptor ion (Z_acc, ionstage_acc) captures an electron from the donor ion (Z_don, ionstage_don).",
-        "This file holds no rate. ARTIS applies the same rate to every reaction of this file:",
-        f"{METAL_METAL_RATE:g}e-9 cm3/s, flat in T. See PARAMETERS.",
-        "autoreverse 1 lets the code add the reverse reaction from detailed balance when the forward",
-        "reaction releases energy. It is 0 when chargetransfer.txt holds a fit for the reverse reaction.",
-        "",
-        "SOURCES",
-        f"Estimate ({nestimates} reactions): a heavy ion with a neutral heavy atom, for the kilonova ejecta,",
-        "  which consist mostly of heavy elements, and any ion with a hydrogen atom or a proton with any neutral",
-        "  atom. No publication gives these rates. Each exothermic reaction with a small energy defect, which",
-        "  chargetransfer.txt does not cover, gets the near-resonant rate of Melius (1974), J. Phys. B, 7, 1692.",
-        "  The energy defect comes from the ground-state ionization energies of the NIST table that",
-        "  artisatomic ships (nist_ionization.txt.zst):",
-        *[f"    {line}" for line in get_nist_ionization_provenance()],
-        f"  With a neutral heavy atom, the elements are {elsymbols[METAL_METAL_ZMIN]} to {elsymbols[ESTIMATE_ZMAX]} (Z = {METAL_METAL_ZMIN} to {ESTIMATE_ZMAX}). With hydrogen,",
-        f"  the elements are He to {elsymbols[ESTIMATE_ZMAX]}.",
-        "",
-        "PARAMETERS",
-        f"Estimates: rate {METAL_METAL_RATE:g}e-9 cm3/s, flat in T, for an exothermic reaction with an energy defect",
-        f"  in (0, {METAL_METAL_MAX_DEFECT_EV:g}] eV. The acceptor charge is one of {METAL_METAL_ACCEPTOR_CHARGES}, or 1 for a proton. The",
-        "  donor is always neutral, because the Coulomb repulsion between two positive ions makes their reactions",
-        "  slow. The estimate assumes that a level of the products lies near the energy defect; it does not",
-        f"  check the level lists. The range of use is {METAL_METAL_TMIN}-{METAL_METAL_TMAX} K.",
-        "  ARTIS makes a Landau-Zener estimate for every reaction that neither file holds.",
-        "autoreverse: set from the reactions of this file and of chargetransfer.txt together.",
+        "autoreverse: set from the full list of reactions in this file, not from one source alone.",
     ]
     return comment_block(lines)
 
@@ -445,75 +374,6 @@ def get_kf96_h_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
         entries.append(CTEntry(1, 2, z, q + 1, a, b, c, d, de4 * 1e4, tmin, tmax, comment))
 
     return entries, report
-
-
-def get_estimate_entries(covered: AbstractSet[tuple[int, int, int, int]] = frozenset()) -> list[CTEntry]:
-    """Build estimates for the capture of an electron from a neutral atom, with a small energy defect.
-
-    The kilonova ejecta consist mostly of heavy elements, so the reactions between heavy species
-    matter there. No publication gives the heavy-element rates. The heavy species have many low
-    levels. An exothermic reaction with an energy defect below METAL_METAL_MAX_DEFECT_EV can
-    therefore reach a level of the products near resonance. Such a reaction gets the
-    near-resonant rate of 1e-9 cm3/s (Melius 1974). The donor is always neutral, because the
-    Coulomb repulsion between two positive ions makes their reactions slow.
-
-    Three kinds of reaction get an estimate:
-
-    - a heavy ion (Sc to Lr) captures from a neutral heavy atom (Sc to Lr);
-    - an ion of any element up to Lr captures from a hydrogen atom;
-    - a proton captures from a neutral atom of any element up to Lr.
-
-    A reaction in `covered`, the keys (Z_acc, stage_acc, Z_don, stage_don) of the other sources,
-    gets no estimate. A published rate therefore replaces its estimate. The ionization energies
-    come from the NIST table that the package ships, artisatomic/nist_ionization.txt.zst.
-    """
-    energies = {(z, stage - 1): energy_ev for (z, stage), energy_ev in get_nist_ionization_energies_ev().items()}
-    ie_hydrogen_ev = energies[1, 0]
-    entries = []
-
-    def add(z_acc: int, charge_acc: int, z_don: int, deltae_ev: float) -> None:
-        """Add the capture by (z_acc, charge_acc) from the neutral atom z_don when the defect is small."""
-        if (z_acc, charge_acc + 1, z_don, 1) in covered or not 0.0 < deltae_ev <= METAL_METAL_MAX_DEFECT_EV:
-            return
-        comment = "Estimate"
-        entries.append(
-            CTEntry(
-                z_acc,
-                charge_acc + 1,
-                z_don,
-                1,
-                METAL_METAL_RATE,
-                0.0,
-                0.0,
-                0.0,
-                0.0,
-                METAL_METAL_TMIN,
-                METAL_METAL_TMAX,
-                comment,
-            )
-        )
-
-    heavy = [z for (z, charge) in sorted(energies) if charge == 0 and METAL_METAL_ZMIN <= z <= ESTIMATE_ZMAX]
-    for z_acc in heavy:
-        for charge_acc in METAL_METAL_ACCEPTOR_CHARGES:
-            if (z_acc, charge_acc - 1) not in energies:
-                continue
-            # the capture releases the ionization energy of the product ion
-            energy_released_ev = energies[z_acc, charge_acc - 1]
-            for z_don in heavy:
-                if z_don == z_acc and charge_acc == 1:
-                    continue  # the products equal the reactants, so the reaction changes nothing
-                add(z_acc, charge_acc, z_don, energy_released_ev - energies[z_don, 0])
-
-    for z in sorted({z for (z, charge) in energies if 1 < z <= ESTIMATE_ZMAX}):
-        # an ion captures from a hydrogen atom
-        for charge_acc in METAL_METAL_ACCEPTOR_CHARGES:
-            if (z, charge_acc - 1) in energies:
-                add(z, charge_acc, 1, energies[z, charge_acc - 1] - ie_hydrogen_ev)
-        # a proton captures from the neutral atom
-        if (z, 0) in energies:
-            add(1, 1, z, ie_hydrogen_ev - energies[z, 0])
-    return entries
 
 
 def get_he_entries(sourcedir: Path) -> list[CTEntry]:
@@ -674,45 +534,31 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     ]
 
 
-def write_chargetransfer_files(entries: list[CTEntry], outdir: Path) -> None:
-    """Write the fits file and the estimates file in the format that chargetransfer.cc of ARTIS reads."""
-    fitted = [e for e in entries if not e.comment.startswith("Estimate")]
-    estimates = [e for e in entries if e.comment.startswith("Estimate")]
-    # the estimates file carries no coefficients, so its header must state the values of the entries
-    assert all((e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax) == ESTIMATE_COEFFS for e in estimates)
-
+def write_chargetransfer_file(entries: list[CTEntry], outdir: Path) -> None:
+    """Write the assembled entries in the format that chargetransfer.cc of ARTIS reads."""
     # each comment starts with the tag of its source, so the header counts come from the entries
-    source_counts = Counter(e.comment.split(";", 1)[0] for e in fitted)
-    fitspath = outdir / "chargetransfer.txt"
-    with fitspath.open("w", encoding="utf-8") as fout:
-        fout.write(format_fits_header(source_counts))
-        fout.write(f"{len(fitted)}\n")
-        fout.write(f"#{ION_COLUMNS} {FIT_COLUMNS} autoreverse\n")
-        for e in fitted:
+    source_counts = Counter(e.comment.split(";", 1)[0] for e in entries)
+    outpath = outdir / "chargetransfer.txt"
+    with outpath.open("w", encoding="utf-8") as fout:
+        fout.write(format_header(source_counts))
+        fout.write(f"{len(entries)}\n")
+        fout.write(f"#{COLUMN_NAMES}\n")
+        for e in entries:
             cols = (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don)
             coeffs = (e.a, e.b, e.c, e.d, e.eexp, e.tmin, e.tmax)
             fout.write(
                 " ".join([*(str(x) for x in cols), *(fnum(x) for x in coeffs), str(e.autoreverse)])
                 + f" # {e.comment}\n"
             )
-    print(f"wrote {len(fitted)} fitted reactions to {fitspath}")
-
-    estimatespath = outdir / "chargetransfer_estimates.txt"
-    with estimatespath.open("w", encoding="utf-8") as fout:
-        fout.write(format_estimates_header(len(estimates)))
-        fout.write(f"{len(estimates)}\n")
-        fout.write(f"#{ION_COLUMNS} autoreverse\n")
-        for e in estimates:
-            fout.write(f"{e.z_acc} {e.ionstage_acc} {e.z_don} {e.ionstage_don} {e.autoreverse}\n")
-    print(f"wrote {len(estimates)} estimates to {estimatespath}")
+    print(f"wrote {len(entries)} reactions to {outpath}")
 
 
 def main() -> None:
-    """Read the sources of the charge transfer rates and write the two files for ARTIS."""
+    """Read the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
     parser = argparse.ArgumentParser(description=__doc__)
     defaultoutdir = Path(__file__).parent.parent.absolute() / "artis_files" / "data"
     defaultsourcedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
-    parser.add_argument("-output_folder", default=defaultoutdir, type=Path, help="folder of the output files")
+    parser.add_argument("-output_folder", default=defaultoutdir, type=Path, help="folder of the output file")
     parser.add_argument(
         "-sourcedir",
         default=defaultsourcedir,
@@ -727,11 +573,6 @@ def main() -> None:
     he_entries = get_he_entries(args.sourcedir)
     print("n-capture elements with hydrogen (SS11):")
     ss11_entries, ss11_report = get_ss11_entries(args.sourcedir)
-    print("Near-resonant estimates (heavy ion with neutral heavy atom, and any element with hydrogen):")
-    published_entries = kf96_entries + he_entries + ss11_entries
-    covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published_entries}
-    metal_entries = get_estimate_entries(covered)
-    print(f"  {len(metal_entries)} reactions with an energy defect in (0, {METAL_METAL_MAX_DEFECT_EV}] eV")
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
     for line in kf96_report:
@@ -742,8 +583,8 @@ def main() -> None:
     print()
 
     args.output_folder.mkdir(parents=True, exist_ok=True)
-    entries = set_autoreverse_flags(published_entries + metal_entries)
-    write_chargetransfer_files(entries, args.output_folder)
+    entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
+    write_chargetransfer_file(entries, args.output_folder)
 
 
 if __name__ == "__main__":

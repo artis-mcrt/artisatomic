@@ -52,10 +52,10 @@ parallel, so a new set is free in wall clock, while extending a set churns its f
 ## The charge transfer set
 
 `chargetransfer/` is not a matrix entry: the `chargetransfer` job of the workflow runs
-`python -m artisatomic.makechargetransferfile` and checks `chargetransfer.txt` and
-`chargetransfer_estimates.txt` against `checksums.txt`. The source files are tracked in `atomic-data-chargetransfer`, so the job downloads
+`python -m artisatomic.makechargetransferfile` and checks `chargetransfer.txt` against
+`checksums.txt`. The source files are tracked in `atomic-data-chargetransfer`, so the job downloads
 nothing. The test `test_chargetransfer_output_matches_the_checksum` checks the same checksum under
-pytest. Regenerate the checksums with:
+pytest. Regenerate the checksum with:
 
 ```bash
 PYTHONPATH="$PWD" uv run makechargetransferfile -output_folder tests/chargetransfer/output

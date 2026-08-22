@@ -181,43 +181,6 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
     assert entry.autoreverse == 1
 
 
-def test_makechargetransferfile_estimates(monkeypatch):
-    """The estimates keep the exothermic reactions with a small energy defect, with a heavy atom or hydrogen."""
-    # the NIST table keys by ion stage
-    monkeypatch.setattr(
-        makechargetransferfile,
-        "get_nist_ionization_energies_ev",
-        lambda: {(1, 1): 13.6, (26, 1): 7.9, (26, 2): 10.0, (26, 3): 16.2, (53, 1): 10.45, (57, 1): 5.58},
-    )
-
-    entries = makechargetransferfile.get_estimate_entries()
-    reactions = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don): e for e in entries}
-
-    # Fe+1 + La0 -> Fe0 + La+1 releases 7.9 - 5.58 = 2.32 eV, which is inside the window
-    assert (26, 2, 57, 1) in reactions
-    assert reactions[26, 2, 57, 1].a == makechargetransferfile.METAL_METAL_RATE
-    # Fe+2 + Fe0 -> Fe+1 + Fe+1 releases 10.0 - 7.9 = 2.1 eV, and I+1 + Fe0 releases 2.55 eV
-    assert (26, 3, 26, 1) in reactions
-    assert (53, 2, 26, 1) in reactions
-    # Fe+3 + H0 -> Fe+2 + H+ releases 16.2 - 13.6 = 2.6 eV
-    assert (26, 4, 1, 1) in reactions
-    # H+ + I0 -> H0 + I+1 releases 13.6 - 10.45 = 3.15 eV
-    assert (1, 2, 53, 1) in reactions
-    # the excluded reactions:
-    #   La+1 + Fe0 and Fe+1 + H0 are endothermic;
-    #   Fe+2 + La0 releases 4.42 eV and H+ + Fe0 releases 5.7 eV, which are above the window;
-    #   Fe+1 + Fe0 changes nothing
-    assert set(reactions) == {(26, 2, 57, 1), (26, 3, 26, 1), (53, 2, 26, 1), (26, 4, 1, 1), (1, 2, 53, 1)}
-
-    # a reaction that another source covers gets no estimate
-    remaining = makechargetransferfile.get_estimate_entries(covered={(26, 2, 57, 1), (1, 2, 53, 1)})
-    assert {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in remaining} == {
-        (26, 3, 26, 1),
-        (53, 2, 26, 1),
-        (26, 4, 1, 1),
-    }
-
-
 def test_set_autoreverse_flags_rejects_a_duplicate_reaction():
     """The assembled list must hold each reaction once, because the reader takes the first fit."""
     entry = makechargetransferfile.CTEntry(26, 2, 1, 1, 1.0, 0.0, 0.0, 0.0, 0.0, 1e3, 4e4, "Test; Fe+1 + H0")
@@ -235,13 +198,9 @@ def test_committed_source_files_build_the_expected_entries():
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
-    published = kf96_entries + he_entries + ss11_entries
-    covered = {(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in published}
-    metal_entries = makechargetransferfile.get_estimate_entries(covered)
-
-    assert (len(kf96_entries), len(he_entries), len(ss11_entries), len(metal_entries)) == (100, 21, 36, 3913)
-    entries = makechargetransferfile.set_autoreverse_flags(published + metal_entries)
-    assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11", "Estimate"} for e in entries)
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
+    entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
+    assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
 
 
 def test_read_source_reads_the_compressed_file(tmp_path):
@@ -256,9 +215,9 @@ def test_read_source_reads_the_compressed_file(tmp_path):
 
 
 def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
-    """main() writes the files that tests/chargetransfer/checksums.txt records, byte for byte.
+    """main() writes the file that tests/chargetransfer/checksums.txt records, byte for byte.
 
-    The CI job 'test chargetransfer' checks the same files with md5sum. Regenerate the checksums
+    The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
     after a deliberate change of the output; tests/README.md gives the commands.
     """
     monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-output_folder", str(tmp_path)])
@@ -266,6 +225,6 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
 
     checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"
     expected = {name: digest for digest, name in (line.split() for line in checksumfile.read_text().splitlines())}
-    assert set(expected) == {"chargetransfer.txt", "chargetransfer_estimates.txt"}
+    assert set(expected) == {"chargetransfer.txt"}
     for name, digest in expected.items():
         assert hashlib.md5((tmp_path / name).read_bytes(), usedforsecurity=False).hexdigest() == digest, name

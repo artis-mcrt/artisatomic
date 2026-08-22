@@ -1,2 +1,1 @@
-a69a8d67455d44a81b00bcaff995249d  chargetransfer.txt
-a82eda276df2abdbb9d442c7d3c69df5  chargetransfer_estimates.txt
+6dede763b555afc54a16f966d4bf98d3  chargetransfer.txt
