@@ -132,7 +132,7 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     lftable = (
         scan_file_lines(filepath, skip_lines=skip_lines)
         .select(parts=pl.col("line").str.extract_all(r"\S+"))
-        # a blank line holds no data, and gives no tokens
+        # a blank line inside the table gives a null in every column, which the callers reject
         .filter(pl.col("parts").list.len() > 0)
         .select(
             pl.col("parts").list.len().alias(countcol),
