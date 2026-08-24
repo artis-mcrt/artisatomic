@@ -196,10 +196,12 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
     reaches the -1, because a negative one has already made the flag true.
     """
+    # the fill_null keeps the outer condition free of nulls: polars 1.44.0 sends a null-condition
+    # row past the inner when to the innermost otherwise (pola-rs/polars#28498)
     return (
         dftransitions_ion.with_columns(forbidden=pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False))
         .with_columns(
-            coll_str=pl.when(pl.col("upsilon") >= 0.0)
+            coll_str=pl.when(pl.col("upsilon").fill_null(-1.0) >= 0.0)
             .then(pl.col("upsilon"))
             .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
         )
