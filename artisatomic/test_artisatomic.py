@@ -1836,12 +1836,12 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
 def test_readfloers25data_ragged_rows(monkeypatch, tmp_path):
     """A short row keeps the columns in front of its empty cell. A long row stops the run.
 
-    The Floers+25 tables right-align each value in a cell of a minimum width, so a value that is
+    The Floers+25 tables right-align each value in a cell of a minimum width. A value that is
     wider than its cell moves the rest of the line. A column is not at a fixed character position,
     and the reader splits each line on whitespace. The level tables leave the LS2 cell of a high-l
     level empty, which gives a row of nine tokens against a header of ten. The reader takes no
     column after LS2, so such a row is read. A row with an extra token moves every value into the
-    column on its left, which no later test can find, so the reader rejects it.
+    column on its left, so the reader rejects it.
     """
     from artisatomic import readfloers25data
 
@@ -1874,4 +1874,43 @@ def test_readfloers25data_ragged_rows(monkeypatch, tmp_path):
         + "     2      57       2   200000.00     1/2       1  5f1  2F  2F  uncalib  EXTRA\n"
     )
     with pytest.raises(ValueError, match="have more than 10 tokens"):
+        readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
+
+
+def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
+    """A table of no data row gives no transition. A broken table names its own file.
+
+    A per-type file holds the transitions of one type, so an ion with no line of that type has a
+    header and no data row. Such a file must add nothing rather than stop the run. A blank line
+    between the third rule and the column names is also permitted.
+    """
+    from artisatomic import readfloers25data
+
+    header = "Test table\n--\n--\n--\n"
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
+    )
+    transheader = " Lower Upper A Type\n"
+    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(header + transheader + " 0 1 1.0e+06 E1\n")
+    # the M1 file holds no data row, because the ion has no M1 line
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + transheader)
+    # the E2 file has a blank line between the third rule and the column names
+    (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(header + "\n" + transheader)
+
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    _, _, dftransitions, counts = readfloers25data.read_levels_and_transitions(
+        57, 2, io.StringIO(), calibrated=True, withforbidden=True
+    )
+    assert dftransitions.height == 1
+    assert not dftransitions["forbidden"][0]
+    assert counts == {"5d1 J=0 index=0": 1, "5p1 J=1 index=1": 1}
+
+    # a file that names none of the columns that the reader takes must say so
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + " Lower Upper A\n 0 1 1.0e+00\n")
+    with pytest.raises(ValueError, match=r"has no \['Type'\]"):
+        readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
+
+    # a file with no column header at all is not a data table
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header)
+    with pytest.raises(ValueError, match="Did not find the expected data table"):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)

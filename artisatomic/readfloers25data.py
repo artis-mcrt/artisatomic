@@ -88,8 +88,14 @@ def read_table_header(filepath: Path) -> tuple[list[str], int]:
                 dashrowcount += 1
                 if dashrowcount == 3:
                     break
-        columns = f.readline().split()
-        linecount += 1
+        # a blank line between the rule and the names holds no column name
+        columns: list[str] = []
+        while dashrowcount == 3 and not columns:
+            line = f.readline()
+            linecount += 1
+            if not line:
+                break
+            columns = line.split()
 
     if dashrowcount < 3 or not columns:
         msg = f"Did not find the expected data table in {filepath}"
@@ -102,49 +108,61 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     """Read the data table that starts after the third '----' line, and cut it into columns.
 
     The tables look like a fixed-width format, but they are not one. A cell holds a right-aligned
-    value with a minimum width, so a value that is wider than its cell takes the space in front of
-    it and moves the rest of the line to the right. The Config_Upper value "4f2.5d1.6s1.6s2" of
-    Tb II does this. A column is therefore not at a fixed character position, and this function
-    splits each line on whitespace instead.
+    value with a minimum width. A value that is wider than its cell takes the space in front of
+    it. It thus moves the rest of the line to the right.
 
-    polars cuts the tokens out of every line at once, which is much faster than a parser that
-    reads one line at a time. The caller names the columns that it uses. The other columns stay
-    in the list of tokens and never become a column, which keeps the memory low on a wide file.
-    Every column of the result holds strings, because the tables mix text and numbers.
+    The Config_Upper value "4f2.5d1.6s1.6s2" of Tb II does this. A column is therefore not at a
+    fixed character position, and this function splits each line on whitespace.
+
+    polars cuts the tokens out of every line at once. That is much faster than a parser that reads
+    one line at a time. The caller names the columns that it uses. The other columns stay in the
+    list of tokens and never become a column. This keeps the memory low on a wide file. Every
+    column of the result holds strings, because the tables mix text and numbers.
     """
     columns, skip_lines = read_table_header(filepath)
     missing = [name for name in usecols if name not in columns]
     # not an assert: input validation must survive python -O
     if missing:
-        msg = f"The data table in {filepath} has no {missing} column. It has {columns}"
+        msg = f"The data table in {filepath} has no {missing} of the columns {columns}"
         raise ValueError(msg)
 
-    dftable = (
+    # the name is not a column name of the data, so it cannot hide a column that the caller asked
+    # for. A leading space keeps it different from every name that split() can give.
+    countcol = " tokencount"
+    lftable = (
         scan_file_lines(filepath, skip_lines=skip_lines)
         .select(parts=pl.col("line").str.extract_all(r"\S+"))
         # a blank line holds no data, and gives no tokens
         .filter(pl.col("parts").list.len() > 0)
         .select(
-            tokencount=pl.col("parts").list.len(),
-            **{name: pl.col("parts").list.get(columns.index(name), null_on_oob=True) for name in usecols},
+            pl.col("parts").list.len().alias(countcol),
+            *[pl.col("parts").list.get(columns.index(name), null_on_oob=True).alias(name) for name in usecols],
         )
-        # the streaming engine keeps the peak memory of a multi-gigabyte file near half of the
-        # memory that the in-memory engine needs, and it is faster here
-        .collect(engine="streaming")
     )
 
-    # A row with more tokens than the header moves every value into the column on its left, which
-    # no later test can find. A row with fewer tokens has an empty cell, and keeps the columns in
-    # front of that cell: the level tables leave the LS2 cell of a high-l level empty. Such a row
-    # is permitted, because the callers take no column after LS2, and because the casts of Index,
-    # Energy and Parity would fail if an earlier cell were the empty one.
+    try:
+        # the streaming engine halves the peak memory of a multi-gigabyte file. It is also faster.
+        dftable = lftable.collect(engine="streaming")
+    except pl.exceptions.NoDataError:
+        # a table can hold a header and no data row, e.g. an ion with no line of one type
+        dftable = pl.DataFrame(schema={countcol: pl.UInt32} | dict.fromkeys(usecols, pl.String))
+    except pl.exceptions.PolarsError as exc:
+        # the parser names no file, so name it here: a run reads more than a hundred of them
+        msg = f"Could not read the data table in {filepath}: {exc}"
+        raise ValueError(msg) from exc
+
+    # A row with more tokens than the header moves every value into the column on its left. No
+    # later test can find that. A row with fewer tokens has an empty cell, and keeps the columns
+    # in front of that cell. The level tables leave the LS2 cell of a high-l level empty. The
+    # callers take no column after LS2, so such a row is permitted.
+    #
     # Not an assert: input validation must survive python -O.
-    nlongrows = dftable.filter(pl.col("tokencount") > len(columns)).height
+    nlongrows = dftable.select((pl.col(countcol) > len(columns)).sum()).item()
     if nlongrows > 0:
         msg = f"{nlongrows} rows of the data table in {filepath} have more than {len(columns)} tokens"
         raise ValueError(msg)
 
-    return dftable.drop("tokencount")
+    return dftable.drop(countcol)
 
 
 def read_transitions_file(filepath: Path) -> pl.DataFrame:
@@ -255,17 +273,17 @@ def read_levels_and_transitions(
             msg = f"Unreadable {colname} values in {levels_file}"
             raise ValueError(msg)
 
+    # every expression here reads the input frame, so g reads the file's own J string
     dflevels = dflevels.with_columns(
-        pl.col("Index").cast(pl.Int64), pl.col("Energy").cast(pl.Float64), pl.col("Parity").cast(pl.Int64)
-    )
-
-    dflevels = dflevels.with_columns(
+        pl.col("Index").cast(pl.Int64),
+        pl.col("Energy").cast(pl.Float64),
+        pl.col("Parity").cast(pl.Int64),
         pl.when(pl.col("J").str.ends_with("/2"))
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
             pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1
         )  # the strip_suffix should not be needed (does not end in "/2" but prevents a polars error)
-        .alias("g")
+        .alias("g"),
     )
 
     # the levels are indexed from zero in file order and the transitions refer to those indices,
