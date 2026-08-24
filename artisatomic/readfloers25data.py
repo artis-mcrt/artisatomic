@@ -129,7 +129,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
 
         if dashrowcount < 3:
             msg = f"Did not find expected data table in {transition_file}"
-        raise ValueError(msg)
+            raise ValueError(msg)
 
     dftransitions = pl.concat(transition_tables).sort(["Lower", "Upper"])
 
