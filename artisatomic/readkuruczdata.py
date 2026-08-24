@@ -1,15 +1,15 @@
 """Read levels and transitions from the Kurucz gfall line lists."""
 
+import itertools
 import os
 import re
 import string
-import typing as t
 from pathlib import Path
 
-import numpy as np
 import polars as pl
 
 import artisatomic
+from artisatomic.base import scan_file_lines
 
 kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
 if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
@@ -70,32 +70,21 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     ]
     number_match = re.compile(r"\d+(\.\d+)?")
     type_match = re.compile(r"[FIXA]")
-    # "Int64" rather than np.int64 because the optional integer fields (isotope numbers, NLTE
-    # level numbers, hyperfine shifts) are blank on most gfall lines and must stay nullable
-    type_dict: dict[str, t.Any] = {"F": np.float64, "I": "Int64", "X": str, "A": str}
-    field_types = tuple(type_dict[item] for item in number_match.sub("", gfall_fortran_format).split(","))
+    type_dict = {"F": pl.Float64, "I": pl.Int64, "X": pl.String, "A": pl.String}
+    field_types = [type_dict[item] for item in number_match.sub("", gfall_fortran_format).split(",")]
 
     field_widths = list(map(int, re.sub(r"\.\d+", "", type_match.sub("", gfall_fortran_format)).split(",")))
+    # each field starts after the fields before it, so the last width starts no field
+    field_offsets = list(itertools.accumulate(field_widths[:-1], initial=0))
 
-    import pandas as pd
-
-    gfall = (
-        pl.from_pandas(
-            pd.read_fwf(
-                fname,
-                widths=field_widths,
-                skip_blank_lines=True,
-                names=gfall_columns,
-                # NB the keyword is 'dtype': pandas silently accepts and ignores 'dtypes',
-                # which left every column's type to be inferred
-                dtype=dict(zip(gfall_columns, field_types, strict=True)),
-                compression="infer",
-                dtype_backend="pyarrow",
-            )
-        )
-        .lazy()
-        .drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
+    # read each line whole, then cut the fixed-width fields out of it
+    gfall = scan_file_lines(fname).select(
+        # a blank field, and a line too short to reach the field, both give a null
+        pl.col("line").str.slice(offset, width).str.strip_chars().replace("", None).cast(dtype).alias(name)
+        for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
     )
+
+    gfall = gfall.drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
     double_columns = [col.replace("_first", "") for col in gfall.collect_schema().names() if col.endswith("first")]
 
     # due to the fact that energy is stored in 1/cm
@@ -134,14 +123,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         energyabovegsinpercm_upper=pl.col("energyabovegsinpercm_upper").abs(),
     )
 
-    gfall = gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
+    return gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
         ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
     )
-    if gfall.select(pl.n_unique("z_dot_ioncharge")).collect().item() != 1:
-        msg = f"Expected exactly one unique ion in file {fname}, but found multiple"
-        raise ValueError(msg)
-
-    return gfall
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
@@ -194,6 +178,46 @@ def read_levels_and_transitions(
         "energyabovegsinpercm_{0}_predicted": "theoretical",
     }
 
+    transition_columns = [
+        "atomic_number",
+        "ion_charge",
+        "energyabovegsinpercm_lower",
+        "j_lower",
+        "energyabovegsinpercm_upper",
+        "j_upper",
+        "wavelength_nm",
+        "loggf",
+        # kept only for the duplicate-line test below, and dropped by the final select
+        "label_lower",
+        "label_upper",
+        "isotope",
+        "isotope2",
+        "log_f_hyperfine",
+        "hyperfine_f_lower",
+        "hyperfine_f_upper",
+        "hyper_shift_lower",
+        "hyper_shift_upper",
+    ]
+    # The levels and the transitions come from the same rows, so read those rows once. Each
+    # collect() of the lazy frame reads and parses the file again, and the file can be 150 MB.
+    # The levels need the two columns below as well, and the transitions need no other column.
+    dfgfall = gfall.select(
+        [
+            *transition_columns,
+            "energyabovegsinpercm_lower_predicted",
+            "energyabovegsinpercm_upper_predicted",
+        ]
+    ).collect()
+
+    # One file holds one ion. The atomic number and the ion charge both come from the file's
+    # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows that
+    # are in memory: on the lazy frame it read and parsed the whole file a second time.
+    if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
+        msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
+        raise ValueError(msg)
+
+    gfall = dfgfall.lazy()
+
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
     e_upper_levels = gfall.rename({key.format("upper"): value for key, value in column_renames.items()})
 
@@ -227,28 +251,7 @@ def read_levels_and_transitions(
     artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
 
     transitions = (
-        gfall.select(
-            [
-                "atomic_number",
-                "ion_charge",
-                "energyabovegsinpercm_lower",
-                "j_lower",
-                "energyabovegsinpercm_upper",
-                "j_upper",
-                "wavelength_nm",
-                "loggf",
-                # kept only for the duplicate-line test below, and dropped by the final select
-                "label_lower",
-                "label_upper",
-                "isotope",
-                "isotope2",
-                "log_f_hyperfine",
-                "hyperfine_f_lower",
-                "hyperfine_f_upper",
-                "hyper_shift_lower",
-                "hyper_shift_upper",
-            ]
-        )
+        gfall.select(transition_columns)
         # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one
         # (Y II has one such pair at 241.7267 and 241.7308 nm, both loggf = 0). ARTIS adds the A
         # values of two rows that share a level pair, so a repeat would double the line.

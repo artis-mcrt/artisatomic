@@ -199,6 +199,17 @@ def find_file_check_extension(filename: str | Path) -> Path | None:
     return next((path for ext in compression_extensions if (path := Path(f"{filename}{ext}")).is_file()), None)
 
 
+def find_file_check_extension_or_raise(filename: str | Path) -> Path:
+    """Find a data file by its plain name, and raise if no form of the name exists."""
+    filepath = find_file_check_extension(filename)
+    if filepath is None:
+        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
+        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
+        raise FileNotFoundError(msg)
+
+    return filepath
+
+
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """Open a data file, trying the compressed variants of the name if it does not exist.
 
@@ -207,13 +218,76 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """
     from xopen import xopen
 
-    filepath = find_file_check_extension(filename)
-    if filepath is None:
-        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
-        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
-        raise FileNotFoundError(msg)
+    return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
-    return xopen(filepath, **kwargs)
+
+def rewrite_file_as_utf8(filename: str | Path) -> bool:
+    """Rewrite a data file as utf-8 if it is not utf-8, and say whether it was rewritten.
+
+    CMFGEN writes an author's name with an accent, which leaves a few of its files in
+    iso-8859-1. Neither Python nor polars reads such a file, so a reader that meets one
+    converts it once, in place, and reads it again.
+    """
+    from xopen import xopen
+
+    filepath = find_file_check_extension_or_raise(filename)
+    with xopen(filepath, "rb") as fin:
+        filebytes = fin.read()
+
+    try:
+        filebytes.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        return False
+
+    print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
+    # every byte is a character in iso-8859-1, so this decode cannot fail
+    text = filebytes.decode("iso-8859-1")
+    try:
+        with xopen(filepath, "wt", encoding="utf-8") as fout:
+            fout.write(text)
+    except OSError as exc:
+        msg = (
+            f"Could not rewrite {filepath} as utf-8: {exc}\n"
+            f"Convert the file by hand, then run this again:\n"
+            f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
+        )
+        raise RuntimeError(msg) from exc
+
+    return True
+
+
+def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
+    """Read a text file into a lazy frame that holds one line in each row of a "line" column.
+
+    polars cuts the columns out of every line at once, with str.slice() or str.extract_all().
+    That is much faster than pandas read_fwf(), or read_csv() with a regular expression
+    separator. Neither of those has a C parser, so each reads one line at a time in Python.
+
+    The caller names the plain file, as for xopen_check_extension(). polars reads a plain, a
+    gzip, or a zstd file itself. It cannot read the xz form, which xopen decompresses into
+    memory instead.
+    """
+    filepath = find_file_check_extension_or_raise(filename)
+
+    csv_options: dict[str, t.Any] = {
+        # a separator that the data files cannot contain keeps each whole line in one column
+        "separator": "\x1f",
+        "has_header": False,
+        "new_columns": ["line"],
+        "quote_char": None,
+        "infer_schema_length": 0,
+        "skip_lines": skip_lines,
+    }
+
+    if filepath.suffix == ".xz":
+        from xopen import xopen
+
+        with xopen(filepath, "rb") as fin:
+            return pl.read_csv(io.BytesIO(fin.read()), **csv_options).lazy()
+
+    return pl.scan_csv(filepath, **csv_options)
 
 
 NIST_IONIZATION_PATH = PYDIR / "nist_ionization.txt.zst"

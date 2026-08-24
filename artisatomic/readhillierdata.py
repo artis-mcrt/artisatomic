@@ -18,7 +18,9 @@ import artisatomic
 from artisatomic.base import elsymbols
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
+from artisatomic.base import scan_file_lines
 from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
@@ -342,7 +344,119 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     return (twosplusone, l, parity)
 
 
+def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFrame:
+    """Read the oscillator strengths table of a CMFGEN file into a transition frame.
+
+    A transition line names its two levels, and a level name can hold a dash. The line is
+    therefore cut at its first dash and at its last dash. The first dash separates the two
+    names, and the last one separates the two level numbers of the "i-j" column. The parts
+    between them keep their dashes, which the exponents of the f and the A values need.
+
+    The file marks no end of the table. A line that is not a transition, e.g. a title, gives
+    parts that fit neither layout below, and the filter drops it.
+    """
+    # only the first table is read, and a spelling mistake in a title must not hide the second one
+    tablestart = (
+        dflines.with_row_index()
+        .filter(pl.col("line").str.contains(r"^\s*Osci(l|ll)ator strengths"))
+        .select("index")
+        .head(1)
+        .collect()
+    )
+    if tablestart.height > 0:
+        dflines = dflines.head(tablestart.item())
+
+    # a line with no dash is doubled, as the parts of the empty middle are joined either side of it
+    linewithspaces = (
+        pl.when(pl.col("line").str.contains("-", literal=True))
+        # the second pattern can only match at the last dash, and costs much less than the
+        # equivalent greedy "^(.*)-" does
+        .then(pl.col("line").str.replace("-", " ", literal=True).str.replace(r"-([^-]*)$", " ${1}"))
+        .otherwise(pl.col("line") + "  " + pl.col("line"))
+    )
+
+    def part(index: int) -> pl.Expr:
+        return pl.col("parts").list.get(index, null_on_oob=True)
+
+    def as_float(index: int) -> pl.Expr:
+        # the files write an exponent as D as well as E
+        return part(index).str.replace_all("D", "E", literal=True).cast(pl.Float64, strict=False)
+
+    dftransitions = (
+        dflines.select(parts=linewithspaces.str.extract_all(r"\S+"))
+        .with_columns(
+            partcount=pl.col("parts").list.len(),
+            f=as_float(2),
+            A=as_float(3),
+        )
+        # the last two columns are absent from some files, which the transition id column follows.
+        # A line that carries no number where the f and the A values belong is not a transition.
+        .filter(
+            ((pl.col("partcount") == 8) | ((pl.col("partcount") >= 10) & (part(-1) == "|")))
+            & pl.col("f").is_not_null()
+            & pl.col("A").is_not_null()
+        )
+        .select(
+            namefrom=part(0),
+            nameto=part(1),
+            f=pl.col("f"),
+            A=pl.col("A"),
+            # the wavelength column holds a dash where the transition has no measured wavelength
+            lambdaangstrom=part(4).cast(pl.Float64, strict=False).fill_null(-1.0),
+            i=part(5).str.strip_chars_end("-").cast(pl.Int64),
+            j=part(6).cast(pl.Int64),
+            # the id column is masked before the cast, not after: the other layout holds a bar
+            # there, and both arms of a when() are evaluated
+            hilliertransitionid=pl.when(pl.col("partcount") == 8)
+            .then(part(7))
+            .cast(pl.Int64)
+            .fill_null(pl.int_range(pl.len(), dtype=pl.Int64) + 1),
+        )
+        .collect()
+    )
+
+    for hilliertransitionid, entrynumber in (
+        dftransitions.select("hilliertransitionid")
+        .with_row_index("entrynumber", offset=1)
+        .filter(pl.col("hilliertransitionid") != pl.col("entrynumber"))
+        # with_row_index() puts its column first, so the two are put back in the unpacked order
+        .select("hilliertransitionid", "entrynumber")
+        .iter_rows()
+    ):
+        print(f"{filename} WARNING: Transition id {hilliertransitionid:d} found at entry number {entrynumber:d}")
+
+    return dftransitions.cast(hillier_transition_schema)
+
+
 def read_levels_and_transitions(
+    atomic_number: int, ion_stage: int, flog
+) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+    """Read one ion, and rewrite its file as utf-8 first if CMFGEN wrote it in iso-8859-1.
+
+    Python raises a UnicodeDecodeError for such a file and polars raises a ComputeError, so
+    both reads of read_levels_and_transitions_from_file() are covered here. The file is
+    converted once, so the second call reads it.
+    """
+    try:
+        return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+    except (UnicodeDecodeError, pl.exceptions.ComputeError):
+        # a failure that the encoding does not explain belongs to the caller
+        if not rewrite_file_as_utf8(hillier_osc_filename(atomic_number, ion_stage)):
+            raise
+
+    return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+
+
+def hillier_osc_filename(atomic_number: int, ion_stage: int) -> Path:
+    """Path of one ion's CMFGEN oscillator file, which holds its levels and its transitions."""
+    return Path(
+        hillier_ion_folder(atomic_number, ion_stage),
+        ions_data[atomic_number, ion_stage].folder,
+        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
+    )
+
+
+def read_levels_and_transitions_from_file(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
     """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
@@ -381,198 +495,161 @@ def read_levels_and_transitions(
             transition_count_of_level_name,
         )
 
-    filename = Path(
-        hillier_ion_folder(atomic_number, ion_stage),
-        ions_data[atomic_number, ion_stage].folder,
-        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
-    )
+    filename = hillier_osc_filename(atomic_number, ion_stage)
 
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
-    transitionrows: list[HillierTransition] = []
 
     prev_line = ""
-    # TODO: Would be nice to have a way of dealing with different encodings automatically, but this seems to be the only case so probably not worth it
-    with artisatomic.xopen_check_extension(
-        filename, encoding="iso-8859-1" if atomic_number == 12 and ion_stage == 8 else "utf-8"
-    ) as fhillierosc:
-        expected_energy_levels = -1
-        expected_transitions = -1
-        row_format_energy_level = None
-        format_date = "NOT_SPECIFIED"
-        for line in fhillierosc:
-            row = line.split()
-            if (
-                re.match(r"x*\*{5,}", line) and prev_line
-            ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
-                if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
-                    print("Fe VIII has a bespoke header")
-                    row_format_energy_level = "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
-                else:
-                    headerline = prev_line
-                    headerline = headerline.replace("ID", "hillierlevelid")
-                    headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
-                    headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
-                    headerline = headerline.replace("eV", "thresholdenergyev")
-                    headerline = headerline.replace("Lam(A)", "lambdaangstrom")
-                    headerline = headerline.replace("ARAD", "arad")
-                    row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
+    # threads=0 decompresses in this process. The default starts a process that writes into a
+    # pipe, which reports a broken pipe when the reader stops at the end of the level table.
+    fhillierosc = artisatomic.xopen_check_extension(filename, threads=0)
+    # the two loops below read the header and the levels. polars reads the transitions, and
+    # starts at the line after the last line that they read.
+    linesread = 0
+    expected_energy_levels = -1
+    expected_transitions = -1
+    row_format_energy_level = None
+    format_date = "NOT_SPECIFIED"
+    for line in fhillierosc:
+        linesread += 1
+        row = line.split()
+        if (
+            re.match(r"x*\*{5,}", line) and prev_line
+        ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
+            if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
+                print("Fe VIII has a bespoke header")
+                row_format_energy_level = (
+                    "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
+                )
+            else:
+                headerline = prev_line
+                headerline = headerline.replace("ID", "hillierlevelid")
+                headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
+                headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
+                headerline = headerline.replace("eV", "thresholdenergyev")
+                headerline = headerline.replace("Lam(A)", "lambdaangstrom")
+                headerline = headerline.replace("ARAD", "arad")
+                row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
 
-                print("File contains columns:")
-                print(f"  {row_format_energy_level}")
-            elif line.rstrip().endswith("!Number of energy levels"):
-                expected_energy_levels = int(row[0])
-                artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
-            elif line.rstrip().endswith("!Number of transitions"):
-                expected_transitions = int(row[0])
-                artisatomic.log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
-            elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
-                format_date = row[0]
-                print(f"Format date: {format_date}")
-
-            if expected_energy_levels >= 0 and not row:
-                break
-            prev_line = line.strip()
-
-        if not row_format_energy_level:
-            # the files that predate the header also predate the format date line
-            if format_date != "NOT_SPECIFIED":
-                msg = f"{filename} gives a format date of {format_date} but carries no column header"
-                raise ValueError(msg)
-            row_format_energy_level = hillier_rowformat_noheader
-            print("File has no column header, assuming columns:")
+            print("File contains columns:")
             print(f"  {row_format_energy_level}")
+        elif line.rstrip().endswith("!Number of energy levels"):
+            expected_energy_levels = int(row[0])
+            artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
+        elif line.rstrip().endswith("!Number of transitions"):
+            expected_transitions = int(row[0])
+            artisatomic.log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+        elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
+            format_date = row[0]
+            print(f"Format date: {format_date}")
 
-        # the file columns vary by ion, so find where the ones we keep sit in each row
-        headercolumns = row_format_energy_level.split()
-        colindex = {colname: index for index, colname in enumerate(headercolumns)}
-        levelcolcount = len(headercolumns)
-        if len(colindex) != levelcolcount:
-            # a repeated header token would silently shadow an earlier column's position
-            msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
+        if expected_energy_levels >= 0 and not row:
+            break
+        prev_line = line.strip()
+
+    if not row_format_energy_level:
+        # the files that predate the header also predate the format date line
+        if format_date != "NOT_SPECIFIED":
+            msg = f"{filename} gives a format date of {format_date} but carries no column header"
             raise ValueError(msg)
-        missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
-        if missingcolumns:
-            msg = (
-                f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
-                f" it has {row_format_energy_level}"
-            )
-            raise ValueError(msg)
+        row_format_energy_level = hillier_rowformat_noheader
+        print("File has no column header, assuming columns:")
+        print(f"  {row_format_energy_level}")
 
-        for line in fhillierosc:
-            row = line.split()
-            # check for right number of columns and that are all numbers except first column
-            if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
-                hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
-                levelname = row[colindex["levelname"]]
-                energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
-                lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
-                (twosplusone, _l, parity) = get_term_as_tuple(levelname)
-                ismerged = parity < 0
-                isjjcoupled = "{" in levelname and "}" in levelname
+    # the file columns vary by ion, so find where the ones we keep sit in each row
+    headercolumns = row_format_energy_level.split()
+    colindex = {colname: index for index, colname in enumerate(headercolumns)}
+    levelcolcount = len(headercolumns)
+    if len(colindex) != levelcolcount:
+        # a repeated header token would silently shadow an earlier column's position
+        msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
+        raise ValueError(msg)
+    missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
+    if missingcolumns:
+        msg = (
+            f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
+            f" it has {row_format_energy_level}"
+        )
+        raise ValueError(msg)
 
-                if ismerged:
-                    # No definite parity: a merged level, which is normal CMFGEN, or a name we
-                    # could not read. Null rather than a number, so that add_level_ids_forbidden()
-                    # cannot match it against another level's absent parity.
-                    parity = None
-                    levels_without_parity.append(levelname)
+    for line in fhillierosc:
+        linesread += 1
+        row = line.split()
+        # check for right number of columns and that are all numbers except first column
+        if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
+            hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
+            levelname = row[colindex["levelname"]]
+            energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
+            lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
+            (twosplusone, _l, parity) = get_term_as_tuple(levelname)
+            ismerged = parity < 0
+            isjjcoupled = "{" in levelname and "}" in levelname
 
-                levelrows.append(
-                    HillierEnergyLevel(
-                        levelname=levelname,
-                        g=float(row[colindex["g"]]),
-                        energyabovegsinpercm=energyabovegsinpercm,
-                        lambdaangstrom=lambdaangstrom,
-                        hillierlevelid=hillierlevelid,
-                        parity=parity,
-                        j=get_level_j(levelname, g=float(row[colindex["g"]])),
-                    )
+            if ismerged:
+                # No definite parity: a merged level, which is normal CMFGEN, or a name we
+                # could not read. Null rather than a number, so that add_level_ids_forbidden()
+                # cannot match it against another level's absent parity.
+                parity = None
+                levels_without_parity.append(levelname)
+
+            levelrows.append(
+                HillierEnergyLevel(
+                    levelname=levelname,
+                    g=float(row[colindex["g"]]),
+                    energyabovegsinpercm=energyabovegsinpercm,
+                    lambdaangstrom=lambdaangstrom,
+                    hillierlevelid=hillierlevelid,
+                    parity=parity,
+                    j=get_level_j(levelname, g=float(row[colindex["g"]])),
                 )
-
-                # -1 indicates that the term could not be interpreted. JJ-coupled names have no
-                # LS term by construction and merged levels are summarised once below, so neither
-                # is worth a line here; what is left is a name we expected to read and could not.
-                if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                    artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
-
-                # if this is the ground state
-                if energyabovegsinpercm < 1.0:
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
-
-                if hillierlevelid != len(levelrows):
-                    artisatomic.log_and_print(
-                        flog,
-                        f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
-                    )
-                    sys.exit(1)
-
-            if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
-                break
-
-        artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
-        if levels_without_parity:
-            # Normal for ions with merged levels, so this is a count and a sample rather than a
-            # warning per level: H I and He II are merged all the way down.
-            artisatomic.log_and_print(
-                flog,
-                f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
-                f" (every transition touching one is treated as permitted), e.g."
-                f" {', '.join(levels_without_parity[:5])}",
             )
-        if len(levelrows) != expected_energy_levels:
-            msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
-            raise ValueError(msg)
 
-        for line in fhillierosc:
-            if re.match(
-                r"^\s*Osci(l|ll)ator strengths", line
-            ):  # only allow one table, and account for spelling mistakes
-                break
-            linesplitdash = line.split("-")
-            row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
+            # -1 indicates that the term could not be interpreted. JJ-coupled names have no
+            # LS term by construction and merged levels are summarised once below, so neither
+            # is worth a line here; what is left is a name we expected to read and could not.
+            if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
+                artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
-            # the two isfloat() calls are spelled out rather than all(map(...)) over a slice: this
-            # runs for every transition line of every ion (2.6M for the cmfgen set), where
-            # building a slice, a map object and an all() call per line is most of the test
-            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and (
-                artisatomic.isfloat(row[2]) and artisatomic.isfloat(row[3])
-            ):
-                try:
-                    lambda_value = float(row[4])
-                except ValueError:
-                    lambda_value = -1
+            # if this is the ground state
+            if energyabovegsinpercm < 1.0:
+                hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
 
-                transitioncount = len(transitionrows)
-                hilliertransitionid = int(row[7]) if len(row) == 8 else transitioncount + 1
-                namefrom = row[0]
-                nameto = row[1]
-
-                transitionrows.append(
-                    HillierTransition(
-                        namefrom=namefrom,
-                        nameto=nameto,
-                        f=float(row[2].replace("D", "E")),
-                        A=float(row[3].replace("D", "E")),
-                        lambdaangstrom=lambda_value,
-                        i=int(row[5].rstrip("-")),
-                        j=int(row[6]),
-                        hilliertransitionid=hilliertransitionid,
-                    )
+            if hillierlevelid != len(levelrows):
+                artisatomic.log_and_print(
+                    flog,
+                    f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
                 )
+                sys.exit(1)
 
-                transition_count_of_level_name[namefrom] += 1
-                transition_count_of_level_name[nameto] += 1
+        if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
+            break
 
-                if hilliertransitionid != transitioncount + 1:
-                    print(
-                        f"{filename} WARNING: Transition id {hilliertransitionid:d} found at entry"
-                        f" number {transitioncount + 1:d}"
-                    )
+    artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
+    if levels_without_parity:
+        # Normal for ions with merged levels, so this is a count and a sample rather than a
+        # warning per level: H I and He II are merged all the way down.
+        artisatomic.log_and_print(
+            flog,
+            f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
+            f" (every transition touching one is treated as permitted), e.g."
+            f" {', '.join(levels_without_parity[:5])}",
+        )
+    if len(levelrows) != expected_energy_levels:
+        msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
+        raise ValueError(msg)
 
-    dftransitions = pl.DataFrame(transitionrows, schema=hillier_transition_schema, orient="row")
+    fhillierosc.close()
+
+    # the rest of the file holds the transitions, which polars reads rather than Python: one ion
+    # carries half a million of them
+    dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
+
+    for namecolumn in ("namefrom", "nameto"):
+        for levelname, count in dftransitions[namecolumn].value_counts().iter_rows():
+            transition_count_of_level_name[levelname] += count
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
