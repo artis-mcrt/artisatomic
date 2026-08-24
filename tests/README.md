@@ -19,7 +19,8 @@ rm artisatomicionhandlers.json
 ```
 
 `ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, QUB and MONS readers to their committed
-`test_sample/` directories, so it is required — the workflow sets it globally. The `rm` matters:
+`test_sample/` directories, so it is required — the workflow sets it globally. It also makes the
+Floers+25 reader ignore the private `OutputFiles_withforbidden` directory. The `rm` matters:
 `get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
 repository root silently overrides the built-in ion selection of every later local run.
 
