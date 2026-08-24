@@ -192,6 +192,7 @@ def read_levels_and_transitions(
                 lowerlevel=pl.col("Lower").cast(pl.Int64),
                 upperlevel=pl.col("Upper").cast(pl.Int64),
                 A=pl.col("A").cast(pl.Float64),
+                transitiontype=pl.col("Type").cast(pl.String),
             )
             for transition_file in transition_files
         ]
@@ -215,7 +216,11 @@ def read_levels_and_transitions(
     # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory.
     # Merge the rows that share a level pair. Add their A values. ARTIS reads each row as one
     # transition, so a duplicate pair would double a line.
-    dftransitions = dftransitions.group_by(["upperlevel", "lowerlevel"], maintain_order=True).agg(A=pl.col("A").sum())
+    # The Type column decides the forbidden flag. A merged row is forbidden only when no E1 line
+    # contributes to it, so M1, E2, and any higher multipole count as forbidden.
+    dftransitions = dftransitions.group_by(["upperlevel", "lowerlevel"], maintain_order=True).agg(
+        A=pl.col("A").sum(), forbidden=(pl.col("transitiontype") != "E1").all()
+    )
 
     # count after the merge of duplicate level pairs. The counts in adata.txt then agree with
     # transitiondata.txt. Count per level index, not per configuration string: several levels
@@ -228,8 +233,8 @@ def read_levels_and_transitions(
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
 
-    # use standard artisatomic column names.
-    # the levels carry a parity, so add_level_ids_forbidden() can derive the forbidden flag from it
+    # use standard artisatomic column names. The parity stays in the level table for reference,
+    # but the forbidden flag comes from the transitions' Type column above.
     dflevels = dflevels.select(
         levelname=pl.col("levelname"),
         parity=pl.col("Parity"),
