@@ -128,7 +128,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
             transition_tables.append(pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow")))
 
         if dashrowcount < 3:
-            raise ValueError(f"Did not find expected data table in {transition_file}")
+            msg = f"Did not find expected data table in {transition_file}"
+        raise ValueError(msg)
 
     dftransitions = pl.concat(transition_tables).sort(["Lower", "Upper"])
 
