@@ -402,13 +402,19 @@ def read_qub_photoionizations(
             # which counts from one
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
             artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
-            photdata = pd.read_csv(filename, sep=r"\s+", header=None)
-            phixstables = {}
             ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
+            # one space separates the columns of these files, and polars rejects a row whose
+            # column count differs, so a file with another layout fails rather than misreads
+            photdata = (
+                pl.scan_csv(filename, separator=" ", has_header=False).select(pl.nth(range(ntargets + 1))).collect()
+            )
+            phixstables = {}
 
             # column n of the file holds the cross section to the upper ion's level id n - 1
             for targetcolumn in range(1, ntargets + 1):
-                phixstable = photdata.loc[photdata[:][targetcolumn] > 0.0][[0, targetcolumn]].to_numpy()
+                phixstable = (
+                    photdata.filter(pl.nth(targetcolumn) > 0.0).select(pl.nth(0), pl.nth(targetcolumn)).to_numpy()
+                )
                 if len(phixstable) == 0:
                     # nothing positive in this column, so there is no table to downsample. Skipping
                     # here leaves the target out of the fractions below, which is what a zero cross
