@@ -12,15 +12,15 @@ import artisatomic
 
 
 def in_testmode() -> bool:
-    """Say whether the test mode is active. Test mode reads only the test_sample directory."""
+    """Say whether the test mode is active. The test mode reads only the test_sample directory."""
     return os.environ.get("ARTISATOMIC_TESTMODE") == "1"
 
 
 def get_basepath(withforbidden: bool) -> Path:
-    """Directory that holds the Floers+25 level and transition tables.
+    """Directory that holds the Floers+25 level and transitions files.
 
     The private OutputFiles_withforbidden directory holds the newer data with forbidden
-    transitions. The public OutputFiles directory holds the published data. In test mode,
+    transitions. The public OutputFiles directory holds the published data. In the test mode,
     every request resolves to the test_sample directory from testdata.tar.xz.
     """
     datapath = artisatomic.PYDIR / ".." / "atomic-data-floers25"
@@ -33,22 +33,25 @@ def extend_ion_list(ion_handlers, calibrated=True):
     """Add every ion with a Floers+25 data file to ion_handlers.
 
     The handler priority from highest to lowest is floers25calibwithforbidden, floers25calib,
-    and floers25uncalib. An ion with no calibrated data gets its uncalibrated version rather
-    than being left out. With calibrated=False, only the uncalibrated handler is added.
+    and floers25uncalib. An ion with no calibrated data gets its uncalibrated version. With
+    calibrated=False, this function adds only the uncalibrated handler.
     """
     basepath_public = get_basepath(withforbidden=False)
     basepath_private = get_basepath(withforbidden=True)
     # not an assert: input validation must survive python -O
-    if not basepath_public.is_dir():
+    if not basepath_public.is_dir() and not basepath_private.is_dir():
+        searched = " or ".join(str(p) for p in dict.fromkeys((basepath_public, basepath_private)))
         msg = (
-            f"The directory {basepath_public} does not exist. Run"
+            f"Found no Floers+25 data directory at {searched}. Run"
             " atomic-data-floers25/setup_floers25_data.sh to download the data. For the test"
             " mode, extract testdata.tar.xz instead."
         )
         raise FileNotFoundError(msg)
 
-    # in test mode the private path equals the public path, so no private search may run
+    # in the test mode the private path equals the public path, so no private search may run
     use_private = not in_testmode() and basepath_private.is_dir()
+    if not use_private and not in_testmode():
+        print(f"Floers+25: skipped the private directory {basepath_private} because it does not exist")
 
     # the searches run in priority order, because add_handler_if_not_set() keeps the first
     # handler that matches an ion
@@ -71,16 +74,9 @@ def extend_ion_list(ion_handlers, calibrated=True):
     return ion_handlers
 
 
-class FloersEnergyLevel(t.NamedTuple):
-    """One energy level of the Floers+25 data set."""
-
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: int
-
-
-def read_dashed_table(filepath: Path, dtype: dict[str, t.Any] | None = None) -> pl.DataFrame:
+def read_dashed_table(
+    filepath: Path, dtype: dict[str, t.Any] | None = None, usecols: list[str] | None = None
+) -> pl.DataFrame:
     """Read the whitespace-separated data table that starts after the third '----' line."""
     dashrowcount = 0
     with artisatomic.xopen_check_extension(filepath) as f:
@@ -92,7 +88,12 @@ def read_dashed_table(filepath: Path, dtype: dict[str, t.Any] | None = None) -> 
         if dashrowcount < 3:
             msg = f"Did not find the expected data table in {filepath}"
             raise ValueError(msg)
-        return pl.from_pandas(pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype=dtype))
+        try:
+            dftable = pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype=dtype, usecols=usecols)
+        except ValueError as exc:
+            msg = f"Could not read the data table in {filepath}: {exc}"
+            raise ValueError(msg) from exc
+        return pl.from_pandas(dftable)
 
 
 def read_levels_and_transitions(
@@ -136,18 +137,13 @@ def read_levels_and_transitions(
     # file for each transition type, for example _E1, _E2, and _M1.
     lines_file = artisatomic.find_file_check_extension(basepath / f"{ionstr}_transitions_{calibstr}.txt")
 
-    # a table can exist in a plain form and in a compressed form at the same time. Resolve each
-    # name once through the extension list, so no table is read twice.
-    pertype_names = sorted(
-        {
-            filepath.name.removesuffix(ext)
-            for ext in artisatomic.compression_extensions
-            for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}")
-        }
-    )
-    pertype_files = [
-        found for name in pertype_names if (found := artisatomic.find_file_check_extension(basepath / name)) is not None
-    ]
+    # a file can exist in a plain form and in a compressed form at the same time. Keep one path
+    # for each name. The extension list is in priority order, so the plain form wins.
+    pertype_file_of_name: dict[str, Path] = {}
+    for ext in artisatomic.compression_extensions:
+        for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
+            pertype_file_of_name.setdefault(filepath.name.removesuffix(ext), filepath)
+    pertype_files = [pertype_file_of_name[name] for name in sorted(pertype_file_of_name)]
 
     if lines_file is not None and pertype_files:
         msg = f"Found both {lines_file.name} and per-type transitions files in {basepath}. Remove one of the forms."
@@ -159,7 +155,7 @@ def read_levels_and_transitions(
 
     artisatomic.log_and_print(
         flog,
-        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transition files",
+        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transitions files",
     )
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
@@ -190,11 +186,11 @@ def read_levels_and_transitions(
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    # keep only the used columns before the concatenation. This also makes the tables
-    # compatible: pandas infers a string type for every column of a table with no data rows.
+    # read only the used columns. This keeps the memory low and makes the in-memory tables
+    # compatible: pandas infers a string type for every column of a file with no data rows.
     dftransitions = pl.concat(
         [
-            read_dashed_table(transition_file).select(
+            read_dashed_table(transition_file, usecols=["Lower", "Upper", "A", "Type"]).select(
                 lowerlevel=pl.col("Lower").cast(pl.Int64),
                 upperlevel=pl.col("Upper").cast(pl.Int64),
                 A=pl.col("A").cast(pl.Float64),
@@ -205,6 +201,20 @@ def read_levels_and_transitions(
     )
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
+
+    # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
+    # Not an assert: input validation must survive python -O.
+    for colname in ("lowerlevel", "upperlevel", "A", "transitiontype"):
+        if dftransitions[colname].null_count() > 0:
+            msg = f"Unreadable {colname} values in the transitions files for {ionstr} in {basepath}"
+            raise ValueError(msg)
+
+    # the forbidden flag below trusts the Type column, so an unknown type must stop the run
+    # rather than count as forbidden
+    badtypes = dftransitions.filter(~pl.col("transitiontype").str.contains(r"^[EM][0-9]+$"))
+    if badtypes.height > 0:
+        msg = f"Unknown transition type {badtypes['transitiontype'][0]!r} for {ionstr} in {basepath}"
+        raise ValueError(msg)
 
     # an out-of-range level reference would be silently dropped by the joins in
     # add_level_ids_forbidden(). Not an assert: input validation must survive python -O.
@@ -219,14 +229,38 @@ def read_levels_and_transitions(
             )
             raise ValueError(msg)
 
-    # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory.
-    # Merge the rows that share a level pair. Add their A values. ARTIS reads each row as one
-    # transition, so a duplicate pair would double a line.
+    # some files give the initial state first, so a row can carry the higher level in the Lower
+    # column. Swap those rows into energy order: the merge and the output want lowerlevel first.
+    nreversed = dftransitions.filter(pl.col("lowerlevel") > pl.col("upperlevel")).height
+    if nreversed > 0:
+        artisatomic.log_and_print(flog, f"Swapped the level order of {nreversed} reversed transitions")
+        dftransitions = dftransitions.with_columns(
+            lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
+            upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
+        )
+
+    # the file's Lower/Upper indices are already zero-based. They agree with the level ids in
+    # memory. Merge the rows that share a level pair. Add their A values. ARTIS reads each row
+    # as one transition, so a duplicate pair would double a line.
     # The Type column decides the forbidden flag. A merged row is forbidden only when no E1 line
     # contributes to it, so M1, E2, and any higher multipole count as forbidden.
     dftransitions = dftransitions.group_by(["upperlevel", "lowerlevel"], maintain_order=True).agg(
         A=pl.col("A").sum(), forbidden=(pl.col("transitiontype") != "E1").all()
     )
+
+    # cross-check the Type column against the Laporte rule, which an E1 line must obey
+    dfparity = dflevels.select(pl.col("Index").cast(pl.Int64), pl.col("Parity"))
+    n_paritymatch = (
+        dftransitions.filter(~pl.col("forbidden"))
+        .join(dfparity.rename({"Index": "lowerlevel", "Parity": "parity_lower"}), on="lowerlevel")
+        .join(dfparity.rename({"Index": "upperlevel", "Parity": "parity_upper"}), on="upperlevel")
+        .filter(pl.col("parity_lower") == pl.col("parity_upper"))
+        .height
+    )
+    if n_paritymatch > 0:
+        artisatomic.log_and_print(
+            flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity"
+        )
 
     # count after the merge of duplicate level pairs. The counts in adata.txt then agree with
     # transitiondata.txt. Count per level index, not per configuration string: several levels
@@ -239,8 +273,8 @@ def read_levels_and_transitions(
         for index, levelname in dflevels.select("Index", "levelname").iter_rows()
     }
 
-    # use standard artisatomic column names. The parity stays in the level table for reference,
-    # but the forbidden flag comes from the transitions' Type column above.
+    # use standard artisatomic column names. The forbidden flag comes from the Type column
+    # above, so add_level_ids_forbidden() does not derive it from the parity.
     dflevels = dflevels.select(
         levelname=pl.col("levelname"),
         parity=pl.col("Parity"),

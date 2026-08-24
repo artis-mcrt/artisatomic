@@ -1789,3 +1789,42 @@ def test_get_nearest_level_indices():
     onelevel, onelevel_second = readmonsdata.get_nearest_level_indices(np.array([5.0]), np.array([1.0, 9.0]))
     assert onelevel.tolist() == [0, 0]
     assert onelevel_second.tolist() == [0, 0]
+
+
+def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path):
+    """The per-type Floers+25 files merge duplicate level pairs and set the forbidden flag.
+
+    A reversed row (Lower > Upper) swaps into energy order first, so both orientations of a
+    pair merge into one row with the summed A. A merged row is forbidden only when no E1 line
+    contributes to it. The committed test_sample data has none of these cases, so this test
+    builds the files itself.
+    """
+    header = "Test table\n--\n--\n--\n"
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n 2 200.0 2 0 4f1\n"
+    )
+    transheader = header + " Lower Upper A Type\n"
+    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n")
+    # the E2 row is reversed on purpose: it must swap and then merge with the M1 row
+    (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 E2\n")
+
+    from artisatomic import readfloers25data
+
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    _, dflevels, dftransitions, counts = readfloers25data.read_levels_and_transitions(
+        57, 2, io.StringIO(), calibrated=True, withforbidden=True
+    )
+
+    assert dflevels.height == 3
+    rows = {
+        (lower, upper): (A, forbidden)
+        for upper, lower, A, forbidden in dftransitions[["upperlevel", "lowerlevel", "A", "forbidden"]].iter_rows()
+    }
+    assert rows == {(0, 1): (1.0e6, False), (0, 2): (5.0, True)}
+    assert counts == {"5d1 J=0 index=0": 2, "5p1 J=1 index=1": 1, "4f1 J=2 index=2": 1}
+
+    # an unknown transition type must stop the run rather than count as forbidden
+    (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 XX\n")
+    with pytest.raises(ValueError, match="Unknown transition type"):
+        readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
