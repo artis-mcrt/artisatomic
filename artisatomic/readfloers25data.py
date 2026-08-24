@@ -1,5 +1,6 @@
 """Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
 
+import os
 import string
 import typing as t
 from pathlib import Path
@@ -10,9 +11,20 @@ import polars as pl
 import artisatomic
 
 
-def get_basepath() -> Path:
-    """Directory holding the Floers+25 level and transition tables."""
-    return artisatomic.PYDIR / ".." / "atomic-data-floers25" / "OutputFiles"
+def get_basepaths() -> list[Path]:
+    """Directories holding the Floers+25 level and transition tables, in priority order.
+
+    The private OutputFiles_withforbidden directory comes first when it exists. The public
+    OutputFiles directory is the fallback for ions that the private set does not include.
+    Test mode uses only the public directory, so the checksums stay reproducible.
+    """
+    datapath = artisatomic.PYDIR / ".." / "atomic-data-floers25"
+    basepaths = [datapath / "OutputFiles"]
+    if os.environ.get("ARTISATOMIC_TESTMODE") != "1":
+        basepaths.insert(0, datapath / "OutputFiles_withforbidden")
+    existing_basepaths = [basepath for basepath in basepaths if basepath.is_dir()]
+    assert existing_basepaths
+    return existing_basepaths
 
 
 def extend_ion_list(ion_handlers, calibrated=True):
@@ -21,17 +33,16 @@ def extend_ion_list(ion_handlers, calibrated=True):
     With calibrated=True the uncalibrated files are added as well, so that an ion with no
     calibrated data still gets its uncalibrated version rather than being left out.
     """
-    BASEPATH = get_basepath()
-    assert BASEPATH.is_dir()
     # if calibrated is requested, also add uncalibrated data where calibrated data is not available
     calibflags = [True, False] if calibrated else [False]
-    for searchcalib in calibflags:
-        calibstr = "calib" if searchcalib else "uncalib"
-        handlername = f"floers25{calibstr}"
-        for s in BASEPATH.glob(f"*_levels_{calibstr}.txt*"):
-            ionstr = s.name.lstrip(string.digits).split("_")[0]
-            atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
-            ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
+    for basepath in get_basepaths():
+        for searchcalib in calibflags:
+            calibstr = "calib" if searchcalib else "uncalib"
+            handlername = f"floers25{calibstr}"
+            for s in basepath.glob(f"*_levels_{calibstr}.txt*"):
+                ionstr = s.name.lstrip(string.digits).split("_")[0]
+                atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
+                ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
     return ion_handlers
 
@@ -57,22 +68,29 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
     calibstr = "calib" if calibrated else "uncalib"
 
-    BASEPATH = get_basepath()
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
-    levels_file = BASEPATH / f"{ionstr}_levels_{calibstr}.txt"
 
-    # Check if original Floers+25 formatted data present
-    # If so: use that, if newer data format read in files for all transition types
-    lines_file = BASEPATH / f"{ionstr}_transitions_{calibstr}.txt"
+    # take the levels and the transitions of an ion from the first directory that has its levels
+    # file, so one ion never mixes the private and the public data
+    basepaths = get_basepaths()
+    basepath = next(
+        (bp for bp in basepaths if artisatomic.find_file_check_extension(bp / f"{ionstr}_levels_{calibstr}.txt")),
+        basepaths[0],
+    )
+    levels_file = basepath / f"{ionstr}_levels_{calibstr}.txt"
 
-    if lines_file.is_file():
+    # the original Floers+25 format has a single transitions file. The newer format has one file
+    # for each transition type, e.g. _E1, _E2, and _M1. The files can be compressed.
+    lines_file = artisatomic.find_file_check_extension(basepath / f"{ionstr}_transitions_{calibstr}.txt")
+
+    if lines_file is not None:
         transition_files = [lines_file]
     else:
-        transition_files = sorted(BASEPATH.glob(f"{ionstr}_transitions_{calibstr}_*.txt"))
+        transition_files = sorted(basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt*"))
 
     artisatomic.log_and_print(
         flog,
-        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {levels_file.name} and {len(transition_files)} transition files",
+        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transition files",
     )
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
@@ -148,9 +166,23 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
             )
             raise ValueError(msg)
 
+    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it.
+    # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory
+    # want to avoid duplicate Lower/Upper index pairs by combining them and adding their A-values
+    dftransitions = (
+        dftransitions.select(
+            lowerlevel=pl.col("Lower"),
+            upperlevel=pl.col("Upper"),
+            A=pl.col("A"),
+        )
+        .group_by(["upperlevel", "lowerlevel"], maintain_order=True)
+        .agg(A=pl.col("A").sum())
+    )
+
+    # count after the merge of duplicate level pairs, so adata.txt agrees with transitiondata.txt.
     # count per level index, not per configuration string: several levels share a configuration
     transition_count_of_levelindex: dict[int, int] = dict(
-        pl.concat([dftransitions["Lower"], dftransitions["Upper"]]).value_counts().iter_rows()
+        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
     )
     transition_count_of_level_name = {
         levelname: transition_count_of_levelindex.get(index, 0)
@@ -164,19 +196,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog, calibr
         parity=pl.col("Parity"),
         g=pl.col("g"),
         energyabovegsinpercm=pl.col("Energy"),
-    )
-
-    # the levels carry a parity, so let add_level_ids_forbidden() derive the forbidden flag from it.
-    # the file's Lower/Upper indices are already zero-based, matching the level ids used in memory
-    # want to avoid duplicate Lower/Upper index pairs by combining them and adding their A-values
-    dftransitions = (
-        dftransitions.select(
-            lowerlevel=pl.col("Lower"),
-            upperlevel=pl.col("Upper"),
-            A=pl.col("A"),
-        )
-        .group_by(["upperlevel", "lowerlevel"], maintain_order=True)
-        .agg(A=pl.col("A").sum())
     )
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
