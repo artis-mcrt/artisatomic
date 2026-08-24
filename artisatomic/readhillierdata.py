@@ -342,6 +342,92 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     return (twosplusone, l, parity)
 
 
+def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFrame:
+    """Read the oscillator strengths table of a CMFGEN file into a transition frame.
+
+    A transition line names its two levels, and a level name can hold a dash, so the line is cut
+    at its first and its last dash: the first separates the two names, and the last separates the
+    two level numbers of the "i-j" column. The parts between those two dashes keep their dashes,
+    which the exponents of the f and A values need.
+
+    A line that is not a transition, e.g. a title or a line of stars, gives parts that do not fit
+    the two layouts below and is dropped, as in the file's own format there is no marker for the
+    end of the table.
+    """
+    dflines = pl.LazyFrame({"line": translines})
+
+    # only the first table is read, and a spelling mistake in a title must not hide the second one
+    tablestart = (
+        dflines.with_row_index()
+        .filter(pl.col("line").str.contains(r"^\s*Osci(l|ll)ator strengths"))
+        .select("index")
+        .head(1)
+        .collect()
+    )
+    if tablestart.height > 0:
+        dflines = pl.LazyFrame({"line": translines[: tablestart.item()]})
+
+    # a line with no dash is doubled, as the parts of the empty middle are joined either side of it
+    linewithspaces = (
+        pl.when(pl.col("line").str.contains("-", literal=True))
+        # the second pattern can only match at the last dash, and costs much less than the
+        # equivalent greedy "^(.*)-" does
+        .then(pl.col("line").str.replace("-", " ", literal=True).str.replace(r"-([^-]*)$", " ${1}"))
+        .otherwise(pl.col("line") + "  " + pl.col("line"))
+    )
+
+    def part(index: int) -> pl.Expr:
+        return pl.col("parts").list.get(index, null_on_oob=True)
+
+    def as_float(index: int) -> pl.Expr:
+        # the files write an exponent as D as well as E
+        return part(index).str.replace_all("D", "E", literal=True).cast(pl.Float64, strict=False)
+
+    dftransitions = (
+        dflines.select(parts=linewithspaces.str.extract_all(r"\S+"))
+        .with_columns(
+            partcount=pl.col("parts").list.len(),
+            f=as_float(2),
+            A=as_float(3),
+        )
+        # the last two columns are absent from some files, which the transition id column follows.
+        # A line that carries no number where the f and the A values belong is not a transition.
+        .filter(
+            ((pl.col("partcount") == 8) | ((pl.col("partcount") >= 10) & (part(-1) == "|")))
+            & pl.col("f").is_not_null()
+            & pl.col("A").is_not_null()
+        )
+        .select(
+            namefrom=part(0),
+            nameto=part(1),
+            f=pl.col("f"),
+            A=pl.col("A"),
+            # the wavelength column holds a dash where the transition has no measured wavelength
+            lambdaangstrom=part(4).cast(pl.Float64, strict=False).fill_null(-1.0),
+            i=part(5).str.strip_chars_end("-").cast(pl.Int64),
+            j=part(6).cast(pl.Int64),
+            # the id column is masked before the cast, not after: the other layout holds a bar
+            # there, and both arms of a when() are evaluated
+            hilliertransitionid=pl.when(pl.col("partcount") == 8)
+            .then(part(7))
+            .cast(pl.Int64)
+            .fill_null(pl.int_range(pl.len(), dtype=pl.Int64) + 1),
+        )
+        .collect()
+    )
+
+    for hilliertransitionid, entrynumber in (
+        dftransitions.select("hilliertransitionid")
+        .with_row_index("entrynumber", offset=1)
+        .filter(pl.col("hilliertransitionid") != pl.col("entrynumber"))
+        .select("hilliertransitionid", "entrynumber")
+        .iter_rows()
+    ):
+        print(f"{filename} WARNING: Transition id {hilliertransitionid:d} found at entry number {entrynumber:d}")
+
+    return dftransitions.cast(hillier_transition_schema)
+
+
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
@@ -391,7 +477,6 @@ def read_levels_and_transitions(
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
-    transitionrows: list[HillierTransition] = []
 
     prev_line = ""
     # TODO: Would be nice to have a way of dealing with different encodings automatically, but this seems to be the only case so probably not worth it
@@ -526,53 +611,15 @@ def read_levels_and_transitions(
             msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
             raise ValueError(msg)
 
-        for line in fhillierosc:
-            if re.match(
-                r"^\s*Osci(l|ll)ator strengths", line
-            ):  # only allow one table, and account for spelling mistakes
-                break
-            linesplitdash = line.split("-")
-            row = (linesplitdash[0] + " " + "-".join(linesplitdash[1:-1]) + " " + linesplitdash[-1]).split()
+        # the rest of the file holds the transitions, which are parsed as a frame rather than
+        # line by line: one ion carries half a million of them
+        translines = fhillierosc.readlines()
 
-            # the two isfloat() calls are spelled out rather than all(map(...)) over a slice: this
-            # runs for every transition line of every ion (2.6M for the cmfgen set), where
-            # building a slice, a map object and an all() call per line is most of the test
-            if (len(row) == 8 or (len(row) >= 10 and row[-1] == "|")) and (
-                artisatomic.isfloat(row[2]) and artisatomic.isfloat(row[3])
-            ):
-                try:
-                    lambda_value = float(row[4])
-                except ValueError:
-                    lambda_value = -1
+    dftransitions = parse_transition_lines(translines, filename)
 
-                transitioncount = len(transitionrows)
-                hilliertransitionid = int(row[7]) if len(row) == 8 else transitioncount + 1
-                namefrom = row[0]
-                nameto = row[1]
-
-                transitionrows.append(
-                    HillierTransition(
-                        namefrom=namefrom,
-                        nameto=nameto,
-                        f=float(row[2].replace("D", "E")),
-                        A=float(row[3].replace("D", "E")),
-                        lambdaangstrom=lambda_value,
-                        i=int(row[5].rstrip("-")),
-                        j=int(row[6]),
-                        hilliertransitionid=hilliertransitionid,
-                    )
-                )
-
-                transition_count_of_level_name[namefrom] += 1
-                transition_count_of_level_name[nameto] += 1
-
-                if hilliertransitionid != transitioncount + 1:
-                    print(
-                        f"{filename} WARNING: Transition id {hilliertransitionid:d} found at entry"
-                        f" number {transitioncount + 1:d}"
-                    )
-
-    dftransitions = pl.DataFrame(transitionrows, schema=hillier_transition_schema, orient="row")
+    for namecolumn in ("namefrom", "nameto"):
+        for levelname, count in dftransitions[namecolumn].value_counts().iter_rows():
+            transition_count_of_level_name[levelname] += count
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
