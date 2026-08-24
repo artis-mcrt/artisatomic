@@ -199,6 +199,17 @@ def find_file_check_extension(filename: str | Path) -> Path | None:
     return next((path for ext in compression_extensions if (path := Path(f"{filename}{ext}")).is_file()), None)
 
 
+def find_file_check_extension_or_raise(filename: str | Path) -> Path:
+    """Find a data file by its plain name, and raise if no form of the name exists."""
+    filepath = find_file_check_extension(filename)
+    if filepath is None:
+        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
+        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
+        raise FileNotFoundError(msg)
+
+    return filepath
+
+
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """Open a data file, trying the compressed variants of the name if it does not exist.
 
@@ -207,13 +218,7 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """
     from xopen import xopen
 
-    filepath = find_file_check_extension(filename)
-    if filepath is None:
-        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
-        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
-        raise FileNotFoundError(msg)
-
-    return xopen(filepath, **kwargs)
+    return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
@@ -227,11 +232,7 @@ def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     gzip, or a zstd file itself. It cannot read the xz form, which xopen decompresses into
     memory instead.
     """
-    filepath = find_file_check_extension(filename)
-    if filepath is None:
-        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
-        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
-        raise FileNotFoundError(msg)
+    filepath = find_file_check_extension_or_raise(filename)
 
     csv_options: dict[str, t.Any] = {
         # a separator that the data files cannot contain keeps each whole line in one column

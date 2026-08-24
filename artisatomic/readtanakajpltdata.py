@@ -37,16 +37,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
     # the header holds at most 6 lines before the "# Z ion_stage" line, and 5 lines after it.
-    # A blank line reads as a null, which the tests below cannot strip.
-    headerlines = [line or "" for line in scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"]]
+    # A blank line reads as a null, which strip() cannot take.
+    headerlines = [(line or "").strip() for line in scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"]]
 
     for linenumber, readlinein in enumerate(headerlines[:7]):
         if linenumber < 3:
-            artisatomic.log_and_print(flog, readlinein.strip())
+            artisatomic.log_and_print(flog, readlinein)
 
-        if readlinein.strip() == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
+        if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
             break
-    assert readlinein.strip() == f"# {atomic_number} {ion_stage}"
+    assert readlinein == f"# {atomic_number} {ion_stage}"
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
     artisatomic.log_and_print(flog, f"levels: {levelcount}")
@@ -54,9 +54,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
     artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
-    assert headerlines[linenumber + 4].strip() == "# Energy levels"
+    assert headerlines[linenumber + 4] == "# Energy levels"
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
-    read_column_headers = headerlines[linenumber + 5].strip().split()  # v2.1 has extra column
+    read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
     assert all(item in read_column_headers for item in expected_column_headers)
 
     # the level section starts on the line after the column headers

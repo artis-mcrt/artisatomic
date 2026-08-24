@@ -123,14 +123,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         energyabovegsinpercm_upper=pl.col("energyabovegsinpercm_upper").abs(),
     )
 
-    gfall = gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
+    return gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
         ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
     )
-    if gfall.select(pl.n_unique("z_dot_ioncharge")).collect().item() != 1:
-        msg = f"Expected exactly one unique ion in file {fname}, but found multiple"
-        raise ValueError(msg)
-
-    return gfall
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
@@ -203,16 +198,25 @@ def read_levels_and_transitions(
         "hyper_shift_lower",
         "hyper_shift_upper",
     ]
-    level_columns = [
-        "atomic_number",
-        "ion_charge",
-        *(key.format(end) for key in column_renames for end in ("lower", "upper")),
-    ]
-
     # The levels and the transitions come from the same rows, so read those rows once. Each
     # collect() of the lazy frame reads and parses the file again, and the file can be 150 MB.
-    # dict.fromkeys() removes the columns that both lists hold, and keeps the order.
-    gfall = gfall.select(list(dict.fromkeys([*level_columns, *transition_columns]))).collect().lazy()
+    # The levels need the two columns below as well, and the transitions need no other column.
+    dfgfall = gfall.select(
+        [
+            *transition_columns,
+            "energyabovegsinpercm_lower_predicted",
+            "energyabovegsinpercm_upper_predicted",
+        ]
+    ).collect()
+
+    # One file holds one ion. The atomic number and the ion charge both come from the file's
+    # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows that
+    # are in memory: on the lazy frame it read and parsed the whole file a second time.
+    if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
+        msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
+        raise ValueError(msg)
+
+    gfall = dfgfall.lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
     e_upper_levels = gfall.rename({key.format("upper"): value for key, value in column_renames.items()})

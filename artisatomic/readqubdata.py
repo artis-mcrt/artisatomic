@@ -14,7 +14,6 @@ import polars as pl
 
 import artisatomic
 from artisatomic.base import hc_in_ev_cm
-from artisatomic.base import scan_file_lines
 from artisatomic.levelnames import lchars
 
 tyndall_co3_path = (
@@ -404,22 +403,24 @@ def read_qub_photoionizations(
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
             artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
             ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
-            # Any run of whitespace separates the columns, as it did for the pandas read that
-            # this replaces. A row with too few parts, or a part that is not a number, raises.
+            # One space separates the columns, and every field is a number, so a null means the
+            # columns are not where the read expects them. Reading the first five columns of the
+            # 41 costs a third of the time that cutting every line into its parts does.
+            columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
             photdata = (
-                scan_file_lines(filename)
-                .select(parts=pl.col("line").str.extract_all(r"\S+"))
-                .select(
-                    pl.col("parts").list.get(column).cast(pl.Float64).alias(str(column))
-                    for column in range(ntargets + 1)
-                )
+                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
                 .collect()
             )
+            if photdata.null_count().sum_horizontal().item() > 0:
+                msg = f"Columns of {filename} are not where they are expected: a value is missing."
+                raise ValueError(msg)
             phixstables = {}
 
             # column n of the file holds the cross section to the upper ion's level id n - 1
             for targetcolumn in range(1, ntargets + 1):
-                phixstable = photdata.filter(pl.col(str(targetcolumn)) > 0.0).select("0", str(targetcolumn)).to_numpy()
+                targetname = f"target{targetcolumn}"
+                phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
                 if len(phixstable) == 0:
                     # nothing positive in this column, so there is no table to downsample. Skipping
                     # here leaves the target out of the fractions below, which is what a zero cross
