@@ -64,6 +64,9 @@ simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
     "kurucz": readkuruczdata.read_levels_and_transitions,
     "dream": readdreamdata.read_levels_and_transitions,  # DREAM database of Z >= 57
     "lisbon": readlisbondata.read_levels_and_transitions,
+    "floers25calibwithforbidden": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
+        atomic_number, ion_stage, flog, calibrated=True, withforbidden=True
+    ),
     "floers25calib": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
         atomic_number, ion_stage, flog, calibrated=True
     ),

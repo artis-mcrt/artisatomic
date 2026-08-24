@@ -18,8 +18,10 @@ rm artisatomicionhandlers.json
 (cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
 ```
 
-`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, QUB and MONS readers to their committed
-`test_sample/` directories, so it is required — the workflow sets it globally. The `rm` matters:
+`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, QUB, MONS and Floers+25 readers to their
+`test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
+`test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
+`OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:
 `get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
 repository root silently overrides the built-in ion selection of every later local run.
 

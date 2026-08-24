@@ -38,6 +38,7 @@ def match_hydrogenic_phixs(
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
+        "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,
         "qub_data": readqubdata.get_level_valence_n,
