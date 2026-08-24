@@ -11,19 +11,22 @@ import polars as pl
 import artisatomic
 
 
+def in_testmode() -> bool:
+    """Say whether the test mode is active. Test mode reads only the test_sample directory."""
+    return os.environ.get("ARTISATOMIC_TESTMODE") == "1"
+
+
 def get_basepath(withforbidden: bool) -> Path:
     """Directory that holds the Floers+25 level and transition tables.
 
     The private OutputFiles_withforbidden directory holds the newer data with forbidden
-    transitions. The public OutputFiles directory holds the published data.
+    transitions. The public OutputFiles directory holds the published data. In test mode,
+    every request resolves to the test_sample directory from testdata.tar.xz.
     """
-    dirname = "OutputFiles_withforbidden" if withforbidden else "OutputFiles"
-    return artisatomic.PYDIR / ".." / "atomic-data-floers25" / dirname
-
-
-def in_testmode() -> bool:
-    """Say whether the test mode is active. Test mode uses only the public data."""
-    return os.environ.get("ARTISATOMIC_TESTMODE") == "1"
+    datapath = artisatomic.PYDIR / ".." / "atomic-data-floers25"
+    if in_testmode():
+        return datapath / "test_sample"
+    return datapath / ("OutputFiles_withforbidden" if withforbidden else "OutputFiles")
 
 
 def extend_ion_list(ion_handlers, calibrated=True):
@@ -37,23 +40,28 @@ def extend_ion_list(ion_handlers, calibrated=True):
     basepath_private = get_basepath(withforbidden=True)
     # not an assert: input validation must survive python -O
     if not basepath_public.is_dir():
-        msg = f"Directory {basepath_public} does not exist. Run atomic-data-floers25/setup_floers25_data.sh to download the data."
+        msg = (
+            f"The directory {basepath_public} does not exist. Run"
+            " atomic-data-floers25/setup_floers25_data.sh to download the data. For the test"
+            " mode, extract testdata.tar.xz instead."
+        )
         raise FileNotFoundError(msg)
+
+    # in test mode the private path equals the public path, so no private search may run
+    use_private = not in_testmode() and basepath_private.is_dir()
 
     # the searches run in priority order, because add_handler_if_not_set() keeps the first
     # handler that matches an ion
-    calibsearches = [
-        ("floers25calibwithforbidden", "calib", basepath_private),
-        ("floers25calib", "calib", basepath_public),
-    ]
-    searches = (calibsearches if calibrated else []) + [
-        ("floers25uncalib", "uncalib", basepath_private),
-        ("floers25uncalib", "uncalib", basepath_public),
-    ]
+    searches: list[tuple[str, str, Path]] = []
+    if calibrated and use_private:
+        searches.append(("floers25calibwithforbidden", "calib", basepath_private))
+    if calibrated:
+        searches.append(("floers25calib", "calib", basepath_public))
+    if use_private:
+        searches.append(("floers25uncalib", "uncalib", basepath_private))
+    searches.append(("floers25uncalib", "uncalib", basepath_public))
 
     for handlername, calibstr, basepath in searches:
-        if basepath == basepath_private and (in_testmode() or not basepath.is_dir()):
-            continue
         for ext in artisatomic.compression_extensions:
             for s in basepath.glob(f"*_levels_{calibstr}.txt{ext}"):
                 ionstr = s.name.lstrip(string.digits).split("_")[0]
@@ -104,10 +112,8 @@ def read_levels_and_transitions(
 
     # the handler name selects the directory. The floers25uncalib handler has no "withforbidden"
     # variant, so it searches the private directory and then the public directory.
-    if withforbidden or calibrated:
+    if withforbidden or calibrated or in_testmode():
         basepaths = [get_basepath(withforbidden=withforbidden)]
-    elif in_testmode():
-        basepaths = [get_basepath(withforbidden=False)]
     else:
         basepaths = [get_basepath(withforbidden=True), get_basepath(withforbidden=False)]
 
