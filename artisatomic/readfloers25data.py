@@ -1,14 +1,14 @@
 """Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
 
 import os
+import re
 import string
-import typing as t
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import scan_file_lines
 
 
 def in_testmode() -> bool:
@@ -74,26 +74,127 @@ def extend_ion_list(ion_handlers, calibrated=True):
     return ion_handlers
 
 
-def read_dashed_table(
-    filepath: Path, dtype: dict[str, t.Any] | None = None, usecols: list[str] | None = None
-) -> pl.DataFrame:
-    """Read the whitespace-separated data table that starts after the third '----' line."""
+def read_table_header(filepath: Path) -> tuple[list[str], int]:
+    """Read the column names of the data table that starts after the third '----' line.
+
+    The second value is the number of lines before the first data row, which the scan skips.
+    """
+    linecount = 0
     dashrowcount = 0
     with artisatomic.xopen_check_extension(filepath) as f:
         for line in f:
+            linecount += 1
             if line.startswith("--"):
                 dashrowcount += 1
                 if dashrowcount == 3:
                     break
-        if dashrowcount < 3:
-            msg = f"Did not find the expected data table in {filepath}"
+        # a blank line between the rule and the names holds no column name
+        columns: list[str] = []
+        while dashrowcount == 3 and not columns:
+            line = f.readline()
+            linecount += 1
+            if not line:
+                break
+            columns = line.split()
+
+    if dashrowcount < 3 or not columns:
+        msg = f"Did not find the expected data table in {filepath}"
+        raise ValueError(msg)
+
+    return columns, linecount
+
+
+def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
+    """Read the data table that starts after the third '----' line, and cut it into columns.
+
+    The tables look like a fixed-width format, but they are not one. A cell holds a right-aligned
+    value with a minimum width. A value that is wider than its cell takes the space in front of
+    it. It thus moves the rest of the line to the right.
+
+    The Config_Upper value "4f2.5d1.6s1.6s2" of Tb II does this. A column is therefore not at a
+    fixed character position, and this function splits each line on whitespace.
+
+    polars cuts the tokens out of every line at once. That is much faster than a parser that reads
+    one line at a time. The caller names the columns that it uses. The other columns stay in the
+    list of tokens and never become a column. This keeps the memory low on a wide file. Every
+    column of the result holds strings, because the tables mix text and numbers.
+    """
+    columns, skip_lines = read_table_header(filepath)
+    missing = [name for name in usecols if name not in columns]
+    # not an assert: input validation must survive python -O
+    if missing:
+        msg = f"The data table in {filepath} has no {missing} of the columns {columns}"
+        raise ValueError(msg)
+
+    # the name is not a column name of the data, so it cannot hide a column that the caller asked
+    # for. A leading space keeps it different from every name that split() can give.
+    countcol = " tokencount"
+    lftable = (
+        scan_file_lines(filepath, skip_lines=skip_lines)
+        .select(parts=pl.col("line").str.extract_all(r"\S+"))
+        # a blank line inside the table gives a null in every column, which the callers reject
+        .filter(pl.col("parts").list.len() > 0)
+        .select(
+            pl.col("parts").list.len().alias(countcol),
+            *[pl.col("parts").list.get(columns.index(name), null_on_oob=True).alias(name) for name in usecols],
+        )
+    )
+
+    try:
+        # the streaming engine halves the peak memory of a multi-gigabyte file. It is also faster.
+        dftable = lftable.collect(engine="streaming")
+    except pl.exceptions.NoDataError:
+        # a table can hold a header and no data row, e.g. an ion with no line of one type
+        dftable = pl.DataFrame(schema={countcol: pl.UInt32} | dict.fromkeys(usecols, pl.String))
+    except pl.exceptions.PolarsError as exc:
+        # the parser names no file, so name it here: a run reads more than a hundred of them
+        msg = f"Could not read the data table in {filepath}: {exc}"
+        raise ValueError(msg) from exc
+
+    # A row with more tokens than the header moves every value into the column on its left. No
+    # later test can find that. A row with fewer tokens has an empty cell, and keeps the columns
+    # in front of that cell. The level tables leave the LS2 cell of a high-l level empty. The
+    # callers take no column after LS2, so such a row is permitted.
+    #
+    # Not an assert: input validation must survive python -O.
+    nlongrows = dftable.select((pl.col(countcol) > len(columns)).sum()).item()
+    if nlongrows > 0:
+        msg = f"{nlongrows} rows of the data table in {filepath} have more than {len(columns)} tokens"
+        raise ValueError(msg)
+
+    return dftable.drop(countcol)
+
+
+def read_transitions_file(filepath: Path) -> pl.DataFrame:
+    """Read one Floers+25 transitions file into the lowerlevel, upperlevel, A and forbidden columns.
+
+    The Type column decides the forbidden flag, so this function keeps a row for each line and
+    does not merge the rows yet. It drops the Type strings, because a large file has millions of
+    rows.
+    """
+    dffile = read_dashed_table(filepath, usecols=["Lower", "Upper", "A", "Type"])
+
+    # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
+    # Not an assert: input validation must survive python -O.
+    for colname in ("Lower", "Upper", "A", "Type"):
+        if dffile[colname].null_count() > 0:
+            msg = f"Unreadable {colname} values in {filepath}"
             raise ValueError(msg)
-        try:
-            dftable = pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype=dtype, usecols=usecols)
-        except ValueError as exc:
-            msg = f"Could not read the data table in {filepath}: {exc}"
-            raise ValueError(msg) from exc
-        return pl.from_pandas(dftable)
+
+    # the forbidden flag below trusts the Type column, so an unknown type must stop the run
+    # rather than count as forbidden. A file has few distinct types, so test those and not each row.
+    for transitiontype in dffile["Type"].unique().to_list():
+        if re.fullmatch(r"[EM][0-9]+", transitiontype) is None:
+            msg = f"Unknown transition type {transitiontype!r} in {filepath}"
+            raise ValueError(msg)
+
+    # Int32 holds every level index of the data set, and it halves the memory of the two columns
+    return dffile.select(
+        lowerlevel=pl.col("Lower").cast(pl.Int32),
+        upperlevel=pl.col("Upper").cast(pl.Int32),
+        A=pl.col("A").cast(pl.Float64),
+        forbidden=pl.col("Type") != "E1",
+    )
 
 
 def read_levels_and_transitions(
@@ -161,15 +262,28 @@ def read_levels_and_transitions(
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
-    dflevels = read_dashed_table(levels_file, dtype={"J": str})
+    # the levels files of the data sets do not all carry the same columns, so name the ones used.
+    # J keeps its "5/2" form as a string, which the g column below reads.
+    dflevels = read_dashed_table(levels_file, usecols=["Index", "Energy", "J", "Parity", "Configuration"])
 
+    # a null means an empty cell, and a level needs each of these values
+    # not an assert: input validation must survive python -O
+    for colname in dflevels.columns:
+        if dflevels[colname].null_count() > 0:
+            msg = f"Unreadable {colname} values in {levels_file}"
+            raise ValueError(msg)
+
+    # every expression here reads the input frame, so g reads the file's own J string
     dflevels = dflevels.with_columns(
+        pl.col("Index").cast(pl.Int64),
+        pl.col("Energy").cast(pl.Float64),
+        pl.col("Parity").cast(pl.Int64),
         pl.when(pl.col("J").str.ends_with("/2"))
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
             pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1
         )  # the strip_suffix should not be needed (does not end in "/2" but prevents a polars error)
-        .alias("g")
+        .alias("g"),
     )
 
     # the levels are indexed from zero in file order and the transitions refer to those indices,
@@ -187,35 +301,13 @@ def read_levels_and_transitions(
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    # read only the used columns. This keeps the memory low and makes the in-memory tables
-    # compatible: pandas infers a string type for every column of a file with no data rows.
+    # the files keep their order, so the merge below adds the A values in the same order for
+    # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
     dftransitions = pl.concat(
-        [
-            read_dashed_table(transition_file, usecols=["Lower", "Upper", "A", "Type"]).select(
-                lowerlevel=pl.col("Lower").cast(pl.Int64),
-                upperlevel=pl.col("Upper").cast(pl.Int64),
-                A=pl.col("A").cast(pl.Float64),
-                transitiontype=pl.col("Type").cast(pl.String),
-            )
-            for transition_file in transition_files
-        ]
+        [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
-
-    # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
-    # Not an assert: input validation must survive python -O.
-    for colname in ("lowerlevel", "upperlevel", "A", "transitiontype"):
-        if dftransitions[colname].null_count() > 0:
-            msg = f"Unreadable {colname} values in the transitions files for {ionstr} in {basepath}"
-            raise ValueError(msg)
-
-    # the forbidden flag below trusts the Type column, so an unknown type must stop the run
-    # rather than count as forbidden
-    badtypes = dftransitions.filter(~pl.col("transitiontype").str.contains(r"^[EM][0-9]+$"))
-    if badtypes.height > 0:
-        msg = f"Unknown transition type {badtypes['transitiontype'][0]!r} for {ionstr} in {basepath}"
-        raise ValueError(msg)
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.
@@ -246,19 +338,19 @@ def read_levels_and_transitions(
     # as one transition, so a duplicate pair would double a line.
     # The Type column decides the forbidden flag. A merged row is forbidden only when no E1 line
     # contributes to it, so M1, E2, and any higher multipole count as forbidden.
-    dftransitions = dftransitions.group_by(["upperlevel", "lowerlevel"], maintain_order=True).agg(
-        A=pl.col("A").sum(), forbidden=(pl.col("transitiontype") != "E1").all()
+    # Each level pair occurs once after the merge, and output.py sorts the rows on the pair. The
+    # order of the groups thus does not change the output, and the merge does not have to keep it.
+    dftransitions = dftransitions.group_by(["upperlevel", "lowerlevel"]).agg(
+        A=pl.col("A").sum(), forbidden=pl.col("forbidden").all()
     )
 
-    # cross-check the Type column against the Laporte rule, which an E1 line must obey
-    dfparity = dflevels.select(pl.col("Index").cast(pl.Int64), pl.col("Parity"))
+    # cross-check the Type column against the Laporte rule, which an E1 line must obey. The level
+    # indices are contiguous from zero, as checked above, so a level index is also a row number.
+    parity_of_index = dflevels["Parity"]
+    dfallowed = dftransitions.filter(~pl.col("forbidden"))
     n_paritymatch = (
-        dftransitions.filter(~pl.col("forbidden"))
-        .join(dfparity.rename({"Index": "lowerlevel", "Parity": "parity_lower"}), on="lowerlevel")
-        .join(dfparity.rename({"Index": "upperlevel", "Parity": "parity_upper"}), on="upperlevel")
-        .filter(pl.col("parity_lower") == pl.col("parity_upper"))
-        .height
-    )
+        parity_of_index.gather(dfallowed["lowerlevel"]) == parity_of_index.gather(dfallowed["upperlevel"])
+    ).sum()
     if n_paritymatch > 0:
         artisatomic.log_and_print(
             flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity"
