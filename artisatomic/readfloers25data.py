@@ -3,14 +3,12 @@
 import os
 import re
 import string
-import typing as t
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 import artisatomic
+from artisatomic.base import scan_file_lines
 
 
 def in_testmode() -> bool:
@@ -76,29 +74,77 @@ def extend_ion_list(ion_handlers, calibrated=True):
     return ion_handlers
 
 
-def read_dashed_table(filepath: Path, usecols: list[str], dtype: dict[str, t.Any] | None = None) -> pl.DataFrame:
-    """Read the whitespace-separated data table that starts after the third '----' line.
+def read_table_header(filepath: Path) -> tuple[list[str], int]:
+    """Read the column names of the data table that starts after the third '----' line.
 
-    The caller names the columns that it uses. pandas does not parse the other columns, which
-    keeps the memory low on the wide transitions files. The C parser of pandas gives up the GIL,
-    so several calls of this function can run at the same time in a thread pool.
+    The second value is the number of lines before the first data row, which the scan skips.
     """
+    linecount = 0
     dashrowcount = 0
     with artisatomic.xopen_check_extension(filepath) as f:
         for line in f:
+            linecount += 1
             if line.startswith("--"):
                 dashrowcount += 1
                 if dashrowcount == 3:
                     break
-        if dashrowcount < 3:
-            msg = f"Did not find the expected data table in {filepath}"
-            raise ValueError(msg)
-        try:
-            dftable = pd.read_csv(f, sep=r"\s+", dtype_backend="pyarrow", dtype=dtype, usecols=usecols)
-        except ValueError as exc:
-            msg = f"Could not read the data table in {filepath}: {exc}"
-            raise ValueError(msg) from exc
-        return pl.from_pandas(dftable)
+        columns = f.readline().split()
+        linecount += 1
+
+    if dashrowcount < 3 or not columns:
+        msg = f"Did not find the expected data table in {filepath}"
+        raise ValueError(msg)
+
+    return columns, linecount
+
+
+def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
+    """Read the data table that starts after the third '----' line, and cut it into columns.
+
+    The tables look like a fixed-width format, but they are not one. A cell holds a right-aligned
+    value with a minimum width, so a value that is wider than its cell takes the space in front of
+    it and moves the rest of the line to the right. The Config_Upper value "4f2.5d1.6s1.6s2" of
+    Tb II does this. A column is therefore not at a fixed character position, and this function
+    splits each line on whitespace instead.
+
+    polars cuts the tokens out of every line at once, which is much faster than a parser that
+    reads one line at a time. The caller names the columns that it uses. The other columns stay
+    in the list of tokens and never become a column, which keeps the memory low on a wide file.
+    Every column of the result holds strings, because the tables mix text and numbers.
+    """
+    columns, skip_lines = read_table_header(filepath)
+    missing = [name for name in usecols if name not in columns]
+    # not an assert: input validation must survive python -O
+    if missing:
+        msg = f"The data table in {filepath} has no {missing} column. It has {columns}"
+        raise ValueError(msg)
+
+    dftable = (
+        scan_file_lines(filepath, skip_lines=skip_lines)
+        .select(parts=pl.col("line").str.extract_all(r"\S+"))
+        # a blank line holds no data, and gives no tokens
+        .filter(pl.col("parts").list.len() > 0)
+        .select(
+            tokencount=pl.col("parts").list.len(),
+            **{name: pl.col("parts").list.get(columns.index(name), null_on_oob=True) for name in usecols},
+        )
+        # the streaming engine keeps the peak memory of a multi-gigabyte file near half of the
+        # memory that the in-memory engine needs, and it is faster here
+        .collect(engine="streaming")
+    )
+
+    # A row with more tokens than the header moves every value into the column on its left, which
+    # no later test can find. A row with fewer tokens has an empty cell, and keeps the columns in
+    # front of that cell: the level tables leave the LS2 cell of a high-l level empty. Such a row
+    # is permitted, because the callers take no column after LS2, and because the casts of Index,
+    # Energy and Parity would fail if an earlier cell were the empty one.
+    # Not an assert: input validation must survive python -O.
+    nlongrows = dftable.filter(pl.col("tokencount") > len(columns)).height
+    if nlongrows > 0:
+        msg = f"{nlongrows} rows of the data table in {filepath} have more than {len(columns)} tokens"
+        raise ValueError(msg)
+
+    return dftable.drop("tokencount")
 
 
 def read_transitions_file(filepath: Path) -> pl.DataFrame:
@@ -108,8 +154,7 @@ def read_transitions_file(filepath: Path) -> pl.DataFrame:
     does not merge the rows yet. It drops the Type strings, because a large file has millions of
     rows.
     """
-    # a file uses only a few transition types, so the category dtype keeps one copy of each type
-    dffile = read_dashed_table(filepath, usecols=["Lower", "Upper", "A", "Type"], dtype={"Type": "category"})
+    dffile = read_dashed_table(filepath, usecols=["Lower", "Upper", "A", "Type"])
 
     # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
     # Not an assert: input validation must survive python -O.
@@ -199,9 +244,19 @@ def read_levels_and_transitions(
 
     ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
-    # the levels files of the data sets do not all carry the same columns, so name the ones used
-    dflevels = read_dashed_table(
-        levels_file, usecols=["Index", "Energy", "J", "Parity", "Configuration"], dtype={"J": str}
+    # the levels files of the data sets do not all carry the same columns, so name the ones used.
+    # J keeps its "5/2" form as a string, which the g column below reads.
+    dflevels = read_dashed_table(levels_file, usecols=["Index", "Energy", "J", "Parity", "Configuration"])
+
+    # a null means an empty cell, and a level needs each of these values
+    # not an assert: input validation must survive python -O
+    for colname in dflevels.columns:
+        if dflevels[colname].null_count() > 0:
+            msg = f"Unreadable {colname} values in {levels_file}"
+            raise ValueError(msg)
+
+    dflevels = dflevels.with_columns(
+        pl.col("Index").cast(pl.Int64), pl.col("Energy").cast(pl.Float64), pl.col("Parity").cast(pl.Int64)
     )
 
     dflevels = dflevels.with_columns(
@@ -228,12 +283,11 @@ def read_levels_and_transitions(
 
     artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
 
-    # the threads read the files at the same time, because read_dashed_table() gives up the GIL
-    # while it parses. executor.map() gives the tables in the order of the files, so the merge
-    # below adds the A values in the same order for each run.
-    # rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing.
-    with ThreadPoolExecutor(max_workers=len(transition_files)) as executor:
-        dftransitions = pl.concat(list(executor.map(read_transitions_file, transition_files)), rechunk=False)
+    # the files keep their order, so the merge below adds the A values in the same order for
+    # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
+    dftransitions = pl.concat(
+        [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
+    )
 
     artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
 

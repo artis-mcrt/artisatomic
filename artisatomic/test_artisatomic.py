@@ -1831,3 +1831,47 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 XX\n")
     with pytest.raises(ValueError, match="Unknown transition type"):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
+
+
+def test_readfloers25data_ragged_rows(monkeypatch, tmp_path):
+    """A short row keeps the columns in front of its empty cell. A long row stops the run.
+
+    The Floers+25 tables right-align each value in a cell of a minimum width, so a value that is
+    wider than its cell moves the rest of the line. A column is not at a fixed character position,
+    and the reader splits each line on whitespace. The level tables leave the LS2 cell of a high-l
+    level empty, which gives a row of nine tokens against a header of ten. The reader takes no
+    column after LS2, so such a row is read. A row with an extra token moves every value into the
+    column on its left, which no later test can find, so the reader rejects it.
+    """
+    from artisatomic import readfloers25data
+
+    header = "Test table\n--\n--\n--\n"
+    levelheader = " Index       Z  Charge      Energy       J  Parity  Configuration     LS    LS2    Method\n"
+    # the second level has an empty LS2 cell, as a high-l level of the published tables does
+    levels = (
+        "     0      57       2        0.00     3/2       0            5d1     2D     2D   uncalib\n"
+        "     1      57       2   113810.70     9/2       0            5g1     2G          uncalib\n"
+    )
+    (tmp_path / "57LaII_levels_calib.txt").write_text(header + levelheader + levels)
+    transheader = header + " Lower Upper A Type\n"
+    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
+
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    _, dflevels, _, _ = readfloers25data.read_levels_and_transitions(
+        57, 2, io.StringIO(), calibrated=True, withforbidden=True
+    )
+
+    # the short row keeps its Energy, J, Parity and Configuration, which all precede LS2
+    assert dflevels["levelname"].to_list() == ["5d1 J=3/2 index=0", "5g1 J=9/2 index=1"]
+    assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 113810.70]
+    assert dflevels["g"].to_list() == [4, 10]
+
+    # a row with an extra token would move every value into the column on its left
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header
+        + levelheader
+        + levels
+        + "     2      57       2   200000.00     1/2       1  5f1  2F  2F  uncalib  EXTRA\n"
+    )
+    with pytest.raises(ValueError, match="have more than 10 tokens"):
+        readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
