@@ -3,11 +3,11 @@
 import re
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 import artisatomic
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import scan_file_lines
 
 jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
@@ -36,71 +36,75 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    with artisatomic.xopen_check_extension(jpltpath / filename) as fin:
-        readlinein = ""
-        for linenumber in range(7):
-            readlinein = fin.readline().strip()
-            if linenumber < 3:
-                artisatomic.log_and_print(flog, readlinein)
+    # the header holds at most 6 lines before the "# Z ion_stage" line, and 5 lines after it
+    headerlines = scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"].to_list()
 
-            if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
-                break
-        assert readlinein == f"# {atomic_number} {ion_stage}"
-        levelcount, transitioncount = (int(x) for x in fin.readline().removeprefix("# ").split())
-        artisatomic.log_and_print(flog, f"levels: {levelcount}")
-        artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
+    for linenumber, readlinein in enumerate(headerlines[:7]):
+        if linenumber < 3:
+            artisatomic.log_and_print(flog, readlinein.strip())
 
-        fin.readline()
-        str_ip_line = fin.readline()
-        ionization_energy_in_ev = float(str_ip_line.removeprefix("# IP = "))
-        artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
-        assert fin.readline().strip() == "# Energy levels"
-        expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
-        read_column_headers = fin.readline().strip().split()  # v2.1 has extra column
-        assert all(item in read_column_headers for item in expected_column_headers)
+        if readlinein.strip() == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
+            break
+    assert readlinein.strip() == f"# {atomic_number} {ion_stage}"
 
-        with pd.read_fwf(
-            fin,
-            chunksize=levelcount,
-            nrows=levelcount,
-            colspecs=[(0, 7), (7, 15), (15, 19), (19, 34), (34, 34 + 5000)],
-            names=["levelid", "g", "parity", "energy_ev", "configuration"],
-        ) as reader:
-            dflevels = pl.from_pandas(reader.get_chunk(levelcount)).select(
-                energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
-                parity=pl.when(pl.col("parity").str.strip_chars() == "odd").then(1).otherwise(0),
-                g=pl.col("g").cast(pl.Float64),
-                # Every expression in one select() reads the INPUT frame, so both columns below
-                # are the file's own values, not the ones being computed alongside them: the name
-                # gets the file's 1-based number rather than the zero-based levelid, and the
-                # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
-                # a human-readable comment in adata.txt — and read_fwf() has already stripped the
-                # text, so this is deliberate rather than the shadowing accident it resembles.
-                levelname=pl.format(
-                    "{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration").str.strip_chars()
-                ),
-                levelid=pl.col("levelid").cast(pl.Int64) - 1,
-            )
+    levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
+    artisatomic.log_and_print(flog, f"levels: {levelcount}")
+    artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
 
-        assert dflevels.height == levelcount
+    ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
+    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    assert headerlines[linenumber + 4].strip() == "# Energy levels"
+    expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
+    read_column_headers = headerlines[linenumber + 5].strip().split()  # v2.1 has extra column
+    assert all(item in read_column_headers for item in expected_column_headers)
 
-        line = fin.readline().strip()
-        assert line in {"# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"}
-        if line == "# Transitions":
-            assert fin.readline().strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
-        dftransitions = pl.from_pandas(
-            pd.read_fwf(
-                fin,
-                colspecs=[(0, 7), (7, 15), (15, 30), (30, 43), (43, 43 + 5000)],
-                names=["upperlevel", "lowerlevel", "wavelength", "g_u_times_A", "log(g_l*f)"],
-                dtype_backend="pyarrow",
-            )
-        ).select(
-            # the file numbers levels from one; level ids are zero-based in memory
-            pl.col("lowerlevel").cast(pl.Int64) - 1,
-            pl.col("upperlevel").cast(pl.Int64) - 1,
-            pl.col("g_u_times_A").cast(pl.Float64),
+    # the level section starts on the line after the column headers
+    dflines = scan_file_lines(jpltpath / filename, skip_lines=linenumber + 6)
+
+    # the transitions follow the levels, after a section title that some files leave out
+    sectionheaders = dflines.slice(levelcount, 2).collect()["line"].to_list()
+    line = sectionheaders[0].strip()
+    assert line in {"# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"}
+    if line == "# Transitions":
+        assert sectionheaders[1].strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
+    transitionsectionstart = levelcount + (2 if line == "# Transitions" else 1)
+
+    dflevels = (
+        dflines.slice(0, levelcount)
+        .select(
+            levelid=pl.col("line").str.slice(0, 7).str.strip_chars(),
+            g=pl.col("line").str.slice(7, 8).str.strip_chars(),
+            parity=pl.col("line").str.slice(15, 4).str.strip_chars(),
+            energy_ev=pl.col("line").str.slice(19, 15).str.strip_chars(),
+            configuration=pl.col("line").str.slice(34).str.strip_chars(),
         )
+        .select(
+            energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
+            parity=pl.when(pl.col("parity") == "odd").then(1).otherwise(0),
+            g=pl.col("g").cast(pl.Float64),
+            # Every expression in one select() reads the INPUT frame, so both columns below
+            # are the file's own values, not the ones being computed alongside them: the name
+            # gets the file's 1-based number rather than the zero-based levelid, and the
+            # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
+            # a human-readable comment in adata.txt.
+            levelname=pl.format("{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration")),
+            levelid=pl.col("levelid").cast(pl.Int64) - 1,
+        )
+        .collect()
+    )
+
+    assert dflevels.height == levelcount
+
+    dftransitions = (
+        dflines.slice(transitionsectionstart)
+        .select(
+            # the file numbers levels from one; level ids are zero-based in memory
+            lowerlevel=pl.col("line").str.slice(7, 8).str.strip_chars().cast(pl.Int64) - 1,
+            upperlevel=pl.col("line").str.slice(0, 7).str.strip_chars().cast(pl.Int64) - 1,
+            g_u_times_A=pl.col("line").str.slice(30, 13).str.strip_chars().cast(pl.Float64),
+        )
+        .collect()
+    )
 
     transition_count_of_levelid: dict[int, int] = dict(
         pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()

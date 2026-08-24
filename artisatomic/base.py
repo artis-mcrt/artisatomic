@@ -216,6 +216,42 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     return xopen(filepath, **kwargs)
 
 
+def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
+    """Read a text file into a lazy frame that holds one line in each row of a "line" column.
+
+    A fixed-width or a space-aligned file is much faster to cut into columns with str.slice() or
+    str.split() than to parse with pandas read_fwf(), or read_csv() with a regular expression
+    separator. Neither of those has a C parser, so each reads one line at a time in Python.
+
+    The caller names the plain file, as for xopen_check_extension(). polars reads a plain, a
+    gzip, or a zstd file itself. It cannot read the xz form, which xopen decompresses into
+    memory instead.
+    """
+    filepath = find_file_check_extension(filename)
+    if filepath is None:
+        filepaths = [f"{filename}{ext}" for ext in compression_extensions]
+        msg = f"Could not find any of the following files:\n  {'\n  '.join(filepaths)}."
+        raise FileNotFoundError(msg)
+
+    csv_options: dict[str, t.Any] = {
+        # a separator that the data files cannot contain keeps each whole line in one column
+        "separator": "\x1f",
+        "has_header": False,
+        "new_columns": ["line"],
+        "quote_char": None,
+        "infer_schema_length": 0,
+        "skip_lines": skip_lines,
+    }
+
+    if filepath.suffix == ".xz":
+        from xopen import xopen
+
+        with xopen(filepath, "rb") as fin:
+            return pl.read_csv(io.BytesIO(fin.read()), **csv_options).lazy()
+
+    return pl.scan_csv(filepath, **csv_options)
+
+
 NIST_IONIZATION_PATH = PYDIR / "nist_ionization.txt.zst"
 
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import polars as pl
 
 import artisatomic
+from artisatomic.base import scan_file_lines
 
 kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
 if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
@@ -76,19 +77,10 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # each field starts after the fields before it, so the last width starts no field
     field_offsets = list(itertools.accumulate(field_widths[:-1], initial=0))
 
-    # Read each line whole, then cut the fixed-width fields out of it. A separator that the
-    # Fortran-formatted text cannot contain keeps every line in one column. This is much faster
-    # than pandas read_fwf, which has no C parser for fixed-width files.
-    gfall = pl.scan_csv(
-        fname,
-        separator="\x1f",
-        has_header=False,
-        new_columns=["gfall_line"],
-        quote_char=None,
-        infer_schema_length=0,
-    ).select(
+    # read each line whole, then cut the fixed-width fields out of it
+    gfall = scan_file_lines(fname).select(
         # a blank field, and a line too short to reach the field, both give a null
-        pl.col("gfall_line").str.slice(offset, width).str.strip_chars().replace("", None).cast(dtype).alias(name)
+        pl.col("line").str.slice(offset, width).str.strip_chars().replace("", None).cast(dtype).alias(name)
         for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
     )
 
