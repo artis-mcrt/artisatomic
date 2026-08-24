@@ -85,7 +85,7 @@ requires-dist = [
     { name = "h5py", specifier = ">=3.10.0" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "pandas", extras = ["compression", "hdf5"], specifier = ">=3.0.5" },
-    { name = "polars", specifier = ">=1.44.0" },
+    { name = "polars", specifier = ">=1.43.2" },
     { name = "pyarrow", specifier = ">=18.1.0" },
     { name = "requests", specifier = ">=2.34.0" },
     { name = "scipy", specifier = ">=1.15.3" },
