@@ -103,8 +103,9 @@ def read_levels_and_transitions(
 
     The ionization energy comes from NIST rather than the file. Configurations are not unique
     (levels of one configuration differ by J), so level names combine the configuration, J and
-    the file's index. Both the level indices and the transitions' references to them are
-    validated, since a gap or an out-of-range index would silently misattach transitions.
+    the file's index. The level indices are validated, since a gap would silently misattach
+    transitions. A transition to a level that the levels file does not list is discarded, with
+    a warning in the log.
     """
     elsym = artisatomic.elsymbols[atomic_number]
     ion_stage_roman = artisatomic.roman_numerals[ion_stage]
@@ -216,18 +217,19 @@ def read_levels_and_transitions(
         msg = f"Unknown transition type {badtypes['transitiontype'][0]!r} for {ionstr} in {basepath}"
         raise ValueError(msg)
 
-    # an out-of-range level reference would be silently dropped by the joins in
-    # add_level_ids_forbidden(). Not an assert: input validation must survive python -O.
-    if dftransitions.height > 0:
-        transition_level_indices = pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]])
-        min_index = t.cast("int", transition_level_indices.min())
-        max_index = t.cast("int", transition_level_indices.max())
-        if min_index < 0 or max_index >= dflevels.height:
-            msg = (
-                f"Transition level indices for {ionstr} in {basepath} span {min_index}..{max_index}, outside the"
-                f" level table's 0..{dflevels.height - 1}"
-            )
-            raise ValueError(msg)
+    # some transitions files reference levels that the levels file does not list, for example
+    # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.
+    inrange = pl.col("lowerlevel").is_between(0, dflevels.height - 1) & pl.col("upperlevel").is_between(
+        0, dflevels.height - 1
+    )
+    ndiscarded = dftransitions.filter(~inrange).height
+    if ndiscarded > 0:
+        artisatomic.log_and_print(
+            flog,
+            f"WARNING: Discarded {ndiscarded} transitions of {ionstr} that reference levels outside"
+            f" 0..{dflevels.height - 1}",
+        )
+        dftransitions = dftransitions.filter(inrange)
 
     # some files give the initial state first, so a row can carry the higher level in the Lower
     # column. Swap those rows into energy order: the merge and the output want lowerlevel first.

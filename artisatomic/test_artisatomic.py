@@ -1805,16 +1805,19 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     )
     transheader = header + " Lower Upper A Type\n"
     (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
-    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n")
+    # the row to level 9 references a level that the levels file does not list: discard it
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n")
     # the E2 row is reversed on purpose: it must swap and then merge with the M1 row
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 E2\n")
 
     from artisatomic import readfloers25data
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    flog = io.StringIO()
     _, dflevels, dftransitions, counts = readfloers25data.read_levels_and_transitions(
-        57, 2, io.StringIO(), calibrated=True, withforbidden=True
+        57, 2, flog, calibrated=True, withforbidden=True
     )
+    assert "Discarded 1 transitions" in flog.getvalue()
 
     assert dflevels.height == 3
     rows = {
