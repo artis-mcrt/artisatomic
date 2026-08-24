@@ -221,26 +221,29 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
-def read_lines_check_encoding(filename: str | Path) -> list[str]:
-    """Read a text data file into its lines, and rewrite the file as utf-8 if it is not utf-8.
+def rewrite_file_as_utf8(filename: str | Path) -> bool:
+    """Rewrite a data file as utf-8 if it is not utf-8, and say whether it was rewritten.
 
     CMFGEN writes an author's name with an accent, which leaves a few of its files in
-    iso-8859-1. Such a file is converted once, in place, so that every later read gets utf-8
-    and no reader needs to know which files those are.
+    iso-8859-1. Neither Python nor polars reads such a file, so a reader that meets one
+    converts it once, in place, and reads it again.
     """
     from xopen import xopen
 
     filepath = find_file_check_extension_or_raise(filename)
-    try:
-        with xopen(filepath, encoding="utf-8") as fin:
-            return fin.readlines()
-    except UnicodeDecodeError:
-        print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
-
     with xopen(filepath, "rb") as fin:
-        # every byte is a character in iso-8859-1, so this decode cannot fail
-        text = fin.read().decode("iso-8859-1")
+        filebytes = fin.read()
 
+    try:
+        filebytes.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    else:
+        return False
+
+    print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
+    # every byte is a character in iso-8859-1, so this decode cannot fail
+    text = filebytes.decode("iso-8859-1")
     try:
         with xopen(filepath, "wt", encoding="utf-8") as fout:
             fout.write(text)
@@ -252,10 +255,7 @@ def read_lines_check_encoding(filename: str | Path) -> list[str]:
         )
         raise RuntimeError(msg) from exc
 
-    # read the file again rather than split the text here: str.splitlines() breaks a line at a
-    # form feed as well, which one CMFGEN file holds, and readlines() does not
-    with xopen(filepath, encoding="utf-8") as fin:
-        return fin.readlines()
+    return True
 
 
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:

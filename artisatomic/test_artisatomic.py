@@ -28,7 +28,7 @@ from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 from artisatomic import write_phixs_data
-from artisatomic.base import read_lines_check_encoding
+from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import scan_file_lines
 
 
@@ -1371,27 +1371,26 @@ def test_scan_file_lines_reads_each_compressed_form(tmp_path):
         scan_file_lines(tmp_path / "notafile.txt")
 
 
-def test_read_lines_check_encoding_rewrites_an_iso_8859_1_file(tmp_path):
-    """A file that CMFGEN wrote in iso-8859-1 is read, and rewritten as utf-8 for later reads."""
-    # a form feed as well as an accent: str.splitlines() breaks a line at a form feed, and the
-    # file's own lines do not, so the converting read must give the lines that readlines() gives
-    text = "Reference: Galav\u00eds M.E. 1998\nsecond\x0cline\nthird\n"
+def test_rewrite_file_as_utf8_converts_an_iso_8859_1_file(tmp_path):
+    """A file that CMFGEN wrote in iso-8859-1 is rewritten as utf-8, and a utf-8 file is left."""
+    text = "Reference: Galav\u00eds M.E. 1998\nsecond line\n"
     filepath = tmp_path / "osc_data"
     filepath.write_bytes(text.encode("iso-8859-1"))
 
-    lines = read_lines_check_encoding(filepath)
+    assert rewrite_file_as_utf8(filepath)
+    assert filepath.read_bytes() == text.encode("utf-8")
+    assert filepath.read_text(encoding="utf-8") == text
 
-    assert lines == ["Reference: Galav\u00eds M.E. 1998\n", "second\x0cline\n", "third\n"]
-    assert filepath.read_bytes().decode("utf-8") == text
-    # the file is utf-8 now, so a later read gives the same lines without converting it again
-    assert read_lines_check_encoding(filepath) == lines
+    # the file is utf-8 now, so a second call has nothing to do and says so
+    assert not rewrite_file_as_utf8(filepath)
+    assert filepath.read_bytes() == text.encode("utf-8")
 
 
 def test_parse_transition_lines_reads_both_layouts():
     """A CMFGEN oscillator table is read whether or not it carries the last two columns."""
     withbars = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090D-03   2.599E+05     1-   2   |    |    |"
     withid = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090E-03   2.599E+05     1-   2       7"
-    dftransitions = rhd.parse_transition_lines([withbars, withid], Path("test_osc"))
+    dftransitions = rhd.parse_transition_lines(pl.LazyFrame({"line": [withbars, withid]}), Path("test_osc"))
 
     assert dftransitions.height == 2
     assert dftransitions["namefrom"].to_list() == ["3d6_a6De[9/2]"] * 2
@@ -1410,9 +1409,10 @@ def test_parse_transition_lines_stops_at_a_second_table():
     transition = "a-b   1.0E-01   2.0E-01   3.0E+03     1-   2       1"
     lines = [transition, "   Oscillator strengths for Fe2", transition]
 
-    assert rhd.parse_transition_lines(lines, Path("test_osc")).height == 1
+    assert rhd.parse_transition_lines(pl.LazyFrame({"line": lines}), Path("test_osc")).height == 1
     # a file that ends at the table title leaves no line to read
-    assert rhd.parse_transition_lines([], Path("test_osc")).height == 0
+    emptyframe = pl.LazyFrame({"line": []}, schema={"line": pl.String})
+    assert rhd.parse_transition_lines(emptyframe, Path("test_osc")).height == 0
 
 
 def test_parse_gfall_collapses_label_whitespace():

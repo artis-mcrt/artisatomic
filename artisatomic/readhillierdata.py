@@ -18,8 +18,9 @@ import artisatomic
 from artisatomic.base import elsymbols
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
-from artisatomic.base import read_lines_check_encoding
+from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
+from artisatomic.base import scan_file_lines
 from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
@@ -343,7 +344,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     return (twosplusone, l, parity)
 
 
-def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFrame:
+def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFrame:
     """Read the oscillator strengths table of a CMFGEN file into a transition frame.
 
     A transition line names its two levels, and a level name can hold a dash. The line is
@@ -354,9 +355,6 @@ def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFram
     The file marks no end of the table. A line that is not a transition, e.g. a title, gives
     parts that fit neither layout below, and the filter drops it.
     """
-    # an empty list gives a null column, which no string operation below accepts
-    dflines = pl.LazyFrame({"line": translines}, schema={"line": pl.String})
-
     # only the first table is read, and a spelling mistake in a title must not hide the second one
     tablestart = (
         dflines.with_row_index()
@@ -433,6 +431,34 @@ def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFram
 def read_levels_and_transitions(
     atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+    """Read one ion, and rewrite its file as utf-8 first if CMFGEN wrote it in iso-8859-1.
+
+    Python raises a UnicodeDecodeError for such a file and polars raises a ComputeError, so
+    both reads of read_levels_and_transitions_from_file() are covered here. The file is
+    converted once, so the second call reads it.
+    """
+    try:
+        return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+    except (UnicodeDecodeError, pl.exceptions.ComputeError):
+        # a failure that the encoding does not explain belongs to the caller
+        if not rewrite_file_as_utf8(hillier_osc_filename(atomic_number, ion_stage)):
+            raise
+
+    return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+
+
+def hillier_osc_filename(atomic_number: int, ion_stage: int) -> Path:
+    """Path of one ion's CMFGEN oscillator file, which holds its levels and its transitions."""
+    return Path(
+        hillier_ion_folder(atomic_number, ion_stage),
+        ions_data[atomic_number, ion_stage].folder,
+        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
+    )
+
+
+def read_levels_and_transitions_from_file(
+    atomic_number: int, ion_stage: int, flog
+) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
     """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
 
     Returns the ionization energy in eV, a level frame, a transition frame, and the number of
@@ -469,11 +495,7 @@ def read_levels_and_transitions(
             transition_count_of_level_name,
         )
 
-    filename = Path(
-        hillier_ion_folder(atomic_number, ion_stage),
-        ions_data[atomic_number, ion_stage].folder,
-        ions_data[atomic_number, ion_stage].levelstransitionsfilename,
-    )
+    filename = hillier_osc_filename(atomic_number, ion_stage)
 
     artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
 
@@ -481,12 +503,18 @@ def read_levels_and_transitions(
     levels_without_parity: list[str] = []
 
     prev_line = ""
-    fhillierosc = iter(read_lines_check_encoding(filename))
+    # threads=0 decompresses in this process. The default starts a process that writes into a
+    # pipe, which reports a broken pipe when the reader stops at the end of the level table.
+    fhillierosc = artisatomic.xopen_check_extension(filename, threads=0)
+    # the two loops below read the header and the levels. polars reads the transitions, and
+    # starts at the line after the last line that they read.
+    linesread = 0
     expected_energy_levels = -1
     expected_transitions = -1
     row_format_energy_level = None
     format_date = "NOT_SPECIFIED"
     for line in fhillierosc:
+        linesread += 1
         row = line.split()
         if (
             re.match(r"x*\*{5,}", line) and prev_line
@@ -548,6 +576,7 @@ def read_levels_and_transitions(
         raise ValueError(msg)
 
     for line in fhillierosc:
+        linesread += 1
         row = line.split()
         # check for right number of columns and that are all numbers except first column
         if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
@@ -612,11 +641,11 @@ def read_levels_and_transitions(
         msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
         raise ValueError(msg)
 
-    # the rest of the file holds the transitions, which are parsed as a frame rather than
-    # line by line: one ion carries half a million of them
-    translines = list(fhillierosc)
+    fhillierosc.close()
 
-    dftransitions = parse_transition_lines(translines, filename)
+    # the rest of the file holds the transitions, which polars reads rather than Python: one ion
+    # carries half a million of them
+    dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
 
     for namecolumn in ("namefrom", "nameto"):
         for levelname, count in dftransitions[namecolumn].value_counts().iter_rows():
