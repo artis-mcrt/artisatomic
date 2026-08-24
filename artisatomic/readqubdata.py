@@ -14,6 +14,7 @@ import polars as pl
 
 import artisatomic
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import scan_file_lines
 from artisatomic.levelnames import lchars
 
 tyndall_co3_path = (
@@ -403,18 +404,22 @@ def read_qub_photoionizations(
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
             artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
             ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
-            # one space separates the columns of these files, and polars rejects a row whose
-            # column count differs, so a file with another layout fails rather than misreads
+            # Any run of whitespace separates the columns, as it did for the pandas read that
+            # this replaces. A row with too few parts, or a part that is not a number, raises.
             photdata = (
-                pl.scan_csv(filename, separator=" ", has_header=False).select(pl.nth(range(ntargets + 1))).collect()
+                scan_file_lines(filename)
+                .select(parts=pl.col("line").str.extract_all(r"\S+"))
+                .select(
+                    pl.col("parts").list.get(column).cast(pl.Float64).alias(str(column))
+                    for column in range(ntargets + 1)
+                )
+                .collect()
             )
             phixstables = {}
 
             # column n of the file holds the cross section to the upper ion's level id n - 1
             for targetcolumn in range(1, ntargets + 1):
-                phixstable = (
-                    photdata.filter(pl.nth(targetcolumn) > 0.0).select(pl.nth(0), pl.nth(targetcolumn)).to_numpy()
-                )
+                phixstable = photdata.filter(pl.col(str(targetcolumn)) > 0.0).select("0", str(targetcolumn)).to_numpy()
                 if len(phixstable) == 0:
                     # nothing positive in this column, so there is no table to downsample. Skipping
                     # here leaves the target out of the fractions below, which is what a zero cross

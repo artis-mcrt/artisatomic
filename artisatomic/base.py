@@ -219,8 +219,8 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     """Read a text file into a lazy frame that holds one line in each row of a "line" column.
 
-    A fixed-width or a space-aligned file is much faster to cut into columns with str.slice() or
-    str.split() than to parse with pandas read_fwf(), or read_csv() with a regular expression
+    polars cuts the columns out of every line at once, with str.slice() or str.extract_all().
+    That is much faster than pandas read_fwf(), or read_csv() with a regular expression
     separator. Neither of those has a C parser, so each reads one line at a time in Python.
 
     The caller names the plain file, as for xopen_check_extension(). polars reads a plain, a

@@ -345,16 +345,16 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
 def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFrame:
     """Read the oscillator strengths table of a CMFGEN file into a transition frame.
 
-    A transition line names its two levels, and a level name can hold a dash, so the line is cut
-    at its first and its last dash: the first separates the two names, and the last separates the
-    two level numbers of the "i-j" column. The parts between those two dashes keep their dashes,
-    which the exponents of the f and A values need.
+    A transition line names its two levels, and a level name can hold a dash. The line is
+    therefore cut at its first dash and at its last dash. The first dash separates the two
+    names, and the last one separates the two level numbers of the "i-j" column. The parts
+    between them keep their dashes, which the exponents of the f and the A values need.
 
-    A line that is not a transition, e.g. a title or a line of stars, gives parts that do not fit
-    the two layouts below and is dropped, as in the file's own format there is no marker for the
-    end of the table.
+    The file marks no end of the table. A line that is not a transition, e.g. a title, gives
+    parts that fit neither layout below, and the filter drops it.
     """
-    dflines = pl.LazyFrame({"line": translines})
+    # an empty list gives a null column, which no string operation below accepts
+    dflines = pl.LazyFrame({"line": translines}, schema={"line": pl.String})
 
     # only the first table is read, and a spelling mistake in a title must not hide the second one
     tablestart = (
@@ -365,7 +365,7 @@ def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFram
         .collect()
     )
     if tablestart.height > 0:
-        dflines = pl.LazyFrame({"line": translines[: tablestart.item()]})
+        dflines = dflines.head(tablestart.item())
 
     # a line with no dash is doubled, as the parts of the empty middle are joined either side of it
     linewithspaces = (
@@ -420,6 +420,7 @@ def parse_transition_lines(translines: list[str], filename: Path) -> pl.DataFram
         dftransitions.select("hilliertransitionid")
         .with_row_index("entrynumber", offset=1)
         .filter(pl.col("hilliertransitionid") != pl.col("entrynumber"))
+        # with_row_index() puts its column first, so the two are put back in the unpacked order
         .select("hilliertransitionid", "entrynumber")
         .iter_rows()
     ):

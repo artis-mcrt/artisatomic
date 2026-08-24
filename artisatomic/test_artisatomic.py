@@ -4,6 +4,7 @@
 import io
 import operator
 import typing as t
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -27,6 +28,7 @@ from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 from artisatomic import write_phixs_data
+from artisatomic.base import scan_file_lines
 
 
 def test_interpret_term():
@@ -1344,6 +1346,56 @@ def test_write_adata_level_comment():
     spaced_line = buf.getvalue().splitlines()[1]
     assert spaced_line.endswith(" " + spacedlevelname)
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
+
+
+def test_scan_file_lines_reads_each_compressed_form(tmp_path):
+    """Every compression form of a file gives the same lines, and skip_lines drops the header."""
+    from xopen import xopen
+
+    text = "first\nsecond\n\nfourth\n"
+    plainpath = tmp_path / "lines.txt"
+    plainpath.write_text(text)
+    for suffix in (".gz", ".xz", ".zst"):
+        with xopen(f"{plainpath}{suffix}", "wt", encoding="utf-8") as fout:
+            fout.write(text)
+
+    # polars reads a plain, a gzip and a zstd file itself, and xopen decompresses the xz form
+    for suffix in ("", ".gz", ".xz", ".zst"):
+        lines = scan_file_lines(f"{plainpath}{suffix}").collect()["line"].to_list()
+        assert lines == ["first", "second", None, "fourth"], suffix
+        assert scan_file_lines(f"{plainpath}{suffix}", skip_lines=2).collect()["line"].to_list() == [None, "fourth"]
+
+    # the caller names the plain file, so a name with no file of any form is an error
+    with pytest.raises(FileNotFoundError):
+        scan_file_lines(tmp_path / "notafile.txt")
+
+
+def test_parse_transition_lines_reads_both_layouts():
+    """A CMFGEN oscillator table is read whether or not it carries the last two columns."""
+    withbars = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090D-03   2.599E+05     1-   2   |    |    |"
+    withid = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090E-03   2.599E+05     1-   2       7"
+    dftransitions = rhd.parse_transition_lines([withbars, withid], Path("test_osc"))
+
+    assert dftransitions.height == 2
+    assert dftransitions["namefrom"].to_list() == ["3d6_a6De[9/2]"] * 2
+    assert dftransitions["nameto"].to_list() == ["3d6_a4De[7/2]"] * 2
+    # the files write an exponent as D as well as E
+    assert dftransitions["A"].to_list() == [2.090e-3, 2.090e-3]
+    assert dftransitions["i"].to_list() == [1, 1]
+    assert dftransitions["j"].to_list() == [2, 2]
+    # the row with no id column is numbered by its position, and the other keeps the file's id
+    assert dftransitions["hilliertransitionid"].to_list() == [1, 7]
+    assert dftransitions.schema == rhd.hillier_transition_schema
+
+
+def test_parse_transition_lines_stops_at_a_second_table():
+    """Only the first table is read, and a table with no line at all gives an empty frame."""
+    transition = "a-b   1.0E-01   2.0E-01   3.0E+03     1-   2       1"
+    lines = [transition, "   Oscillator strengths for Fe2", transition]
+
+    assert rhd.parse_transition_lines(lines, Path("test_osc")).height == 1
+    # a file that ends at the table title leaves no line to read
+    assert rhd.parse_transition_lines([], Path("test_osc")).height == 0
 
 
 def test_parse_gfall_collapses_label_whitespace():

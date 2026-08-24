@@ -36,8 +36,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
-    # the header holds at most 6 lines before the "# Z ion_stage" line, and 5 lines after it
-    headerlines = scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"].to_list()
+    # the header holds at most 6 lines before the "# Z ion_stage" line, and 5 lines after it.
+    # A blank line reads as a null, which the tests below cannot strip.
+    headerlines = [line or "" for line in scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"]]
 
     for linenumber, readlinein in enumerate(headerlines[:7]):
         if linenumber < 3:
@@ -90,6 +91,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             levelname=pl.format("{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration")),
             levelid=pl.col("levelid").cast(pl.Int64) - 1,
         )
+        # an empty line holds no level, and gives a null in every column. The count test below
+        # rejects the file if such a line falls inside the section rather than after it.
+        .filter(pl.col("levelid").is_not_null())
         .collect()
     )
 
@@ -103,6 +107,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             upperlevel=pl.col("line").str.slice(0, 7).str.strip_chars().cast(pl.Int64) - 1,
             g_u_times_A=pl.col("line").str.slice(30, 13).str.strip_chars().cast(pl.Float64),
         )
+        # the file may end with a blank line, which holds no transition
+        .filter(pl.col("lowerlevel").is_not_null())
         .collect()
     )
 
