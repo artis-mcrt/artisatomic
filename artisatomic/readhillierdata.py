@@ -18,6 +18,7 @@ import artisatomic
 from artisatomic.base import elsymbols
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import read_lines_check_encoding
 from artisatomic.base import ryd_to_ev
 from artisatomic.levelnames import lchars
 
@@ -480,141 +481,140 @@ def read_levels_and_transitions(
     levels_without_parity: list[str] = []
 
     prev_line = ""
-    # TODO: Would be nice to have a way of dealing with different encodings automatically, but this seems to be the only case so probably not worth it
-    with artisatomic.xopen_check_extension(
-        filename, encoding="iso-8859-1" if atomic_number == 12 and ion_stage == 8 else "utf-8"
-    ) as fhillierosc:
-        expected_energy_levels = -1
-        expected_transitions = -1
-        row_format_energy_level = None
-        format_date = "NOT_SPECIFIED"
-        for line in fhillierosc:
-            row = line.split()
-            if (
-                re.match(r"x*\*{5,}", line) and prev_line
-            ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
-                if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
-                    print("Fe VIII has a bespoke header")
-                    row_format_energy_level = "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
-                else:
-                    headerline = prev_line
-                    headerline = headerline.replace("ID", "hillierlevelid")
-                    headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
-                    headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
-                    headerline = headerline.replace("eV", "thresholdenergyev")
-                    headerline = headerline.replace("Lam(A)", "lambdaangstrom")
-                    headerline = headerline.replace("ARAD", "arad")
-                    row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
-
-                print("File contains columns:")
-                print(f"  {row_format_energy_level}")
-            elif line.rstrip().endswith("!Number of energy levels"):
-                expected_energy_levels = int(row[0])
-                artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
-            elif line.rstrip().endswith("!Number of transitions"):
-                expected_transitions = int(row[0])
-                artisatomic.log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
-            elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
-                format_date = row[0]
-                print(f"Format date: {format_date}")
-
-            if expected_energy_levels >= 0 and not row:
-                break
-            prev_line = line.strip()
-
-        if not row_format_energy_level:
-            # the files that predate the header also predate the format date line
-            if format_date != "NOT_SPECIFIED":
-                msg = f"{filename} gives a format date of {format_date} but carries no column header"
-                raise ValueError(msg)
-            row_format_energy_level = hillier_rowformat_noheader
-            print("File has no column header, assuming columns:")
-            print(f"  {row_format_energy_level}")
-
-        # the file columns vary by ion, so find where the ones we keep sit in each row
-        headercolumns = row_format_energy_level.split()
-        colindex = {colname: index for index, colname in enumerate(headercolumns)}
-        levelcolcount = len(headercolumns)
-        if len(colindex) != levelcolcount:
-            # a repeated header token would silently shadow an earlier column's position
-            msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
-            raise ValueError(msg)
-        missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
-        if missingcolumns:
-            msg = (
-                f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
-                f" it has {row_format_energy_level}"
-            )
-            raise ValueError(msg)
-
-        for line in fhillierosc:
-            row = line.split()
-            # check for right number of columns and that are all numbers except first column
-            if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
-                hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
-                levelname = row[colindex["levelname"]]
-                energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
-                lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
-                (twosplusone, _l, parity) = get_term_as_tuple(levelname)
-                ismerged = parity < 0
-                isjjcoupled = "{" in levelname and "}" in levelname
-
-                if ismerged:
-                    # No definite parity: a merged level, which is normal CMFGEN, or a name we
-                    # could not read. Null rather than a number, so that add_level_ids_forbidden()
-                    # cannot match it against another level's absent parity.
-                    parity = None
-                    levels_without_parity.append(levelname)
-
-                levelrows.append(
-                    HillierEnergyLevel(
-                        levelname=levelname,
-                        g=float(row[colindex["g"]]),
-                        energyabovegsinpercm=energyabovegsinpercm,
-                        lambdaangstrom=lambdaangstrom,
-                        hillierlevelid=hillierlevelid,
-                        parity=parity,
-                        j=get_level_j(levelname, g=float(row[colindex["g"]])),
-                    )
+    fhillierosc = iter(read_lines_check_encoding(filename))
+    expected_energy_levels = -1
+    expected_transitions = -1
+    row_format_energy_level = None
+    format_date = "NOT_SPECIFIED"
+    for line in fhillierosc:
+        row = line.split()
+        if (
+            re.match(r"x*\*{5,}", line) and prev_line
+        ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
+            if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
+                print("Fe VIII has a bespoke header")
+                row_format_energy_level = (
+                    "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
                 )
+            else:
+                headerline = prev_line
+                headerline = headerline.replace("ID", "hillierlevelid")
+                headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
+                headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
+                headerline = headerline.replace("eV", "thresholdenergyev")
+                headerline = headerline.replace("Lam(A)", "lambdaangstrom")
+                headerline = headerline.replace("ARAD", "arad")
+                row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
 
-                # -1 indicates that the term could not be interpreted. JJ-coupled names have no
-                # LS term by construction and merged levels are summarised once below, so neither
-                # is worth a line here; what is left is a name we expected to read and could not.
-                if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                    artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
+            print("File contains columns:")
+            print(f"  {row_format_energy_level}")
+        elif line.rstrip().endswith("!Number of energy levels"):
+            expected_energy_levels = int(row[0])
+            artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
+        elif line.rstrip().endswith("!Number of transitions"):
+            expected_transitions = int(row[0])
+            artisatomic.log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+        elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
+            format_date = row[0]
+            print(f"Format date: {format_date}")
 
-                # if this is the ground state
-                if energyabovegsinpercm < 1.0:
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
+        if expected_energy_levels >= 0 and not row:
+            break
+        prev_line = line.strip()
 
-                if hillierlevelid != len(levelrows):
-                    artisatomic.log_and_print(
-                        flog,
-                        f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
-                    )
-                    sys.exit(1)
-
-            if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
-                break
-
-        artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
-        if levels_without_parity:
-            # Normal for ions with merged levels, so this is a count and a sample rather than a
-            # warning per level: H I and He II are merged all the way down.
-            artisatomic.log_and_print(
-                flog,
-                f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
-                f" (every transition touching one is treated as permitted), e.g."
-                f" {', '.join(levels_without_parity[:5])}",
-            )
-        if len(levelrows) != expected_energy_levels:
-            msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
+    if not row_format_energy_level:
+        # the files that predate the header also predate the format date line
+        if format_date != "NOT_SPECIFIED":
+            msg = f"{filename} gives a format date of {format_date} but carries no column header"
             raise ValueError(msg)
+        row_format_energy_level = hillier_rowformat_noheader
+        print("File has no column header, assuming columns:")
+        print(f"  {row_format_energy_level}")
 
-        # the rest of the file holds the transitions, which are parsed as a frame rather than
-        # line by line: one ion carries half a million of them
-        translines = fhillierosc.readlines()
+    # the file columns vary by ion, so find where the ones we keep sit in each row
+    headercolumns = row_format_energy_level.split()
+    colindex = {colname: index for index, colname in enumerate(headercolumns)}
+    levelcolcount = len(headercolumns)
+    if len(colindex) != levelcolcount:
+        # a repeated header token would silently shadow an earlier column's position
+        msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
+        raise ValueError(msg)
+    missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
+    if missingcolumns:
+        msg = (
+            f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
+            f" it has {row_format_energy_level}"
+        )
+        raise ValueError(msg)
+
+    for line in fhillierosc:
+        row = line.split()
+        # check for right number of columns and that are all numbers except first column
+        if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
+            hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
+            levelname = row[colindex["levelname"]]
+            energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
+            lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
+            (twosplusone, _l, parity) = get_term_as_tuple(levelname)
+            ismerged = parity < 0
+            isjjcoupled = "{" in levelname and "}" in levelname
+
+            if ismerged:
+                # No definite parity: a merged level, which is normal CMFGEN, or a name we
+                # could not read. Null rather than a number, so that add_level_ids_forbidden()
+                # cannot match it against another level's absent parity.
+                parity = None
+                levels_without_parity.append(levelname)
+
+            levelrows.append(
+                HillierEnergyLevel(
+                    levelname=levelname,
+                    g=float(row[colindex["g"]]),
+                    energyabovegsinpercm=energyabovegsinpercm,
+                    lambdaangstrom=lambdaangstrom,
+                    hillierlevelid=hillierlevelid,
+                    parity=parity,
+                    j=get_level_j(levelname, g=float(row[colindex["g"]])),
+                )
+            )
+
+            # -1 indicates that the term could not be interpreted. JJ-coupled names have no
+            # LS term by construction and merged levels are summarised once below, so neither
+            # is worth a line here; what is left is a name we expected to read and could not.
+            if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
+                artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
+
+            # if this is the ground state
+            if energyabovegsinpercm < 1.0:
+                hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
+
+            if hillierlevelid != len(levelrows):
+                artisatomic.log_and_print(
+                    flog,
+                    f"Hillier levels mismatch: id {len(levelrows):d} found at entry number {hillierlevelid:d}",
+                )
+                sys.exit(1)
+
+        if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
+            break
+
+    artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
+    if levels_without_parity:
+        # Normal for ions with merged levels, so this is a count and a sample rather than a
+        # warning per level: H I and He II are merged all the way down.
+        artisatomic.log_and_print(
+            flog,
+            f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
+            f" (every transition touching one is treated as permitted), e.g."
+            f" {', '.join(levels_without_parity[:5])}",
+        )
+    if len(levelrows) != expected_energy_levels:
+        msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
+        raise ValueError(msg)
+
+    # the rest of the file holds the transitions, which are parsed as a frame rather than
+    # line by line: one ion carries half a million of them
+    translines = list(fhillierosc)
 
     dftransitions = parse_transition_lines(translines, filename)
 

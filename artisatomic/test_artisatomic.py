@@ -28,6 +28,7 @@ from artisatomic import readtanakajpltdata
 from artisatomic import reduce_phixs_tables_worker
 from artisatomic import write_adata
 from artisatomic import write_phixs_data
+from artisatomic.base import read_lines_check_encoding
 from artisatomic.base import scan_file_lines
 
 
@@ -1368,6 +1369,22 @@ def test_scan_file_lines_reads_each_compressed_form(tmp_path):
     # the caller names the plain file, so a name with no file of any form is an error
     with pytest.raises(FileNotFoundError):
         scan_file_lines(tmp_path / "notafile.txt")
+
+
+def test_read_lines_check_encoding_rewrites_an_iso_8859_1_file(tmp_path):
+    """A file that CMFGEN wrote in iso-8859-1 is read, and rewritten as utf-8 for later reads."""
+    # a form feed as well as an accent: str.splitlines() breaks a line at a form feed, and the
+    # file's own lines do not, so the converting read must give the lines that readlines() gives
+    text = "Reference: Galav\u00eds M.E. 1998\nsecond\x0cline\nthird\n"
+    filepath = tmp_path / "osc_data"
+    filepath.write_bytes(text.encode("iso-8859-1"))
+
+    lines = read_lines_check_encoding(filepath)
+
+    assert lines == ["Reference: Galav\u00eds M.E. 1998\n", "second\x0cline\n", "third\n"]
+    assert filepath.read_bytes().decode("utf-8") == text
+    # the file is utf-8 now, so a later read gives the same lines without converting it again
+    assert read_lines_check_encoding(filepath) == lines
 
 
 def test_parse_transition_lines_reads_both_layouts():

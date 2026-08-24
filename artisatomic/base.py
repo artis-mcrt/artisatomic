@@ -221,6 +221,43 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
+def read_lines_check_encoding(filename: str | Path) -> list[str]:
+    """Read a text data file into its lines, and rewrite the file as utf-8 if it is not utf-8.
+
+    CMFGEN writes an author's name with an accent, which leaves a few of its files in
+    iso-8859-1. Such a file is converted once, in place, so that every later read gets utf-8
+    and no reader needs to know which files those are.
+    """
+    from xopen import xopen
+
+    filepath = find_file_check_extension_or_raise(filename)
+    try:
+        with xopen(filepath, encoding="utf-8") as fin:
+            return fin.readlines()
+    except UnicodeDecodeError:
+        print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
+
+    with xopen(filepath, "rb") as fin:
+        # every byte is a character in iso-8859-1, so this decode cannot fail
+        text = fin.read().decode("iso-8859-1")
+
+    try:
+        with xopen(filepath, "wt", encoding="utf-8") as fout:
+            fout.write(text)
+    except OSError as exc:
+        msg = (
+            f"Could not rewrite {filepath} as utf-8: {exc}\n"
+            f"Convert the file by hand, then run this again:\n"
+            f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
+        )
+        raise RuntimeError(msg) from exc
+
+    # read the file again rather than split the text here: str.splitlines() breaks a line at a
+    # form feed as well, which one CMFGEN file holds, and readlines() does not
+    with xopen(filepath, encoding="utf-8") as fin:
+        return fin.readlines()
+
+
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     """Read a text file into a lazy frame that holds one line in each row of a "line" column.
 
