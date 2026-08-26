@@ -1,7 +1,6 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
-from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -577,15 +576,18 @@ def write_phixs_data(
     # Not an assert: this guards written output and must survive python -O.
     for lowerlevelid in levelids_to_write:
         targetlist = photoionization_targetfractions[lowerlevelid]
-        duplicates = [
-            upperionlevelid
-            for upperionlevelid, count in Counter(upperionlevelid for upperionlevelid, _ in targetlist).items()
-            if count > 1
-        ]
-        if duplicates:
+        upperionlevelids = [upperionlevelid for upperionlevelid, _ in targetlist]
+        if len(upperionlevelids) != len(set(upperionlevelids)):
+            duplicates = sorted(
+                {
+                    upperionlevelid
+                    for index, upperionlevelid in enumerate(upperionlevelids)
+                    if upperionlevelid in upperionlevelids[:index]
+                }
+            )
             msg = (
                 f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target level ids"
-                f" {sorted(duplicates)} occur more than one time ({targetlist})"
+                f" {duplicates} occur more than one time ({targetlist})"
             )
             raise ValueError(msg)
 
