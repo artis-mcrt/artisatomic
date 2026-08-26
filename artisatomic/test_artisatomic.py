@@ -1545,25 +1545,23 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
 
 
 def test_get_photoiontargetfractions_merges_targets_that_match_one_level():
-    """F II names three routes, of which two match no F III level name and fall back to the ground state."""
+    """A matched route and a route that falls back to the ground state can come to the same level."""
     from artisatomic import readhillierdata
 
-    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p4_3Pe[2]"], "g": [5.0]})
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["3s2_3p6_4s_2Se[1/2]"], "g": [2.0]})
     dfenergy_levels_upperion = pl.DataFrame(
         {
-            "levelid": [0, 1, 2],
-            "levelname": ["2s2_2p3_4So[3/2]", "2s2_2p3_2Do[5/2]", "2s2_2p3_2Do[3/2]"],
-            "g": [4.0, 6.0, 4.0],
+            "levelid": [0, 1],
+            "levelname": ["3s2_3p6_1Se[0]", "3s2_3p5_4s_3Po[2]"],
+            "g": [1.0, 5.0],
         }
     )
-    # the second and the third route carry the parentheses that the level names do not have
-    targetconfigs: list[list[tuple[str, float]] | None] = [
-        [("2s2_2p3_4So", 0.5), ("2s2_2p3(2Do)", 0.3), ("2s2_2p3(2Po)", 0.2)]
-    ]
+    # the first route matches the ground state, and the second matches nothing and falls back to it
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1Se", 0.7), ("3s2_3p6_1So", 0.3)]]
 
     targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
 
-    # one entry only, with the three fractions added, and not the same target three times
+    # one entry only, with the two fractions added, and not the same target two times
     assert targetlist == [[(0, 1.0)]]
 
 
@@ -1584,6 +1582,95 @@ def test_get_photoiontargetfractions_shares_a_target_over_its_j_levels():
     targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
 
     assert targetlist == [[(1, 0.6), (2, 0.4)]]
+
+
+def test_get_photoiontargetfractions_matches_a_parenthesised_target():
+    """F II names '2s2_2p3(2Do)' where F III has '2s2_2p3_2Do', so the separators must not decide."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p4_3Pe[2]"], "g": [5.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "levelname": ["2s2_2p3_4So[3/2]", "2s2_2p3_2Do[5/2]", "2s2_2p3_2Do[3/2]"],
+            "g": [4.0, 6.0, 4.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)", 1.0)]]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    # the two J levels of 2Do, by statistical weight, and not the ground state fallback
+    assert targetlist == [[(1, 0.6), (2, 0.4)]]
+
+
+def test_get_photoiontargetfractions_matches_a_target_with_no_separators():
+    """O IV names '2s2p3Po' where O V has '2s_2p_3Po'."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p_2Po[1/2]"], "g": [2.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "levelname": ["2s2_1Se[0]", "2s_2p_3Po[1]"],
+            "g": [1.0, 3.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2p3Po", 1.0)]]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    assert targetlist == [[(1, 1.0)]]
+
+
+def test_get_photoiontargetfractions_keeps_the_ground_state_for_a_different_term():
+    """K I names '3s2_3p6_1So' where K II has '3s2_3p6_1Se'. The parity differs, so it must not match."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["3s2_3p6_4s_2Se[1/2]"], "g": [2.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "levelname": ["3s2_3p6_1Se[0]", "3s2_3p5_4s_3Po[2]"],
+            "g": [1.0, 5.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1So", 1.0)]]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    assert targetlist == [[(0, 1.0)]]
+
+
+def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
+    """Two upper ion names that differ in their separators alone give no target that can be shared."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["3d7_a4Fe[9/2]"], "g": [10.0]})
+    # the two names are different levels, but they become one string with the separators removed
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "levelname": ["3d6(5D)4s_a6De[9/2]", "3d6_5D_4s_a6De[9/2]"],
+            "g": [10.0, 10.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("3d6(5D)4sa6De", 1.0)]]
+
+    with pytest.raises(ValueError, match="matched more than one level name"):
+        readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+
+def test_strip_name_separators():
+    """The underscore and the parentheses go; nothing else changes."""
+    from artisatomic.readhillierdata import strip_name_separators
+
+    assert strip_name_separators("2s2_2p3(2Do)") == "2s22p32Do"
+    assert strip_name_separators("2s2_2p3_2Do") == "2s22p32Do"
+    assert strip_name_separators("3d6(5D)4sa6De") == "3d65D4sa6De"
+    assert strip_name_separators("3d6(5D)4s_a6De") == "3d65D4sa6De"
+    # a different term stays different
+    assert strip_name_separators("3s2_3p6_1So") != strip_name_separators("3s2_3p6_1Se")
 
 
 def test_write_phixs_data_rejects_a_duplicated_target():
