@@ -134,7 +134,9 @@ def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: a
         ]
 
         if not args.nophixs:
-            resolve_photoion_targetfractions(iondatalist)
+            resolve_photoion_targetfractions(
+                iondatalist, atomic_number, Path(args.output_folder, args.output_folder_logs)
+            )
 
         write_output_files(atomic_number, iondatalist, args)
 

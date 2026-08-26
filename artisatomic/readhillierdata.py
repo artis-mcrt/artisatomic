@@ -1628,11 +1628,11 @@ def strip_name_separators(levelname: str) -> str:
     """Remove the characters that a phot file and an oscillator file put between the parts of a name.
 
     A phot file does not always separate the parts of a target name the way the oscillator file of
-    the upper ion does. F II names a route '2s2_2p3(2Do)' where F III has '2s2_2p3_2Do', and O IV
+    the upper ion does. F II names a target '2s2_2p3(2Do)' where F III has '2s2_2p3_2Do', and O IV
     names '2s2p3Po' where O V has '2s_2p_3Po'. The underscore and the parentheses carry no other
-    meaning in these names, so a comparison with them removed still matches the shells and the term
-    exactly. Over the whole CMFGEN corpus no two level names of one ion become the same string, and
-    get_photoiontargetfractions() rejects a match that spans more than one name.
+    meaning in these names. A comparison with them removed still matches the shells and the term
+    exactly. Over the whole CMFGEN corpus, no two level names of one ion become the same string.
+    get_photoiontargetfractions() rejects a name part that matches more than one level name.
     """
     return levelname.replace("_", "").replace("(", "").replace(")", "")
 
@@ -1641,37 +1641,47 @@ def get_photoiontargetfractions(
     dfenergy_levels,
     dfenergy_levels_upperion,
     hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
+    flog=None,
 ) -> list[list[tuple[int, float]]]:
     """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
 
     Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. Each upper
     ion level occurs one time only: two target configurations that come to the same level get one
     entry with the summed fraction. A target configuration that names several J-split levels of
-    the upper ion is shared over them in proportion to their statistical weights. A name that
-    matches no level is tried again with the separators removed, and falls back to the upper ion's
-    ground state only if that fails as well. Levels with no cross-section data (None) take that
-    same ground state.
+    the upper ion shares its fraction over them in proportion to their statistical weights. For a
+    name that matches no level, the comparison runs again with the separators removed. If that
+    also fails, the target becomes the upper ion's ground state. A level with no cross-section
+    data (None) keeps an empty target list, and write_phixs_data() skips it.
 
-    The second comparison must come to one name. A match that spans more than one name is
-    ambiguous, and this raises a ValueError rather than share the fraction over the two names.
+    In the second comparison, each part of the name must come to one level name of the upper ion.
+    A part that matches more than one name is ambiguous, and this function raises a ValueError.
     """
+
+    def logprint(strout: str) -> None:
+        """Write to stdout, and to the ion log when the caller gave one."""
+        if flog is None:
+            print(strout)
+        else:
+            artisatomic.log_and_print(flog, strout)
+
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
-    targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
+    targetlist_of_targetconfig: dict[str, list[tuple[int, float]]] = {}
 
     if hillier_photoion_targetconfigs is None:
         return targetlist
 
-    # the names are matched per target configuration, not per level, so pull them out one time
+    # The comparison is per target configuration, not per level. Pull the names out one time.
     uppernamenoj_of_levelid = [levelname.split("[")[0] for levelname in dfenergy_levels_upperion["levelname"].to_list()]
+    strippednames_of_levelid = [strip_name_separators(levelname) for levelname in uppernamenoj_of_levelid]
 
     for lowerlevelid in range(dfenergy_levels.height):
         targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelid]
         if targetconfig_fractions is None:
             continue  # photoionisation flagged as not available
 
-        # keyed by upper ion level id because two target configurations of one level can come to
-        # the same upper ion level, and ARTIS gives each entry of the list its own target
-        fraction_of_upperlevelid: dict[int, float] = {}
+        # The dict key is the upper ion level id. Two target configurations of one level can come
+        # to the same upper ion level. ARTIS gives each entry of the list its own target.
+        fraction_of_upperlevelid: defaultdict[int, float] = defaultdict(float)
 
         for targetconfig, targetconfig_fraction in targetconfig_fractions:
             if targetconfig not in targetlist_of_targetconfig:
@@ -1684,51 +1694,59 @@ def get_photoiontargetfractions(
                     if upperlevelnamenoj in targetconfiglist
                 ]
                 if not upperionlevelids:
-                    # the two files do not always separate the parts of a name the same way, so
-                    # try again with the separators removed before the ground state is assumed
+                    # The two files do not always separate the parts of a name the same way.
+                    # Compare again with the separators removed before the ground state fallback.
                     targetconfiglist_stripped = [strip_name_separators(part) for part in targetconfiglist]
                     upperionlevelids = [
                         upperlevelid
-                        for upperlevelid, upperlevelnamenoj in enumerate(uppernamenoj_of_levelid)
-                        if strip_name_separators(upperlevelnamenoj) in targetconfiglist_stripped
+                        for upperlevelid, strippedname in enumerate(strippednames_of_levelid)
+                        if strippedname in targetconfiglist_stripped
                     ]
                     if upperionlevelids:
-                        matchednames = sorted({uppernamenoj_of_levelid[levelid] for levelid in upperionlevelids})
-                        # the fraction is shared over the matched levels by statistical weight,
-                        # which is correct only where they are the J levels of one name. Two names
-                        # that differ in their separators alone would split the route between two
-                        # different levels. No ion of the corpus has such a pair, and this keeps
-                        # that true. Not an assert: it guards written output and must survive -O.
-                        if len(matchednames) > 1:
-                            msg = (
-                                f"Photoionisation target '{targetconfig}' matched more than one level name of"
-                                f" the upper ion with the name separators removed: {matchednames}. The target"
-                                " is ambiguous, so the fraction cannot be shared over them."
+                        # The share by statistical weight is correct over the J levels of one
+                        # name, and over the names of a slash list. A part that matches two names
+                        # would split its fraction between two different levels. No ion of the
+                        # corpus has such a part, and this check keeps that true. Not an assert:
+                        # it guards written output and must survive -O.
+                        names_of_strippedname: defaultdict[str, set[str]] = defaultdict(set)
+                        for levelid in upperionlevelids:
+                            names_of_strippedname[strippednames_of_levelid[levelid]].add(
+                                uppernamenoj_of_levelid[levelid]
                             )
-                            raise ValueError(msg)
-                        print(
+                        for strippedpart, partnames in names_of_strippedname.items():
+                            if len(partnames) > 1:
+                                msg = (
+                                    f"Photoionisation target part '{strippedpart}' of '{targetconfig}' matched"
+                                    f" more than one level name of the upper ion with the name separators"
+                                    f" removed: {sorted(partnames)}. The part is ambiguous, so artisatomic"
+                                    " cannot share the fraction."
+                                )
+                                logprint(f"ERROR: {msg}")
+                                raise ValueError(msg)
+                        matchednames = sorted(
+                            {name for partnames in names_of_strippedname.values() for name in partnames}
+                        )
+                        logprint(
                             f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
                             " with the name separators removed"
                         )
                 if not upperionlevelids:
-                    print(
+                    logprint(
                         f"WARNING: photoionisation target '{targetconfig}' matched no level of the upper ion,"
                         " so the upper ion's ground state is the target"
                     )
                     upperionlevelids = [0]  # the upper ion's ground state
-                targetlist_of_targetconfig[targetconfig] = []
 
                 summed_statistical_weights = sum(
                     float(dfenergy_levels_upperion["g"][levelid]) for levelid in upperionlevelids
                 )
-                for upperionlevelid in sorted(upperionlevelids):
-                    statweight_fraction = dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights
-                    targetlist_of_targetconfig[targetconfig].append((upperionlevelid, statweight_fraction))
+                targetlist_of_targetconfig[targetconfig] = [
+                    (upperionlevelid, dfenergy_levels_upperion["g"][upperionlevelid] / summed_statistical_weights)
+                    for upperionlevelid in upperionlevelids
+                ]
 
             for upperlevelid, statweight_fraction in targetlist_of_targetconfig[targetconfig]:
-                fraction_of_upperlevelid[upperlevelid] = (
-                    fraction_of_upperlevelid.get(upperlevelid, 0.0) + targetconfig_fraction * statweight_fraction
-                )
+                fraction_of_upperlevelid[upperlevelid] += targetconfig_fraction * statweight_fraction
 
         # the upper ion's ground state where no target was matched at all
         targetlist[lowerlevelid] = list(fraction_of_upperlevelid.items()) or [(0, 1.0)]

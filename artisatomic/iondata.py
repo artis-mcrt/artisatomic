@@ -1,6 +1,7 @@
 """Read a single ion's levels, transitions, and photoionisation data from its source dataset."""
 
 import argparse
+import contextlib
 import itertools
 import typing as t
 from collections.abc import Callable
@@ -196,7 +197,9 @@ def read_ion_data(
     )
 
 
-def resolve_photoion_targetfractions(iondatalist: list[IonData]) -> None:
+def resolve_photoion_targetfractions(
+    iondatalist: list[IonData], atomic_number: int | None = None, log_folder: str | Path | None = None
+) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
     An ion's targets are levels of the next ion up, so the fractions can only be resolved once the
@@ -204,8 +207,14 @@ def resolve_photoion_targetfractions(iondatalist: list[IonData]) -> None:
     to), as is any ion whose reader already gave per-level fractions.
 
     Call this before write_output_files() unless cross sections are switched off entirely; the
-    writer needs the fractions and does not resolve them itself.
+    writer needs the fractions and does not resolve them itself. Give atomic_number and log_folder
+    to append the resolve messages to each ion's log file.
     """
+    # a half-given pair is always a caller bug, so fail loudly rather than skip the log silently
+    if (atomic_number is None) != (log_folder is None):
+        msg = "give both atomic_number and log_folder, or neither"
+        raise ValueError(msg)
+
     if not iondatalist:
         return
 
@@ -220,6 +229,16 @@ def resolve_photoion_targetfractions(iondatalist: list[IonData]) -> None:
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
-                iondata.dfenergylevels, upperiondata.dfenergylevels, iondata.hillier_photoion_targetconfigs
+            # The reading pass closed the per-ion log. Reopen it in append mode.
+            logcontext = (
+                ion_log_path(log_folder, atomic_number, iondata.ion_stage).open("a", encoding="utf-8")
+                if log_folder is not None and atomic_number is not None
+                else contextlib.nullcontext()
             )
+            with logcontext as flog:
+                iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
+                    iondata.dfenergylevels,
+                    upperiondata.dfenergylevels,
+                    iondata.hillier_photoion_targetconfigs,
+                    flog=flog,
+                )
