@@ -572,9 +572,10 @@ def write_phixs_data(
         raise ValueError(msg)
 
     # ARTIS gives each entry of a target list its own target level and fraction (input.cc). A
-    # repeated target level would get two fractions of the same recombination. The check runs
-    # over every level before the first write, so a bad level fails before part of the ion goes
-    # out. Not an assert: this guards written output and must survive python -O.
+    # repeated target level would get two fractions of the same recombination, and a bad
+    # fraction sum would change the recombination total. The checks run over every level before
+    # the first write, so a bad level fails before part of the ion goes out. Not an assert:
+    # this guards written output and must survive python -O.
     for lowerlevelid in levelids_to_write:
         targetlist = photoionization_targetfractions[lowerlevelid]
         targetcounts = Counter(upperionlevelid for upperionlevelid, _ in targetlist)
@@ -586,6 +587,17 @@ def write_phixs_data(
             )
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
+        # the single-target form below implies a fraction of 1.0, so only a multi-target list
+        # needs its sum checked
+        if not (len(targetlist) == 1 and targetlist[0][1] > 0.99):
+            probability_sum = sum(fraction for _, fraction in targetlist)
+            if abs(probability_sum - 1.0) > 0.00001:
+                msg = (
+                    f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
+                    f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
+                )
+                log_and_print(flog, f"ERROR: {msg}")
+                raise ValueError(msg)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
@@ -606,16 +618,10 @@ def write_phixs_data(
                 f"{atomic_number:12d}{ion_stage + 1:12d}{-1:8d}{ion_stage:12d}{lowerlevelid + 1:8d}{threshold_ev:16.6E}\n"
             )
             fphixs.write(f"{len(targetlist):8d}\n")
-            probability_sum = 0.0
-            for upperionlevelid, targetprobability in targetlist:
-                fphixs.write(f"{upperionlevelid + 1:8d}{targetprobability:12f}\n")
-                probability_sum += targetprobability
-            if abs(probability_sum - 1.0) > 0.00001:
-                msg = (
-                    f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
-                    f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
-                )
-                raise ValueError(msg)
+            fphixs.writelines(
+                f"{upperionlevelid + 1:8d}{targetprobability:12f}\n"
+                for upperionlevelid, targetprobability in targetlist
+            )
 
         # one writelines() per table rather than a write() per point: nphixspoints lines per level,
         # 1.5M of them for the cmfgen set

@@ -1656,13 +1656,21 @@ def get_photoiontargetfractions(
     In the second comparison, each part of the name must come to one level name of the upper ion.
     A part that matches more than one name is ambiguous, and this function raises a ValueError.
     """
+
+    def logprint(strout: str) -> None:
+        """Write to stdout, and to the ion log when the caller gave one."""
+        if flog is None:
+            print(strout)
+        else:
+            artisatomic.log_and_print(flog, strout)
+
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: dict[str, list[tuple[int, float]]] = {}
 
     if hillier_photoion_targetconfigs is None:
         return targetlist
 
-    # The comparison is per target configuration, not per level, so pull the names out one time.
+    # The comparison is per target configuration, not per level. Pull the names out one time.
     uppernamenoj_of_levelid = [levelname.split("[")[0] for levelname in dfenergy_levels_upperion["levelname"].to_list()]
     strippednames_of_levelid = [strip_name_separators(levelname) for levelname in uppernamenoj_of_levelid]
 
@@ -1700,33 +1708,32 @@ def get_photoiontargetfractions(
                         # would split its fraction between two different levels. No ion of the
                         # corpus has such a part, and this check keeps that true. Not an assert:
                         # it guards written output and must survive -O.
-                        for strippedpart in targetconfiglist_stripped:
-                            partnames = sorted(
-                                {
-                                    uppernamenoj_of_levelid[levelid]
-                                    for levelid in upperionlevelids
-                                    if strippednames_of_levelid[levelid] == strippedpart
-                                }
+                        names_of_strippedname: defaultdict[str, set[str]] = defaultdict(set)
+                        for levelid in upperionlevelids:
+                            names_of_strippedname[strippednames_of_levelid[levelid]].add(
+                                uppernamenoj_of_levelid[levelid]
                             )
+                        for strippedpart, partnames in names_of_strippedname.items():
                             if len(partnames) > 1:
                                 msg = (
                                     f"Photoionisation target part '{strippedpart}' of '{targetconfig}' matched"
                                     f" more than one level name of the upper ion with the name separators"
-                                    f" removed: {partnames}. The part is ambiguous, so artisatomic cannot"
-                                    " share the fraction."
+                                    f" removed: {sorted(partnames)}. The part is ambiguous, so artisatomic"
+                                    " cannot share the fraction."
                                 )
+                                logprint(f"ERROR: {msg}")
                                 raise ValueError(msg)
-                        matchednames = sorted({uppernamenoj_of_levelid[levelid] for levelid in upperionlevelids})
-                        artisatomic.log_and_print(
-                            flog,
+                        matchednames = sorted(
+                            {name for partnames in names_of_strippedname.values() for name in partnames}
+                        )
+                        logprint(
                             f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
-                            " with the name separators removed",
+                            " with the name separators removed"
                         )
                 if not upperionlevelids:
-                    artisatomic.log_and_print(
-                        flog,
+                    logprint(
                         f"WARNING: photoionisation target '{targetconfig}' matched no level of the upper ion,"
-                        " so the upper ion's ground state is the target",
+                        " so the upper ion's ground state is the target"
                     )
                     upperionlevelids = [0]  # the upper ion's ground state
 

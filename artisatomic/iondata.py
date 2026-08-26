@@ -210,6 +210,11 @@ def resolve_photoion_targetfractions(
     writer needs the fractions and does not resolve them itself. Give atomic_number and log_folder
     to append the resolve messages to each ion's log file.
     """
+    # a half-given pair is always a caller bug, so fail loudly rather than skip the log silently
+    if (atomic_number is None) != (log_folder is None):
+        msg = "give both atomic_number and log_folder, or neither"
+        raise ValueError(msg)
+
     if not iondatalist:
         return
 
@@ -224,7 +229,7 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # the per-ion log of the reading pass is closed here, so reopen it in append mode
+            # The reading pass closed the per-ion log. Reopen it in append mode.
             logcontext = (
                 ion_log_path(log_folder, atomic_number, iondata.ion_stage).open("a", encoding="utf-8")
                 if log_folder is not None and atomic_number is not None

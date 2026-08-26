@@ -551,6 +551,17 @@ def test_resolve_photoion_targetfractions_keeps_reader_supplied():
     assert lower.photoionization_targetfractions == supplied
 
 
+def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
+    """A caller must give both atomic_number and log_folder, or neither, so a log is not lost silently."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
+    upper = make_iondata(2, is_top_ion=True)
+
+    with pytest.raises(ValueError, match="both atomic_number and log_folder"):
+        resolve_photoion_targetfractions([lower, upper], 8)
+
+
 def test_resolve_photoion_targetfractions_rejects_misordered_ions():
     """A list that is not one element's ions in ascending order is rejected rather than resolved.
 
@@ -1709,6 +1720,24 @@ def test_write_phixs_data_rejects_a_duplicated_target():
         write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
 
     # the level fails before any part of the ion goes out
+    assert not out.getvalue()
+
+
+def test_write_phixs_data_rejects_a_bad_fraction_sum_before_output():
+    """A bad fraction sum fails before any part of the ion goes out."""
+    import argparse
+
+    from artisatomic import write_phixs_data
+
+    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5]])
+    targetfractions = [[(0, 0.4), (1, 0.3)]]  # the fractions sum to 0.7
+    thresholds = np.array([13.6])
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="sum to"):
+        write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
+
     assert not out.getvalue()
 
 
