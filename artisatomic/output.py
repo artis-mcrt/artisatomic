@@ -570,6 +570,27 @@ def write_phixs_data(
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)
 
+    # ARTIS gives each entry of a target list its own target level and fraction (input.cc), so a
+    # repeated target level would get two fractions of the same recombination. Checked over every
+    # level before the first write, so a bad level fails before part of the ion goes out.
+    # Not an assert: this guards written output and must survive python -O.
+    for lowerlevelid in levelids_to_write:
+        targetlist = photoionization_targetfractions[lowerlevelid]
+        upperionlevelids = [upperionlevelid for upperionlevelid, _ in targetlist]
+        if len(upperionlevelids) != len(set(upperionlevelids)):
+            duplicates = sorted(
+                {
+                    upperionlevelid
+                    for index, upperionlevelid in enumerate(upperionlevelids)
+                    if upperionlevelid in upperionlevelids[:index]
+                }
+            )
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target level ids"
+                f" {duplicates} occur more than one time ({targetlist})"
+            )
+            raise ValueError(msg)
+
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
     for lowerlevelid in levelids_to_write:
