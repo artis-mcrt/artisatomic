@@ -1661,6 +1661,26 @@ def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
         readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
 
 
+def test_get_photoiontargetfractions_matches_a_slash_target_with_separators_removed():
+    """Each part of a slash target gets its own second comparison, so two matched names are not ambiguous."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p4_3Pe[2]"], "g": [5.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "levelname": ["2s2_2p3_4So[3/2]", "2s2_2p3_2Do[5/2]", "2s2_2p3_2Po[1/2]"],
+            "g": [4.0, 6.0, 2.0],
+        }
+    )
+    # each part matches exactly one name, so the parts share the fraction as the exact comparison does
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)/2s2_2p3(2Po)", 1.0)]]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    assert targetlist == [[(1, 0.75), (2, 0.25)]]
+
+
 def test_strip_name_separators():
     """The underscore and the parentheses go; nothing else changes."""
     from artisatomic.readhillierdata import strip_name_separators

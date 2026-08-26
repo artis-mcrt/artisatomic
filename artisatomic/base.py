@@ -154,9 +154,10 @@ def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> 
 
 
 def log_and_print(flog, strout):
-    """Write a line to both stdout and this ion's log file."""
+    """Write a line to stdout, and to the ion's log file when flog is not None."""
     print(strout)
-    flog.write(strout + "\n")
+    if flog is not None:
+        flog.write(strout + "\n")
 
 
 def path_for_log(filepath: str | Path) -> str:
