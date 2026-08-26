@@ -1624,6 +1624,18 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
     return upsilondict
 
 
+def strip_name_separators(levelname: str) -> str:
+    """Remove the characters that a phot file and an oscillator file put between the parts of a name.
+
+    A phot file does not always separate the parts of a target name the way the oscillator file of
+    the upper ion does. F II names a route '2s2_2p3(2Do)' where F III has '2s2_2p3_2Do', and O IV
+    names '2s2p3Po' where O V has '2s_2p_3Po'. The underscore and the parentheses carry no other
+    meaning in these names, so a comparison with them removed still matches the shells and the term
+    exactly. Over the whole CMFGEN corpus no two level names of one ion become the same string.
+    """
+    return levelname.replace("_", "").replace("(", "").replace(")", "")
+
+
 def get_photoiontargetfractions(
     dfenergy_levels,
     dfenergy_levels_upperion,
@@ -1634,9 +1646,10 @@ def get_photoiontargetfractions(
     Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. Each upper
     ion level occurs one time only: two target configurations that come to the same level get one
     entry with the summed fraction. A target configuration that names several J-split levels of
-    the upper ion is shared over them in proportion to their statistical weights. Levels with no
-    cross-section data (None) and levels whose targets could not be matched both fall back to the
-    upper ion's ground state.
+    the upper ion is shared over them in proportion to their statistical weights. A name that
+    matches no level is tried again with the separators removed, and falls back to the upper ion's
+    ground state only if that fails as well. Levels with no cross-section data (None) take that
+    same ground state.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
@@ -1644,15 +1657,16 @@ def get_photoiontargetfractions(
     if hillier_photoion_targetconfigs is None:
         return targetlist
 
+    # the names are matched per target configuration, not per level, so pull them out one time
+    uppernamenoj_of_levelid = [levelname.split("[")[0] for levelname in dfenergy_levels_upperion["levelname"].to_list()]
+
     for lowerlevelid in range(dfenergy_levels.height):
         targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelid]
         if targetconfig_fractions is None:
             continue  # photoionisation flagged as not available
 
-        # keyed by upper ion level id because two target configurations can come to the same
-        # level, and ARTIS gives each entry of the list its own target. F II is the case here:
-        # its routes '2s2_2p3(2Do)' and '2s2_2p3(2Po)' match no F III level name
-        # ('2s2_2p3_2Do[5/2]'), so both fall back to the ground state.
+        # keyed by upper ion level id because two target configurations of one level can come to
+        # the same upper ion level, and ARTIS gives each entry of the list its own target
         fraction_of_upperlevelid: dict[int, float] = {}
 
         for targetconfig, targetconfig_fraction in targetconfig_fractions:
@@ -1660,12 +1674,31 @@ def get_photoiontargetfractions(
                 # sometimes the target has a slash, e.g. '3d7_4Fe/3d7_a4Fe'
                 # so split on the slash and match all parts
                 targetconfiglist = targetconfig.split("/")
-                upperionlevelids = []
-                for upperlevelid, levelname in dfenergy_levels_upperion[["levelid", "levelname"]].iter_rows():
-                    upperlevelnamenoj = levelname.split("[")[0]
-                    if upperlevelnamenoj in targetconfiglist:
-                        upperionlevelids.append(upperlevelid)
+                upperionlevelids = [
+                    upperlevelid
+                    for upperlevelid, upperlevelnamenoj in enumerate(uppernamenoj_of_levelid)
+                    if upperlevelnamenoj in targetconfiglist
+                ]
                 if not upperionlevelids:
+                    # the two files do not always separate the parts of a name the same way, so
+                    # try again with the separators removed before the ground state is assumed
+                    targetconfiglist_stripped = [strip_name_separators(part) for part in targetconfiglist]
+                    upperionlevelids = [
+                        upperlevelid
+                        for upperlevelid, upperlevelnamenoj in enumerate(uppernamenoj_of_levelid)
+                        if strip_name_separators(upperlevelnamenoj) in targetconfiglist_stripped
+                    ]
+                    if upperionlevelids:
+                        matchednames = sorted({uppernamenoj_of_levelid[levelid] for levelid in upperionlevelids})
+                        print(
+                            f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
+                            " with the name separators removed"
+                        )
+                if not upperionlevelids:
+                    print(
+                        f"WARNING: photoionisation target '{targetconfig}' matched no level of the upper ion,"
+                        " so the upper ion's ground state is the target"
+                    )
                     upperionlevelids = [0]  # the upper ion's ground state
                 targetlist_of_targetconfig[targetconfig] = []
 
