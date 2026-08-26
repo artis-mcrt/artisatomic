@@ -1631,10 +1631,12 @@ def get_photoiontargetfractions(
 ) -> list[list[tuple[int, float]]]:
     """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
 
-    Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. A target
-    configuration that names several J-split levels of the upper ion is shared over them in
-    proportion to their statistical weights. Levels with no cross-section data (None) and levels
-    whose targets could not be matched both fall back to the upper ion's ground state.
+    Returns, per zero-based level id, a list of (upper ion level id, fraction) pairs. Each upper
+    ion level occurs one time only: two target configurations that come to the same level get one
+    entry with the summed fraction. A target configuration that names several J-split levels of
+    the upper ion is shared over them in proportion to their statistical weights. Levels with no
+    cross-section data (None) and levels whose targets could not be matched both fall back to the
+    upper ion's ground state.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
@@ -1646,6 +1648,12 @@ def get_photoiontargetfractions(
         targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelid]
         if targetconfig_fractions is None:
             continue  # photoionisation flagged as not available
+
+        # keyed by upper ion level id because two target configurations can come to the same
+        # level, and ARTIS gives each entry of the list its own target. F II is the case here:
+        # its routes '2s2_2p3(2Do)' and '2s2_2p3(2Po)' match no F III level name
+        # ('2s2_2p3_2Do[5/2]'), so both fall back to the ground state.
+        fraction_of_upperlevelid: dict[int, float] = {}
 
         for targetconfig, targetconfig_fraction in targetconfig_fractions:
             if targetconfig not in targetlist_of_targetconfig:
@@ -1669,10 +1677,12 @@ def get_photoiontargetfractions(
                     targetlist_of_targetconfig[targetconfig].append((upperionlevelid, statweight_fraction))
 
             for upperlevelid, statweight_fraction in targetlist_of_targetconfig[targetconfig]:
-                targetlist[lowerlevelid].append((upperlevelid, targetconfig_fraction * statweight_fraction))
+                fraction_of_upperlevelid[upperlevelid] = (
+                    fraction_of_upperlevelid.get(upperlevelid, 0.0) + targetconfig_fraction * statweight_fraction
+                )
 
-        if len(targetlist[lowerlevelid]) == 0:
-            targetlist[lowerlevelid].append((0, 1.0))  # the upper ion's ground state
+        # the upper ion's ground state where no target was matched at all
+        targetlist[lowerlevelid] = list(fraction_of_upperlevelid.items()) or [(0, 1.0)]
 
     return targetlist
 

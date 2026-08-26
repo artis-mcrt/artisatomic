@@ -1544,6 +1544,67 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
     assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
 
 
+def test_get_photoiontargetfractions_merges_targets_that_match_one_level():
+    """F II names three routes, of which two match no F III level name and fall back to the ground state."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p4_3Pe[2]"], "g": [5.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "levelname": ["2s2_2p3_4So[3/2]", "2s2_2p3_2Do[5/2]", "2s2_2p3_2Do[3/2]"],
+            "g": [4.0, 6.0, 4.0],
+        }
+    )
+    # the second and the third route carry the parentheses that the level names do not have
+    targetconfigs: list[list[tuple[str, float]] | None] = [
+        [("2s2_2p3_4So", 0.5), ("2s2_2p3(2Do)", 0.3), ("2s2_2p3(2Po)", 0.2)]
+    ]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    # one entry only, with the three fractions added, and not the same target three times
+    assert targetlist == [[(0, 1.0)]]
+
+
+def test_get_photoiontargetfractions_shares_a_target_over_its_j_levels():
+    """A matched configuration is still split over its J levels by statistical weight."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["2s2_2p4_3Pe[2]"], "g": [5.0]})
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "levelname": ["2s2_2p3_4So[3/2]", "2s2_2p3_2Do[5/2]", "2s2_2p3_2Do[3/2]"],
+            "g": [4.0, 6.0, 4.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3_2Do", 1.0)]]
+
+    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+    assert targetlist == [[(1, 0.6), (2, 0.4)]]
+
+
+def test_write_phixs_data_rejects_a_duplicated_target():
+    """A target level that occurs two times would give the same target two fractions in ARTIS."""
+    import argparse
+
+    from artisatomic import write_phixs_data
+
+    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5]])
+    targetfractions = [[(0, 0.4), (1, 0.3), (0, 0.3)]]  # target level 0 occurs two times
+    thresholds = np.array([13.6])
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="occur more than one time"):
+        write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
+
+    # the level fails before any part of the ion goes out
+    assert not out.getvalue()
+
+
 def test_log_degenerate_transitions():
     """ARTIS drops a transition whose two levels have one energy, so artisatomic reports it."""
     from artisatomic.output import log_degenerate_transitions

@@ -1,6 +1,7 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -569,6 +570,24 @@ def write_phixs_data(
         msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)
+
+    # ARTIS gives each entry of a target list its own target level and fraction (input.cc), so a
+    # repeated target level would get two fractions of the same recombination. Checked over every
+    # level before the first write, so a bad level fails before part of the ion goes out.
+    # Not an assert: this guards written output and must survive python -O.
+    for lowerlevelid in levelids_to_write:
+        targetlist = photoionization_targetfractions[lowerlevelid]
+        duplicates = [
+            upperionlevelid
+            for upperionlevelid, count in Counter(upperionlevelid for upperionlevelid, _ in targetlist).items()
+            if count > 1
+        ]
+        if duplicates:
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target level ids"
+                f" {sorted(duplicates)} occur more than one time ({targetlist})"
+            )
+            raise ValueError(msg)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
