@@ -1651,6 +1651,9 @@ def get_photoiontargetfractions(
     matches no level is tried again with the separators removed, and falls back to the upper ion's
     ground state only if that fails as well. Levels with no cross-section data (None) take that
     same ground state.
+
+    The second comparison must come to one name. A match that spans more than one name is
+    ambiguous, and this raises a ValueError rather than share the fraction over the two names.
     """
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: defaultdict[str, list[tuple[int, float]]] = defaultdict(list)
