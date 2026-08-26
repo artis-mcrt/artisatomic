@@ -1642,6 +1642,25 @@ def test_get_photoiontargetfractions_keeps_the_ground_state_for_a_different_term
     assert targetlist == [[(0, 1.0)]]
 
 
+def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
+    """Two upper ion names that differ in their separators alone give no target that can be shared."""
+    from artisatomic import readhillierdata
+
+    dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["3d7_a4Fe[9/2]"], "g": [10.0]})
+    # the two names are different levels, but they become one string with the separators removed
+    dfenergy_levels_upperion = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "levelname": ["3d6(5D)4s_a6De[9/2]", "3d6_5D_4s_a6De[9/2]"],
+            "g": [10.0, 10.0],
+        }
+    )
+    targetconfigs: list[list[tuple[str, float]] | None] = [[("3d6(5D)4sa6De", 1.0)]]
+
+    with pytest.raises(ValueError, match="matched more than one level name"):
+        readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+
+
 def test_strip_name_separators():
     """The underscore and the parentheses go; nothing else changes."""
     from artisatomic.readhillierdata import strip_name_separators

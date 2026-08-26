@@ -1631,7 +1631,8 @@ def strip_name_separators(levelname: str) -> str:
     the upper ion does. F II names a route '2s2_2p3(2Do)' where F III has '2s2_2p3_2Do', and O IV
     names '2s2p3Po' where O V has '2s_2p_3Po'. The underscore and the parentheses carry no other
     meaning in these names, so a comparison with them removed still matches the shells and the term
-    exactly. Over the whole CMFGEN corpus no two level names of one ion become the same string.
+    exactly. Over the whole CMFGEN corpus no two level names of one ion become the same string, and
+    get_photoiontargetfractions() rejects a match that spans more than one name.
     """
     return levelname.replace("_", "").replace("(", "").replace(")", "")
 
@@ -1690,6 +1691,18 @@ def get_photoiontargetfractions(
                     ]
                     if upperionlevelids:
                         matchednames = sorted({uppernamenoj_of_levelid[levelid] for levelid in upperionlevelids})
+                        # the fraction is shared over the matched levels by statistical weight,
+                        # which is correct only where they are the J levels of one name. Two names
+                        # that differ in their separators alone would split the route between two
+                        # different levels. No ion of the corpus has such a pair, and this keeps
+                        # that true. Not an assert: it guards written output and must survive -O.
+                        if len(matchednames) > 1:
+                            msg = (
+                                f"Photoionisation target '{targetconfig}' matched more than one level name of"
+                                f" the upper ion with the name separators removed: {matchednames}. The target"
+                                " is ambiguous, so the fraction cannot be shared over them."
+                            )
+                            raise ValueError(msg)
                         print(
                             f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
                             " with the name separators removed"
