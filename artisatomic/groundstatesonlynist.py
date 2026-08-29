@@ -5,7 +5,8 @@ from collections import defaultdict
 
 import pandas as pd
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 
 
@@ -33,7 +34,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     this_ion = groundstatesdata.loc[(groundstatesdata["Z"] == atomic_number) & (groundstatesdata["ion"] == ion_stage)]
 
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
-    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [
         EnergyLevel(
             levelname=this_ion["config"].to_numpy()[0],
@@ -55,6 +56,6 @@ def extend_ion_list(ion_handlers):
     for _index, row in groundstatesdata.iterrows():
         # add_handler_if_not_set() returns a new list rather than mutating its argument,
         # and normalises the pandas numpy integers to plain ints
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, row["Z"], row["ion"], "gsnist")
+        ion_handlers = add_handler_if_not_set(ion_handlers, row["Z"], row["ion"], "gsnist")
 
     return ion_handlers

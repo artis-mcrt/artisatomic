@@ -9,13 +9,13 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import atomic_weights
+from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_log_path
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
 from artisatomic.iondata import IonData
-from artisatomic.ionhandlers import drop_handlers
 
 
 def clear_files(args: argparse.Namespace) -> None:

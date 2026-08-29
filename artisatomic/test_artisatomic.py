@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the artisatomic readers, parsers and output writers."""
 
+import functools
 import io
 import operator
 import typing as t
@@ -383,6 +384,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         energy_levels=dflevels,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
 
@@ -408,6 +410,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         energy_levels=dflevels_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
     assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
@@ -445,6 +448,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
             energy_levels=dflevels,
             ionization_energy_ev=ionization_energy_ev,
             ion_handler="kurucz",
+            get_level_valence_n=readkuruczdata.get_level_valence_n,
             args=args,
         )
         assert sum(bool(targets) for targets in targetfractions) == n_expected
@@ -464,6 +468,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         energy_levels=dflevels_partly_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
     assert np.count_nonzero(~np.isnan(thresholds)) == 1
@@ -518,7 +523,7 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
         dftransitions=pl.DataFrame(),
         transition_count_of_level_name={},
         upsilondict={},
-        hillier_photoion_targetconfigs=targetconfigs,
+        photoion_targetconfigs=targetconfigs,
         photoionization_crosssections=np.empty((0, 100)),
         photoionization_targetfractions=targetfractions if targetfractions is not None else [],
         photoionization_thresholds_ev=np.empty(0),
@@ -1792,7 +1797,7 @@ def test_fill_missing_phixs_thresholds():
             dftransitions=pl.DataFrame(),
             transition_count_of_level_name={},
             upsilondict={},
-            hillier_photoion_targetconfigs=None,
+            photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
             photoionization_thresholds_ev=np.array(thresholds),
@@ -1884,7 +1889,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
             dftransitions=pl.DataFrame(),
             transition_count_of_level_name={},
             upsilondict={},
-            hillier_photoion_targetconfigs=None,
+            photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
             photoionization_thresholds_ev=np.array(thresholds),
@@ -2111,3 +2116,91 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header)
     with pytest.raises(ValueError, match="Did not find the expected data table"):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
+
+
+def test_iondata_simple_handlers_registry():
+    """Each handler must keep its own level-name parser and its own return shape.
+
+    The parsers used to be a second table in phixs.py, and the return shape used to be read
+    from the length of the reader's result. Both are registry fields now, so nothing else
+    checks them: a parser registered against the wrong handler would give an ion the
+    hydrogenic cross sections of another data source, and a wrong returns_upsilondict would
+    fail the unpacking on the first run.
+    """
+    from artisatomic import groundstatesonlynist
+    from artisatomic import readdreamdata
+    from artisatomic import readlisbondata
+    from artisatomic.iondata import simple_handlers
+
+    expected_parsers = {
+        "kurucz": readkuruczdata.get_level_valence_n,
+        "fac": readfacdata.get_level_valence_n,
+        "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
+        "floers25calib": readfloers25data.get_level_valence_n,
+        "floers25uncalib": readfloers25data.get_level_valence_n,
+        "tanakajplt": readtanakajpltdata.get_level_valence_n,
+        "qub_data": readqubdata.get_level_valence_n,
+    }
+    assert {
+        name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
+    } == expected_parsers
+
+    # no parser is registered for these handlers, so their ions get no hydrogenic estimate
+    # and match_hydrogenic_phixs() writes a warning. Registering one is what changes that.
+    assert {name for name, handler in simple_handlers.items() if handler.get_level_valence_n is None} == {
+        "boyle",
+        "dream",
+        "lisbon",
+        "mons",
+        "gsnist",
+    }
+
+    # only the QUB reader returns collision strengths beside the levels and the transitions
+    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub_data"}
+
+    # the readers that the registry calls with (atomic_number, ion_stage, flog)
+    expected_readers = {
+        "kurucz": readkuruczdata.read_levels_and_transitions,
+        "dream": readdreamdata.read_levels_and_transitions,
+        "lisbon": readlisbondata.read_levels_and_transitions,
+        "fac": readfacdata.read_levels_and_transitions,
+        "mons": readmonsdata.read_levels_and_transitions,
+        "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
+        "gsnist": groundstatesonlynist.read_ground_levels,
+        "qub_data": readqubdata.read_qub_levels_and_transitions,
+    }
+    for name, reader in expected_readers.items():
+        assert simple_handlers[name].read_levels_and_transitions is reader, name
+
+    # the three floers25 entries call one reader and select the data set by keyword, so each
+    # entry must bind its own keywords
+    expected_keywords = {
+        "floers25calibwithforbidden": {"calibrated": True, "withforbidden": True},
+        "floers25calib": {"calibrated": True},
+        "floers25uncalib": {"calibrated": False},
+    }
+    for name, keywords in expected_keywords.items():
+        reader = simple_handlers[name].read_levels_and_transitions
+        assert isinstance(reader, functools.partial)
+        assert reader.func is readfloers25data.read_levels_and_transitions
+        assert reader.keywords == keywords
+
+
+def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
+    """The boyle entry is the one adapter that drops an argument, so it needs its own check.
+
+    Its reader takes no flog, and the registry calls every reader with one, so the entry has to
+    drop it. A comparison of the callables cannot catch a mis-wired adapter here.
+    """
+    from artisatomic import readboyledata
+    from artisatomic.iondata import simple_handlers
+
+    calls = []
+    monkeypatch.setattr(
+        readboyledata,
+        "read_levels_and_transitions",
+        lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
+    )
+    simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
+
+    assert calls == [(2, 1)]

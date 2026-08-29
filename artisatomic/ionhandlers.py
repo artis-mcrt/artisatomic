@@ -6,7 +6,6 @@ inferred from its atomic number.
 """
 
 import json
-import operator
 import typing as t
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
+from artisatomic.base import sort_ion_handlers
 
 
 def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
@@ -70,70 +70,3 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
         ion_handlers.append((int(atomic_number), ions))
 
     return ion_handlers
-
-
-def sort_ion_handlers(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Sort by atomic number, and each element's ions by ion stage.
-
-    process_files() relies on ascending ion stages to identify the top ion and to find each ion's
-    photoionisation target, so normalise the order here, before the handler list is written to
-    artisatomicionhandlers.json and passed to write_compositionfile().
-
-    A duplicated element or ion stage is rejected here, because the code downstream trusts the
-    list: write_compositionfile() counts an element's ions as max - min + 1 and cannot see a
-    duplicate, so a duplicate would make compositiondata.txt disagree with the other output files.
-    """
-    atomic_numbers = [atomic_number for atomic_number, _listions in ion_handlers]
-    if len(set(atomic_numbers)) != len(atomic_numbers):
-        duplicates = sorted({z for z in atomic_numbers if atomic_numbers.count(z) > 1})
-        msg = f"The ion handlers list contains more than one entry for Z={duplicates}."
-        raise ValueError(msg)
-    for atomic_number, listions in ion_handlers:
-        ion_stages = [ion_stage for ion_stage, _handler in listions]
-        if len(set(ion_stages)) != len(ion_stages):
-            duplicates = sorted({s for s in ion_stages if ion_stages.count(s) > 1})
-            msg = f"The ion handlers list contains ion stage {duplicates} more than once for Z={atomic_number}."
-            raise ValueError(msg)
-
-    return sorted(
-        ((atomic_number, sorted(listions, key=operator.itemgetter(0))) for atomic_number, listions in ion_handlers),
-        key=operator.itemgetter(0),
-    )
-
-
-def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
-    """Replace [(ion_stage1, 'handler1'), (ion_stage2, 'handler2')] with [ion_stage1, ion_stage2]."""
-    return [ion_stage for ion_stage, _handler in list_ions]
-
-
-def add_handler_if_not_set(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    atomic_number: int | str,
-    ion_stage: int | str,
-    handler: str,
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
-
-    The input list is not modified, so the return value must be used.
-    """
-    # readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
-    # numpy integers, so normalise here rather than in each caller
-    atomic_number = int(atomic_number)
-    ion_stage = int(ion_stage)
-
-    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
-    found_element = False
-    for tmp_atomic_number, list_ions_handlers in ion_handlers:
-        list_ions_handlers_out: list[tuple[int, str]] = list(list_ions_handlers)
-        if tmp_atomic_number == atomic_number:
-            found_element = True
-            if ion_stage not in [x[0] for x in list_ions_handlers_out]:
-                list_ions_handlers_out.append((ion_stage, handler))
-        ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
-
-    if not found_element:
-        ion_handlers_out.append((atomic_number, [(ion_stage, handler)]))
-
-    return sort_ion_handlers(ion_handlers_out)

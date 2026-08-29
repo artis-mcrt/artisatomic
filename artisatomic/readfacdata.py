@@ -9,8 +9,16 @@ from pathlib import Path
 
 import pandas as pd
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import elsymbols
+from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import levelid_of_fileindex_map
+from artisatomic.base import log_and_print
+from artisatomic.base import path_for_log
+from artisatomic.base import resolve_transition_levelids
+from artisatomic.base import roman_numerals
+from artisatomic.base import split_element_ionstage_str
 
 USE_CALIBRATED = True
 
@@ -159,8 +167,8 @@ def extend_ion_list(ion_handlers):
 
     for s in basepath.glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
-        atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
+        atomic_number, ion_stage = split_element_ionstage_str(ionstr)
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
 
     # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return ion_handlers
@@ -197,7 +205,7 @@ def read_levels_data(dflevels):
         for _index, row in dflevels.iterrows()
     ]
 
-    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
+    return energy_levels, levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
 
 
 class FACTransition(t.NamedTuple):
@@ -227,7 +235,7 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
         # not an assert: this decides which levels a transition is written between, so it must
         # survive python -O, and it names the offending Ilev values rather than just failing
-        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+        lowerlevel, upperlevel = resolve_transition_levelids(
             row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
         )
 
@@ -246,8 +254,8 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the FAC data set, an early version of the Floers+25 calibrated data."""
-    elsym = artisatomic.elsymbols[atomic_number]
-    ion_stage_roman = artisatomic.roman_numerals[ion_stage]
+    elsym = elsymbols[atomic_number]
+    ion_stage_roman = roman_numerals[ion_stage]
 
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}{'_calib' if USE_CALIBRATED else ''}"
     ion_folder = get_basepath() / ionstr
@@ -262,13 +270,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         levels_file = ion_folder / f"{ionstr}.lev.asc"
         lines_file = ion_folder / f"{ionstr}.tr.asc"
 
-    artisatomic.log_and_print(
+    log_and_print(
         flog,
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {artisatomic.path_for_log(ion_folder)}",
+        f" {path_for_log(ion_folder)}",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     if not levels_file.is_file():
         msg = f"FAC levels file {levels_file} not found"
@@ -278,7 +286,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # map associates source file level numbers with energy-sorted level numbers (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     if not lines_file.is_file():
         msg = f"FAC transitions file {lines_file} not found"
@@ -287,7 +295,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, ilev_enlevelindex_map)
 
-    artisatomic.log_and_print(flog, f"Read {len(transitions)} transitions")
+    log_and_print(flog, f"Read {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
 

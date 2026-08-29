@@ -4,8 +4,9 @@ import re
 
 import polars as pl
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
@@ -21,7 +22,7 @@ def extend_ion_list(ion_handlers, maxionstage=None):
         tanakaions = [ion for ion in tanakaions if ion[1] <= maxionstage]
 
     for atomic_number, ion_stage in tanakaions:
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
 
     return ion_handlers
 
@@ -42,18 +43,18 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     for linenumber, readlinein in enumerate(headerlines[:7]):
         if linenumber < 3:
-            artisatomic.log_and_print(flog, readlinein)
+            log_and_print(flog, readlinein)
 
         if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
             break
     assert readlinein == f"# {atomic_number} {ion_stage}"
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
-    artisatomic.log_and_print(flog, f"levels: {levelcount}")
-    artisatomic.log_and_print(flog, f"transitions: {transitioncount}")
+    log_and_print(flog, f"levels: {levelcount}")
+    log_and_print(flog, f"transitions: {transitioncount}")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     assert headerlines[linenumber + 4] == "# Energy levels"
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
@@ -126,7 +127,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
-        artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
         dftransitions = dftransitions_filtered
 
     # count after the self-transition filter, so the counts in adata.txt agree with the

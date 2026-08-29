@@ -6,6 +6,7 @@ import itertools
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -49,36 +50,67 @@ class IonData:
     dftransitions: pl.DataFrame
     transition_count_of_level_name: dict[str, int]
     upsilondict: dict[tuple[int, int], float]
-    # None where a level has no photoionisation data (and None entirely if none was read)
-    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None
+    # None where a level has no photoionisation data (and None entirely if none was read).
+    # readhillierdata.get_photoiontargetfractions() matches these names to the upper ion's
+    # levels. It follows the CMFGEN conventions for a name. That reader therefore resolves
+    # this field for every handler, and returns an empty result when the field is None.
+    photoion_targetconfigs: list[list[tuple[str, float]] | None] | None
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
     photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
     photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
 
 
-# handlers whose readers share a common call signature and return
-# (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name) with an additional upsilondict for qub_data
-simple_handler_readers: dict[str, Callable[..., tuple[t.Any, ...]]] = {
-    "boyle": lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(
-        atomic_number, ion_stage
+@dataclass(frozen=True, slots=True)
+class SimpleHandler:
+    """One entry of the simple-handler registry.
+
+    The reader takes (atomic_number, ion_stage, flog) and returns (ionization_energy_ev,
+    energy_levels, transitions, transition_count_of_level_name), with an upsilondict appended
+    when returns_upsilondict is set. The shapes differ by design, so the Callable stays untyped
+    in its return. get_level_valence_n is the handler's own level-name parser. The
+    hydrogenic photoionisation estimate uses it. None leaves the ion without cross sections,
+    and match_hydrogenic_phixs() then writes a warning.
+    """
+
+    read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
+    get_level_valence_n: Callable[[str], int] | None = None
+    returns_upsilondict: bool = False
+
+
+simple_handlers: dict[str, SimpleHandler] = {
+    "boyle": SimpleHandler(
+        lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
     ),
-    "kurucz": readkuruczdata.read_levels_and_transitions,
-    "dream": readdreamdata.read_levels_and_transitions,  # DREAM database of Z >= 57
-    "lisbon": readlisbondata.read_levels_and_transitions,
-    "floers25calibwithforbidden": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-        atomic_number, ion_stage, flog, calibrated=True, withforbidden=True
+    "kurucz": SimpleHandler(readkuruczdata.read_levels_and_transitions, readkuruczdata.get_level_valence_n),
+    "dream": SimpleHandler(readdreamdata.read_levels_and_transitions),  # DREAM database of Z >= 57
+    "lisbon": SimpleHandler(readlisbondata.read_levels_and_transitions),
+    "floers25calibwithforbidden": SimpleHandler(
+        partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
+        readfloers25data.get_level_valence_n,
     ),
-    "floers25calib": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-        atomic_number, ion_stage, flog, calibrated=True
+    "floers25calib": SimpleHandler(
+        partial(readfloers25data.read_levels_and_transitions, calibrated=True),
+        readfloers25data.get_level_valence_n,
     ),
-    "floers25uncalib": lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-        atomic_number, ion_stage, flog, calibrated=False
+    "floers25uncalib": SimpleHandler(
+        partial(readfloers25data.read_levels_and_transitions, calibrated=False),
+        readfloers25data.get_level_valence_n,
     ),
-    "fac": readfacdata.read_levels_and_transitions,  # early version of floers25 calib data
-    "mons": readmonsdata.read_levels_and_transitions,  # Carvajal Gallego et al. (University of Mons) lanthanides V-VII
-    "tanakajplt": readtanakajpltdata.read_levels_and_transitions,  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
-    "gsnist": groundstatesonlynist.read_ground_levels,  # ground states taken from NIST
-    "qub_data": readqubdata.read_qub_levels_and_transitions,  # also returns an upsilondict
+    # fac reads an early version of the floers25 calib data
+    "fac": SimpleHandler(readfacdata.read_levels_and_transitions, readfacdata.get_level_valence_n),
+    "mons": SimpleHandler(
+        readmonsdata.read_levels_and_transitions  # Carvajal Gallego et al. (University of Mons) lanthanides V-VII
+    ),
+    "tanakajplt": SimpleHandler(
+        readtanakajpltdata.read_levels_and_transitions,  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+        readtanakajpltdata.get_level_valence_n,
+    ),
+    "gsnist": SimpleHandler(groundstatesonlynist.read_ground_levels),  # ground states taken from NIST
+    "qub_data": SimpleHandler(
+        readqubdata.read_qub_levels_and_transitions,
+        readqubdata.get_level_valence_n,
+        returns_upsilondict=True,
+    ),
 }
 
 
@@ -90,12 +122,13 @@ def read_ion_data(
     Every ion names the handler that reads it; there is no default per element.
     """
     ion_stage, handler = ion_stage_entry
+    simplehandler = simple_handlers.get(handler)
 
     # no default for ionization_energy_ev: every handler branch below sets it, and an unknown
     # handler raises, so a branch that forgets should fail rather than write a 0 eV threshold
     transition_count_of_level_name: dict[str, int] = {}
     upsilondict: dict[tuple[int, int], float] = {}
-    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
+    photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
     # empty until a handler below reads photoionisation data (and left empty for the top ion)
     photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
@@ -109,7 +142,7 @@ def read_ion_data(
         )
         log_and_print(flog, f"Source handler: {handler}")
         if handler == "qub_cobalt":
-            if ion_stage in {3, 4}:  # QUB levels and transitions, or single-level Co IV
+            if ion_stage in readqubdata.qub_cobalt_stages:
                 (
                     ionization_energy_ev,
                     energy_levels,
@@ -147,13 +180,13 @@ def read_ion_data(
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
                 (
                     photoionization_crosssections,
-                    hillier_photoion_targetconfigs,
+                    photoion_targetconfigs,
                     photoionization_thresholds_ev,
                 ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog)
 
-        elif handler in simple_handler_readers:
-            result = simple_handler_readers[handler](atomic_number, ion_stage, flog)
-            if len(result) == 5:
+        elif simplehandler is not None:
+            result = simplehandler.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            if simplehandler.returns_upsilondict:
                 (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name, upsilondict) = result
             else:
                 (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name) = result
@@ -173,11 +206,14 @@ def read_ion_data(
         and len(photoionization_crosssections) == 0
         and args.nlevels_hydrogenic_for_unknown_phixs > 0
     ):
+        get_level_valence_n = simplehandler.get_level_valence_n if simplehandler is not None else None
         (
             photoionization_crosssections,
             photoionization_targetfractions,
             photoionization_thresholds_ev,
-        ) = match_hydrogenic_phixs(atomic_number, dfenergylevels, ionization_energy_ev, handler, args)
+        ) = match_hydrogenic_phixs(
+            atomic_number, dfenergylevels, ionization_energy_ev, handler, get_level_valence_n, args
+        )
 
     dftransitions = transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions)
 
@@ -190,7 +226,7 @@ def read_ion_data(
         dftransitions=dftransitions,
         transition_count_of_level_name=transition_count_of_level_name,
         upsilondict=upsilondict,
-        hillier_photoion_targetconfigs=hillier_photoion_targetconfigs,
+        photoion_targetconfigs=photoion_targetconfigs,
         photoionization_crosssections=photoionization_crosssections,
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
@@ -239,6 +275,6 @@ def resolve_photoion_targetfractions(
                 iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
                     iondata.dfenergylevels,
                     upperiondata.dfenergylevels,
-                    iondata.hillier_photoion_targetconfigs,
+                    iondata.photoion_targetconfigs,
                     flog=flog,
                 )
