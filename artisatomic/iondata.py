@@ -6,6 +6,7 @@ import itertools
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -50,9 +51,9 @@ class IonData:
     transition_count_of_level_name: dict[str, int]
     upsilondict: dict[tuple[int, int], float]
     # None where a level has no photoionisation data (and None entirely if none was read).
-    # The level-name matching in readhillierdata.get_photoiontargetfractions() follows the
-    # CMFGEN naming conventions, which is why that reader resolves this field for every
-    # handler (an empty result when None).
+    # readhillierdata.get_photoiontargetfractions() matches these names to the upper ion's
+    # levels. It follows the CMFGEN conventions for a name. That reader therefore resolves
+    # this field for every handler, and returns an empty result when the field is None.
     photoion_targetconfigs: list[list[tuple[str, float]] | None] | None
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
     photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
@@ -66,9 +67,8 @@ class SimpleHandler:
     The reader takes (atomic_number, ion_stage, flog) and returns (ionization_energy_ev,
     energy_levels, transitions, transition_count_of_level_name), with an upsilondict appended
     when returns_upsilondict is set. The shapes differ by design, so the Callable stays untyped
-    in its return. get_level_valence_n is the handler's own level-name parser for the
-    hydrogenic photoionisation estimate; None means the estimate is not available for the
-    handler, and match_hydrogenic_phixs() then warns and assigns nothing.
+    in its return. get_level_valence_n is the handler's own level-name parser. The
+    hydrogenic photoionisation estimate uses it. None means that the handler has no parser.
     """
 
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
@@ -76,7 +76,7 @@ class SimpleHandler:
     returns_upsilondict: bool = False
 
 
-simple_handler_readers: dict[str, SimpleHandler] = {
+simple_handlers: dict[str, SimpleHandler] = {
     "boyle": SimpleHandler(
         lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
     ),
@@ -84,21 +84,15 @@ simple_handler_readers: dict[str, SimpleHandler] = {
     "dream": SimpleHandler(readdreamdata.read_levels_and_transitions),  # DREAM database of Z >= 57
     "lisbon": SimpleHandler(readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": SimpleHandler(
-        lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-            atomic_number, ion_stage, flog, calibrated=True, withforbidden=True
-        ),
+        partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25calib": SimpleHandler(
-        lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-            atomic_number, ion_stage, flog, calibrated=True
-        ),
+        partial(readfloers25data.read_levels_and_transitions, calibrated=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25uncalib": SimpleHandler(
-        lambda atomic_number, ion_stage, flog: readfloers25data.read_levels_and_transitions(
-            atomic_number, ion_stage, flog, calibrated=False
-        ),
+        partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
     ),
     # fac reads an early version of the floers25 calib data
@@ -127,6 +121,7 @@ def read_ion_data(
     Every ion names the handler that reads it; there is no default per element.
     """
     ion_stage, handler = ion_stage_entry
+    simplehandler = simple_handlers.get(handler)
 
     # no default for ionization_energy_ev: every handler branch below sets it, and an unknown
     # handler raises, so a branch that forgets should fail rather than write a 0 eV threshold
@@ -188,8 +183,7 @@ def read_ion_data(
                     photoionization_thresholds_ev,
                 ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog)
 
-        elif handler in simple_handler_readers:
-            simplehandler = simple_handler_readers[handler]
+        elif simplehandler is not None:
             result = simplehandler.read_levels_and_transitions(atomic_number, ion_stage, flog)
             if simplehandler.returns_upsilondict:
                 (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name, upsilondict) = result
@@ -211,9 +205,7 @@ def read_ion_data(
         and len(photoionization_crosssections) == 0
         and args.nlevels_hydrogenic_for_unknown_phixs > 0
     ):
-        get_level_valence_n = (
-            simple_handler_readers[handler].get_level_valence_n if handler in simple_handler_readers else None
-        )
+        get_level_valence_n = simplehandler.get_level_valence_n if simplehandler is not None else None
         (
             photoionization_crosssections,
             photoionization_targetfractions,

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the artisatomic readers, parsers and output writers."""
 
+import functools
 import io
 import operator
 import typing as t
@@ -2115,3 +2116,71 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header)
     with pytest.raises(ValueError, match="Did not find the expected data table"):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
+
+
+def test_iondata_simple_handlers_registry():
+    """Each handler must keep its own level-name parser and its own return shape.
+
+    The parsers used to be a second table in phixs.py, and the return shape used to be read
+    from the length of the reader's result. Both are registry fields now, so nothing else
+    checks them: a parser registered against the wrong handler would give an ion the
+    hydrogenic cross sections of another data source, and a wrong returns_upsilondict would
+    fail the unpacking on the first run.
+    """
+    from artisatomic import groundstatesonlynist
+    from artisatomic import readdreamdata
+    from artisatomic import readlisbondata
+    from artisatomic.iondata import simple_handlers
+
+    expected_parsers = {
+        "kurucz": readkuruczdata.get_level_valence_n,
+        "fac": readfacdata.get_level_valence_n,
+        "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
+        "floers25calib": readfloers25data.get_level_valence_n,
+        "floers25uncalib": readfloers25data.get_level_valence_n,
+        "tanakajplt": readtanakajpltdata.get_level_valence_n,
+        "qub_data": readqubdata.get_level_valence_n,
+    }
+    assert {
+        name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
+    } == expected_parsers
+
+    # these data sets name their levels in a format that no parser reads, so they get no
+    # hydrogenic estimate. match_hydrogenic_phixs() writes a warning for them.
+    assert {name for name, handler in simple_handlers.items() if handler.get_level_valence_n is None} == {
+        "boyle",
+        "dream",
+        "lisbon",
+        "mons",
+        "gsnist",
+    }
+
+    # only the QUB reader returns collision strengths beside the levels and the transitions
+    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub_data"}
+
+    # the readers that the registry calls with (atomic_number, ion_stage, flog)
+    expected_readers = {
+        "kurucz": readkuruczdata.read_levels_and_transitions,
+        "dream": readdreamdata.read_levels_and_transitions,
+        "lisbon": readlisbondata.read_levels_and_transitions,
+        "fac": readfacdata.read_levels_and_transitions,
+        "mons": readmonsdata.read_levels_and_transitions,
+        "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
+        "gsnist": groundstatesonlynist.read_ground_levels,
+        "qub_data": readqubdata.read_qub_levels_and_transitions,
+    }
+    for name, reader in expected_readers.items():
+        assert simple_handlers[name].read_levels_and_transitions is reader, name
+
+    # the three floers25 entries call one reader and select the data set by keyword, so each
+    # entry must bind its own keywords
+    expected_keywords = {
+        "floers25calibwithforbidden": {"calibrated": True, "withforbidden": True},
+        "floers25calib": {"calibrated": True},
+        "floers25uncalib": {"calibrated": False},
+    }
+    for name, keywords in expected_keywords.items():
+        reader = simple_handlers[name].read_levels_and_transitions
+        assert isinstance(reader, functools.partial)
+        assert reader.func is readfloers25data.read_levels_and_transitions
+        assert reader.keywords == keywords

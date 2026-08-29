@@ -710,6 +710,10 @@ def read_phixs_tables(
     sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
     functions that evaluate them.
     """
+    # phixs imports this module for get_hydrogenic_n_phixstable(), so a module-level import
+    # of reduce_phixs_tables here would be circular
+    from artisatomic.phixs import reduce_phixs_tables
+
     msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
     if max_hyd_l_n == -1:
         raise RuntimeError(msg)
@@ -1036,10 +1040,6 @@ def read_phixs_tables(
                     lowerlevelname = ""
                     crosssectiontype = -1
                     numpointsexpected = 0
-
-        # phixs imports this module for get_hydrogenic_n_phixstable(), so a
-        # module-level import of reduce_phixs_tables here would be circular
-        from artisatomic.phixs import reduce_phixs_tables
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
@@ -1653,7 +1653,7 @@ def strip_name_separators(levelname: str) -> str:
 def get_photoiontargetfractions(
     dfenergy_levels,
     dfenergy_levels_upperion,
-    hillier_photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
+    photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
     flog=None,
 ) -> list[list[tuple[int, float]]]:
     """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
@@ -1680,7 +1680,7 @@ def get_photoiontargetfractions(
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: dict[str, list[tuple[int, float]]] = {}
 
-    if hillier_photoion_targetconfigs is None:
+    if photoion_targetconfigs is None:
         return targetlist
 
     # The comparison is per target configuration, not per level. Pull the names out one time.
@@ -1688,7 +1688,7 @@ def get_photoiontargetfractions(
     strippednames_of_levelid = [strip_name_separators(levelname) for levelname in uppernamenoj_of_levelid]
 
     for lowerlevelid in range(dfenergy_levels.height):
-        targetconfig_fractions = hillier_photoion_targetconfigs[lowerlevelid]
+        targetconfig_fractions = photoion_targetconfigs[lowerlevelid]
         if targetconfig_fractions is None:
             continue  # photoionisation flagged as not available
 

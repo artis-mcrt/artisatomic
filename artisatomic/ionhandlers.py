@@ -70,8 +70,3 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
         ion_handlers.append((int(atomic_number), ions))
 
     return ion_handlers
-
-
-def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
-    """Replace [(ion_stage1, 'handler1'), (ion_stage2, 'handler2')] with [ion_stage1, ion_stage2]."""
-    return [ion_stage for ion_stage, _handler in list_ions]

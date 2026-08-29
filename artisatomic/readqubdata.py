@@ -23,9 +23,8 @@ from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
 from artisatomic.phixs import reduce_phixs_tables
 
-tyndall_co3_path = (
-    PYDIR / ".." / "atomic-data-qub" / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
-).resolve()
+qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
+tyndall_co3_path = qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
 
 
 class QUBTransitionRow(t.NamedTuple):
@@ -54,9 +53,6 @@ class QUBEnergyLevel(t.NamedTuple):
     energyabovegsinpercm: float
     g: float
     parity: int | None  # None where the configuration determines no parity
-
-
-qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
 
 
 def extend_ion_list(ion_handlers):
@@ -261,7 +257,8 @@ def append_qub_transition(
 
 # the ion stages that the QUB Co data covers: the Co III adf04 files and the single-level
 # Co IV. For the other stages of a "qub_cobalt" ion, iondata.read_ion_data() falls back to
-# the CMFGEN reader.
+# the CMFGEN reader. read_qub_levels_and_transitions() below has one branch for each stage
+# in this set, so a new stage needs an entry here and a branch there.
 qub_cobalt_stages: frozenset[int] = frozenset({3, 4})
 
 

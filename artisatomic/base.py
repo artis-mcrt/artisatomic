@@ -436,6 +436,11 @@ def parallel_map[ResultType](
     return results
 
 
+def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
+    """Replace [(ion_stage1, 'handler1'), (ion_stage2, 'handler2')] with [ion_stage1, ion_stage2]."""
+    return [ion_stage for ion_stage, _handler in list_ions]
+
+
 def sort_ion_handlers(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
 ) -> list[tuple[int, list[tuple[int, str]]]]:
@@ -488,7 +493,7 @@ def add_handler_if_not_set(
         list_ions_handlers_out: list[tuple[int, str]] = list(list_ions_handlers)
         if tmp_atomic_number == atomic_number:
             found_element = True
-            if ion_stage not in [x[0] for x in list_ions_handlers_out]:
+            if ion_stage not in drop_handlers(list_ions_handlers_out):
                 list_ions_handlers_out.append((ion_stage, handler))
         ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
 

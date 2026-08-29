@@ -35,9 +35,9 @@ def match_hydrogenic_phixs(
     ion whose handler covered even one level keeps exactly the levels that handler covered, and
     the rest are left without photoionization rather than filled in hydrogenically.
 
-    get_level_valence_n is the handler's own level-name parser, registered beside the reader in
-    iondata.simple_handler_readers. None means the handler has no parser, and the ion then gets
-    no estimate.
+    get_level_valence_n is the handler's own level-name parser. The handler registry in
+    iondata.py holds it. None means that the handler has no parser. The ion then gets no
+    estimate, and this function writes a warning.
     """
     if get_level_valence_n is None:
         print(
@@ -45,7 +45,6 @@ def match_hydrogenic_phixs(
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
-    get_n = get_level_valence_n
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
@@ -63,7 +62,7 @@ def match_hydrogenic_phixs(
         photoionization_thresholds_ev[levelindex] = threshold_ev
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
 
-        n = get_n(level["levelname"])
+        n = get_level_valence_n(level["levelname"])
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)

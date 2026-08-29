@@ -6,18 +6,17 @@ Each data source has its own read*.py module; this package selects a handler per
 and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
 The implementation lives in submodules (base, levelnames, ionhandlers, phixs, iondata, output,
-cli). This module re-exports names so the internal command-line scripts and the tests can use the
-flat artisatomic.name interface. The package has no external API callers, so a name gets a
-re-export only when an internal script or a test requires it. Each name is imported under its own
+cli). This module re-exports the names that the tests and __main__.py use through the flat
+artisatomic.name interface. The package has no external API callers, so a name gets a re-export
+only when a test or an internal script requires it. The command-line scripts import from the
+submodules directly. Each name is imported under its own
 name (`import x as x`), which is what marks it as a re-export rather than an incidental import.
 Submodules and readers import base-level helpers and constants with
 `from artisatomic.base import ...` (safe from circularity, since base imports nothing from the
 package).
 """
 
-from artisatomic import groundstatesonlynist as groundstatesonlynist
 from artisatomic import readboyledata as readboyledata
-from artisatomic import readdreamdata as readdreamdata
 from artisatomic import readfacdata as readfacdata
 from artisatomic import readfloers25data as readfloers25data
 from artisatomic import readhillierdata as readhillierdata
