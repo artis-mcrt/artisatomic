@@ -253,6 +253,12 @@ def append_qub_transition(
     qub_transitions.append(transition)
 
 
+# the ion stages that the QUB Co data covers: the Co III adf04 files and the single-level
+# Co IV. For the other stages of a "qub_cobalt" ion, iondata.read_ion_data() falls back to
+# the CMFGEN reader.
+qub_cobalt_stages: frozenset[int] = frozenset({3, 4})
+
+
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the QUB calculations.
 

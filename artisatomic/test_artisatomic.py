@@ -383,6 +383,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         energy_levels=dflevels,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
 
@@ -408,6 +409,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         energy_levels=dflevels_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
     assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
@@ -445,6 +447,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
             energy_levels=dflevels,
             ionization_energy_ev=ionization_energy_ev,
             ion_handler="kurucz",
+            get_level_valence_n=readkuruczdata.get_level_valence_n,
             args=args,
         )
         assert sum(bool(targets) for targets in targetfractions) == n_expected
@@ -464,6 +467,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         energy_levels=dflevels_partly_unbound,
         ionization_energy_ev=ionization_energy_ev,
         ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
     )
     assert np.count_nonzero(~np.isnan(thresholds)) == 1
@@ -518,7 +522,7 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
         dftransitions=pl.DataFrame(),
         transition_count_of_level_name={},
         upsilondict={},
-        hillier_photoion_targetconfigs=targetconfigs,
+        photoion_targetconfigs=targetconfigs,
         photoionization_crosssections=np.empty((0, 100)),
         photoionization_targetfractions=targetfractions if targetfractions is not None else [],
         photoionization_thresholds_ev=np.empty(0),
@@ -1792,7 +1796,7 @@ def test_fill_missing_phixs_thresholds():
             dftransitions=pl.DataFrame(),
             transition_count_of_level_name={},
             upsilondict={},
-            hillier_photoion_targetconfigs=None,
+            photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
             photoionization_thresholds_ev=np.array(thresholds),
@@ -1884,7 +1888,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
             dftransitions=pl.DataFrame(),
             transition_count_of_level_name={},
             upsilondict={},
-            hillier_photoion_targetconfigs=None,
+            photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
             photoionization_thresholds_ev=np.array(thresholds),

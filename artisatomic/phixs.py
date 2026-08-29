@@ -1,17 +1,13 @@
 """Downsample photoionization cross-section tables and estimate hydrogenic ones where none exist."""
 
+from collections.abc import Callable
 from functools import partial
 
 import numpy as np
 import numpy.typing as npt
 import polars as pl
 
-from artisatomic import readfacdata
-from artisatomic import readfloers25data
 from artisatomic import readhillierdata
-from artisatomic import readkuruczdata
-from artisatomic import readqubdata
-from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
@@ -19,7 +15,12 @@ from artisatomic.base import parallel_map
 
 
 def match_hydrogenic_phixs(
-    atomic_number: int, energy_levels: pl.DataFrame, ionization_energy_ev: float, ion_handler: str, args
+    atomic_number: int,
+    energy_levels: pl.DataFrame,
+    ionization_energy_ev: float,
+    ion_handler: str,
+    get_level_valence_n: Callable[[str], int] | None,
+    args,
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     """Estimate photoionization cross sections for a data set that supplies none.
 
@@ -33,23 +34,18 @@ def match_hydrogenic_phixs(
     real data is never replaced or extended by an estimate. The granularity is the whole ion: an
     ion whose handler covered even one level keeps exactly the levels that handler covered, and
     the rest are left without photoionization rather than filled in hydrogenically.
+
+    get_level_valence_n is the handler's own level-name parser, registered beside the reader in
+    iondata.simple_handler_readers. None means the handler has no parser, and the ion then gets
+    no estimate.
     """
-    dict_get_n_func = {
-        "tanakajplt": readtanakajpltdata.get_level_valence_n,
-        "kurucz": readkuruczdata.get_level_valence_n,
-        "fac": readfacdata.get_level_valence_n,
-        "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
-        "floers25calib": readfloers25data.get_level_valence_n,
-        "floers25uncalib": readfloers25data.get_level_valence_n,
-        "qub_data": readqubdata.get_level_valence_n,
-    }
-    if ion_handler not in dict_get_n_func:
+    if get_level_valence_n is None:
         print(
             f"WARNING: Can't assign hydrogenic photoionization cross sections because I don't know how to find principle quantum numbers for {ion_handler} levels"
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
-    get_n = dict_get_n_func[ion_handler]
+    get_n = get_level_valence_n
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
