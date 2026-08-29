@@ -312,14 +312,21 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
     file, the row index + 1 is the charge after the electron loss.
     """
     lines = text.split("\n")
-    assert lines[0].split()[0] in {"201903041", "201903042"}, "unexpected magic number in the Cloudy file"
+    # not asserts: input-file validation must survive python -O
+    if lines[0].split()[0] not in {"201903041", "201903042"}:
+        msg = "unexpected magic number in the Cloudy file"
+        raise ValueError(msg)
     rows = {}
     for k, line in enumerate(line for line in lines[1:] if line.strip()):
         vals = [float(x) for x in line.split()]
-        assert len(vals) == ncols, f"expected {ncols} columns: {line}"
+        if len(vals) != ncols:
+            msg = f"expected {ncols} columns: {line}"
+            raise ValueError(msg)
         nelem, ionindex = divmod(k, 4)
         rows[nelem + 1, ionindex + 1] = vals
-    assert len(rows) == 120, "expected 30 elements with 4 rows each"
+    if len(rows) != 120:
+        msg = "expected 30 elements with 4 rows each"
+        raise ValueError(msg)
     return rows
 
 
@@ -382,7 +389,10 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
         if not line.strip():
             continue
         parts = line.split()
-        assert len(parts) == 8, f"expected 8 columns in the AR85 table: {line}"
+        # not an assert: input-file validation must survive python -O
+        if len(parts) != 8:
+            msg = f"expected 8 columns in the AR85 table: {line}"
+            raise ValueError(msg)
         z, nelectrons = int(parts[0]), int(parts[1])
         a, b, c, d, tmin, tmax = (float(x) for x in parts[2:8])
         q = z - nelectrons + 1  # the file lists the electron count of the product ion
@@ -404,7 +414,10 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
         if not rawline.strip():
             continue
         line = rawline.rstrip().ljust(212)
-        assert len(line) == 212, f"unexpected line length in the CDS table: {rawline}"
+        # not an assert: input-file validation must survive python -O
+        if len(line) != 212:
+            msg = f"unexpected line length in the CDS table: {rawline}"
+            raise ValueError(msg)
         elsymbol = line[0:2].strip()
         q = int(line[3])
         vals = [float(line[33 + 9 * i : 41 + 9 * i]) for i in range(len(SS11_TGRID))]
@@ -521,7 +534,11 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     """
     keys = [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in entries]
     duplicates = [key for key, count in Counter(keys).items() if count > 1]
-    assert not duplicates, f"reactions that appear more than once: {duplicates[:5]}"
+    # not an assert: this guards the written output and must survive python -O, because a
+    # duplicate reaction would silently shadow every later fit for the same reaction
+    if duplicates:
+        msg = f"reactions that appear more than once: {duplicates[:5]}"
+        raise ValueError(msg)
     reactions = set(keys)
     return [
         entry._replace(
