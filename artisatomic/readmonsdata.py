@@ -99,8 +99,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     The level file gives the energy (in 1000 cm^-1) and J of each level, in no particular order.
     The transition file gives the wavelength, the lower level energy and the weighted oscillator
     strength of each E1 transition. The reader finds the levels of a transition by their energy:
-    the upper level energy is the lower level energy plus the photon energy. The level names are
-    the energies. NIST supplies the ionization energy.
+    the upper level energy is the lower level energy plus the photon energy. Each level name is
+    the energy plus the zero-based level id, so two levels with one energy keep separate names.
+    NIST supplies the ionization energy.
     """
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
@@ -112,7 +113,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
 
     dflevels = pl.DataFrame(
         {
-            "levelname": [str(energy) for energy in energiesabovegsinpercm],
+            # the id makes the name unique: two levels with one energy would otherwise share a
+            # name, and dict(zip(...)) below would keep only one transition count for both
+            "levelname": [f"{energy},id={levelid}" for levelid, energy in enumerate(energiesabovegsinpercm)],
             "energyabovegsinpercm": energiesabovegsinpercm,
             "g": g_arr,
             "j": j_arr,
