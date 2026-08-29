@@ -184,7 +184,7 @@ def test_makechargetransferfile_ar85_helium_entries(patch_sources, tmp_path):
 def test_set_autoreverse_flags_rejects_a_duplicate_reaction():
     """The assembled list must hold each reaction once, because the reader takes the first fit."""
     entry = makechargetransferfile.CTEntry(26, 2, 1, 1, 1.0, 0.0, 0.0, 0.0, 0.0, 1e3, 4e4, "Test; Fe+1 + H0")
-    with pytest.raises(AssertionError, match=r"more than once"):
+    with pytest.raises(ValueError, match=r"more than once"):
         makechargetransferfile.set_autoreverse_flags([entry, entry])
 
 
