@@ -204,7 +204,14 @@ def reduce_phixs_tables_worker(
         else:
             nsteps = 50  # was 500
             arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
-            arr_sigma_megabarns = np.interp(arr_energyryd, tablein_energyryd, tablein_sigma)
+            # np.interp holds the last cross section constant past the table's end. Apply the
+            # same power-law decay that the interval edges above use, so a bin that straddles
+            # the table end does not overweight its tail.
+            arr_sigma_megabarns = np.where(
+                arr_energyryd > table_energy_last,
+                table_sigma_last * (table_energy_last / arr_energyryd) ** 3,
+                np.interp(arr_energyryd, tablein_energyryd, tablein_sigma),
+            )
 
         # the recombination-rate weight nu^2 exp(-h nu / k T), evaluated over the whole interval at
         # once. np.vectorize() called math.exp() once per sample, which dominated this function.
