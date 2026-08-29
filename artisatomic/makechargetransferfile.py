@@ -312,7 +312,7 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
     file, the row index + 1 is the charge after the electron loss.
     """
     lines = text.split("\n")
-    # not asserts: input-file validation must survive python -O
+    # not asserts: input validation must survive python -O
     if lines[0].split()[0] not in {"201903041", "201903042"}:
         msg = "unexpected magic number in the Cloudy file"
         raise ValueError(msg)
@@ -389,7 +389,7 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
         if not line.strip():
             continue
         parts = line.split()
-        # not an assert: input-file validation must survive python -O
+        # not an assert: input validation must survive python -O
         if len(parts) != 8:
             msg = f"expected 8 columns in the AR85 table: {line}"
             raise ValueError(msg)
@@ -414,7 +414,7 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
         if not rawline.strip():
             continue
         line = rawline.rstrip().ljust(212)
-        # not an assert: input-file validation must survive python -O
+        # not an assert: input validation must survive python -O
         if len(line) != 212:
             msg = f"unexpected line length in the CDS table: {rawline}"
             raise ValueError(msg)
@@ -534,8 +534,8 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     """
     keys = [(e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) for e in entries]
     duplicates = [key for key, count in Counter(keys).items() if count > 1]
-    # not an assert: this guards the written output and must survive python -O, because a
-    # duplicate reaction would silently shadow every later fit for the same reaction
+    # not an assert: this guards written output and must survive python -O. A duplicate
+    # reaction shadows every later fit for that reaction, because the reader takes the first.
     if duplicates:
         msg = f"reactions that appear more than once: {duplicates[:5]}"
         raise ValueError(msg)
