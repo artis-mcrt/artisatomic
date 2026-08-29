@@ -2145,8 +2145,8 @@ def test_iondata_simple_handlers_registry():
         name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
     } == expected_parsers
 
-    # these data sets name their levels in a format that no parser reads, so they get no
-    # hydrogenic estimate. match_hydrogenic_phixs() writes a warning for them.
+    # no parser is registered for these handlers, so their ions get no hydrogenic estimate
+    # and match_hydrogenic_phixs() writes a warning. Registering one is what changes that.
     assert {name for name, handler in simple_handlers.items() if handler.get_level_valence_n is None} == {
         "boyle",
         "dream",
@@ -2184,3 +2184,23 @@ def test_iondata_simple_handlers_registry():
         assert isinstance(reader, functools.partial)
         assert reader.func is readfloers25data.read_levels_and_transitions
         assert reader.keywords == keywords
+
+
+def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
+    """The boyle entry is the one adapter that drops an argument, so it needs its own check.
+
+    Its reader takes no flog, and the registry calls every reader with one, so the entry has to
+    drop it. A comparison of the callables cannot catch a mis-wired adapter here.
+    """
+    from artisatomic import readboyledata
+    from artisatomic.iondata import simple_handlers
+
+    calls = []
+    monkeypatch.setattr(
+        readboyledata,
+        "read_levels_and_transitions",
+        lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
+    )
+    simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
+
+    assert calls == [(2, 1)]

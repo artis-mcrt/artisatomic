@@ -68,7 +68,8 @@ class SimpleHandler:
     energy_levels, transitions, transition_count_of_level_name), with an upsilondict appended
     when returns_upsilondict is set. The shapes differ by design, so the Callable stays untyped
     in its return. get_level_valence_n is the handler's own level-name parser. The
-    hydrogenic photoionisation estimate uses it. None means that the handler has no parser.
+    hydrogenic photoionisation estimate uses it. None leaves the ion without cross sections,
+    and match_hydrogenic_phixs() then writes a warning.
     """
 
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]

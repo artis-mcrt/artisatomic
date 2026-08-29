@@ -24,7 +24,7 @@ from artisatomic.levelnames import lchars
 from artisatomic.phixs import reduce_phixs_tables
 
 qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
-tyndall_co3_path = qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
+tyndall_co3_path = (qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
 
 
 class QUBTransitionRow(t.NamedTuple):
