@@ -1,6 +1,5 @@
 """Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
 
-import os
 import re
 import string
 from pathlib import Path
@@ -9,11 +8,12 @@ import polars as pl
 
 import artisatomic
 from artisatomic.base import scan_file_lines
+from artisatomic.base import TESTMODE
 
 
 def in_testmode() -> bool:
     """Say whether the test mode is active. The test mode reads only the test_sample directory."""
-    return os.environ.get("ARTISATOMIC_TESTMODE") == "1"
+    return TESTMODE
 
 
 def get_basepath(withforbidden: bool) -> Path:

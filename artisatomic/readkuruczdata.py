@@ -1,7 +1,6 @@
 """Read levels and transitions from the Kurucz gfall line lists."""
 
 import itertools
-import os
 import re
 import string
 from pathlib import Path
@@ -9,10 +8,13 @@ from pathlib import Path
 import polars as pl
 
 import artisatomic
+from artisatomic.base import find_file_check_extension
+from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
+from artisatomic.base import TESTMODE
 
-kuruczdatapath = Path(__file__).parent.absolute() / ".." / "atomic-data-kurucz"
-if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
+kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
+if TESTMODE:
     kuruczdatapath /= "test_sample"
 
 
@@ -108,10 +110,12 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # Clean labels. str.replace_all(), not Expr.replace(): the latter swaps whole values that
     # equal the literal string "\s+", so the internal whitespace runs the gfall columns are padded
     # with ('s4d  1D') were never collapsed and went into the level names as-is.
+    # fill_null(""): a blank label parsed to null, and a null is_in() result made filter() drop
+    # the row, so U II lost 495 of its 595 lines. Only the three pseudo-level labels are ignored.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
     gfall = gfall.with_columns(
-        pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " "),
-        pl.col("label_upper").str.strip_chars().str.replace_all(r"\s+", " "),
+        pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
+        pl.col("label_upper").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
     ).filter(
         (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
     )
@@ -134,21 +138,15 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
     has no data for it.
     """
-    extended_atoms_filenames = [
-        f"gf{atomic_number:02d}{ion_charge:02d}.lines.zst",
-        f"gf{atomic_number:02d}{ion_charge:02d}.lines",
-        f"gf{atomic_number:02d}{ion_charge:02d}z.lines.zst",
-        f"gf{atomic_number:02d}{ion_charge:02d}z.lines",
+    stems = [
+        kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}.lines",
+        kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}z.lines",
+        kuruczdatapath / "zztar" / f"gf{atomic_number:02d}{ion_charge:02d}.all",
     ]
-    for filename in extended_atoms_filenames:
-        path_gfall = (kuruczdatapath / "extendedatoms" / filename).resolve()
-        if path_gfall.is_file():
-            return path_gfall
-    zztar_filenames = [f"gf{atomic_number:02d}{ion_charge:02d}.all", f"gf{atomic_number:02d}{ion_charge:02d}.all.zst"]
-    for filename in zztar_filenames:
-        path_gfall = (kuruczdatapath / "zztar" / filename).resolve()
-        if path_gfall.is_file():
-            return path_gfall
+    for stem in stems:
+        path_gfall = find_file_check_extension(stem)
+        if path_gfall is not None:
+            return path_gfall.resolve()
 
     msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
     raise FileNotFoundError(msg)
@@ -227,7 +225,7 @@ def read_levels_and_transitions(
         # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
         # without it the level names in adata.txt can differ from run to run
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
-        .sort(["energyabovegsinpercm", "j", "label"])
+        .sort("energyabovegsinpercm", "j")
         .select(
             pl.col("energyabovegsinpercm"),
             pl.col("j"),
@@ -240,7 +238,6 @@ def read_levels_and_transitions(
             ),
             g=2 * pl.col("j") + 1,
         )
-        .sort("energyabovegsinpercm", "j")
         .collect()
     )
     dflevels = artisatomic.leveltuples_to_pldataframe(dflevels).with_columns(

@@ -1,15 +1,15 @@
 """Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
 
 import re
-from pathlib import Path
 
 import polars as pl
 
 import artisatomic
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
-jpltpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
+jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
 
 def extend_ion_list(ion_handlers, maxionstage=None):
@@ -112,13 +112,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         .collect()
     )
 
-    transition_count_of_levelid: dict[int, int] = dict(
-        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    transition_count_of_level_name = {
-        levelname: transition_count_of_levelid.get(levelid, 0)
-        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
-    }
     assert dftransitions.height == transitioncount
 
     dftransitions = (
@@ -135,6 +128,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     if dftransitions.height != dftransitions_filtered.height:
         artisatomic.log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
         dftransitions = dftransitions_filtered
+
+    # count after the self-transition filter, so the counts in adata.txt agree with the
+    # transitions present in transitiondata.txt
+    transition_count_of_levelid: dict[int, int] = dict(
+        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
+    )
+    transition_count_of_level_name = {
+        levelname: transition_count_of_levelid.get(levelid, 0)
+        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
+    }
 
     return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
 

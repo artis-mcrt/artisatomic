@@ -80,7 +80,23 @@ def sort_ion_handlers(
     process_files() relies on ascending ion stages to identify the top ion and to find each ion's
     photoionisation target, so normalise the order here, before the handler list is written to
     artisatomicionhandlers.json and passed to write_compositionfile().
+
+    A duplicated element or ion stage is rejected here, because the code downstream trusts the
+    list: write_compositionfile() counts an element's ions as max - min + 1 and cannot see a
+    duplicate, so a duplicate would make compositiondata.txt disagree with the other output files.
     """
+    atomic_numbers = [atomic_number for atomic_number, _listions in ion_handlers]
+    if len(set(atomic_numbers)) != len(atomic_numbers):
+        duplicates = sorted({z for z in atomic_numbers if atomic_numbers.count(z) > 1})
+        msg = f"The ion handlers list contains more than one entry for Z={duplicates}."
+        raise ValueError(msg)
+    for atomic_number, listions in ion_handlers:
+        ion_stages = [ion_stage for ion_stage, _handler in listions]
+        if len(set(ion_stages)) != len(ion_stages):
+            duplicates = sorted({s for s in ion_stages if ion_stages.count(s) > 1})
+            msg = f"The ion handlers list contains ion stage {duplicates} more than once for Z={atomic_number}."
+            raise ValueError(msg)
+
     return sorted(
         ((atomic_number, sorted(listions, key=operator.itemgetter(0))) for atomic_number, listions in ion_handlers),
         key=operator.itemgetter(0),
@@ -114,7 +130,6 @@ def add_handler_if_not_set(
         if tmp_atomic_number == atomic_number:
             found_element = True
             if ion_stage not in [x[0] for x in list_ions_handlers_out]:
-                # add an ion that is not present in the element's list
                 list_ions_handlers_out.append((ion_stage, handler))
         ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
 

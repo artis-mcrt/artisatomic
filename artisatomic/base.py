@@ -5,6 +5,7 @@ import io
 import itertools
 import math
 import multiprocessing as mp
+import os
 import sys
 import typing as t
 from collections.abc import Callable
@@ -17,6 +18,10 @@ import pandas as pd
 import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
+
+# read once at import: every reader that has a test data sample keys its data path on this flag,
+# so a change to the variable after the import must not redirect only some of the readers
+TESTMODE = os.environ.get("ARTISATOMIC_TESTMODE") == "1"
 atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
 # estimate unknown atomic mass as Z / 0.45. Only the mass column: a row-wise fillna() filled every
 # column with it, including the densities and radii, which are not masses and are not read here.

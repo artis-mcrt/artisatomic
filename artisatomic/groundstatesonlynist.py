@@ -2,11 +2,11 @@
 
 import typing as t
 from collections import defaultdict
-from pathlib import Path
 
 import pandas as pd
 
 import artisatomic
+from artisatomic.base import PYDIR
 
 
 class EnergyLevel(t.NamedTuple):
@@ -18,7 +18,7 @@ class EnergyLevel(t.NamedTuple):
     parity: float
 
 
-datafilepath = Path(Path(Path(__file__).resolve()).parent, "..", "atomic-data-groundstatesonlynist", "groundstates.dat")
+datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
 
 
 def read_ground_levels(atomic_number, ion_stage, flog):

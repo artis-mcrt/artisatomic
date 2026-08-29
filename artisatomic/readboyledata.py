@@ -3,9 +3,10 @@
 import typing as t
 from collections import defaultdict
 from functools import cache
-from pathlib import Path
 
-datafilepath = Path(Path(Path(__file__).resolve()).parent, "..", "atomic-data-helium-boyle", "aoife.hdf5")
+from artisatomic.base import PYDIR
+
+datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
 
 
 @cache
@@ -26,12 +27,15 @@ def get_aoife_dataset():
 
 
 class EnergyLevelRow(t.NamedTuple):
-    """One level of the AOIFE levels_data table, with the three derived fields appended."""
+    """One level of the AOIFE levels_data table, with the derived fields appended.
+
+    The table's energy column is the energy above the ground state, kept once as
+    energyabovegsinpercm.
+    """
 
     atomic_number: float
     ion_number: float
     level_number: float
-    energy: float
     g: float
     metastable: float
     energyabovegsinpercm: float
@@ -99,7 +103,6 @@ def read_levels_data(atomic_number, ion_stage):
                 atomic_number=atomic_num,
                 ion_number=ion_number,
                 level_number=level_number,
-                energy=energyabovegsinpercm,
                 g=g,
                 metastable=metastable,
                 energyabovegsinpercm=energyabovegsinpercm,

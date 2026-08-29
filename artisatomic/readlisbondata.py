@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 import artisatomic
+from artisatomic.base import PYDIR
 
 
 class LisbonReader:
@@ -22,19 +23,15 @@ class LisbonReader:
     lines : DataFrame
     """
 
-    def __init__(self, data, priority=10) -> None:
-        """Store the Lisbon data and its priority.
+    def __init__(self, data) -> None:
+        """Store the Lisbon data.
 
         Parameters
         ----------
         data : dict
             Dictionary containing one dictionary per species with
             keys `levels` and `lines`.
-
-        priority: int, optional
-            Priority of the current data source, by default 10.
         """
-        self.priority = priority
         self._get_levels_lines(data)
 
     def _get_levels_lines(self, data):
@@ -48,9 +45,9 @@ class LisbonReader:
         """
         lvl_list = []
         lns_list = []
-        # the caller already knows the element and charge, so they are passed in rather than
-        # formatted into the key and parsed back out with carsus.util.parse_selected_species(),
-        # which made an undeclared optional dependency a hard requirement of this reader
+        # the caller passes the element and the charge directly. The alternative was to format
+        # them into the key and to parse them back with carsus.util.parse_selected_species(),
+        # which made an undeclared optional dependency a hard requirement of this reader.
         for parser in data.values():
             atomic_number = parser["atomic_number"]
             ion_charge = parser["ion_charge"]
@@ -59,8 +56,6 @@ class LisbonReader:
             levels["energy"] = levels_data["Energy[cm^-1]"]
             levels["j"] = 0.5 * (levels_data["g"] - 1)
             levels["label"] = levels_data["RelConfig"]
-            levels["method"] = "meas"
-            levels["priority"] = self.priority
             levels["atomic_number"] = atomic_number
             levels["ion_charge"] = ion_charge
             levels["level_index"] = levels.index
@@ -73,12 +68,11 @@ class LisbonReader:
             lines["level_index_upper"] = lines_data["Upper"]
             lines["atomic_number"] = atomic_number
             lines["ion_charge"] = ion_charge
-            lines["energy_lower"] = levels.iloc[lines["level_index_lower"]]["energy"].to_numpy()
-            lines["energy_upper"] = levels.iloc[lines["level_index_upper"]]["energy"].to_numpy()
             lines["gf"] = lines_data["gf"]
-            lines["j_lower"] = levels.iloc[lines["level_index_lower"]]["j"].to_numpy()
             lines["j_upper"] = levels.iloc[lines["level_index_upper"]]["j"].to_numpy()
-            lines["wavelength"] = lines_data["Wavelength[Ang]"] / 10.0
+            # keep the wavelength in Angstrom: the gf-to-A constant in
+            # read_levels_and_transitions() expects Angstrom
+            lines["wavelength"] = lines_data["Wavelength[Ang]"]
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
         levels = pd.concat(lvl_list)
@@ -189,9 +183,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # the Lisbon CSVs are not part of this repository, so the location is configurable and
     # checked up front: pandas would otherwise report only the missing file, not what to set
-    lisbonpath = Path(
-        os.environ.get("ARTISATOMIC_LISBON_PATH", Path(__file__).parent.resolve() / ".." / "atomic-data-lisbon")
-    ).resolve()
+    lisbonpath = Path(os.environ.get("ARTISATOMIC_LISBON_PATH", PYDIR / ".." / "atomic-data-lisbon")).resolve()
     if not lisbonpath.is_dir():
         msg = (
             f"Lisbon data directory {lisbonpath} not found. Set ARTISATOMIC_LISBON_PATH to the directory holding the"
@@ -216,6 +208,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
+    # the constant 1.49919e-16 converts gf to A with the wavelength in Angstrom, as in
+    # readkuruczdata and readmonsdata
     dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)

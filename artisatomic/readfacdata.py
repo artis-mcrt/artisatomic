@@ -10,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 
 import artisatomic
+from artisatomic.base import hc_in_ev_cm
 
 USE_CALIBRATED = True
 
@@ -26,15 +27,6 @@ def get_basepath() -> Path:
     return Path(os.environ.get("ARTISATOMIC_FAC_PATH", default)) / f"OptimizedFAC_lanthanides{calibstr}"
 
 
-# Constants
-me = 9.10938e-28  # grams
-NA = 6.0221409e23  # mol^-1
-cspeed = 29979245800  # cm/s
-kB = 0.6950356  # cm-1 K
-echarge = 4.8e-10  # statC
-hc = 4.1357e-15 * cspeed
-
-
 def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
     """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
     widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
@@ -43,15 +35,13 @@ def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
     levels_FAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
 
     levels_FAC["Config"] = levels_FAC["Configs"].apply(lambda x: " ".join(x.split(".")))
-    levels_FAC["Config rel"] = levels_FAC["Config rel"].apply(
-        lambda x: x.replace(".", " ") if isinstance(x, str) else x
-    )
     levels_FAC["g"] = levels_FAC["2J"] + 1
 
-    levels_FAC = levels_FAC[["Ilev", "Config", "Config rel", "P", "2J", "g", "Energy_ev"]]
+    levels_FAC = levels_FAC[["Ilev", "Config", "P", "2J", "g", "Energy_ev"]]
 
-    levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: s.replace("1", ""))
-    levels_FAC["energypercm"] = levels_FAC["Energy_ev"] / hc
+    # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits
+    levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
+    levels_FAC["energypercm"] = levels_FAC["Energy_ev"] / hc_in_ev_cm
 
     assert isinstance(levels_FAC, pd.DataFrame)
     return levels_FAC
@@ -65,14 +55,14 @@ def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
     levels_cFAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
 
     levels_cFAC["Config"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[0])
-    levels_cFAC["Config rel"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[1])
 
     levels_cFAC["g"] = levels_cFAC["2J"] + 1
 
-    levels_cFAC = levels_cFAC[["Ilev", "Config", "Config rel", "P", "g", "Energy_ev"]]
+    levels_cFAC = levels_cFAC[["Ilev", "Config", "P", "g", "Energy_ev"]]
 
-    levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: s.replace("1", ""))
-    levels_cFAC["energypercm"] = [en_ev / hc for en_ev in levels_cFAC["Energy_ev"]]
+    # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits
+    levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
+    levels_cFAC["energypercm"] = [en_ev / hc_in_ev_cm for en_ev in levels_cFAC["Energy_ev"]]
 
     assert isinstance(levels_cFAC, pd.DataFrame)
     return levels_cFAC
@@ -101,7 +91,7 @@ def GetLevels(filename: Path | str, ionization_energy_in_ev: float) -> pd.DataFr
         msg = "No FAC-like code detected on output file"
         raise ValueError(msg)
 
-    levels = levels[levels["energypercm"] <= (ionization_energy_in_ev / hc)]
+    levels = levels[levels["energypercm"] <= (ionization_energy_in_ev / hc_in_ev_cm)]
     assert isinstance(levels, pd.DataFrame)
 
     return levels
@@ -113,10 +103,8 @@ def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
     trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    trans_FAC["Wavelength[Ang]"] = trans_FAC["DeltaE[eV]"].apply(lambda en_ev: (hc / en_ev) * 1e8)
-    trans_FAC["DeltaE[cm^-1]"] = trans_FAC["DeltaE[eV]"] / hc
     trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
-    trans_FAC = trans_FAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    trans_FAC = trans_FAC[["Upper", "Lower", "A"]]
     assert isinstance(trans_FAC, pd.DataFrame)
     return trans_FAC
 
@@ -127,9 +115,7 @@ def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
 
     widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
     trans_cFAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    trans_cFAC["Wavelength[Ang]"] = trans_cFAC["DeltaE[eV]"].apply(lambda en_ev: (hc / en_ev) * 1e8)
-    trans_cFAC["DeltaE[cm^-1]"] = trans_cFAC["DeltaE[eV]"] / hc
-    trans_cFAC = trans_cFAC[["Upper", "Lower", "DeltaE[eV]", "DeltaE[cm^-1]", "Wavelength[Ang]", "gf", "A"]]
+    trans_cFAC = trans_cFAC[["Upper", "Lower", "A"]]
     assert isinstance(trans_cFAC, pd.DataFrame)
     return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
@@ -226,14 +212,19 @@ class FACTransition(t.NamedTuple):
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
     """Convert FAC lines to transitions referencing zero-based level ids.
 
-    A line naming an Ilev with no level is an error rather than something to skip, and the two
-    levels are ordered lower id first. Returns the transitions and the number of them touching
-    each level name.
+    A line that names an Ilev with no level is skipped, because GetLevels() drops the levels
+    above the ionization energy. The two levels are ordered lower id first. Returns the
+    transitions and the number of them touching each level name.
     """
     transitions = []
     transition_count_of_level_name = defaultdict(int)
+    skipped_count = 0
 
     for _, row in dflines.iterrows():
+        if int(row["Lower"]) not in ilev_enlevelindex_map or int(row["Upper"]) not in ilev_enlevelindex_map:
+            skipped_count += 1
+            continue
+
         # not an assert: this decides which levels a transition is written between, so it must
         # survive python -O, and it names the offending Ilev values rather than just failing
         lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
@@ -246,6 +237,9 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
 
         transitions.append(transtuple)
+
+    if skipped_count > 0:
+        print(f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionization energy")
 
     return transitions, transition_count_of_level_name
 

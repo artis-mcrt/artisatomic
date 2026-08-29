@@ -3,11 +3,13 @@
 
 import io
 import math
-from pathlib import Path
 
 import artistools as at
 import polars as pl
 import requests
+
+from artisatomic.base import elsymbols
+from artisatomic.base import PYDIR
 
 colreplacements = {
     "Rad Int.": "intensity",
@@ -24,9 +26,7 @@ def main():
 
     Each nuclide's gamma lines are written to artis_files/data/gamma_<nuclide>.txt.
     """
-    elsymbols = at.get_elsymbolslist()
-
-    outfolder = Path(__file__).parent.parent.absolute() / "artis_files" / "data"
+    outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
 
     dfbetaminus = (
