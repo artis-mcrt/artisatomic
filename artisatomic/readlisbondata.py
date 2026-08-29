@@ -7,8 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 
-import artisatomic
+from artisatomic.base import elsymbols
+from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import levelid_of_fileindex_map
+from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
+from artisatomic.base import resolve_transition_levelids
+from artisatomic.base import roman_numerals
 
 
 class LisbonReader:
@@ -117,7 +122,7 @@ def read_levels_data(dflevels):
         for levelid, (_fileposition, row) in enumerate(dflevels.iterrows())
     ]
 
-    return energy_levels, artisatomic.levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
+    return energy_levels, levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
 
 
 def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
@@ -133,7 +138,7 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     transition_count_of_level_name = defaultdict(int)
 
     for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
-        lowerlevel, upperlevel = artisatomic.resolve_transition_levelids(
+        lowerlevel, upperlevel = resolve_transition_levelids(
             fileindex_lower, fileindex_upper, levelid_of_fileindex, "the Lisbon transitions file"
         )
 
@@ -173,8 +178,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     are looked for.
     """
     ion_charge = ion_stage - 1
-    elsym = artisatomic.elsymbols[atomic_number]
-    ion_stage_roman = artisatomic.roman_numerals[ion_stage]
+    elsym = elsymbols[atomic_number]
+    ion_stage_roman = roman_numerals[ion_stage]
 
     assert elsym in {"Nd", "U"}
     assert ion_stage in {2, 3}
@@ -216,9 +221,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # from NIST, as every other reader whose data set carries no ionization energy does. This was
     # -1, which went into adata.txt verbatim as the ion's ionization energy.
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

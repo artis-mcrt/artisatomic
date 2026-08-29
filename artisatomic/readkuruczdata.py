@@ -7,8 +7,11 @@ from pathlib import Path
 
 import polars as pl
 
-import artisatomic
 from artisatomic.base import find_file_check_extension
+from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import leveltuples_to_pldataframe
+from artisatomic.base import log_and_print
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
@@ -163,10 +166,10 @@ def read_levels_and_transitions(
     """
     ion_charge = ion_stage - 1
 
-    artisatomic.log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
+    log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     path_gfall = find_gfall(atomic_number, ion_charge)
-    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(path_gfall)}")
+    log_and_print(flog, f"Reading {path_for_log(path_gfall)}")
 
     gfall = parse_gfall(fname=str(path_gfall))
     column_renames = {
@@ -240,12 +243,12 @@ def read_levels_and_transitions(
         )
         .collect()
     )
-    dflevels = artisatomic.leveltuples_to_pldataframe(dflevels).with_columns(
+    dflevels = leveltuples_to_pldataframe(dflevels).with_columns(
         # this data set supplies no parities, and a null one never matches another, so
         # add_level_ids_forbidden() leaves every transition permitted
         parity=pl.lit(None, dtype=pl.Int64)
     )
-    artisatomic.log_and_print(flog, f"Read {len(dflevels):d} levels")
+    log_and_print(flog, f"Read {len(dflevels):d} levels")
 
     transitions = (
         gfall.select(transition_columns)
@@ -311,9 +314,7 @@ def read_levels_and_transitions(
         maintain_order=True,
     )
     if transitions.height < transitions_in:
-        artisatomic.log_and_print(
-            flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once"
-        )
+        log_and_print(flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once")
 
     transitions = transitions.select(
         upperlevel=pl.col("levelid_upper"),
@@ -329,10 +330,10 @@ def read_levels_and_transitions(
         levelname: transition_count_of_levelid.get(levelid, 0)
         for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
     }
-    artisatomic.log_and_print(flog, f"Read {len(transitions):d} transitions")
+    log_and_print(flog, f"Read {len(transitions):d} transitions")
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions, transition_count_of_level_name
 

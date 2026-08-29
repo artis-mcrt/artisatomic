@@ -5,7 +5,9 @@ from collections import defaultdict
 
 import pandas as pd
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 
 # the h5 file comes from Andreas Floers's DREAM parser
@@ -48,7 +50,7 @@ def extend_ion_list(ion_handlers):
     assert dreamdata is not None
     for atomic_number, charge in dreamdata.index.unique():  # ty:ignore[possibly-missing-attribute]
         ion_stage = charge + 1
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "dream")
 
     return ion_handlers
 
@@ -156,9 +158,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     transitions, transition_count_of_level_name = read_lines_data(dfiondata, energy_levels)
 
     # DREAM has no ionization energies, so take them from NIST as the other handlers do
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    artisatomic.log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    artisatomic.log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name

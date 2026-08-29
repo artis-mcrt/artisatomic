@@ -6,9 +6,18 @@ from pathlib import Path
 
 import polars as pl
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import compression_extensions
+from artisatomic.base import elsymbols
+from artisatomic.base import find_file_check_extension
+from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import log_and_print
+from artisatomic.base import PYDIR
+from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
+from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
+from artisatomic.base import xopen_check_extension
 
 
 def in_testmode() -> bool:
@@ -23,7 +32,7 @@ def get_basepath(withforbidden: bool) -> Path:
     transitions. The public OutputFiles directory holds the published data. In the test mode,
     every request resolves to the test_sample directory from testdata.tar.xz.
     """
-    datapath = artisatomic.PYDIR / ".." / "atomic-data-floers25"
+    datapath = PYDIR / ".." / "atomic-data-floers25"
     if in_testmode():
         return datapath / "test_sample"
     return datapath / ("OutputFiles_withforbidden" if withforbidden else "OutputFiles")
@@ -65,11 +74,11 @@ def extend_ion_list(ion_handlers, calibrated=True):
     searches.append(("floers25uncalib", "uncalib", basepath_public))
 
     for handlername, calibstr, basepath in searches:
-        for ext in artisatomic.compression_extensions:
+        for ext in compression_extensions:
             for s in basepath.glob(f"*_levels_{calibstr}.txt{ext}"):
                 ionstr = s.name.lstrip(string.digits).split("_")[0]
-                atomic_number, ion_stage = artisatomic.split_element_ionstage_str(ionstr)
-                ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
+                atomic_number, ion_stage = split_element_ionstage_str(ionstr)
+                ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, handlername)
 
     return ion_handlers
 
@@ -81,7 +90,7 @@ def read_table_header(filepath: Path) -> tuple[list[str], int]:
     """
     linecount = 0
     dashrowcount = 0
-    with artisatomic.xopen_check_extension(filepath) as f:
+    with xopen_check_extension(filepath) as f:
         for line in f:
             linecount += 1
             if line.startswith("--"):
@@ -208,8 +217,8 @@ def read_levels_and_transitions(
     transitions. A transition to a level that the levels file does not list is discarded, with
     a warning in the log.
     """
-    elsym = artisatomic.elsymbols[atomic_number]
-    ion_stage_roman = artisatomic.roman_numerals[ion_stage]
+    elsym = elsymbols[atomic_number]
+    ion_stage_roman = roman_numerals[ion_stage]
     calibstr = "calib" if calibrated else "uncalib"
     ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
 
@@ -224,8 +233,7 @@ def read_levels_and_transitions(
         (
             found
             for searchpath in basepaths
-            if (found := artisatomic.find_file_check_extension(searchpath / f"{ionstr}_levels_{calibstr}.txt"))
-            is not None
+            if (found := find_file_check_extension(searchpath / f"{ionstr}_levels_{calibstr}.txt")) is not None
         ),
         None,
     )
@@ -237,12 +245,12 @@ def read_levels_and_transitions(
 
     # the original Floers+25 format has a single transitions file. The newer format has one
     # file for each transition type, for example _E1, _E2, and _M1.
-    lines_file = artisatomic.find_file_check_extension(basepath / f"{ionstr}_transitions_{calibstr}.txt")
+    lines_file = find_file_check_extension(basepath / f"{ionstr}_transitions_{calibstr}.txt")
 
     # a file can exist in a plain form and in a compressed form at the same time. Keep one path
     # for each name. The extension list is in priority order, so the plain form wins.
     pertype_file_of_name: dict[str, Path] = {}
-    for ext in artisatomic.compression_extensions:
+    for ext in compression_extensions:
         for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
             pertype_file_of_name.setdefault(filepath.name.removesuffix(ext), filepath)
     pertype_files = [pertype_file_of_name[name] for name in sorted(pertype_file_of_name)]
@@ -255,12 +263,12 @@ def read_levels_and_transitions(
         msg = f"Found no Floers+25 transitions files for {ionstr} ({calibstr}) in {basepath}"
         raise FileNotFoundError(msg)
 
-    artisatomic.log_and_print(
+    log_and_print(
         flog,
         f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transitions files",
     )
 
-    ionization_energy_in_ev = artisatomic.get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
 
     # the levels files of the data sets do not all carry the same columns, so name the ones used.
     # J keeps its "5/2" form as a string, which the g column below reads.
@@ -299,7 +307,7 @@ def read_levels_and_transitions(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
 
-    artisatomic.log_and_print(flog, f"Read {dflevels.height:d} levels")
+    log_and_print(flog, f"Read {dflevels.height:d} levels")
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
@@ -307,7 +315,7 @@ def read_levels_and_transitions(
         [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
-    artisatomic.log_and_print(flog, f"Read {dftransitions.height} transitions")
+    log_and_print(flog, f"Read {dftransitions.height} transitions")
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.
@@ -316,7 +324,7 @@ def read_levels_and_transitions(
     )
     ndiscarded = dftransitions.filter(~inrange).height
     if ndiscarded > 0:
-        artisatomic.log_and_print(
+        log_and_print(
             flog,
             f"WARNING: Discarded {ndiscarded} transitions of {ionstr} that reference levels outside"
             f" 0..{dflevels.height - 1}",
@@ -327,7 +335,7 @@ def read_levels_and_transitions(
     # column. Swap those rows into energy order: the merge and the output want lowerlevel first.
     nreversed = dftransitions.filter(pl.col("lowerlevel") > pl.col("upperlevel")).height
     if nreversed > 0:
-        artisatomic.log_and_print(flog, f"Swapped the level order of {nreversed} reversed transitions")
+        log_and_print(flog, f"Swapped the level order of {nreversed} reversed transitions")
         dftransitions = dftransitions.with_columns(
             lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
             upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
@@ -352,9 +360,7 @@ def read_levels_and_transitions(
         parity_of_index.gather(dfallowed["lowerlevel"]) == parity_of_index.gather(dfallowed["upperlevel"])
     ).sum()
     if n_paritymatch > 0:
-        artisatomic.log_and_print(
-            flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity"
-        )
+        log_and_print(flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity")
 
     # count after the merge of duplicate level pairs. The counts in adata.txt then agree with
     # transitiondata.txt. Count per level index, not per configuration string: several levels

@@ -11,11 +11,17 @@ import numpy.typing as npt
 import pandas as pd
 import polars as pl
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import empty_transitions_schema
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import log_and_print
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import TESTMODE
+from artisatomic.base import xopen_check_extension
+from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
+from artisatomic.phixs import reduce_phixs_tables
 
 tyndall_co3_path = (
     PYDIR / ".." / "atomic-data-qub" / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
@@ -50,14 +56,14 @@ class QUBEnergyLevel(t.NamedTuple):
     parity: int | None  # None where the configuration determines no parity
 
 
-qubpath = (Path(__file__).parent.resolve() / ".." / "atomic-data-qub").resolve()
+qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
 
 
 def extend_ion_list(ion_handlers):
     """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler."""
     qubions = sorted([tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in qubpath.glob("*_*.adf04")])
     for atomic_number, ion_stage in qubions:
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
 
     return ion_handlers
 
@@ -75,8 +81,8 @@ def read_adf04(
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
-    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filepath)}")
-    with artisatomic.xopen_check_extension(filepath) as fleveltrans:
+    log_and_print(flog, f"Reading {path_for_log(filepath)}")
+    with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
@@ -132,7 +138,7 @@ def read_adf04(
             # L in their own columns (read just above). Stripping a term off the end would lose
             # the last orbital of '3S2 3P6 3D5 4P1', and would read the bare '5s2' as a term
             # rather than an orbital, which is how every level of some files came out even.
-            parity = artisatomic.get_config_parity(config_for_parity, hasterm=False)
+            parity = get_config_parity(config_for_parity, hasterm=False)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
@@ -204,13 +210,13 @@ def read_adf04(
             if levelidpair not in upsilondict:
                 upsilondict[levelidpair] = upsilon
             else:
-                artisatomic.log_and_print(
+                log_and_print(
                     flog,
                     f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
                     f" {upsilondict[levelidpair]:5.2e} instead of using {upsilon:5.2e}",
                 )
 
-    artisatomic.log_and_print(flog, f"Read {len(energylevels):d} levels")
+    log_and_print(flog, f"Read {len(energylevels):d} levels")
 
     return ionization_energy_ev, energylevels, upsilondict
 
@@ -302,7 +308,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
         transition_count_of_level_name = defaultdict(int)
         transitionfile = tyndall_co3_path / "adf04rad_v1"
-        with artisatomic.xopen_check_extension(transitionfile) as ftrans:
+        with xopen_check_extension(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
                 id_upper = int(row[0])
@@ -322,7 +328,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     elif (atomic_number == 27) and (ion_stage == 4):
         transition_count_of_level_name = defaultdict(int)
         qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
-        qub_transitions = pl.DataFrame(schema=artisatomic.empty_transitions_schema)
+        qub_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
 
@@ -337,7 +343,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         transition_count_of_level_name = defaultdict(int)
         # two passes are needed (collision strengths are found by line length, known only after
         # seeing every line), so read the lines once: a decompressing stream may not seek back
-        with artisatomic.xopen_check_extension(atom_filepath) as ftrans:
+        with xopen_check_extension(atom_filepath) as ftrans:
             translines = ftrans.readlines()
 
         atom_group_note = False
@@ -389,7 +395,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
 
-    artisatomic.log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
+    log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
     return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
 
@@ -413,7 +419,7 @@ def read_qub_photoionizations(
             # the cross-section files are named after the level's number in the source data,
             # which counts from one
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
-            artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
+            log_and_print(flog, f"Reading {path_for_log(filename)}")
             ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
             # One space separates the columns, and every field is a number, so a null means the
             # columns are not where the read expects them. Reading the first five columns of the
@@ -437,7 +443,7 @@ def read_qub_photoionizations(
                     # nothing positive in this column, so there is no table to downsample. Skipping
                     # here leaves the target out of the fractions below, which is what a zero cross
                     # section means anyway; reduce_phixs_tables() would index off an empty array.
-                    artisatomic.log_and_print(
+                    log_and_print(
                         flog,
                         f"WARNING: level {lowerlevelid} has no positive cross section to target"
                         f" {targetcolumn - 1}, so that target is dropped",
@@ -445,7 +451,7 @@ def read_qub_photoionizations(
                     continue
                 phixstables[targetcolumn] = phixstable
 
-            reduced_phixs_dict = artisatomic.reduce_phixs_tables(
+            reduced_phixs_dict = reduce_phixs_tables(
                 phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )
             target_scalefactors = np.zeros(ntargets)
@@ -462,7 +468,7 @@ def read_qub_photoionizations(
             scalefactorsum = sum(target_scalefactors)
             if scalefactorsum <= 0.0:
                 # nothing was assigned for this level, so write_phixs_data() will skip it
-                artisatomic.log_and_print(
+                log_and_print(
                     flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
                 )
                 continue
@@ -594,7 +600,7 @@ def read_qub_photoionizations(
             # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9; a stop
             # of 10.9 produced 99 and the strict flag then dropped the table's last point
             dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
-            phixsvalues = artisatomic.reduce_phixs_tables(
+            phixsvalues = reduce_phixs_tables(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
 

@@ -14,13 +14,21 @@ import numpy as np
 import numpy.typing as npt
 import polars as pl
 
-import artisatomic
+from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import isfloat
+from artisatomic.base import log_and_print
+from artisatomic.base import path_for_log
+from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
+from artisatomic.base import roman_numerals
 from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
+from artisatomic.base import xopen_check_extension
+from artisatomic.levelnames import get_config_parity
+from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
 
 # need to also include collision strengths from e.g., o2col.dat
@@ -226,12 +234,12 @@ def hillier_ion_folder(atomic_number, ion_stage):
     """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
         (
-            artisatomic.PYDIR
+            PYDIR
             / ".."
             / "atomic-data-hillier"
             / "atomic_21jun23"
             / atomic_number_to_hillier_code[atomic_number]
-            / artisatomic.roman_numerals[ion_stage]
+            / roman_numerals[ion_stage]
         ).resolve()
     )
 
@@ -255,7 +263,7 @@ def get_level_parity(config: str) -> int:
         return -1
 
     # first, because a merged level spans both parities whatever the rest of the name says
-    if artisatomic.has_merged_orbital(config):
+    if has_merged_orbital(config):
         return -1
 
     if config[-1] == "e":
@@ -263,7 +271,7 @@ def get_level_parity(config: str) -> int:
     if config[-1] == "o":
         return 1
 
-    configparity = artisatomic.get_config_parity(config)
+    configparity = get_config_parity(config)
     return -1 if configparity is None else configparity
 
 
@@ -501,7 +509,7 @@ def read_levels_and_transitions_from_file(
 
     filename = hillier_osc_filename(atomic_number, ion_stage)
 
-    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
+    log_and_print(flog, f"Reading {path_for_log(filename)}")
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
@@ -509,7 +517,7 @@ def read_levels_and_transitions_from_file(
     prev_line = ""
     # threads=0 decompresses in this process. The default starts a process that writes into a
     # pipe, which reports a broken pipe when the reader stops at the end of the level table.
-    fhillierosc = artisatomic.xopen_check_extension(filename, threads=0)
+    fhillierosc = xopen_check_extension(filename, threads=0)
     # the two loops below read the header and the levels. polars reads the transitions, and
     # starts at the line after the last line that they read.
     linesread = 0
@@ -542,10 +550,10 @@ def read_levels_and_transitions_from_file(
             print(f"  {row_format_energy_level}")
         elif line.rstrip().endswith("!Number of energy levels"):
             expected_energy_levels = int(row[0])
-            artisatomic.log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
+            log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
         elif line.rstrip().endswith("!Number of transitions"):
             expected_transitions = int(row[0])
-            artisatomic.log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+            log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
         elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
             format_date = row[0]
             print(f"Format date: {format_date}")
@@ -582,7 +590,7 @@ def read_levels_and_transitions_from_file(
     for line in fhillierosc:
         linesread += 1
         row = line.split()
-        if len(row) == levelcolcount and all(map(artisatomic.isfloat, row[1:])):
+        if len(row) == levelcolcount and all(map(isfloat, row[1:])):
             hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
             levelname = row[colindex["levelname"]]
             energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
@@ -614,14 +622,14 @@ def read_levels_and_transitions_from_file(
             # LS term by construction and merged levels are summarised once below, so neither
             # is worth a line here; what is left is a name we expected to read and could not.
             if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                artisatomic.log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
+                log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
             # if this is the ground state
             if energyabovegsinpercm < 1.0:
                 hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
 
             if hillierlevelid != len(levelrows):
-                artisatomic.log_and_print(
+                log_and_print(
                     flog,
                     f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}",
                 )
@@ -630,11 +638,11 @@ def read_levels_and_transitions_from_file(
         if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
             break
 
-    artisatomic.log_and_print(flog, f"Read {len(levelrows):d} levels")
+    log_and_print(flog, f"Read {len(levelrows):d} levels")
     if levels_without_parity:
         # Normal for ions with merged levels, so this is a count and a sample rather than a
         # warning per level: H I and He II are merged all the way down.
-        artisatomic.log_and_print(
+        log_and_print(
             flog,
             f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
             f" (every transition touching one is treated as permitted), e.g."
@@ -654,7 +662,7 @@ def read_levels_and_transitions_from_file(
         for levelname, count in dftransitions[namecolumn].value_counts().iter_rows():
             transition_count_of_level_name[levelname] += count
 
-    artisatomic.log_and_print(flog, f"Read {dftransitions.height:d} transitions")
+    log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
         msg = f"{filename} declares {expected_transitions} transitions but {dftransitions.height} were read"
         raise ValueError(msg)
@@ -757,9 +765,9 @@ def read_phixs_tables(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
-        artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
+        log_and_print(flog, f"Reading {path_for_log(filename)}")
 
-        with artisatomic.xopen_check_extension(filename) as fhillierphot:
+        with xopen_check_extension(filename) as fhillierphot:
             lowerlevelindex = -1
             lowerlevelname = ""
             targetlevelname = ""
@@ -782,7 +790,7 @@ def read_phixs_tables(
                 if has_marker and len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
                     # this is not used because the upper ion's levels are not known at this time
                     targetlevelname = row[0]
-                    artisatomic.log_and_print(flog, "Photoionisation target: " + targetlevelname)
+                    log_and_print(flog, "Photoionisation target: " + targetlevelname)
                     if "[" in targetlevelname:
                         print("STOP! target level contains a bracket (is J-split?)")
                         sys.exit(1)
@@ -800,7 +808,7 @@ def read_phixs_tables(
                         j_splitting_seen = new_j_splitting_on
                         j_splitting_on = new_j_splitting_on
                         if j_splitting_on:
-                            artisatomic.log_and_print(flog, "File specifies J-splitting enabled")
+                            log_and_print(flog, "File specifies J-splitting enabled")
                     else:
                         print(f'STOP! J-splitting not true or false: "{row[0]}"')
                         sys.exit(1)
@@ -810,7 +818,7 @@ def read_phixs_tables(
                     or " ".join(row[-3:]) == "!Configuration name [*]"
                 ):
                     if not in_header:
-                        artisatomic.log_and_print(
+                        log_and_print(
                             flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
                         )
                         continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines before the header that end in "!Configuration name" and confuse things...
@@ -842,7 +850,7 @@ def read_phixs_tables(
                     # matches the oscillator value for every ion in ions_data) and just report it.
                     zion_from_photfile = int(float(row[0]))
                     if zion_from_photfile != ion_stage:
-                        artisatomic.log_and_print(
+                        log_and_print(
                             flog,
                             f"WARNING: ignoring screened nuclear charge {zion_from_photfile} in {photfilename},"
                             f" which disagrees with ion_stage {ion_stage}",
@@ -860,7 +868,7 @@ def read_phixs_tables(
 
                 # a line carrying a "!..." marker has text in it, so it can never be all floats.
                 # Short-circuiting on that skips the parse attempt on every header line.
-                row_is_all_floats = not has_marker and all(map(artisatomic.isfloat, row))
+                row_is_all_floats = not has_marker and all(map(isfloat, row))
                 if crosssectiontype == 0:
                     if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
                         fitcoefficients.append(float(row[0].replace("D", "E")))
@@ -887,13 +895,11 @@ def read_phixs_tables(
                             n, l_start, l_end = fitcoefficients
 
                             if n > max_hyd_l_n:
-                                artisatomic.log_and_print(
-                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table"
-                                )
+                                log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
                                 continue
 
                             if l_end > n - 1:
-                                artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                                log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
                                 lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
@@ -908,7 +914,7 @@ def read_phixs_tables(
                             scale, n = fitcoefficients
 
                             if n > max_hyd_gaunt_n:
-                                artisatomic.log_and_print(
+                                log_and_print(
                                     flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_gaunt_n}), skipping table"
                                 )
                                 continue
@@ -935,13 +941,11 @@ def read_phixs_tables(
                             n, l_start, l_end, nu_o = fitcoefficients
 
                             if n > max_hyd_l_n:
-                                artisatomic.log_and_print(
-                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table"
-                                )
+                                log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
                                 continue
 
                             if l_end > n - 1:
-                                artisatomic.log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                                log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
                             else:
                                 lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
                                 phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
@@ -1033,7 +1037,11 @@ def read_phixs_tables(
                     crosssectiontype = -1
                     numpointsexpected = 0
 
-        reduced_phixstables_onetarget = artisatomic.reduce_phixs_tables(
+        # phixs imports this module for get_hydrogenic_n_phixstable(), so a
+        # module-level import of reduce_phixs_tables here would be circular
+        from artisatomic.phixs import reduce_phixs_tables
+
+        reduced_phixstables_onetarget = reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
         )
 
@@ -1045,7 +1053,7 @@ def read_phixs_tables(
                 # photoionization. For type 8 (offset) this happens when the offset edge
                 # nu_edge + nu_o lies beyond the grid that reduce_phixs_tables() samples.
                 num_levelnames_with_zero_crosssection += 1
-                artisatomic.log_and_print(
+                log_and_print(
                     flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
                 )
             else:
@@ -1063,7 +1071,7 @@ def read_phixs_tables(
                 # largest threshold cross section. The normalisation below divides it by that
                 # target's fraction, recovering the level's total rather than one target's share.
                 if lowerlevelname in reduced_phixs_dict:
-                    artisatomic.log_and_print(
+                    log_and_print(
                         flog,
                         f"{lowerlevelname} has a cross section table in more than one photoionisation file."
                         f" Target {phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb at threshold against"
@@ -1081,20 +1089,20 @@ def read_phixs_tables(
         # are the ones least likely to have a label, so indexing would fail while reporting them
         typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
         if crosssectiontype in unknown_phixs_types:
-            artisatomic.log_and_print(
+            log_and_print(
                 flog,
                 f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
                 f" {crosssectiontype}: {typelabel}",
             )
         else:
-            artisatomic.log_and_print(
+            log_and_print(
                 flog,
                 f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
                 f" {typelabel}",
             )
 
     if num_levelnames_with_zero_crosssection > 0:
-        artisatomic.log_and_print(
+        log_and_print(
             flog,
             f"WARNING: {num_levelnames_with_zero_crosssection} level names have a cross section that is zero"
             " everywhere on the output energy grid, so those levels get no photoionization",
@@ -1115,7 +1123,7 @@ def read_phixs_tables(
 
             if len(target_configfactors) == 0:
                 # every target was below the 1% cut, so keep them all rather than dividing by zero
-                artisatomic.log_and_print(
+                log_and_print(
                     flog,
                     f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
                     f" ({target_configfactors_nofilter}), so keeping them unfiltered",
@@ -1408,7 +1416,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
     upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
-        artisatomic.log_and_print(flog, "No collisional data file specified")
+        log_and_print(flog, "No collisional data file specified")
         return upsilondict
 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
@@ -1421,7 +1429,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
         if levelname != levelnamenoJ:  # levels are J split
             level_ids_of_level_name[levelname] = [levelid]
         elif not found_nonjsplit_transition:
-            artisatomic.log_and_print(flog, "Found at least one transition specifying level name with no J value")
+            log_and_print(flog, "Found at least one transition specifying level name with no J value")
             found_nonjsplit_transition = True
 
         # keep track of the level ids of states that differ by J only
@@ -1443,13 +1451,13 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
         / ions_data[atomic_number, ion_stage].folder
         / coldatafilename
     )
-    artisatomic.log_and_print(flog, f"Reading {artisatomic.path_for_log(filename)}")
+    log_and_print(flog, f"Reading {path_for_log(filename)}")
     coll_lines_in = 0
     number_expected_transitions = -1
     # the within-term pair loops below insert all of a name's pairs at its first mention, so
     # later mentions of the name can skip both loops
     names_expanded: set[str] = set()
-    with artisatomic.xopen_check_extension(filename) as fcoldata:
+    with xopen_check_extension(filename) as fcoldata:
         header_row: list[str] = []
         temperature_index = -1
         num_expected_t_values = -1
@@ -1464,7 +1472,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 and num_expected_t_values != -1
                 and re.match(r"^\*{5,}+", line.strip())
             ):
-                artisatomic.log_and_print(
+                log_and_print(
                     flog, "WARNING: Found line of *'s after reading header, assuming that's the end of the table"
                 )
                 break  # Some files have lines of stars at the end, if we see one of these just exit (e.g. Na VI, Ne V)
@@ -1475,7 +1483,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
             if line.lstrip().startswith(r"Transition\T"):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
-                    artisatomic.log_and_print(
+                    log_and_print(
                         flog,
                         f"WARNING: Expected {num_expected_t_values:d} temperature values, but header has"
                         f" {len(header_row):d} columns",
@@ -1484,13 +1492,13 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     # Sc I and III have most of their temperatures commented out, so the number of expected temperatures is actually correct
                     # This will not catch cases with a commented header where len(header_row) == num_expected_t_values + 1 (no such cases exist as far as I am aware)
                     if "!" in header_row:
-                        artisatomic.log_and_print(
+                        log_and_print(
                             flog,
                             f"Some temperatures are commented out, assuming header is correct, num_expected_t_values={num_expected_t_values:d}",
                         )
                     else:
                         num_expected_t_values = len(header_row) - 1
-                        artisatomic.log_and_print(
+                        log_and_print(
                             flog,
                             f"Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}",
                         )
@@ -1502,7 +1510,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 if "!" in row:
                     row = row[: row.index("!")]
                 temperatures = row[-num_expected_t_values:]
-                artisatomic.log_and_print(
+                log_and_print(
                     flog,
                     "Temperatures available for effective collision strengths (units of"
                     f" {t_scale_factor:.1e} K):\n{', '.join(temperatures)}",
@@ -1513,7 +1521,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 )
                 best_temperature = match_sorted_temperatures[0]
                 temperature_index = temperatures.index(best_temperature)
-                artisatomic.log_and_print(
+                log_and_print(
                     flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K"
                 )
                 continue
@@ -1529,7 +1537,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
                     and float(row[0].replace("D", "E")) != 1.0
                 ):
-                    artisatomic.log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
+                    log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
                     sys.exit(1)
 
             if header_row != []:
@@ -1548,7 +1556,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 # so guard the whole block rather than each lookup
                 try:  # ruff: ignore[too-many-statements-in-try-clause]
                     if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
-                        artisatomic.log_and_print(
+                        log_and_print(
                             flog,
                             f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
                             f"-> {nameto} {level_ids_of_level_name[nameto]}.",
@@ -1591,7 +1599,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                             # dropping the pairs that come out reversed
                             key = (min(id_lower, id_upper), max(id_lower, id_upper))
                             if key in upsilondict and upsilondict[key] >= 0.0:
-                                artisatomic.log_and_print(
+                                log_and_print(
                                     flog,
                                     f"ERROR: Duplicate collisional transition from {namefrom} <->"
                                     f" {nameto} ({key[0]} -> {key[1]}). Keeping existing collision strength of"
@@ -1604,27 +1612,27 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 except KeyError:
                     unlisted_from_message = " (unlisted)" if namefrom not in level_ids_of_level_name else ""
                     unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
-                    artisatomic.log_and_print(
+                    log_and_print(
                         flog,
                         f"Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
                         f" {nameto}{unlisted_to_message}",
                     )
 
     if number_expected_transitions < 0:
-        artisatomic.log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
+        log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
     elif coll_lines_in < number_expected_transitions:
         print(
             f"ERROR: file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
         )
         sys.exit(1)
     elif coll_lines_in > number_expected_transitions:
-        artisatomic.log_and_print(
+        log_and_print(
             flog,
             f"WARNING: file specified {number_expected_transitions:d} transitions, but {coll_lines_in:d} were found",
         )
     else:
-        artisatomic.log_and_print(flog, f"Read {coll_lines_in} effective collision strengths")
-        artisatomic.log_and_print(flog, f"Output {len(upsilondict)} effective collision strengths")
+        log_and_print(flog, f"Read {coll_lines_in} effective collision strengths")
+        log_and_print(flog, f"Output {len(upsilondict)} effective collision strengths")
 
     return upsilondict
 
@@ -1667,7 +1675,7 @@ def get_photoiontargetfractions(
         if flog is None:
             print(strout)
         else:
-            artisatomic.log_and_print(flog, strout)
+            log_and_print(flog, strout)
 
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: dict[str, list[tuple[int, float]]] = {}
@@ -1793,7 +1801,7 @@ def read_hyd_phixsdata():
     max_n = -1
     l_start_u = 0.0
     l_del_u = 0.0
-    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
+    with xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1842,7 +1850,7 @@ def read_hyd_phixsdata():
     max_n = -1
     n_start_u = 0.0
     n_del_u = 0.0
-    with artisatomic.xopen_check_extension(hyd_filename) as fhyd:
+    with xopen_check_extension(hyd_filename) as fhyd:
         for line in fhyd:
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
@@ -1897,6 +1905,6 @@ def extend_ion_list(
             continue  # skip
         if not include_hydrogen and atomic_number == 1:
             continue  # skip
-        ion_handlers = artisatomic.add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "cmfgen")
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "cmfgen")
 
     return ion_handlers
