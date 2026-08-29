@@ -3,7 +3,6 @@
 Data: https://doi.org/10.5281/zenodo.10635803 (see atomic-data-mons/readme.txt for the file formats).
 """
 
-import os
 import zipfile
 
 import numpy as np
@@ -16,9 +15,10 @@ from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
+from artisatomic.base import TESTMODE
 
 datafilepath = (PYDIR / ".." / "atomic-data-mons").resolve()
-if os.environ.get("ARTISATOMIC_TESTMODE") == "1":
+if TESTMODE:
     # a reduced Ce V and Ce VI sample cut from the full archives (see tests/README.md)
     datafilepath /= "test_sample"
 

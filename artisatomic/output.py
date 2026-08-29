@@ -95,16 +95,29 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         return dftransitions_ion
 
     if "upperlevel" not in dftransitions_ion.columns:
+        height_before = dftransitions_ion.height
         dftransitions_ion = dftransitions_ion.join(
             dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), pl.col("levelname").alias("nameto")),
             on="nameto",
         )
+        if dftransitions_ion.height != height_before:
+            # an inner join drops the row quietly, and adata.txt counts the transition anyway
+            print(
+                f"WARNING: the nameto join dropped {height_before - dftransitions_ion.height:d} transitions"
+                " whose upper level name matches no level"
+            )
 
     if "lowerlevel" not in dftransitions_ion.columns:
+        height_before = dftransitions_ion.height
         dftransitions_ion = dftransitions_ion.join(
             dfenergylevels_ion.select(pl.col("levelid").alias("lowerlevel"), pl.col("levelname").alias("namefrom")),
             on="namefrom",
         )
+        if dftransitions_ion.height != height_before:
+            print(
+                f"WARNING: the namefrom join dropped {height_before - dftransitions_ion.height:d} transitions"
+                " whose lower level name matches no level"
+            )
 
     if "forbidden" not in dftransitions_ion.columns:
         # null for anything that is not a number, so a NaN cannot compare equal to itself and a
@@ -237,12 +250,21 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             dftransitions_ion = iondata.dftransitions
 
             if dftransitions_ion.is_empty():
-                unused_upsilon_transitions = set()
+                # a reader with no transitions gives a frame with no columns, which the joins in
+                # add_level_ids_forbidden() cannot take. Every upsilon pair is unused then, so the
+                # upsilon-only mechanism below still writes the ion's collision strengths.
+                unused_upsilon_transitions = set(upsilondict.keys())
             else:
                 dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
-                unused_upsilon_transitions = set(upsilondict.keys()).difference(
-                    dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
+                # the guard matters: set.difference() consumes the whole iterable even for an
+                # empty set, and most handlers have an empty upsilondict against millions of rows
+                unused_upsilon_transitions = (
+                    set(upsilondict.keys()).difference(
+                        dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
+                    )
+                    if upsilondict
+                    else set()
                 )
 
             log_and_print(
@@ -355,14 +377,18 @@ def write_adata(
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
     # every reader names its own levels, and that name is the whole level comment
-    for energylevel in dfenergylevels.iter_rows(named=True):
-        levelname = energylevel.get("levelname", "")
-        transitioncount = transition_count_of_level_name.get(levelname, 0)
-
-        # level ids are zero-based in memory, but the output format numbers them from one
-        fatommodels.write(
-            f"{energylevel['levelid'] + 1:5d} {hc_in_ev_cm * float(energylevel['energyabovegsinpercm']):19.16f} {float(energylevel['g']):8.3f} {transitioncount:4d} {levelname:}\n"
-        )
+    dfout = (
+        dfenergylevels if "levelname" in dfenergylevels.columns else dfenergylevels.with_columns(levelname=pl.lit(""))
+    )
+    # level ids are zero-based in memory, but the output format numbers them from one.
+    # writelines() with a generator, as in write_transition_data(): a write() call per level
+    # costs more than the formatting.
+    fatommodels.writelines(
+        f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm):19.16f} {float(g):8.3f} {transition_count_of_level_name.get(levelname, 0):4d} {levelname:}\n"
+        for levelid, energyabovegsinpercm, g, levelname in dfout.select(
+            "levelid", "energyabovegsinpercm", "g", "levelname"
+        ).iter_rows(named=False)
+    )
 
     fatommodels.write("\n")
 
@@ -473,9 +499,9 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     with both level energies above their own ion's ground state. The target is the first one, as
     ARTIS uses phixstargetindex 0 for a level's continuum edge (input.cc).
 
-    A reader marks a threshold it does not have in two ways, and both count as missing here: NaN,
-    which is what the arrays start as, and a negative value, which readqubdata writes to say that
-    the threshold comes from the level energies rather than from its cross-section table.
+    A reader marks a threshold it does not have as NaN, which is what the arrays start as. A
+    non-positive value also counts as missing here, so a mis-computed threshold is filled rather
+    than written to the output.
 
     A threshold that does not come out positive is left alone: the level is then at or above the
     continuum, which is not something a photoionisation edge can describe.

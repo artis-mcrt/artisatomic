@@ -2,16 +2,14 @@
 
 import typing as t
 from collections import defaultdict
-from pathlib import Path
 
 import pandas as pd
 
 import artisatomic
+from artisatomic.base import PYDIR
 
 # the h5 file comes from Andreas Floers's DREAM parser
-dreamdatapath = Path(
-    Path(Path(__file__).resolve()).parent, "..", "atomic-data-dream", "DREAM_atomic_data_20241106-1325.h5"
-)
+dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325.h5"
 dreamdata: pd.DataFrame | None = None
 
 
