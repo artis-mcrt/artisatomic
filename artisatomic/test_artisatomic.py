@@ -2204,3 +2204,22 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
     simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
 
     assert calls == [(2, 1)]
+
+
+def test_console_script_entry_points_resolve():
+    """Each console script must name a module and a function that exist.
+
+    The CI jobs start the tool with `python -m artisatomic`, so nothing else runs the console
+    scripts that pyproject.toml declares. A wrong module path there fails only when a user runs
+    the installed command, and every CI check still passes.
+    """
+    from importlib.metadata import entry_points
+
+    declared = {ep.name: ep for ep in entry_points(group="console_scripts") if ep.module.startswith("artisatomic")}
+    assert set(declared) == {"makeartisatomicfiles", "makechargetransferfile", "makerecombratefile"}
+
+    # the module that defines main(), not the package root: the root re-exports nothing
+    assert declared["makeartisatomicfiles"].value == "artisatomic.cli:main"
+
+    for name, entrypoint in declared.items():
+        assert callable(entrypoint.load()), name
