@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# PYTHON_ARGCOMPLETE_OK
 """Build an ARTIS atomic database from published atomic data sets.
 
 Each data source has its own read*.py module; this package selects a handler per ion, calls it,
