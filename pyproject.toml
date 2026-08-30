@@ -61,7 +61,7 @@ Repository = "https://www.github.com/artis-mcrt/artisatomic"
 Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
-makeartisatomicfiles = "artisatomic:main"
+makeartisatomicfiles = "artisatomic.cli:main"
 makechargetransferfile = "artisatomic.makechargetransferfile:main"
 makerecombratefile = "artisatomic.makerecombratefile:main"
 

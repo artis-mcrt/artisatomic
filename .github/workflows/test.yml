@@ -31,6 +31,15 @@ jobs:
             - name: Install artisatomic
               run: uv sync --compile-bytecode
 
+            # every other job starts the tool with `python -m`, so this is the only place that
+            # runs the installed console scripts. --help reads no atomic data. makerecombratefile
+            # has no argument parser, so --help would start the whole job: the pytest suite checks
+            # that its entry point resolves instead.
+            - name: Check the console scripts start
+              run: |
+                  makeartisatomicfiles --help > /dev/null
+                  makechargetransferfile --help > /dev/null
+
             - name: Run Ruff
               if: always()
               run: |

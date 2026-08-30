@@ -11,13 +11,6 @@ import numpy as np
 import polars as pl
 import pytest
 
-from artisatomic import add_handler_if_not_set
-from artisatomic import add_level_ids_forbidden
-from artisatomic import hc_in_ev_cm
-from artisatomic import interpret_configuration
-from artisatomic import leveltuples_to_pldataframe
-from artisatomic import match_hydrogenic_phixs
-from artisatomic import PYDIR
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
@@ -26,11 +19,18 @@ from artisatomic import readkuruczdata
 from artisatomic import readmonsdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic import reduce_phixs_tables_worker
-from artisatomic import write_adata
-from artisatomic import write_phixs_data
+from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import leveltuples_to_pldataframe
+from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import scan_file_lines
+from artisatomic.levelnames import interpret_configuration
+from artisatomic.output import add_level_ids_forbidden
+from artisatomic.output import write_adata
+from artisatomic.output import write_phixs_data
+from artisatomic.phixs import match_hydrogenic_phixs
+from artisatomic.phixs import reduce_phixs_tables_worker
 
 
 def test_interpret_term():
@@ -86,7 +86,7 @@ def test_get_level_parity():
 
 def test_has_merged_orbital():
     """Merge markers are orbital letters standing for several l at once, so l >= n gives them away."""
-    from artisatomic import has_merged_orbital
+    from artisatomic.levelnames import has_merged_orbital
 
     assert has_merged_orbital("2s2_13w_2W")  # 'w' would be l=19, but n=13
     assert has_merged_orbital("10z_2Z")  # 'z' would be l=22, but n=10
@@ -111,7 +111,7 @@ def test_has_merged_orbital():
 
 def test_get_parity_from_multi_orbital_token():
     """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
-    from artisatomic import get_config_parity
+    from artisatomic.levelnames import get_config_parity
 
     # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
     # Reading only the first letter and calling the rest an occupation raises on int('p').
@@ -121,7 +121,7 @@ def test_get_parity_from_multi_orbital_token():
 
 def test_get_config_parity():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
-    from artisatomic import get_config_parity
+    from artisatomic.levelnames import get_config_parity
 
     # sum of l over the occupied orbitals, mod 2
     assert get_config_parity("3d64s2") == 0  # 2 * 6 = 12
@@ -152,7 +152,7 @@ def test_get_config_parity():
 
 def test_parity_of_a_bare_configuration():
     """A name with no term is all configuration, and adf04 writes its orbitals in upper case."""
-    from artisatomic import get_config_parity
+    from artisatomic.levelnames import get_config_parity
 
     # the whole string is orbitals, so nothing is lost off the end and odd really reads as odd
     assert get_config_parity("3d7", hasterm=False) == 0  # 2 * 7 = 14
@@ -1104,7 +1104,7 @@ def test_add_handler_if_not_set():
 
 def test_parse_ion_handlers():
     """The JSON form becomes tuples, and an ion that names no handler is rejected."""
-    from artisatomic import parse_ion_handlers
+    from artisatomic.ionhandlers import parse_ion_handlers
 
     # json.load() gives nested lists; every ion must come back as an (ion_stage, handler) tuple
     assert parse_ion_handlers([[26, [[1, "cmfgen"], [2, "cmfgen"]]]]) == [(26, [(1, "cmfgen"), (2, "cmfgen")])]
@@ -1137,7 +1137,7 @@ def test_parent_elevel_zero_normalisation_is_anchored():
 
 def test_parallel_map_rejects_iterables_of_different_lengths():
     """A short iterable is refused, whichever path the call would otherwise have taken."""
-    from artisatomic import parallel_map
+    from artisatomic.base import parallel_map
 
     # Executor.map() and thread_map() stop at the shortest iterable while the serial shortcut's
     # zip(strict=True) raises, so the check has to happen before the path is chosen. 4 items takes
@@ -1149,7 +1149,7 @@ def test_parallel_map_rejects_iterables_of_different_lengths():
 
 def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
     """Both paths apply fn to one item of each iterable, in the order they were given."""
-    from artisatomic import parallel_map
+    from artisatomic.base import parallel_map
 
     # 4 items takes the serial shortcut, 40 goes to the pool. Subtraction does not commute, so
     # the results also pin which iterable reaches which parameter.
@@ -1166,7 +1166,7 @@ def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
 
 def test_split_element_ionstage_str():
     """'FeII' splits into element and ion stage, including the symbols made only of Roman numeral letters."""
-    from artisatomic import split_element_ionstage_str
+    from artisatomic.base import split_element_ionstage_str
 
     assert split_element_ionstage_str("FeII") == (26, 2)
     assert split_element_ionstage_str("DyIII") == (66, 3)
@@ -1537,7 +1537,7 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
     """A cross section is real data; a threshold ARTIS never reads is not a reason to drop it."""
     import argparse
 
-    from artisatomic import write_phixs_data
+    from artisatomic.output import write_phixs_data
 
     args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
@@ -1713,7 +1713,7 @@ def test_write_phixs_data_rejects_a_duplicated_target():
     """A target level that occurs two times would give the same target two fractions in ARTIS."""
     import argparse
 
-    from artisatomic import write_phixs_data
+    from artisatomic.output import write_phixs_data
 
     args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
@@ -1732,7 +1732,7 @@ def test_write_phixs_data_rejects_a_bad_fraction_sum_before_output():
     """A bad fraction sum fails before any part of the ion goes out."""
     import argparse
 
-    from artisatomic import write_phixs_data
+    from artisatomic.output import write_phixs_data
 
     args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
@@ -2204,3 +2204,22 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
     simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
 
     assert calls == [(2, 1)]
+
+
+def test_console_script_entry_points_resolve():
+    """Each console script must name a module and a function that exist.
+
+    The CI jobs start the tool with `python -m artisatomic`, so nothing else runs the console
+    scripts that pyproject.toml declares. A wrong module path there fails only when a user runs
+    the installed command, and every CI check still passes.
+    """
+    from importlib.metadata import entry_points
+
+    declared = {ep.name: ep for ep in entry_points(group="console_scripts") if ep.module.startswith("artisatomic")}
+    assert set(declared) == {"makeartisatomicfiles", "makechargetransferfile", "makerecombratefile"}
+
+    # the module that defines main(), not the package root: the root re-exports nothing
+    assert declared["makeartisatomicfiles"].value == "artisatomic.cli:main"
+
+    for name, entrypoint in declared.items():
+        assert callable(entrypoint.load()), name

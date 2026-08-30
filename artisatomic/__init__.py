@@ -1,44 +1,11 @@
-#!/usr/bin/env python3
-# PYTHON_ARGCOMPLETE_OK
 """Build an ARTIS atomic database from published atomic data sets.
 
 Each data source has its own read*.py module; this package selects a handler per ion, calls it,
 and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
 The implementation lives in submodules (base, levelnames, ionhandlers, phixs, iondata, output,
-cli). This module re-exports the names that reach the package through the flat artisatomic.name
-interface: the tests, __main__.py, and the makeartisatomicfiles entry point, which pyproject.toml
-declares as `artisatomic:main`. The package has no external API callers, so a name gets a
-re-export only when one of those requires it. A submodule name resolves without a re-export,
-because Python binds it to the package when it is imported. Each name is imported under its own
-name (`import x as x`), which is what marks it as a re-export rather than an incidental import.
-Submodules and readers import base-level helpers and constants with
-`from artisatomic.base import ...` (safe from circularity, since base imports nothing from the
-package).
+cli), and every caller imports from the submodule that defines the name. This module therefore
+re-exports nothing: the package has no external API callers, and a re-export here would be a
+second name for something that already has one. Python binds a submodule to the package when
+something imports it, so `from artisatomic import readqubdata` needs no line here either.
 """
-
-from artisatomic import readboyledata as readboyledata
-from artisatomic import readfacdata as readfacdata
-from artisatomic import readfloers25data as readfloers25data
-from artisatomic import readhillierdata as readhillierdata
-from artisatomic import readkuruczdata as readkuruczdata
-from artisatomic import readlisbondata as readlisbondata
-from artisatomic import readmonsdata as readmonsdata
-from artisatomic import readqubdata as readqubdata
-from artisatomic import readtanakajpltdata as readtanakajpltdata
-from artisatomic.base import add_handler_if_not_set as add_handler_if_not_set
-from artisatomic.base import hc_in_ev_cm as hc_in_ev_cm
-from artisatomic.base import leveltuples_to_pldataframe as leveltuples_to_pldataframe
-from artisatomic.base import parallel_map as parallel_map
-from artisatomic.base import PYDIR as PYDIR
-from artisatomic.base import split_element_ionstage_str as split_element_ionstage_str
-from artisatomic.cli import main as main
-from artisatomic.ionhandlers import parse_ion_handlers as parse_ion_handlers
-from artisatomic.levelnames import get_config_parity as get_config_parity
-from artisatomic.levelnames import has_merged_orbital as has_merged_orbital
-from artisatomic.levelnames import interpret_configuration as interpret_configuration
-from artisatomic.output import add_level_ids_forbidden as add_level_ids_forbidden
-from artisatomic.output import write_adata as write_adata
-from artisatomic.output import write_phixs_data as write_phixs_data
-from artisatomic.phixs import match_hydrogenic_phixs as match_hydrogenic_phixs
-from artisatomic.phixs import reduce_phixs_tables_worker as reduce_phixs_tables_worker
