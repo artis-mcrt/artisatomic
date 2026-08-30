@@ -46,7 +46,7 @@ CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly erro
 
 ## Code layout
 
-- `artisatomic/__init__.py` re-exports names (`import x as x`), so the scripts and tests can use the flat `artisatomic.name` interface. Add a re-export only when an internal script or a test requires the name. A new function does not need a re-export by default.
+- `artisatomic/__init__.py` re-exports nothing. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readqubdata` needs no line in `__init__.py`.
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionization cross sections.
