@@ -4,6 +4,7 @@
 import string
 import typing as t
 from collections import defaultdict
+from io import StringIO
 from pathlib import Path
 
 import numpy as np
@@ -165,8 +166,15 @@ def read_adf04(
         # each collision row is upper, lower, A-value, one upsilon per temperature, then the
         # infinite-energy (Born) limit. Name that last column so pandas does not drop one to fit.
         list_headers = ["upper", "lower", "avalue", *list_tempheaders, "born_limit"]
+
+        collision_lines = []
+        for line in fleveltrans:
+            if line.lstrip().startswith("-1"):
+                break
+            collision_lines.append(line)
+
         qubupsilondf_alltemps = pd.read_csv(
-            fleveltrans,
+            StringIO("".join(collision_lines)),
             index_col=False,
             sep=r"\s+",
             comment="C",
@@ -176,7 +184,6 @@ def read_adf04(
             skip_blank_lines=True,
             keep_default_na=False,
         )
-        qubupsilondf_alltemps = qubupsilondf_alltemps.query("upper!=-1")
 
         # Co, W I and II rates are calculated at different temperatures
         # Should be handled in a less approximate way in the future
