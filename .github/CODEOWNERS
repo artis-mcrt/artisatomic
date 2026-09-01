@@ -1,5 +1,5 @@
 *       @lukeshingles
-# version files are not owned to allow auto-approval of version updates
+# No owner reviews these paths. This lets GitHub approve a version update automatically.
 .github/workflows/**
 pyproject.toml
 **/*.lock
