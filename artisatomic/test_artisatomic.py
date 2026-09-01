@@ -1312,7 +1312,7 @@ def test_reduce_phixs_tables_worker():
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict = readqubdata.read_adf04(
+    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
         (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
     )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
@@ -1352,10 +1352,10 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    assert "Skipped 1 collision rows" in flog.getvalue()
+    assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
     assert "Read 235 effective collision strengths" in flog.getvalue()
 
 
@@ -1367,7 +1367,7 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
     assert len(upsilondict) == 235
 
 
