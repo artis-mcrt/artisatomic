@@ -1371,6 +1371,25 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     assert len(upsilondict) == 235
 
 
+def test_extend_ion_list_finds_a_compressed_adf04():
+    """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
+    assert (38, [(1, "qub_data")]) in readqubdata.extend_ion_list({})
+
+
+def test_read_qub_sr1():
+    """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
+    flog = io.StringIO()
+    ionization_energy_ev, energylevels, transitions, _, upsilondict = readqubdata.read_qub_levels_and_transitions(
+        38, 1, flog
+    )
+    assert abs(ionization_energy_ev - 5.694867) < 1e-5
+    assert len(energylevels) == 57
+    # the file holds 1596 collision rows between the temperature header and the "-1" row
+    assert len(upsilondict) == 1596
+    assert len(transitions) == 1372
+    assert energylevels[0].levelname.startswith("4p65s2")
+
+
 def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 
