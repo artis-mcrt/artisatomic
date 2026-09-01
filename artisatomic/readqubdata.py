@@ -58,12 +58,12 @@ class QUBEnergyLevel(t.NamedTuple):
 
 
 def extend_ion_list(ion_handlers):
-    """Add every ion with a QUB adf04 file to ion_handlers under the "qub_data" handler."""
+    """Add every ion with a QUB adf04 file to ion_handlers under the "qub" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     qubfiles = [f for ext in compression_extensions for f in qubpath.glob(f"*_*.adf04{ext}")]
     qubions = sorted({tuple(int(x) for x in f.name.split(".")[0].split("_")) for f in qubfiles})
     for atomic_number, ion_stage in qubions:
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub_data")
+        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub")
 
     return ion_handlers
 
@@ -201,18 +201,6 @@ def read_adf04(
                 continue
             collision_lines.append(line)
 
-        qubupsilondf_alltemps = pd.read_csv(
-            StringIO("".join(collision_lines)),
-            index_col=False,
-            sep=r"\s+",
-            comment="C",
-            names=list_headers,
-            dtype={"lower": int, "upper": int},
-            on_bad_lines="skip",
-            skip_blank_lines=True,
-            keep_default_na=False,
-        )
-
         # Co, W I and II rates are calculated at different temperatures
         # Should be handled in a less approximate way in the future
         if atomic_number == 27:
@@ -227,7 +215,28 @@ def read_adf04(
             strtemperature = "5.00+03"
         upsiloncolumn = f"upsT={strtemperature}"
 
-        for _, row in qubupsilondf_alltemps.iterrows():
+        if upsiloncolumn not in list_tempheaders:
+            msg = (
+                f"{filepath} holds no collision strengths at {strtemperature} K."
+                f" The file's temperatures are: {' '.join(x.removeprefix('upsT=') for x in list_tempheaders)}"
+            )
+            raise ValueError(msg)
+
+        # name every column so the positions match, but parse only the three that are read below
+        qubupsilondf = pd.read_csv(
+            StringIO("".join(collision_lines)),
+            index_col=False,
+            sep=r"\s+",
+            comment="C",
+            names=list_headers,
+            usecols=["upper", "lower", upsiloncolumn],
+            dtype={"lower": int, "upper": int},
+            on_bad_lines="skip",
+            skip_blank_lines=True,
+            keep_default_na=False,
+        )
+
+        for _, row in qubupsilondf.iterrows():
             lower = row["lower"]
             upper = row["upper"]
             lower, upper = min(lower, upper), max(lower, upper)

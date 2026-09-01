@@ -1373,7 +1373,20 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
 
 def test_extend_ion_list_finds_a_compressed_adf04():
     """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
-    assert (38, [(1, "qub_data")]) in readqubdata.extend_ion_list({})
+    assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
+
+
+def test_parse_ion_handlers_accepts_a_renamed_handler():
+    """A file written before a handler was renamed still names the old handler, so map it."""
+    from artisatomic.iondata import simple_handlers
+    from artisatomic.ionhandlers import parse_ion_handlers
+    from artisatomic.ionhandlers import renamed_handlers
+
+    assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "qub")])]
+    # a name that was never renamed passes through unchanged
+    assert parse_ion_handlers([[27, [[2, "qub_cobalt"]]]]) == [(27, [(2, "qub_cobalt")])]
+    # every alias must point at a handler that read_ion_data() can dispatch
+    assert set(renamed_handlers.values()) <= set(simple_handlers) | {"qub_cobalt"}
 
 
 def test_read_qub_sr1():
@@ -2203,7 +2216,7 @@ def test_iondata_simple_handlers_registry():
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
-        "qub_data": readqubdata.get_level_valence_n,
+        "qub": readqubdata.get_level_valence_n,
     }
     assert {
         name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
@@ -2220,7 +2233,7 @@ def test_iondata_simple_handlers_registry():
     }
 
     # only the QUB reader returns collision strengths beside the levels and the transitions
-    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub_data"}
+    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub"}
 
     # the readers that the registry calls with (atomic_number, ion_stage, flog)
     expected_readers = {
@@ -2231,7 +2244,7 @@ def test_iondata_simple_handlers_registry():
         "mons": readmonsdata.read_levels_and_transitions,
         "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
         "gsnist": groundstatesonlynist.read_ground_levels,
-        "qub_data": readqubdata.read_qub_levels_and_transitions,
+        "qub": readqubdata.read_qub_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
         assert simple_handlers[name].read_levels_and_transitions is reader, name
