@@ -65,6 +65,25 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
+def is_adf04_terminator(line: str) -> bool:
+    """Report whether the line is the "-1" row that ends an adf04 section.
+
+    The level block and the collision block each end with such a row. Writers pad it
+    differently, so the test is on the first field and not on a fixed column.
+    """
+    return line.split(maxsplit=1)[:1] == ["-1"]
+
+
+def is_adf04_data_row(line: str) -> bool:
+    """Report whether the line starts with a level id, which marks it as a table row.
+
+    ADAS writes auxiliary rows with a process code in the first field: R for recombination,
+    S and I for ionization, P for proton impact. Those rows are not collision strengths.
+    """
+    firstfield = line.split(maxsplit=1)
+    return bool(firstfield) and firstfield[0].isdigit()
+
+
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float]]:
@@ -89,7 +108,7 @@ def read_adf04(
         atomic_group_note = False
         while True:
             line = fleveltrans.readline()
-            if not line or line.startswith("   -1"):
+            if not line or is_adf04_terminator(line):
                 break
             if line.startswith("C-"):
                 atomic_group_note = not atomic_group_note
@@ -167,10 +186,16 @@ def read_adf04(
         # infinite-energy (Born) limit. Name that last column so pandas does not drop one to fit.
         list_headers = ["upper", "lower", "avalue", *list_tempheaders, "born_limit"]
 
-        collision_lines = []
+        collision_lines: list[str] = []
+        skipped_rows = 0
         for line in fleveltrans:
-            if line.lstrip().startswith("-1"):
+            if is_adf04_terminator(line):
                 break
+            if not line.strip():
+                continue
+            if not is_adf04_data_row(line):
+                skipped_rows += 1
+                continue
             collision_lines.append(line)
 
         qubupsilondf_alltemps = pd.read_csv(
@@ -203,7 +228,14 @@ def read_adf04(
             lower = row["lower"]
             upper = row["upper"]
             lower, upper = min(lower, upper), max(lower, upper)
-            assert upper > lower
+            # a raise rather than an assert: this validates an input file, and the check
+            # must survive python -O. Equal ids would store a self-transition.
+            if not 1 <= lower < upper <= len(energylevels):
+                msg = (
+                    f"collision strength level ids {lower}, {upper} in {filepath} are outside"
+                    f" the file's {len(energylevels)} levels"
+                )
+                raise ValueError(msg)
 
             strupsilon = str(row[upsiloncolumn])
             upsilon = float(strupsilon.replace("-", "E-").replace("+", "E+"))
@@ -220,6 +252,9 @@ def read_adf04(
                 )
 
     log_and_print(flog, f"Read {len(energylevels):d} levels")
+    log_and_print(flog, f"Read {len(upsilondict):d} effective collision strengths")
+    if skipped_rows:
+        log_and_print(flog, f"Skipped {skipped_rows:d} collision rows without a numeric level id")
 
     return ionization_energy_ev, energylevels, upsilondict
 
@@ -350,6 +385,14 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         with xopen_check_extension(atom_filepath) as ftrans:
             translines = ftrans.readlines()
 
+        # read_adf04 stops at the "-1" row that ends the collision block, so stop here too.
+        # The first such row ends the level block, so the second one is the wanted end. The
+        # lines before it are kept, because the line length that finds the collision rows is
+        # measured over the same lines as before.
+        terminators = [i for i, line in enumerate(translines) if is_adf04_terminator(line)]
+        if len(terminators) > 1:
+            translines = translines[: terminators[1]]
+
         atom_group_note = False
         longest_line_length = 0
         # Use the length of lines to locate collision strengths
@@ -359,6 +402,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                 atom_group_note = not atom_group_note
                 continue
             if atom_group_note:
+                continue
+            # measure over the data rows only, so a wider header or process-code row cannot
+            # set a length that no collision row matches
+            if not is_adf04_data_row(line):
                 continue
             longest_line_length = max(longest_line_length, len(line))
 
@@ -374,6 +421,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
             rowlen = line
             row = line.split()
+
+            if not is_adf04_data_row(line):
+                continue
 
             if len(rowlen) == longest_line_length:
                 # W II file has the first two columns swapped around from the standard order

@@ -1326,6 +1326,51 @@ def test_read_adf04():
     assert level1.parity == 0
 
 
+def test_is_adf04_terminator():
+    """The terminator test reads the first field, so padding and negative values do not confuse it."""
+    for line in ("   -1\n", "  -1\n", "-1\n", "\t-1\n", "  -1  -1\n"):
+        assert readqubdata.is_adf04_terminator(line)
+
+    for line in ("  -1.0E+00 no data for this pair\n", "  -10  3 1.0\n", "\n", "   1   2 1.0+00\n"):
+        assert not readqubdata.is_adf04_terminator(line)
+
+
+def read_adf04_sample_lines() -> list[str]:
+    """Return the lines of the committed adf04 sample, which stops inside the collision block."""
+    samplepath = (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve()
+    with readqubdata.xopen_check_extension(samplepath) as fsample:
+        return fsample.readlines()
+
+
+def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
+    """The reader stops at the "-1" row, and skips the ADAS rows that carry a process code."""
+    lines = read_adf04_sample_lines()
+    # an ADAS process-code row sits inside the collision block; the trailer follows the terminator
+    processrow = "R  1  +1" + " 3.24-13" * 22 + "\n"
+    trailer = ["  -1\n", "  -1  -1\n", "C-----\n", "C PRODUCER: test\n", "   1   2 9.99+99\n"]
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join([*lines, processrow, *trailer]))
+
+    flog = io.StringIO()
+    _, energylevels, upsilondict = readqubdata.read_adf04(filepath, 27, 3, flog)
+    assert len(energylevels) == 262
+    assert len(upsilondict) == 235
+    assert "Skipped 1 collision rows" in flog.getvalue()
+    assert "Read 235 effective collision strengths" in flog.getvalue()
+
+
+def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
+    """A row that starts with a negative number is not the terminator, so the block continues."""
+    lines = read_adf04_sample_lines()
+    middle = 264 + (len(lines) - 264) // 2
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
+
+    flog = io.StringIO()
+    _, _, upsilondict = readqubdata.read_adf04(filepath, 27, 3, flog)
+    assert len(upsilondict) == 235
+
+
 def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 
