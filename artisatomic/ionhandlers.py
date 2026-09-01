@@ -48,6 +48,11 @@ def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
     return sort_ion_handlers(ion_handlers)
 
 
+# handler names that were renamed. A file written before the rename still names the old one,
+# so map it here and keep those files readable.
+renamed_handlers = {"qub_data": "qub"}
+
+
 def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]:
     """Convert the JSON form of an ion_handlers list into tuples, rejecting entries with no handler.
 
@@ -66,7 +71,8 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
                 )
                 raise TypeError(msg)
             ion_stage, handler = entry
-            ions.append((int(ion_stage), str(handler)))
+            handlername = str(handler)
+            ions.append((int(ion_stage), renamed_handlers.get(handlername, handlername)))
         ion_handlers.append((int(atomic_number), ions))
 
     return ion_handlers

@@ -106,7 +106,7 @@ simple_handlers: dict[str, SimpleHandler] = {
         readtanakajpltdata.get_level_valence_n,
     ),
     "gsnist": SimpleHandler(groundstatesonlynist.read_ground_levels),  # ground states taken from NIST
-    "qub_data": SimpleHandler(
+    "qub": SimpleHandler(
         readqubdata.read_qub_levels_and_transitions,
         readqubdata.get_level_valence_n,
         returns_upsilondict=True,

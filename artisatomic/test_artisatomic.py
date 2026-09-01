@@ -25,6 +25,7 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import scan_file_lines
+from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import interpret_configuration
 from artisatomic.output import add_level_ids_forbidden
 from artisatomic.output import write_adata
@@ -1309,12 +1310,15 @@ def test_reduce_phixs_tables_worker():
     assert abs(integral_reduced / integral_input - 1) < 0.01
 
 
+def adf04_sample_path() -> Path:
+    """Return the path of the committed QUB adf04 sample."""
+    return (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve()
+
+
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict = readqubdata.read_adf04(
-        (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
-    )
+    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(adf04_sample_path(), 27, 3, flog)
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
@@ -1324,6 +1328,82 @@ def test_read_adf04():
     assert level1.energyabovegsinpercm == 0.0
     assert level1.g == 10.0
     assert level1.parity == 0
+
+
+def test_is_adf04_terminator():
+    """The terminator test reads the first field, so padding and negative values do not confuse it."""
+    for line in ("   -1\n", "  -1\n", "-1\n", "\t-1\n", "  -1  -1\n"):
+        assert readqubdata.is_adf04_terminator(line)
+
+    for line in ("  -1.0E+00 no data for this pair\n", "  -10  3 1.0\n", "\n", "   1   2 1.0+00\n"):
+        assert not readqubdata.is_adf04_terminator(line)
+
+
+def read_adf04_sample_lines() -> list[str]:
+    """Return the lines of the committed adf04 sample, which stops inside the collision block."""
+    with xopen_check_extension(adf04_sample_path()) as fsample:
+        return fsample.readlines()
+
+
+def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
+    """The reader stops at the "-1" row, and skips the ADAS rows that carry a process code."""
+    lines = read_adf04_sample_lines()
+    # an ADAS process-code row sits inside the collision block; the trailer follows the terminator
+    processrow = "R  1  +1" + " 3.24-13" * 22 + "\n"
+    trailer = ["  -1\n", "  -1  -1\n", "C-----\n", "C PRODUCER: test\n", "   1   2 9.99+99\n"]
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join([*lines, processrow, *trailer]))
+
+    flog = io.StringIO()
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    assert len(energylevels) == 262
+    assert len(upsilondict) == 235
+    assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
+    assert "Read 235 effective collision strengths" in flog.getvalue()
+
+
+def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
+    """A row that starts with a negative number is not the terminator, so the block continues."""
+    lines = read_adf04_sample_lines()
+    middle = 264 + (len(lines) - 264) // 2
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
+
+    flog = io.StringIO()
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    assert len(upsilondict) == 235
+
+
+def test_extend_ion_list_finds_a_compressed_adf04():
+    """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
+    assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
+
+
+def test_parse_ion_handlers_accepts_a_renamed_handler():
+    """A file written before a handler was renamed still names the old handler, so map it."""
+    from artisatomic.iondata import simple_handlers
+    from artisatomic.ionhandlers import parse_ion_handlers
+    from artisatomic.ionhandlers import renamed_handlers
+
+    assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "qub")])]
+    # a name that was never renamed passes through unchanged
+    assert parse_ion_handlers([[27, [[2, "qub_cobalt"]]]]) == [(27, [(2, "qub_cobalt")])]
+    # every alias must point at a handler that read_ion_data() can dispatch
+    assert set(renamed_handlers.values()) <= set(simple_handlers) | {"qub_cobalt"}
+
+
+def test_read_qub_sr1():
+    """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
+    flog = io.StringIO()
+    ionization_energy_ev, energylevels, transitions, _, upsilondict = readqubdata.read_qub_levels_and_transitions(
+        38, 1, flog
+    )
+    assert abs(ionization_energy_ev - 5.694867) < 1e-5
+    assert len(energylevels) == 57
+    # the file holds 1596 collision rows between the temperature header and the "-1" row
+    assert len(upsilondict) == 1596
+    assert len(transitions) == 1372
+    assert energylevels[0].levelname.startswith("4p65s2")
 
 
 def test_write_adata_level_comment():
@@ -2139,7 +2219,7 @@ def test_iondata_simple_handlers_registry():
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
-        "qub_data": readqubdata.get_level_valence_n,
+        "qub": readqubdata.get_level_valence_n,
     }
     assert {
         name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
@@ -2156,7 +2236,7 @@ def test_iondata_simple_handlers_registry():
     }
 
     # only the QUB reader returns collision strengths beside the levels and the transitions
-    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub_data"}
+    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub"}
 
     # the readers that the registry calls with (atomic_number, ion_stage, flog)
     expected_readers = {
@@ -2167,7 +2247,7 @@ def test_iondata_simple_handlers_registry():
         "mons": readmonsdata.read_levels_and_transitions,
         "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
         "gsnist": groundstatesonlynist.read_ground_levels,
-        "qub_data": readqubdata.read_qub_levels_and_transitions,
+        "qub": readqubdata.read_qub_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
         assert simple_handlers[name].read_levels_and_transitions is reader, name
