@@ -66,33 +66,50 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
+adf04_section_end = "-1"
+
+
+def adf04_first_field(line: str) -> str:
+    """Return the first whitespace-separated field of the line, or "" when it holds none."""
+    fields = line.split(maxsplit=1)
+    return fields[0] if fields else ""
+
+
 def is_adf04_terminator(line: str) -> bool:
-    """Report whether the line is the "-1" row that ends an adf04 section.
+    """Report whether the line is the row that ends an adf04 section.
 
     The level block and the collision block each end with such a row. Writers pad it
     differently, so the test is on the first field and not on a fixed column.
     """
-    return line.split(maxsplit=1)[:1] == ["-1"]
+    return adf04_first_field(line) == adf04_section_end
 
 
-def is_adf04_data_row(line: str) -> bool:
-    """Report whether the line starts with a level id, which marks it as a table row.
+def adf04_field(index: int) -> pl.Expr:
+    """Return an expression for the whitespace-separated field at index of the "line" column."""
+    return pl.col("line").str.extract(rf"^\s*(?:\S+\s+){{{index}}}(\S+)", 1)
 
-    ADAS writes auxiliary rows with a process code in the first field: R for recombination,
-    S and I for ionization, P for proton impact. Those rows are not collision strengths.
+
+def adf04_float(index: int) -> pl.Expr:
+    """Return an expression for the field at index as a float.
+
+    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04.
     """
-    firstfield = line.split(maxsplit=1)
-    return bool(firstfield) and firstfield[0].isdigit()
+    return (
+        adf04_field(index)
+        .str.replace_all("-", "E-", literal=True)
+        .str.replace_all("+", "E+", literal=True)
+        .cast(pl.Float64, strict=False)
+    )
 
 
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
-) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float], list[str]]:
+) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float], pl.DataFrame]:
     """Read levels and effective collision strengths from an ADAS adf04 file.
 
     Returns the ionization energy in eV, the levels, a dict of upsilon values keyed by a
-    (lower, upper) pair of zero-based level ids, and the collision rows as they were read. The
-    caller reads the A-values from those rows, which saves a second read of the same file. The
+    (lower, upper) pair of zero-based level ids, and the parsed collision rows. The caller takes
+    the A-values from that frame, which saves a second read and a second parse of the file. The
     file numbers levels from one, and the rest of the code looks up id n at list index n - 1, so
     the level ids are validated as contiguous and 1-based. Collision strengths are taken at one
     temperature, chosen per element.
@@ -184,19 +201,20 @@ def read_adf04(
                 raise ValueError(msg)
 
         upsilonheader = fleveltrans.readline().split()
-        list_tempheaders = [f"upsT={x:}" for x in upsilonheader[2:]]
-        # each collision row is upper, lower, A-value, one upsilon per temperature, then the
-        # infinite-energy (Born) limit. Name that last column so pandas does not drop one to fit.
-        list_headers = ["upper", "lower", "avalue", *list_tempheaders, "born_limit"]
+        temperatures = upsilonheader[2:]
 
+        # ADAS writes auxiliary rows with a process code in the first field: R for recombination,
+        # S and I for ionization, P for proton impact. Only a row that starts with a level id is
+        # a collision strength. A blank line is not a bad row, so it is not counted.
         collision_lines: list[str] = []
         skipped_rows = 0
         for line in fleveltrans:
-            if is_adf04_terminator(line):
+            firstfield = adf04_first_field(line)
+            if firstfield == adf04_section_end:
                 break
-            if not line.strip():
+            if not firstfield:
                 continue
-            if not is_adf04_data_row(line):
+            if not firstfield.isdigit():
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
@@ -213,39 +231,32 @@ def read_adf04(
             strtemperature = "4.00+03"
         else:
             strtemperature = "5.00+03"
-        upsiloncolumn = f"upsT={strtemperature}"
 
-        if upsiloncolumn not in list_tempheaders:
+        if strtemperature not in temperatures:
             msg = (
                 f"{filepath} holds no collision strengths at {strtemperature} K."
-                f" The file's temperatures are: {' '.join(x.removeprefix('upsT=') for x in list_tempheaders)}"
+                f" The file's temperatures are: {' '.join(temperatures)}"
             )
             raise ValueError(msg)
 
-        # polars, not pandas: the conversions run in Rust and the lines go in as they are, with
-        # no joined copy of the block. Take the three fields straight out of each line: splitting
-        # every line into all of its columns costs about three times the memory, and no other
-        # column is read.
-        upsilonindex = list_headers.index(upsiloncolumn)
-        qubupsilondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
-            pl.col("line").str.extract(r"^\s*\S+\s+(\S+)", 1).cast(pl.Int64, strict=False).alias("lower"),
-            pl.col("line").str.extract(r"^\s*(\S+)", 1).cast(pl.Int64, strict=False).alias("upper"),
-            # adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04
-            pl.col("line")
-            .str.extract(rf"^\s*(?:\S+\s+){{{upsilonindex}}}(\S+)", 1)
-            .str.replace_all("-", "E-", literal=True)
-            .str.replace_all("+", "E+", literal=True)
-            .cast(pl.Float64, strict=False)
-            .alias("upsilon"),
+        # each collision row is upper, lower, A-value, one upsilon for each temperature, then
+        # the infinite-energy (Born) limit. Cutting out the wanted fields costs about a third of
+        # the memory of splitting every line into all of its columns.
+        upsilonindex = 3 + temperatures.index(strtemperature)
+        collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
+            adf04_field(0).cast(pl.Int64, strict=False).alias("upper"),
+            adf04_field(1).cast(pl.Int64, strict=False).alias("lower"),
+            adf04_float(2).alias("avalue"),
+            adf04_float(upsilonindex).alias("upsilon"),
+            # the caller finds the collision rows by their width
+            pl.col("line").str.len_chars().alias("linelength"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null
-        goodrows = qubupsilondf.drop_nulls()
-        unreadable_rows = qubupsilondf.height - goodrows.height
+        goodrows = collisiondf.drop_nulls(subset=["lower", "upper", "upsilon"])
+        unreadable_rows = collisiondf.height - goodrows.height
 
-        for lower, upper, upsilon in zip(
-            goodrows["lower"].to_list(), goodrows["upper"].to_list(), goodrows["upsilon"].to_list(), strict=True
-        ):
+        for lower, upper, upsilon in goodrows.select("lower", "upper", "upsilon").iter_rows():
             lower, upper = min(lower, upper), max(lower, upper)
             # a raise rather than an assert: this validates an input file, and the check
             # must survive python -O. Equal ids would store a self-transition.
@@ -275,7 +286,7 @@ def read_adf04(
     if unreadable_rows:
         log_and_print(flog, f"Skipped collision rows that could not be read: {unreadable_rows:d}")
 
-    return ionization_energy_ev, energylevels, upsilondict, collision_lines
+    return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
 
 def append_qub_transition(
@@ -396,40 +407,30 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         # qubpath, so resolving the read against the working directory instead would let discovery
         # succeed and the read fail whenever the run is started outside the repository root
         atom_filepath = qubpath / f"{atomic_number}_{ion_stage}.adf04"
-        ionization_energy_ev, qub_energylevels, upsilondict, collision_lines = read_adf04(
+        ionization_energy_ev, qub_energylevels, upsilondict, collisiondf = read_adf04(
             atom_filepath, atomic_number, ion_stage, flog
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
         transition_count_of_level_name = defaultdict(int)
 
-        # the A-values sit in the collision rows that read_adf04 already returned, so the file
-        # is not read a second time. Those rows stop at the "-1" terminator and hold no process
-        # code or notes line, so the two passes cannot disagree about where the data ends.
-        # Use the length of lines to locate collision strengths
-        longest_line_length = max((len(line) for line in collision_lines), default=0)
+        # W II file has the first two columns swapped around from the standard order
+        uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
+        # the widest rows are the collision strengths; a shorter row is a header or a short row
+        transitiondf = collisiondf.filter(
+            pl.col("linelength") == collisiondf["linelength"].max(), pl.col("avalue") > 2e-30
+        )
 
-        for line in collision_lines:
-            if len(line) == longest_line_length:
-                row = line.split()
-                # W II file has the first two columns swapped around from the standard order
-                if atomic_number == 74 and ion_stage == 2:
-                    id_upper = int(row[1])
-                    id_lower = int(row[0])
-                else:
-                    id_upper = int(row[0])
-                    id_lower = int(row[1])
-                A = float(row[2].replace("-", "E-").replace("+", "E+"))
-                if A > 2e-30:
-                    append_qub_transition(
-                        qub_energylevels,
-                        qub_transitions,
-                        transition_count_of_level_name,
-                        id_lower,
-                        id_upper,
-                        A,
-                        atom_filepath,
-                    )
+        for id_upper, id_lower, A in transitiondf.select(uppercolumn, lowercolumn, "avalue").iter_rows():
+            append_qub_transition(
+                qub_energylevels,
+                qub_transitions,
+                transition_count_of_level_name,
+                id_lower,
+                id_upper,
+                A,
+                atom_filepath,
+            )
 
     else:
         msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage}"

@@ -25,6 +25,7 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import scan_file_lines
+from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import interpret_configuration
 from artisatomic.output import add_level_ids_forbidden
 from artisatomic.output import write_adata
@@ -1309,12 +1310,15 @@ def test_reduce_phixs_tables_worker():
     assert abs(integral_reduced / integral_input - 1) < 0.01
 
 
+def adf04_sample_path() -> Path:
+    """Return the path of the committed QUB adf04 sample."""
+    return (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve()
+
+
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
-        (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve(), 27, 3, flog
-    )
+    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(adf04_sample_path(), 27, 3, flog)
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
@@ -1337,8 +1341,7 @@ def test_is_adf04_terminator():
 
 def read_adf04_sample_lines() -> list[str]:
     """Return the lines of the committed adf04 sample, which stops inside the collision block."""
-    samplepath = (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve()
-    with readqubdata.xopen_check_extension(samplepath) as fsample:
+    with xopen_check_extension(adf04_sample_path()) as fsample:
         return fsample.readlines()
 
 
