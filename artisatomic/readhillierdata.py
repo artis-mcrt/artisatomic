@@ -979,8 +979,9 @@ class PhotFileReader:
             self.take_tabulated_rows(seg_ncols, seg_f0, self.f1[start:end])
         elif self.crosssectiontype == 9:
             if self.numpointsexpected > 0:
-                for rowindex in np.flatnonzero(seg_ncols == 8) + start:
-                    self.take_vy95_row(self.lines[int(rowindex)].split())
+                # tolist(): a list of Python ints, which is what the Series index takes
+                for rowindex in (np.flatnonzero(seg_ncols == 8) + start).tolist():
+                    self.take_vy95_row(self.lines[rowindex].split())
         elif not self.type_is_known():
             self.note_unknown_type()
         elif self.numpointsexpected > 0:
