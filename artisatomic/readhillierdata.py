@@ -709,8 +709,8 @@ class PhotFileReader:
     units of the threshold and a cross section in Megabarns.
 
     One polars pass cuts every line into its tokens and parses the first two as floats. 94% of
-    a phot file is two-column data, and a Python loop over those lines was the largest cost of
-    a cmfgen build after the downsampling. The lines with a "!..." marker and the blank lines
+    a phot file is two-column data. A Python loop over those lines was the largest cost of a
+    cmfgen build after the downsampling. The lines with a "!..." marker and the blank lines
     are the events. read_file() walks those in Python and takes the data rows of each block as
     a slice of the parsed columns.
 
