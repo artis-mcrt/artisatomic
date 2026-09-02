@@ -714,8 +714,8 @@ class PhotFileReader:
     are the events. read_file() walks those in Python and takes the data rows of each block as
     a slice of the parsed columns.
 
-    The ion-wide state stays on the instance across the files: the tables and the target of
-    each file, the J-splitting mode, and the level names of each cross-section type.
+    The ion-wide state stays on the instance across the files. That state is the tables and
+    the target of each file, the J-splitting mode, and the level names of each type.
     """
 
     def __init__(
@@ -763,8 +763,8 @@ class PhotFileReader:
         # the points of the current tabulated block, in file order
         self.pending_energyryd: list[np.ndarray] = []
         self.pending_sigma: list[np.ndarray] = []
-        # the name and the declared size of the block those points belong to: a file can start
-        # the next block with no blank line, and the state then names the next level already
+        # the name and the declared size of the block those points belong to. A file can start
+        # the next block with no blank line. The state then names the next level already.
         self.pending_levelname = ""
         self.pending_numpoints = 0
         self.thresholdenergyryd = 0.0
