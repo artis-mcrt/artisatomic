@@ -702,10 +702,11 @@ phixs_type_labels = {
 class PhotFileReader:
     """Read the photoionization files of one CMFGEN ion, one file at a time.
 
-    A file is a header, then one block for each level: a "!Configuration name" line, a "!Type
-    of cross-section" line, a "!Number of cross-section points" line, the data rows, and a
-    blank line. The rows of a fit type hold one coefficient each. The rows of a tabulated type
-    (20, 21, 22) hold an energy in units of the threshold and a cross section in Megabarns.
+    A file is a header, then one block for each level. A block starts with three marker
+    lines: "!Configuration name", "!Type of cross-section" and "!Number of cross-section
+    points". The data rows follow, and a blank line ends the block. The rows of a fit type
+    hold one coefficient each. The rows of a tabulated type (20, 21, 22) hold an energy in
+    units of the threshold and a cross section in Megabarns.
 
     One polars pass cuts every line into its tokens and parses the first two as floats. 94% of
     a phot file is two-column data, and a Python loop over those lines was the largest cost of
