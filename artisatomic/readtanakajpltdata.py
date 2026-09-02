@@ -157,8 +157,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     return ionization_energy_in_ev, dflevels, dftransitions, transition_counts
 
 
-def get_level_valence_n(levelname: str):
+def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a JPLT level name.
+
+    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log.
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
@@ -169,12 +172,8 @@ def get_level_valence_n(levelname: str):
     where it is the last dot-separated shell before the term label.
     """
     if "{" in levelname:
-        n = int(levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0].rstrip("spdfg+-"))
+        lastshell = levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0]
     else:
         lastshell = levelname.rsplit(" ", maxsplit=1)[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0]
-        nmatch = re.match(r"\d+", lastshell)
-        assert nmatch is not None, f"Could not parse valence n from level name: {levelname}"
-        n = int(nmatch.group())
-    assert n >= 0
-    assert n < 20
-    return n
+    nmatch = re.match(r"\d+", lastshell)
+    return int(nmatch.group()) if nmatch is not None else None

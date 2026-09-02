@@ -262,55 +262,43 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             dfenergylevels_ion = iondata.dfenergylevels
             dftransitions_ion = iondata.dftransitions
 
+            # one frame of the upsilon pairs for the whole ion: the anti join below finds the
+            # pairs with no transition, and the left join after it attaches the values
+            dfupsilon = pl.DataFrame(
+                [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
+                schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
+                orient="row",
+            )
+
             if dftransitions_ion.is_empty():
                 # a reader with no transitions gives a frame with no columns, which the joins in
                 # add_level_ids_forbidden() cannot take. Every upsilon pair is unused then, so the
                 # upsilon-only mechanism below still writes the ion's collision strengths.
-                unused_upsilon_transitions = set(upsilondict.keys())
+                dfupsilon_only_transitions = dfupsilon.select("lowerlevel", "upperlevel")
             else:
-                dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
+                dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion).with_columns(
+                    pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
+                )
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
                 # an anti join, not set.difference() over iter_rows(): that built a Python tuple
-                # for each of the millions of transitions of a cmfgen ion. The guard keeps the
-                # join off the handlers with an empty upsilondict.
-                unused_upsilon_transitions = (
-                    set(
-                        pl.DataFrame(
-                            list(upsilondict.keys()),
-                            schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
-                            orient="row",
-                        )
-                        .join(
-                            dftransitions_ion.select(
-                                pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
-                            ),
-                            on=["lowerlevel", "upperlevel"],
-                            how="anti",
-                        )
-                        .iter_rows(named=False)
-                    )
-                    if upsilondict
-                    else set()
+                # for each of the millions of transitions of a cmfgen ion
+                dfupsilon_only_transitions = dfupsilon.select("lowerlevel", "upperlevel").join(
+                    dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
                 )
 
             log_and_print(
-                flog, f"Adding in {len(unused_upsilon_transitions):d} extra transitions with only upsilon values"
+                flog,
+                f"Adding in {dfupsilon_only_transitions.height:d} extra transitions with only upsilon values",
             )
 
-            if unused_upsilon_transitions:
-                dfupsilon_only_transitions = pl.DataFrame(
-                    list(unused_upsilon_transitions),
-                    schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
-                    orient="row",
-                ).with_columns(A=0.0)
+            if not dfupsilon_only_transitions.is_empty():
+                dfupsilon_only_transitions = dfupsilon_only_transitions.with_columns(A=0.0)
+                levelnames = dfenergylevels_ion["levelname"].to_list()
                 for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(
                     named=False
                 ):
-                    namefrom = dfenergylevels_ion["levelname"][id_upper]
-                    nameto = dfenergylevels_ion["levelname"][id_lower]
-
-                    transition_count_of_level_name[namefrom] += 1
-                    transition_count_of_level_name[nameto] += 1
+                    transition_count_of_level_name[levelnames[id_upper]] += 1
+                    transition_count_of_level_name[levelnames[id_lower]] += 1
 
                 dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
@@ -321,18 +309,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 # per row costs more than the whole rest of the write. upsilondict's keys are
                 # unique, so the join cannot duplicate rows, and maintain_order keeps the frame in
                 # the order the reader produced it.
-                dfupsilon = pl.DataFrame(
-                    [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
-                    schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
-                    orient="row",
-                )
-                dftransitions_ion = (
-                    dftransitions_ion.with_columns(
-                        pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
-                    )
-                    .join(dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left")
-                    .pipe(resolve_coll_str)
-                )
+                dftransitions_ion = dftransitions_ion.join(
+                    dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
+                ).pipe(resolve_coll_str)
 
             with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
                 write_adata(
@@ -426,10 +405,10 @@ def write_adata(
 def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> None:
     """Report the transitions whose upper level is not above the lower one, which ARTIS drops.
 
-    ARTIS gives every transition a frequency of (E_upper - E_lower) / h and skips the row where
-    that is not positive (input.cc), so a pair of levels the source gives the same energy is
-    silently lost, along with any collision strength it carried. Nothing here can fix that: a line
-    of zero frequency has no place in the radiation field. It should not happen quietly, though.
+    ARTIS gives every transition a frequency of (E_upper - E_lower) / h, and it skips the row
+    where that is not positive (input.cc). A pair of levels with the same energy in the source
+    thus loses its transition, and any collision strength it carried. Nothing here can fix that:
+    a line of zero frequency has no place in the radiation field. This function reports it.
 
     A level list that is not in energy order gives the same loss for a pair whose lower id has
     the higher energy, so that case is reported too, on its own line.
@@ -532,7 +511,7 @@ def write_transition_data(
 
 
 def threshold_is_known(threshold_ev: float) -> bool:
-    """Whether a photoionization threshold is a usable value: finite and positive.
+    """Whether a photoionisation threshold is a usable value: finite and positive.
 
     A reader marks a threshold it does not have as NaN. A non-positive value is not a
     threshold either, so the filler and the writer both treat it as missing.

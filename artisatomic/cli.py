@@ -10,7 +10,6 @@ from pathlib import Path
 
 import argcomplete
 
-from artisatomic import readhillierdata
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.ionhandlers import get_ion_handlers
@@ -90,17 +89,6 @@ def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None =
         # get_ion_handlers() reads a file, so this validates input and must survive python -O
         msg = "No ions selected. artisatomicionhandlers.json is empty, or no reader found any data."
         raise ValueError(msg)
-
-    # only the cross sections use these tables, and reading them means parsing the whole H I
-    # oscillator file plus two hydrogenic data files. The CMFGEN fit types 2, 3 and 8 need them,
-    # and so does the hydrogenic estimate for the other handlers. A run with neither does not
-    # need the CMFGEN data at all.
-    handlers_in_run = {handler for _atomic_number, listions in ion_handlers for _ion_stage, handler in listions}
-    needs_hydrogenic_tables = args.nlevels_hydrogenic_for_unknown_phixs > 0 or bool(
-        handlers_in_run & {"cmfgen", "qub_cobalt"}
-    )
-    if not args.nophixs and needs_hydrogenic_tables:
-        readhillierdata.read_hyd_phixsdata()
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 

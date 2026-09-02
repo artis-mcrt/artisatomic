@@ -3,6 +3,7 @@
 import typing as t
 from collections import defaultdict
 
+import numpy as np
 import pandas as pd
 
 from artisatomic.base import add_handler_if_not_set
@@ -101,12 +102,15 @@ def read_lines_data(dfiondata, energy_levels):
     transitions = []
     transition_count_of_level_name = defaultdict(int)
 
-    for _, row in dfiondata.iterrows():
-        # the levels were sorted by energy, and transitiondata.txt is written with the lower
-        # id first, so a pair that the file lists the other way round is swapped here
-        lowerindex = min(row["Lower_index"], row["Upper_index"])
-        upperindex = max(row["Lower_index"], row["Upper_index"])
-        A = row["gA"] / row["Upper_g"]  # TODO: is this correct?
+    # numpy columns, not iterrows(): that built a Series for each of the 10^5 lines of an ion.
+    # The levels were sorted by energy, and transitiondata.txt is written with the lower id
+    # first, so a pair that the file lists the other way round is swapped here.
+    lowerindices = np.minimum(dfiondata["Lower_index"].to_numpy(), dfiondata["Upper_index"].to_numpy())
+    upperindices = np.maximum(dfiondata["Lower_index"].to_numpy(), dfiondata["Upper_index"].to_numpy())
+    # g_upper is the g of the level the file calls upper, because gA is that level's product
+    A_values = dfiondata["gA"].to_numpy() / dfiondata["Upper_g"].to_numpy()
+
+    for lowerindex, upperindex, A in zip(lowerindices.tolist(), upperindices.tolist(), A_values.tolist(), strict=True):
         transtuple = TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A)
 
         transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1

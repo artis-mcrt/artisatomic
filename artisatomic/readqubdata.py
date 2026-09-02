@@ -425,13 +425,6 @@ def read_qub_photoionizations(
     caller reads an empty cross-section array as "no data", and then applies the hydrogenic
     estimate. A zero-filled array would pass as data and leave the ion with no cross sections.
     """
-    if (atomic_number, ion_stage) not in {(27, 2), (27, 3)}:
-        log_and_print(
-            flog,
-            f"WARNING: no QUB photoionization data for Z={atomic_number} ion_stage {ion_stage}",
-        )
-        return np.empty((0, args.nphixspoints)), [], np.empty(0)
-
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
@@ -634,6 +627,10 @@ def read_qub_photoionizations(
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
             if levelid < 4:
                 photoionization_crosssections[levelid] = phixsvalues
+
+    else:
+        log_and_print(flog, f"WARNING: no QUB photoionization data for Z={atomic_number} ion_stage {ion_stage}")
+        return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 

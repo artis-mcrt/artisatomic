@@ -363,15 +363,21 @@ def get_level_valence_n(levelname: str) -> int | None:
         if not part[-1].isdigit():
             return None
         part = part.rstrip(string.digits)
-    part = part.strip("spdfghijklmnopqr")
 
-    # inefficient way to find the last number in a string
-    for i in range(len(part)):
-        try:
-            n = int(part[i:])
-        except ValueError:
-            continue
-        else:
-            return n
-
-    return None
+    # the digits before the valence orbital letter. A Kurucz label writes the electron count of
+    # the shell before them without a space: "s25p" is 5s2 5p, "f36s" is 4f3 6s and "f125d" is
+    # 4f12 5d. So a run of digits that follows an orbital letter starts with that count. A
+    # two-digit run that ends in 0 is a two-digit n ("s10d" is 5s 10d), because no shell has
+    # n = 0. A lower-case letter is an orbital letter here: the term letters are upper case.
+    nmatch = re.search(r"([a-z]?)(\d+)[a-z]$", part)
+    if nmatch is None:
+        return None
+    digits = nmatch.group(2)
+    if nmatch.group(1):
+        if len(digits) == 2 and digits[1] != "0":
+            digits = digits[1:]
+        elif len(digits) == 3:
+            digits = digits[2:]
+        elif len(digits) > 3:
+            return None
+    return int(digits)

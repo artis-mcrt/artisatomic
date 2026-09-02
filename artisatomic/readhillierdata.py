@@ -699,6 +699,416 @@ phixs_type_labels = {
 }
 
 
+class PhotFileReader:
+    """Read the photoionization files of one CMFGEN ion, one file at a time.
+
+    A file is a header, then one block for each level. A block starts with three marker
+    lines: "!Configuration name", "!Type of cross-section" and "!Number of cross-section
+    points". The data rows follow, and a blank line ends the block. The rows of a fit type
+    hold one coefficient each. The rows of a tabulated type (20, 21, 22) hold an energy in
+    units of the threshold and a cross section in Megabarns.
+
+    One polars pass cuts every line into its tokens and parses the first two as floats. 94% of
+    a phot file is two-column data. A Python loop over those lines was the largest cost of a
+    cmfgen build after the downsampling. The lines with a "!..." marker and the blank lines
+    are the events. read_file() walks those in Python and takes the data rows of each block as
+    a slice of the parsed columns.
+
+    The ion-wide state stays on the instance across the files. That state is the tables and
+    the target of each file, the J-splitting mode, and the level names of each type.
+    """
+
+    def __init__(
+        self,
+        atomic_number: int,
+        ion_stage: int,
+        photfilecount: int,
+        lambdaangstroms: list[float],
+        firstlevelindex_of_levelname: dict[str, int],
+        firstlevelindex_of_levelnamenoJ: dict[str, int],
+        flog,
+    ) -> None:
+        """Set up the reader for one ion. The level lookups come from read_phixs_tables()."""
+        self.atomic_number = atomic_number
+        self.ion_stage = ion_stage
+        # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file,
+        # which equals the ionisation stage for every ion here)
+        self.zion = ion_stage
+        self.lambdaangstroms = lambdaangstroms
+        self.firstlevelindex_of_levelname = firstlevelindex_of_levelname
+        self.firstlevelindex_of_levelnamenoJ = firstlevelindex_of_levelnamenoJ
+        self.flog = flog
+
+        self.phixstables: list[dict[str, np.ndarray]] = [{} for _ in range(photfilecount)]
+        self.phixstargets: list[str] = ["" for _ in range(photfilecount)]
+        self.j_splitting_on = False
+        # the level matching after the files uses one mode for the whole ion, so every phot
+        # file of the ion must declare the same J-splitting mode. None means no file declared
+        # one yet.
+        self.j_splitting_seen: bool | None = None
+        # sets, not lists: only the distinct level count per type is reported, and a list
+        # needed a linear scan per record to dedupe, which is quadratic in the level count
+        self.phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
+        self.unknown_phixs_types: list[int] = []
+
+        # the state of the file and the block being read, reset by read_file()
+        self.filenum = 0
+        self.photfilename = ""
+        self.lowerlevelindex = -1
+        self.lowerlevelname = ""
+        self.targetlevelname = ""
+        self.numpointsexpected = 0
+        self.crosssectiontype = -1
+        self.fitcoefficients: list[t.Any] = []
+        # the points of the current tabulated block, in file order
+        self.pending_energyryd: list[np.ndarray] = []
+        self.pending_sigma: list[np.ndarray] = []
+        # the name and the declared size of the block those points belong to. A file can start
+        # the next block with no blank line. The state then names the next level already.
+        self.pending_levelname = ""
+        self.pending_numpoints = 0
+        self.thresholdenergyryd = 0.0
+        # Used to skip problematic lines in Fe VIII and Ni X phot_data_A (see read_file)
+        self.in_header = False
+        self.lines = pl.Series("line", [], dtype=pl.String)
+        self.ncols = np.empty(0, dtype=np.int64)
+        self.f0 = np.empty(0)
+        self.f1 = np.empty(0)
+
+    def read_file(self, filenum: int, filename: Path, photfilename: str) -> None:
+        """Read one phot file into self.phixstables[filenum] and self.phixstargets[filenum]."""
+        self.filenum = filenum
+        self.photfilename = photfilename
+        self.lowerlevelindex = -1
+        self.lowerlevelname = ""
+        self.targetlevelname = ""
+        self.numpointsexpected = 0
+        self.crosssectiontype = -1
+        self.fitcoefficients = []
+        self.pending_energyryd = []
+        self.pending_sigma = []
+        self.pending_levelname = ""
+        self.pending_numpoints = 0
+        self.thresholdenergyryd = 0.0
+        self.in_header = False
+
+        self.lines = scan_file_lines(filename).collect()["line"].fill_null("")
+        is_event = self.lines.str.contains("!", literal=True) | (self.lines.str.strip_chars().str.len_chars() == 0)
+        event_rows = np.flatnonzero(is_event.to_numpy())
+        event_lines: list[str] = self.lines.filter(is_event).to_list()
+        dftokens = (
+            self.lines.to_frame()
+            .select(parts=pl.col("line").str.extract_all(r"\S+"))
+            .select(
+                pl.col("parts").list.len().alias("ncols"),
+                # Fortran writes a D exponent. A token that is not a float gives NaN.
+                *(
+                    pl.col("parts")
+                    .list.get(column, null_on_oob=True)
+                    .str.replace("D", "E", literal=True)
+                    .cast(pl.Float64, strict=False)
+                    .alias(f"f{column}")
+                    for column in (0, 1)
+                ),
+            )
+        )
+        self.ncols = dftokens["ncols"].to_numpy()
+        self.f0 = dftokens["f0"].to_numpy()
+        self.f1 = dftokens["f1"].to_numpy()
+
+        segment_start = 0
+        for event_row, line in zip(event_rows, event_lines, strict=True):
+            # the data rows between the previous event and this one belong to the current block
+            self.take_data_rows(segment_start, int(event_row))
+            segment_start = int(event_row) + 1
+            self.take_event_line(line)
+
+        self.take_data_rows(segment_start, len(self.lines))
+        self.finish_tabulated_block(validate=False)
+
+        # a file with no "!Cross-section unit" line never leaves the header state, so every
+        # level block was skipped with a warning and the file gave no cross sections
+        if not self.in_header:
+            msg = f"{photfilename} has no '!Cross-section unit' line, so none of its cross sections were read"
+            raise ValueError(msg)
+
+    def take_event_line(self, line: str) -> None:
+        """Apply one blank line or one line with a "!..." marker to the state."""
+        row = line.split()
+        if not row:
+            # a blank line ends the block, and the points read must match the declared count
+            self.finish_tabulated_block(validate=True)
+            self.lowerlevelname = ""
+            self.crosssectiontype = -1
+            self.numpointsexpected = 0
+            return
+
+        if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
+            # this is not used because the upper ion's levels are not known at this time
+            self.targetlevelname = row[0]
+            log_and_print(self.flog, "Photoionisation target: " + self.targetlevelname)
+            if "[" in self.targetlevelname:
+                msg = f"target level {self.targetlevelname} contains a bracket (is J-split?)"
+                raise ValueError(msg)
+            if self.targetlevelname in self.phixstargets:
+                msg = f"Multiple phixs files for the same target configuration {self.targetlevelname}"
+                raise ValueError(msg)
+            self.phixstargets[self.filenum] = self.targetlevelname
+
+        if len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
+            if row[0].lower() in {"true", "false"}:
+                new_j_splitting_on = row[0].lower() == "true"
+                if self.j_splitting_seen is not None and new_j_splitting_on != self.j_splitting_seen:
+                    msg = "The ion's phot files disagree about J-splitting"
+                    raise ValueError(msg)
+                self.j_splitting_seen = new_j_splitting_on
+                self.j_splitting_on = new_j_splitting_on
+                if self.j_splitting_on:
+                    log_and_print(self.flog, "File specifies J-splitting enabled")
+            else:
+                msg = f'J-splitting not true or false: "{row[0]}"'
+                raise ValueError(msg)
+
+        if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
+            row[-3:]
+        ) == "!Configuration name [*]":
+            if not self.in_header:
+                log_and_print(
+                    self.flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
+                )
+                # Fe VIII and Ni X phot_data_A have lines before the header that end in
+                # "!Configuration name" and are not level blocks
+                return
+
+            self.lowerlevelname = row[0]
+            # with J splitting the name (including any [J] suffix) maps to exactly one
+            # level; without it, strip the suffix so the table covers the configuration
+            if not self.j_splitting_on and "[" in self.lowerlevelname:
+                self.lowerlevelname = self.lowerlevelname.split("[")[0]
+            self.fitcoefficients = []
+            self.numpointsexpected = 0
+            # take the first matching level (without J splitting, several can differ by
+            # J). A name with no matching level falls back to index 0, so the fit uses
+            # the ground state's threshold wavelength. Nothing uses that table: the
+            # levelindices_of_matchname mapping in read_phixs_tables() has the same key,
+            # finds no level for the name, and drops the table. The phot files routinely
+            # cover levels that the oscillator file does not (1145 of them for Co II), so
+            # this is a silent fallback rather than an error.
+            self.lowerlevelindex = (
+                self.firstlevelindex_of_levelname if self.j_splitting_on else self.firstlevelindex_of_levelnamenoJ
+            ).get(self.lowerlevelname, 0)
+            if not self.targetlevelname:
+                msg = f"{self.photfilename} names a level before its '!Final state in ion' line"
+                raise ValueError(msg)
+
+        if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
+            # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
+            # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
+            # matches the oscillator value for every ion in ions_data) and just report it.
+            zion_from_photfile = int(float(row[0]))
+            if zion_from_photfile != self.ion_stage:
+                log_and_print(
+                    self.flog,
+                    f"WARNING: ignoring screened nuclear charge {zion_from_photfile} in {self.photfilename},"
+                    f" which disagrees with ion_stage {self.ion_stage}",
+                )
+
+        if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
+            # a new block of points starts, so a block that no blank line ended is stored as is
+            self.finish_tabulated_block(validate=False)
+            self.numpointsexpected = int(row[0])
+
+        if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
+            self.in_header = True  # All phot_data_* in 19apr23 have this line
+            if row[0] != "Megabarns":
+                msg = f"Wrong cross-section unit: {row[0]}"
+                raise ValueError(msg)
+
+        if self.crosssectiontype != -1 and not self.type_is_known():
+            self.note_unknown_type()
+
+        if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
+            self.crosssectiontype = int(row[0])
+            self.phixs_type_levels[self.crosssectiontype].add(self.lowerlevelname)
+
+    def type_is_known(self) -> bool:
+        """Whether the current cross-section type is one that this reader evaluates."""
+        return self.crosssectiontype in phixs_fit_functions or self.crosssectiontype in {0, 2, 3, 8, 9, 20, 21, 22}
+
+    def note_unknown_type(self) -> None:
+        """Record a cross-section type that this reader does not evaluate, and drop its block."""
+        if self.crosssectiontype not in self.unknown_phixs_types:
+            self.unknown_phixs_types.append(self.crosssectiontype)
+        self.fitcoefficients = []
+        self.lowerlevelname = ""
+        self.numpointsexpected = 0
+
+    def finish_tabulated_block(self, validate: bool) -> None:
+        """Store the points of the tabulated block that ends here.
+
+        A blank line ends a block, and then the point count must match the declared one.
+        Without a blank line the table keeps the declared size, with zeros where the file
+        gave no point.
+        """
+        if not self.pending_energyryd:
+            return
+        energyryd = np.concatenate(self.pending_energyryd)
+        sigma = np.concatenate(self.pending_sigma)
+        self.pending_energyryd = []
+        self.pending_sigma = []
+        if len(energyryd) != self.pending_numpoints and (validate or len(energyryd) > self.pending_numpoints):
+            msg = (
+                f"Z={self.atomic_number}, ion_stage={self.ion_stage}, lowerlevel={self.pending_levelname},"
+                f" crosssectiontype={self.crosssectiontype}: expecting {self.pending_numpoints:d}"
+                f" cross-section rows but found {len(energyryd):d}"
+            )
+            raise ValueError(msg)
+        table = np.zeros((self.pending_numpoints, 2))
+        table[: len(energyryd), 0] = energyryd
+        table[: len(energyryd), 1] = sigma
+        self.phixstables[self.filenum][self.pending_levelname] = table
+
+    def take_data_rows(self, start: int, end: int) -> None:
+        """Read the data rows start to end - 1 into the current block."""
+        if self.crosssectiontype == -1 or start >= end:
+            return
+        seg_ncols = self.ncols[start:end]
+        seg_f0 = self.f0[start:end]
+
+        if self.crosssectiontype in {20, 21, 22}:
+            self.take_tabulated_rows(seg_ncols, seg_f0, self.f1[start:end])
+        elif self.crosssectiontype == 9:
+            if self.numpointsexpected > 0:
+                # tolist(): a list of Python ints, which is what the Series index takes
+                for rowindex in (np.flatnonzero(seg_ncols == 8) + start).tolist():
+                    self.take_vy95_row(self.lines[rowindex].split())
+        elif not self.type_is_known():
+            self.note_unknown_type()
+        elif self.numpointsexpected > 0:
+            # the fit types take one float on each row
+            for value in seg_f0[(seg_ncols == 1) & ~np.isnan(seg_f0)]:
+                self.take_fit_coefficient(float(value))
+
+    def take_tabulated_rows(self, seg_ncols: np.ndarray, seg_f0: np.ndarray, seg_f1: np.ndarray) -> None:
+        """Add the two-column rows of a tabulated block (types 20, 21, 22) to the pending points."""
+        if not self.lowerlevelname:
+            return
+        ispoint = (seg_ncols == 2) & ~np.isnan(seg_f0) & ~np.isnan(seg_f1)
+        if not ispoint.any():
+            return
+        x = seg_f0[ispoint]
+        if not self.pending_energyryd:
+            self.pending_levelname = self.lowerlevelname
+            self.pending_numpoints = self.numpointsexpected
+            lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+            self.thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+            # for these types the x value is a fraction of the threshold, not an energy
+            if abs(x[0] - 1.0) > 0.5:
+                print(
+                    f"{self.lowerlevelname} cross section type:{self.crosssectiontype}, {x[0]:.3f} is not near"
+                    f" one? might be energy instead? E_threshold = {self.thresholdenergyryd:.3f} Ry"
+                )
+        energyryd = x * self.thresholdenergyryd
+        # the order test includes the last point of the block read so far
+        allenergy = (
+            energyryd if not self.pending_energyryd else np.concatenate(([self.pending_energyryd[-1][-1]], energyryd))
+        )
+        steps = np.diff(allenergy)
+        decreasing = np.flatnonzero(steps < 0)
+        if len(decreasing) > 0:
+            msg = (
+                f"photoionization table for {self.lowerlevelname} first column decreases "
+                f"with energy {allenergy[decreasing[0]]} followed by {allenergy[decreasing[0] + 1]}"
+            )
+            raise ValueError(msg)
+        for index in np.flatnonzero(steps == 0):
+            print(
+                f"WARNING: photoionization table for {self.lowerlevelname} first column duplicated "
+                f"energy value of {allenergy[index]}"
+            )
+        self.pending_energyryd.append(energyryd)
+        self.pending_sigma.append(seg_f1[ispoint])
+
+    def take_vy95_row(self, row: list[str]) -> None:
+        """Add one eight-column row of a type 9 (Verner & Yakovlev 1995) block."""
+        self.fitcoefficients.append(
+            VY95PhixsFitRow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
+        )
+        if len(self.fitcoefficients) * 8 == self.numpointsexpected:
+            lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+            self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
+
+    def store_table(self, table: np.ndarray) -> None:
+        """Keep the evaluated table of the current level, and close the block to more coefficients."""
+        self.phixstables[self.filenum][self.lowerlevelname] = table
+        self.numpointsexpected = len(table)
+
+    def take_fit_coefficient(self, value: float) -> None:
+        """Add one coefficient of a fit type, and evaluate the fit when the type's count is reached."""
+        crosssectiontype = self.crosssectiontype
+        fitcoefficients = self.fitcoefficients
+        flog = self.flog
+
+        if crosssectiontype == 0:
+            fitcoefficients.append(value)
+            if value != 0.0:
+                msg = f"Cross section type 0 of {self.lowerlevelname} has a non-zero number after it"
+                raise ValueError(msg)
+            return
+
+        if crosssectiontype in phixs_fit_functions:
+            # types 1, 5, 6 and 7 share one shape: single-float rows fill fitcoefficients
+            # until the type's count is reached, and one call then builds the table
+            fitcoefficients.append(value)
+            ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
+            if len(fitcoefficients) == ncoefficients:
+                lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+                self.store_table(fitfunc(lambda_angstrom, *fitcoefficients))
+            return
+
+        if crosssectiontype == 2:
+            fitcoefficients.append(int(value))
+            if len(fitcoefficients) == 3:
+                n, l_start, l_end = fitcoefficients
+                if n > max_hyd_l_n:
+                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
+                elif l_end > n - 1:
+                    log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                else:
+                    lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+                    self.store_table(get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end))
+            return
+
+        if crosssectiontype == 3:
+            fitcoefficients.append(value)
+            if len(fitcoefficients) == 2:
+                scale, n = fitcoefficients
+                if n > max_hyd_gaunt_n:
+                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_gaunt_n}), skipping table")
+                    return
+                lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+                # scale the cross sections but not the energy grid
+                phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
+                phixstable[:, 1] *= scale
+                self.store_table(phixstable)
+            return
+
+        if crosssectiontype == 8:
+            # the first three parameters are integers, the fourth is a float
+            fitcoefficients.append(int(value) if len(fitcoefficients) <= 2 else value)
+            if len(fitcoefficients) == 4:
+                n, l_start, l_end, nu_o = fitcoefficients
+                if n > max_hyd_l_n:
+                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
+                elif l_end > n - 1:
+                    log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                else:
+                    lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
+                    self.store_table(
+                        get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=self.zion)
+                    )
+
+
 def read_phixs_tables(
     atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[str, float]] | None], npt.NDArray[np.float64]]:
@@ -715,11 +1125,8 @@ def read_phixs_tables(
     # of reduce_phixs_tables here would be circular
     from artisatomic.phixs import reduce_phixs_tables
 
-    msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
-    if max_hyd_l_n == -1:
-        raise RuntimeError(msg)
-    if max_hyd_gaunt_n == -1:
-        raise RuntimeError(msg)
+    # the type 2, 3 and 8 fits interpolate the hydrogenic tables
+    read_hyd_phixsdata()
 
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
@@ -741,12 +1148,16 @@ def read_phixs_tables(
     # relies on, so this must not be initialised to empty lists
     photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None] * levelcount
 
-    # charge of the ion left behind, i.e. CMFGEN's ZION (= ZXzV from the oscillator file, which
-    # equals the ionisation stage for every ion here)
-    zion = ion_stage
     photfilenames = ions_data[atomic_number, ion_stage].photfilenames
-    phixstables = [{} for _ in photfilenames]
-    phixstargets = ["" for _ in photfilenames]
+    reader = PhotFileReader(
+        atomic_number,
+        ion_stage,
+        len(photfilenames),
+        lambdaangstroms,
+        firstlevelindex_of_levelname,
+        firstlevelindex_of_levelnamenoJ,
+        flog,
+    )
     reduced_phixs_dict = {}
     # the target whose table is the one kept in reduced_phixs_dict, so the normalisation below can
     # divide by that target's fraction and recover the level's total cross section, plus that
@@ -756,312 +1167,26 @@ def read_phixs_tables(
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
     num_levelnames_with_zero_crosssection = 0
 
-    j_splitting_on = False
-    # the level matching after this loop uses one mode for the whole ion, so every phot file of
-    # the ion must declare the same J-splitting mode. None means no file declared one yet.
-    j_splitting_seen: bool | None = None
-
-    # sets, not lists: only the distinct level count per type is reported, and a list needed a
-    # linear scan per record to dedupe, which is quadratic in the level count of the ion
-    phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
-    unknown_phixs_types = []
     for filenum, photfilename in enumerate(photfilenames):
         filename = Path(
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
         log_and_print(flog, f"Reading {path_for_log(filename)}")
-
-        with xopen_check_extension(filename) as fhillierphot:
-            lowerlevelindex = -1
-            lowerlevelname = ""
-            targetlevelname = ""
-            numpointsexpected = 0
-            pointnumber = 0
-            crosssectiontype = -1
-            fitcoefficients: list[t.Any] = []
-            # the tabulated types (20, 21, 22) set these at the first point of every block
-            curtable = np.empty((0, 2))
-            thresholdenergyryd = 0.0
-            prevenergy = 0.0
-
-            # Used to skip problematic lines in Fe VIII and Ni X phot_data_A (see below)
-            in_header = False
-
-            for line in fhillierphot:
-                row = line.split()
-
-                # Every marker below is a trailing "!..." comment, so a line with no '!' at all
-                # cannot match any of them. 94% of a phot file is two-column cross-section data,
-                # and testing that once here skips seven " ".join() calls per such line.
-                has_marker = "!" in line
-
-                if has_marker and len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
-                    # this is not used because the upper ion's levels are not known at this time
-                    targetlevelname = row[0]
-                    log_and_print(flog, "Photoionisation target: " + targetlevelname)
-                    if "[" in targetlevelname:
-                        msg = f"target level {targetlevelname} contains a bracket (is J-split?)"
-                        raise ValueError(msg)
-                    if targetlevelname in phixstargets:
-                        msg = f"Multiple phixs files for the same target configuration {targetlevelname}"
-                        raise ValueError(msg)
-                    phixstargets[filenum] = targetlevelname
-
-                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
-                    if row[0].lower() in {"true", "false"}:
-                        new_j_splitting_on = row[0].lower() == "true"
-                        if j_splitting_seen is not None and new_j_splitting_on != j_splitting_seen:
-                            msg = "The ion's phot files disagree about J-splitting"
-                            raise ValueError(msg)
-                        j_splitting_seen = new_j_splitting_on
-                        j_splitting_on = new_j_splitting_on
-                        if j_splitting_on:
-                            log_and_print(flog, "File specifies J-splitting enabled")
-                    else:
-                        msg = f'J-splitting not true or false: "{row[0]}"'
-                        raise ValueError(msg)
-
-                if has_marker and (
-                    (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name")
-                    or " ".join(row[-3:]) == "!Configuration name [*]"
-                ):
-                    if not in_header:
-                        log_and_print(
-                            flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
-                        )
-                        # Fe VIII and Ni X phot_data_A have lines before the header that end in
-                        # "!Configuration name" and are not level blocks
-                        continue
-
-                    lowerlevelname = row[0]
-                    # with J splitting the name (including any [J] suffix) maps to exactly one
-                    # level; without it, strip the suffix so the table covers the configuration
-                    if not j_splitting_on and "[" in lowerlevelname:
-                        lowerlevelname = lowerlevelname.split("[")[0]
-                    fitcoefficients = []
-                    numpointsexpected = 0
-                    # take the first matching level (without J splitting, several can differ by
-                    # J). A name with no matching level falls back to index 0, so the fit uses
-                    # the ground state's threshold wavelength. Nothing uses that table: the
-                    # levelindices_of_matchname mapping at the end of this function has the same
-                    # key, finds no level for the name, and drops the table. The phot files
-                    # routinely cover levels that the oscillator file does not (1145 of them for
-                    # Co II), so this is a silent fallback rather than an error.
-                    lowerlevelindex = (
-                        firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
-                    ).get(lowerlevelname, 0)
-                    if not targetlevelname:
-                        msg = f"{photfilename} names a level before its '!Final state in ion' line"
-                        raise ValueError(msg)
-
-                if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
-                    # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
-                    # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
-                    # matches the oscillator value for every ion in ions_data) and just report it.
-                    zion_from_photfile = int(float(row[0]))
-                    if zion_from_photfile != ion_stage:
-                        log_and_print(
-                            flog,
-                            f"WARNING: ignoring screened nuclear charge {zion_from_photfile} in {photfilename},"
-                            f" which disagrees with ion_stage {ion_stage}",
-                        )
-
-                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
-                    numpointsexpected = int(row[0])
-                    pointnumber = 0
-
-                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
-                    in_header = True  # All phot_data_* in 19apr23 have this line
-                    if row[0] != "Megabarns":
-                        msg = f"Wrong cross-section unit: {row[0]}"
-                        raise ValueError(msg)
-
-                # a line carrying a "!..." marker has text in it, so it can never be all floats.
-                # Short-circuiting on that skips the parse attempt on every header line.
-                row_is_all_floats = not has_marker and all(map(isfloat, row))
-                if crosssectiontype == 0:
-                    if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(float(row[0].replace("D", "E")))
-
-                        if fitcoefficients[-1] != 0.0:
-                            msg = f"Cross section type 0 of {lowerlevelname} has a non-zero number after it"
-                            raise ValueError(msg)
-
-                elif crosssectiontype in phixs_fit_functions:
-                    # types 1, 5, 6 and 7 share one shape: single-float rows fill fitcoefficients
-                    # until the type's count is reached, and one call then builds the table
-                    if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(float(row[0].replace("D", "E")))
-                        ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
-                        if len(fitcoefficients) == ncoefficients:
-                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                            phixstables[filenum][lowerlevelname] = fitfunc(lambda_angstrom, *fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
-
-                elif crosssectiontype == 2:
-                    if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(int(float(row[0].replace("D", "E"))))
-                        if len(fitcoefficients) == 3:
-                            n, l_start, l_end = fitcoefficients
-
-                            if n > max_hyd_l_n:
-                                log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
-                                continue
-
-                            if l_end > n - 1:
-                                log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
-                            else:
-                                lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
-                                    lambda_angstrom, n, l_start, l_end
-                                )
-                                numpointsexpected = len(phixstables[filenum][lowerlevelname])
-
-                elif crosssectiontype == 3:
-                    if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        fitcoefficients.append(float(row[0].replace("D", "E")))
-                        if len(fitcoefficients) == 2:
-                            scale, n = fitcoefficients
-
-                            if n > max_hyd_gaunt_n:
-                                log_and_print(
-                                    flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_gaunt_n}), skipping table"
-                                )
-                                continue
-
-                            n = int(n)
-                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                            # scale the cross sections but not the energy grid
-                            phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, n)
-                            phixstable[:, 1] *= scale
-                            phixstables[filenum][lowerlevelname] = phixstable
-
-                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
-
-                elif crosssectiontype == 8:
-                    if len(row) == 1 and row_is_all_floats and numpointsexpected > 0:
-                        if len(fitcoefficients) <= 2:
-                            # first three params should be integers
-                            fitcoefficients.append(int(float(row[0].replace("D", "E"))))
-                        else:
-                            # fourth param is a float
-                            fitcoefficients.append(float(row[0].replace("D", "E")))
-
-                        if len(fitcoefficients) == 4:
-                            n, l_start, l_end, nu_o = fitcoefficients
-
-                            if n > max_hyd_l_n:
-                                log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
-                                continue
-
-                            if l_end > n - 1:
-                                log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
-                            else:
-                                lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                                phixstables[filenum][lowerlevelname] = get_hydrogenic_nl_phixstable(
-                                    lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion
-                                )
-                                numpointsexpected = len(phixstables[filenum][lowerlevelname])
-
-                elif crosssectiontype == 9:
-                    if len(row) == 8 and numpointsexpected > 0:
-                        fitcoefficients.append(
-                            VY95PhixsFitRow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
-                        )
-
-                        if len(fitcoefficients) * 8 == numpointsexpected:
-                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                            phixstables[filenum][lowerlevelname] = get_vy95_phixstable(lambda_angstrom, fitcoefficients)
-                            numpointsexpected = len(phixstables[filenum][lowerlevelname])
-
-                elif crosssectiontype in {20, 21, 22}:  # sampled data points
-                    if len(row) == 2 and row_is_all_floats and lowerlevelname:
-                        if pointnumber == 0:
-                            # a new array for every block, so a second block for the same level
-                            # name replaces the first rather than writing into it
-                            phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
-                            # bind the level's table and its threshold once per block: 94% of a
-                            # phot file is two-column data points
-                            curtable = phixstables[filenum][lowerlevelname]
-                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                            thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
-                            prevenergy = 0.0
-
-                        enryd = float(row[0].replace("D", "E"))
-
-                        # for these types the x value is a fraction of the threshold, not an energy
-                        if pointnumber == 0 and abs(enryd - 1.0) > 0.5:
-                            print(
-                                f"{lowerlevelname} cross section type:{crosssectiontype}, {enryd:.3f} is not near"
-                                f" one? might be energy instead? E_threshold = {thresholdenergyryd:.3f} Ry"
-                            )
-                        enryd *= thresholdenergyryd
-
-                        curtable[pointnumber] = enryd, float(row[1].replace("D", "E"))
-
-                        if pointnumber > 0:
-                            if enryd == prevenergy:
-                                print(
-                                    f"WARNING: photoionization table for {lowerlevelname} first column duplicated "
-                                    f"energy value of {prevenergy}"
-                                )
-                            elif enryd < prevenergy:
-                                msg = (
-                                    f"photoionization table for {lowerlevelname} first column decreases "
-                                    f"with energy {prevenergy} followed by {enryd}"
-                                )
-                                raise ValueError(msg)
-                        prevenergy = enryd
-                        pointnumber += 1
-
-                elif crosssectiontype != -1:
-                    if crosssectiontype not in unknown_phixs_types:
-                        unknown_phixs_types.append(crosssectiontype)
-                    fitcoefficients = []
-                    lowerlevelname = ""
-                    numpointsexpected = 0
-
-                if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
-                    crosssectiontype = int(row[0])
-                    phixs_type_levels[crosssectiontype].add(lowerlevelname)
-
-                if len(row) == 0:
-                    # for the tabulated types the array is preallocated to the declared row
-                    # count, so a short table leaves trailing zeros: compare the points read
-                    if (
-                        crosssectiontype in {20, 21, 22}
-                        and lowerlevelname
-                        and lowerlevelname in phixstables[filenum]
-                        and pointnumber != numpointsexpected
-                    ):
-                        msg = (
-                            f"Z={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname},"
-                            f" crosssectiontype={crosssectiontype}: expecting {numpointsexpected:d} cross-section"
-                            f" rows but found {pointnumber:d}"
-                        )
-                        raise ValueError(msg)
-                    lowerlevelname = ""
-                    crosssectiontype = -1
-                    numpointsexpected = 0
-
-        # a file with no "!Cross-section unit" line never leaves the header state, so every
-        # level block above was skipped with a warning and the file gave no cross sections
-        if not in_header:
-            msg = f"{photfilename} has no '!Cross-section unit' line, so none of its cross sections were read"
-            raise ValueError(msg)
+        reader.read_file(filenum, filename, photfilename)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
-            phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+            reader.phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            # The first non-zero point of the grid, not index 0. A table that is zero at the
-            # nominal threshold (a type 8 offset fit, or a tabulated type whose data starts
-            # above nu_edge) has its own edge further up the grid, and its cross section is read
-            # there. So two targets of one level can be compared at different photon energies
-            # (N II 2s_2p2(4Pe)3s_5Pe: nu/nu_edge = 2.47 against 1.0). That is the accepted
-            # choice: each target's branching factor is its cross section at its own edge.
+            # The first non-zero point of the grid, not index 0. A table can be zero at the
+            # nominal threshold: a type 8 offset fit, or a tabulated type whose data starts
+            # above nu_edge. Such a table has its own edge further up the grid, and the reader
+            # takes its cross section there. Two targets of one level can thus meet at
+            # different photon energies (N II 2s_2p2(4Pe)3s_5Pe: nu/nu_edge = 2.47 against
+            # 1.0). That is the accepted choice: each target's branching factor is its cross
+            # section at its own edge.
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
             except IndexError:
@@ -1075,7 +1200,7 @@ def read_phixs_tables(
             else:
                 phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
                     (
-                        phixstargets[filenum],
+                        reader.phixstargets[filenum],
                         phixs_at_threshold,
                     )
                 )
@@ -1090,30 +1215,30 @@ def read_phixs_tables(
                     log_and_print(
                         flog,
                         f"{lowerlevelname} has a cross section table in more than one photoionisation file."
-                        f" Target {phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb at threshold against"
+                        f" Target {reader.phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb at threshold against"
                         f" {keptthreshold_of_levelname[lowerlevelname]:.4e} Mb for {kepttarget_of_levelname[lowerlevelname]}.",
                     )
                 if phixs_at_threshold > keptthreshold_of_levelname.get(lowerlevelname, 0.0):
                     reduced_phixs_dict[lowerlevelname] = reduced_phixstable
-                    kepttarget_of_levelname[lowerlevelname] = phixstargets[filenum]
+                    kepttarget_of_levelname[lowerlevelname] = reader.phixstargets[filenum]
                     keptthreshold_of_levelname[lowerlevelname] = phixs_at_threshold
 
     # summarised once for the ion, not once per photoionisation file: the counts below accumulate
     # over every file, so logging them inside that loop repeated them with partial totals
-    for crosssectiontype in sorted(phixs_type_levels.keys()):
+    for crosssectiontype in sorted(reader.phixs_type_levels.keys()):
         # .get(): the branch below fires for exactly the types this parser does not handle, which
         # are the ones least likely to have a label, so indexing would fail while reporting them
         typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
-        if crosssectiontype in unknown_phixs_types:
+        if crosssectiontype in reader.unknown_phixs_types:
             log_and_print(
                 flog,
-                f"WARNING {len(phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
+                f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
                 f" {crosssectiontype}: {typelabel}",
             )
         else:
             log_and_print(
                 flog,
-                f"{len(phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
+                f"{len(reader.phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
                 f" {typelabel}",
             )
 
@@ -1170,7 +1295,7 @@ def read_phixs_tables(
     # the configuration, so index the level list by match name once rather than rescanning it.
     levelindices_of_matchname: defaultdict[str, list[int]] = defaultdict(list)
     for levelindex, levelname in enumerate(levelnames):
-        levelindices_of_matchname[levelname if j_splitting_on else levelname.split("[")[0]].append(levelindex)
+        levelindices_of_matchname[levelname if reader.j_splitting_on else levelname.split("[")[0]].append(levelindex)
 
     for lowerlevelname_a, phixstable in reduced_phixs_dict.items():
         for levelindex in levelindices_of_matchname[lowerlevelname_a]:
@@ -1311,10 +1436,10 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
     already accounts for the effective charge, so the result must not be rescaled by the caller.
     """
-    if not hyd_gaunt_energygrid_ryd:
-        # the same guard that read_phixs_tables() has: a bare KeyError on the empty module
-        # dict would name neither the missing step nor the function
-        msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before get_hydrogenic_n_phixstable()"
+    read_hyd_phixsdata()
+    if n < 1 or n > max_hyd_gaunt_n:
+        # a bare KeyError on the module dict would name neither the table nor its range
+        msg = f"The hydrogenic tables cover n = 1 to {max_hyd_gaunt_n}, not n = {n}"
         raise ValueError(msg)
     energygrid = np.asarray(hyd_gaunt_energygrid_ryd[n])
 
@@ -1783,15 +1908,20 @@ def get_photoiontargetfractions(
     return targetlist
 
 
-def read_hyd_phixsdata():
+def read_hyd_phixsdata(force: bool = False) -> None:
     """Load the hydrogenic photoionization tables that the type 2, 3 and 8 fits interpolate.
 
-    Fills the module-level hyd_phixs / hyd_gaunt tables, so it must be called before any
-    get_hydrogenic_*_phixstable(). Thresholds are taken from the H I level list, which is
-    therefore required to be indexed by principal quantum number.
+    Fills the module-level hyd_phixs / hyd_gaunt tables. The functions that read the tables
+    call this first, so a caller needs no call of its own. A second call does nothing unless
+    force is set. Thresholds are taken from the H I level list, which is therefore required to
+    be indexed by principal quantum number.
     """
-    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload (the
-    # tests call this repeatedly) must not leave sums from the previous tables
+    global max_hyd_l_n, max_hyd_gaunt_n
+    if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1 and not force:
+        return
+
+    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload must
+    # not leave sums from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
@@ -1822,7 +1952,6 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
-                global max_hyd_l_n
                 max_hyd_l_n = max_n
 
             if " ".join(row[1:]) == "!L_ST_U":
@@ -1868,7 +1997,6 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
-                global max_hyd_gaunt_n
                 max_hyd_gaunt_n = max_n
 
             if len(row) > 1:

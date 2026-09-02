@@ -124,11 +124,11 @@ def main():
 
             found_groundlevel = False
             for (parelevel,), dfdecay in dfnuclide.group_by("parent_elevel"):
-                # a blank parent level reads as null, and float(None) raises TypeError, not
-                # ValueError. Neither is the ground level.
+                # a blank parent level reads as null, and a level that is not a number is not
+                # the ground level either
                 try:
-                    is_groundlevel = float(parelevel) == 0.0  # type: ignore[arg-type]
-                except (TypeError, ValueError):
+                    is_groundlevel = parelevel is not None and float(parelevel) == 0.0
+                except ValueError:
                     is_groundlevel = False
                 print(f"  parent_Elevel: {parelevel} is_groundlevel: {is_groundlevel}")
                 if not is_groundlevel:

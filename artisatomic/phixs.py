@@ -57,6 +57,9 @@ def match_hydrogenic_phixs(
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
+    # loads the tables on the first call: the range test below reads max_hyd_gaunt_n, which is
+    # -1 before the load, and every level would then be skipped as out of range
+    readhillierdata.read_hyd_phixsdata()
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
