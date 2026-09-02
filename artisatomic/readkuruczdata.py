@@ -363,15 +363,14 @@ def get_level_valence_n(levelname: str) -> int | None:
         if not part[-1].isdigit():
             return None
         part = part.rstrip(string.digits)
-    part = part.strip("spdfghijklmnopqr")
 
-    # inefficient way to find the last number in a string
-    for i in range(len(part)):
-        try:
-            n = int(part[i:])
-        except ValueError:
-            continue
-        else:
-            return n
-
-    return None
+    # the digits before the valence orbital letter. A Kurucz label writes the electron count of
+    # the shell before them without a space: "s25p" is 5s2 5p and "f36s" is 4f3 6s. So the first
+    # digit of a run that follows an orbital letter is that count, not part of n.
+    nmatch = re.search(r"([a-z]?)(\d+)[spdfghijklmnopqr]$", part)
+    if nmatch is None:
+        return None
+    digits = nmatch.group(2)
+    if nmatch.group(1) and len(digits) > 1:
+        digits = digits[1:]
+    return int(digits)

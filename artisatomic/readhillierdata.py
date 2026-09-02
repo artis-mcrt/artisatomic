@@ -1125,11 +1125,8 @@ def read_phixs_tables(
     # of reduce_phixs_tables here would be circular
     from artisatomic.phixs import reduce_phixs_tables
 
-    msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before read_phixs_tables()"
-    if max_hyd_l_n == -1:
-        raise RuntimeError(msg)
-    if max_hyd_gaunt_n == -1:
-        raise RuntimeError(msg)
+    # the type 2, 3 and 8 fits interpolate the hydrogenic tables
+    read_hyd_phixsdata()
 
     # pulled out of the frame once: the loops below index these per level, per cross-section table
     levelcount = dfenergy_levels.height
@@ -1183,12 +1180,13 @@ def read_phixs_tables(
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            # The first non-zero point of the grid, not index 0. A table that is zero at the
-            # nominal threshold (a type 8 offset fit, or a tabulated type whose data starts
-            # above nu_edge) has its own edge further up the grid, and its cross section is read
-            # there. So two targets of one level can be compared at different photon energies
-            # (N II 2s_2p2(4Pe)3s_5Pe: nu/nu_edge = 2.47 against 1.0). That is the accepted
-            # choice: each target's branching factor is its cross section at its own edge.
+            # The first non-zero point of the grid, not index 0. A table can be zero at the
+            # nominal threshold: a type 8 offset fit, or a tabulated type whose data starts
+            # above nu_edge. Such a table has its own edge further up the grid, and the reader
+            # takes its cross section there. Two targets of one level can thus meet at
+            # different photon energies (N II 2s_2p2(4Pe)3s_5Pe: nu/nu_edge = 2.47 against
+            # 1.0). That is the accepted choice: each target's branching factor is its cross
+            # section at its own edge.
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
             except IndexError:
@@ -1438,10 +1436,10 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
     already accounts for the effective charge, so the result must not be rescaled by the caller.
     """
-    if not hyd_gaunt_energygrid_ryd:
-        # the same guard that read_phixs_tables() has: a bare KeyError on the empty module
-        # dict would name neither the missing step nor the function
-        msg = "Hydrogenic tables not loaded; call read_hyd_phixsdata() before get_hydrogenic_n_phixstable()"
+    read_hyd_phixsdata()
+    if n < 1 or n > max_hyd_gaunt_n:
+        # a bare KeyError on the module dict would name neither the table nor its range
+        msg = f"The hydrogenic tables cover n = 1 to {max_hyd_gaunt_n}, not n = {n}"
         raise ValueError(msg)
     energygrid = np.asarray(hyd_gaunt_energygrid_ryd[n])
 
@@ -1910,15 +1908,20 @@ def get_photoiontargetfractions(
     return targetlist
 
 
-def read_hyd_phixsdata():
+def read_hyd_phixsdata(force: bool = False) -> None:
     """Load the hydrogenic photoionization tables that the type 2, 3 and 8 fits interpolate.
 
-    Fills the module-level hyd_phixs / hyd_gaunt tables, so it must be called before any
-    get_hydrogenic_*_phixstable(). Thresholds are taken from the H I level list, which is
-    therefore required to be indexed by principal quantum number.
+    Fills the module-level hyd_phixs / hyd_gaunt tables. The functions that read the tables
+    call this first, so a caller needs no call of its own. A second call does nothing unless
+    force is set. Thresholds are taken from the H I level list, which is therefore required to
+    be indexed by principal quantum number.
     """
-    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload (the
-    # tests call this repeatedly) must not leave sums from the previous tables
+    global max_hyd_l_n, max_hyd_gaunt_n
+    if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1 and not force:
+        return
+
+    # the cached (2l+1)-weighted sums come from the tables filled in below, so a reload must
+    # not leave sums from the previous tables
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
@@ -1949,7 +1952,6 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
-                global max_hyd_l_n
                 max_hyd_l_n = max_n
 
             if " ".join(row[1:]) == "!L_ST_U":
@@ -1995,7 +1997,6 @@ def read_hyd_phixsdata():
             row = line.split()
             if " ".join(row[1:]) == "!Maximum principal quantum number":
                 max_n = int(row[0])
-                global max_hyd_gaunt_n
                 max_hyd_gaunt_n = max_n
 
             if len(row) > 1:

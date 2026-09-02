@@ -124,8 +124,8 @@ def read_lines_data(atomic_number, ion_stage):
     """Read one ion's bound-bound transitions from the AOIFE HDF5 file.
 
     Returns the transitions and the number of them touching each level name. The file's level
-    numbers are already zero-based, matching the level ids used in memory. No collision
-    strengths are available, so every transition gets the -1 "unknown" sentinel.
+    numbers are already zero-based, matching the level ids used in memory. The file gives no
+    collision strengths.
     """
     aoife_dataset = get_aoife_dataset()
     assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"

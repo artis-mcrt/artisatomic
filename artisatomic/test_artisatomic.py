@@ -1585,7 +1585,11 @@ def test_get_level_valence_n():
 
     # a Kurucz label can end in a parent term and an odd-parity mark after the valence orbital
     assert readkuruczdata.get_level_valence_n("4f3(4I*)6s6p*(3P*) 5I,enpercm=12345.0,j=2.5") == 6
-    assert readkuruczdata.get_level_valence_n("f36s *5I,enpercm=0.0,j=4.0") == 36
+    # a Kurucz label glues the electron count of a shell to the n of the next: s25p is 5s2 5p
+    assert readkuruczdata.get_level_valence_n("f36s *5I,enpercm=0.0,j=4.0") == 6
+    assert readkuruczdata.get_level_valence_n("s25p 3P,enpercm=14276.381,j=0.0") == 5
+    assert readkuruczdata.get_level_valence_n("d25s 4F,enpercm=1.0,j=1.5") == 5
+    assert readkuruczdata.get_level_valence_n("31s 2S,enpercm=1.0,j=0.5") == 31
     assert readkuruczdata.get_level_valence_n("d5p' 3P,enpercm=37292.106,j=0.0") == 5
 
     # a name with no readable n gives None, never a guessed n: match_hydrogenic_phixs() then
@@ -1594,6 +1598,8 @@ def test_get_level_valence_n():
     assert readkuruczdata.get_level_valence_n("N(1S)2H 1,enpercm=76765.9,j=4.5") is None
     assert readqubdata.get_level_valence_n("_id=1") is None
     assert readqubdata.get_level_valence_n("(3P)_1Se[0/2]_id=1") is None
+    assert readtanakajpltdata.get_level_valence_n("1,even,{  6h+ 1 }") == 6
+    assert readtanakajpltdata.get_level_valence_n("1,even,{  h+ 1 }") is None
 
     # the Floers+25 and FAC names accept any orbital letter, and give None for a bad token
     assert readfloers25data.get_level_valence_n("4f12.6h1 J=5 index=17") == 6
@@ -1621,8 +1627,8 @@ def test_leveltuples_to_pldataframe_empty_list():
 def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     """A level with no readable n, or with n outside the hydrogenic tables, gets no estimate.
 
-    The hydrogenic tables cover n up to max_hyd_gaunt_n (30). Real Kurucz files have ground
-    states such as 'f36s *5I' inside the lowest 100 levels, which gave a KeyError before.
+    The hydrogenic tables cover n up to max_hyd_gaunt_n (30). A level outside them gave a
+    KeyError before.
     """
     import argparse
 
@@ -1637,7 +1643,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
             "g": [2.0, 2.0, 2.0],
             "levelname": [
                 "s1s  1S,enpercm=0.0,j=0.5",  # n=1: gets a table
-                "f36s *5I,enpercm=1000.0,j=4.0",  # n=36: outside the tables
+                "31s 2S,enpercm=1000.0,j=0.5",  # n=31: outside the tables
                 "N(1S)2H 1,enpercm=2000.0,j=4.5",  # no readable n
             ],
         }
@@ -1665,7 +1671,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     assert np.all(crosssections[2] == 0.0)
 
     logtext = flog.getvalue()
-    assert "n=36" in logtext
+    assert "n=31" in logtext
     assert "no principal quantum number found in level name 'N(1S)2H 1,enpercm=2000.0,j=4.5'" in logtext
 
 
@@ -1961,10 +1967,32 @@ def test_log_degenerate_transitions():
     nocollstr = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0]})
     assert "(0 of them with a collision strength)" in warnings_for(nocollstr)
 
+    # a pair whose lower id has the higher energy is reported on its own line, not as degenerate
+    inverted = pl.DataFrame({"lowerlevel": [1], "upperlevel": [0], "A": [1.0]})
+    assert "1 transitions have a lower level id whose energy is above" in warnings_for(inverted)
+    assert "same energy" not in warnings_for(inverted)
+
     # a level frame with no energy column cannot be checked, and must stay silent rather than raise
     flog = io.StringIO()
     log_degenerate_transitions(flog, dflevels.drop("energyabovegsinpercm"), degenerate)
     assert not flog.getvalue()
+
+
+def test_read_qub_photoionizations_without_data_gives_empty_arrays():
+    """An ion with no QUB cross sections must give the empty arrays, not zero-filled ones.
+
+    iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
+    estimate, so the ion would be written with no cross sections at all.
+    """
+    import argparse
+
+    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    crosssections, targetfractions, thresholds = readqubdata.read_qub_photoionizations(
+        38, 1, levelcount=5, args=args, flog=io.StringIO()
+    )
+    assert crosssections.shape == (0, 100)
+    assert targetfractions == []
+    assert thresholds.shape == (0,)
 
 
 def test_fill_missing_phixs_thresholds():
