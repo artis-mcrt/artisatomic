@@ -9,12 +9,14 @@ import polars as pl
 
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.base import transition_count_of_level_name
 
 kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
 if TESTMODE:
@@ -285,7 +287,8 @@ def read_levels_and_transitions(
         )
         .with_columns(
             # wavelengths are in nanometers, so multiply by 10 to get Angstroms
-            A=pl.col("gf") / (1.49919e-16 * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
+            A=pl.col("gf")
+            / (gf_to_a_coefficient * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
         )
         .collect()
     )
@@ -320,44 +323,45 @@ def read_levels_and_transitions(
         upperlevel=pl.col("levelid_upper"),
         lowerlevel=pl.col("levelid_lower"),
         A=pl.col("A"),
-        coll_str=pl.lit(-1),
     )
 
-    transition_count_of_levelid: dict[int, int] = dict(
-        pl.concat([transitions["lowerlevel"], transitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    transition_count_of_level_name: dict[str, int] = {
-        levelname: transition_count_of_levelid.get(levelid, 0)
-        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
-    }
+    transition_counts = transition_count_of_level_name(dflevels, transitions)
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    return ionization_energy_in_ev, dflevels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, transitions, transition_counts
 
 
-def get_level_valence_n(levelname: str):
+def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Kurucz level label.
 
-    Falls back to n=1 with a warning when the label cannot be parsed, since a missing n only
-    affects the hydrogenic photoionisation estimate rather than the level itself.
+    Returns None when the label cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log. A guessed n would give the
+    level a cross section of the wrong size without a trace in the output.
+
+    A label can end in a parent term ("6s6p*(3P*)"), an odd-parity mark ("*"), or a prime that
+    marks a second series ("d5p'"). All come after the valence orbital, so they are removed
+    before the orbital is read.
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
     """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
-        print(f"WARNING: Could not find n in {levelname}. Using n=1")
-        return 1
+        return None
+
+    if part.endswith(")") and "(" in part:
+        part = part[: part.rfind("(")]
+    part = part.rstrip("*'")
+    if not part:
+        return None
 
     if part[-1] not in "spdfghijklmnopqr":
         # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
-
         if not part[-1].isdigit():
-            print(f"WARNING: Could not find n in {levelname}. Using n=1")
-            return 1
+            return None
         part = part.rstrip(string.digits)
     part = part.strip("spdfghijklmnopqr")
 
@@ -368,9 +372,6 @@ def get_level_valence_n(levelname: str):
         except ValueError:
             continue
         else:
-            assert n >= 0
-            assert n < 50
             return n
 
-    print(f"WARNING: Could not find n in {levelname}. Using n=1")
-    return 1
+    return None

@@ -30,7 +30,6 @@ class TransitionTuple(t.NamedTuple):
     lowerlevel: int
     upperlevel: int
     A: float
-    coll_str: float
 
 
 def init_dreamdata():
@@ -103,10 +102,12 @@ def read_lines_data(dfiondata, energy_levels):
     transition_count_of_level_name = defaultdict(int)
 
     for _, row in dfiondata.iterrows():
-        lowerindex = row["Lower_index"]
-        upperindex = row["Upper_index"]
+        # the levels were sorted by energy, and transitiondata.txt is written with the lower
+        # id first, so a pair that the file lists the other way round is swapped here
+        lowerindex = min(row["Lower_index"], row["Upper_index"])
+        upperindex = max(row["Lower_index"], row["Upper_index"])
         A = row["gA"] / row["Upper_g"]  # TODO: is this correct?
-        transtuple = TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A, coll_str=-1)
+        transtuple = TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A)
 
         transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1
         transition_count_of_level_name[energy_levels[upperindex].levelname] += 1
@@ -141,19 +142,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             raise ValueError(msg)
         return levelid
 
-    dfiondata.insert(
-        2,
-        "Lower_index",
-        dfiondata.apply(lambda row: get_level_index(row, prefix="Lower"), axis=1).to_numpy(),
-        allow_duplicates=True,
-    )
-
-    dfiondata.insert(
-        2,
-        "Upper_index",
-        dfiondata.apply(lambda row: get_level_index(row, prefix="Upper"), axis=1).to_numpy(),
-        allow_duplicates=True,
-    )
+    # a list over the row records, not DataFrame.apply(axis=1): apply builds a Series per row,
+    # which cost tens of microseconds for each of the 10^5 lines of a lanthanide ion
+    rows = dfiondata.to_dict("records")
+    dfiondata.insert(2, "Lower_index", [get_level_index(row, prefix="Lower") for row in rows], allow_duplicates=True)
+    dfiondata.insert(2, "Upper_index", [get_level_index(row, prefix="Upper") for row in rows], allow_duplicates=True)
 
     transitions, transition_count_of_level_name = read_lines_data(dfiondata, energy_levels)
 

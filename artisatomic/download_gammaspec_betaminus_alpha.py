@@ -77,7 +77,10 @@ def main():
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
         }
-        with requests.Session().get(url, headers=headers) as response:
+        # a timeout, so a stalled connection stops the run instead of holding it forever, and a
+        # status check, so an error page is not parsed as a table
+        with requests.Session().get(url, headers=headers, timeout=120) as response:
+            response.raise_for_status()
             textdata = response.text
             if "<pre>" not in textdata:
                 print(f"  no table data returned from {url}")
@@ -121,10 +124,11 @@ def main():
 
             found_groundlevel = False
             for (parelevel,), dfdecay in dfnuclide.group_by("parent_elevel"):
-                assert isinstance(parelevel, str)
+                # a blank parent level reads as null, and float(None) raises TypeError, not
+                # ValueError. Neither is the ground level.
                 try:
-                    is_groundlevel = float(parelevel) == 0.0
-                except ValueError:
+                    is_groundlevel = float(parelevel) == 0.0  # type: ignore[arg-type]
+                except (TypeError, ValueError):
                     is_groundlevel = False
                 print(f"  parent_Elevel: {parelevel} is_groundlevel: {is_groundlevel}")
                 if not is_groundlevel:
@@ -183,12 +187,15 @@ def main():
                     }
                 ).sort("energy_mev")
                 if len(dfout) > 0:
-                    with nucoutfilepath.open("w", encoding="utf-8") as fout:
+                    # write to a temporary name and then rename: a run that stops part way
+                    # through leaves the previous file complete rather than truncated
+                    tmpoutfilepath = nucoutfilepath.with_suffix(".tmp")
+                    with tmpoutfilepath.open("w", encoding="utf-8") as fout:
                         fout.write(f"{len(dfout)}\n")
                         for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
                             fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
-
-                        print(f"Saved {nucoutfilepath.name}")
+                    tmpoutfilepath.replace(nucoutfilepath)
+                    print(f"Saved {nucoutfilepath.name}")
                 else:
                     print("empty DataFrame")
             if not found_groundlevel:

@@ -17,7 +17,9 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
+from artisatomic.base import transition_count_of_level_name
 from artisatomic.base import xopen_check_extension
+from artisatomic.levelnames import parse_orbital_n
 
 
 def in_testmode() -> bool:
@@ -365,13 +367,7 @@ def read_levels_and_transitions(
     # count after the merge of duplicate level pairs. The counts in adata.txt then agree with
     # transitiondata.txt. Count per level index, not per configuration string: several levels
     # share a configuration.
-    transition_count_of_levelindex: dict[int, int] = dict(
-        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    transition_count_of_level_name = {
-        levelname: transition_count_of_levelindex.get(index, 0)
-        for index, levelname in dflevels.select("Index", "levelname").iter_rows()
-    }
+    transition_counts = transition_count_of_level_name(dflevels, dftransitions, levelidcolumn="Index")
 
     # use standard artisatomic column names. The forbidden flag comes from the Type column
     # above, so add_level_ids_forbidden() does not derive it from the parity.
@@ -382,19 +378,18 @@ def read_levels_and_transitions(
         energyabovegsinpercm=pl.col("Energy"),
     )
 
-    return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, dftransitions, transition_counts
 
 
-def get_level_valence_n(levelname: str):
+def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Floers+25 level name.
+
+    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log.
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
     """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]
-    if part[-1] not in "spdfg":
-        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
-        assert part[-1].isdigit()
-        part = part.rstrip(string.digits)
-    return int(part.rstrip("spdfg"))
+    return parse_orbital_n(part)

@@ -52,7 +52,6 @@ class TransitionTuple(t.NamedTuple):
     upperlevel: int
     A: float
     lambdaangstrom: float
-    coll_str: float
 
 
 def read_ionization_data(atomic_number, ion_stage):
@@ -151,16 +150,17 @@ def read_lines_data(atomic_number, ion_stage):
             A_ul,
         ) = rowtuple
 
-        coll_str = -1  # TODO
-        # the file's level numbers are already zero-based, matching the level ids used in memory
-        line = TransitionTuple(
-            atomic_num, ion_number, int(level_number_lower), int(level_number_upper), A_ul, wavelength, coll_str
-        )
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
+        # the file's level numbers are already zero-based, matching the level ids used in memory.
+        # transitiondata.txt is written with the lower id first, so a pair that the file lists
+        # the other way round is swapped here.
+        levelid_lower = min(int(level_number_lower), int(level_number_upper))
+        levelid_upper = max(int(level_number_lower), int(level_number_upper))
+        line = TransitionTuple(atomic_num, ion_number, levelid_lower, levelid_upper, A_ul, wavelength)
         # must match the levelname format used in read_levels_data
-        transition_count_of_level_name[f"level{int(level_number_lower):05d}"] += 1
-        transition_count_of_level_name[f"level{int(level_number_upper):05d}"] += 1
+        transition_count_of_level_name[f"level{levelid_lower:05d}"] += 1
+        transition_count_of_level_name[f"level{levelid_upper:05d}"] += 1
 
         transitions.append(line)
 

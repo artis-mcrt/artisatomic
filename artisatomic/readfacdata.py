@@ -19,6 +19,7 @@ from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
 from artisatomic.base import split_element_ionstage_str
+from artisatomic.levelnames import parse_orbital_n
 
 USE_CALIBRATED = True
 
@@ -111,7 +112,10 @@ def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
     trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
+    # read_fwf() infers the A column as float64 when no row carries the leading "-" of a
+    # negative Monopole in the last column, and as str when one does. Convert through str so
+    # both cases take the same path.
+    trans_FAC["A"] = pd.to_numeric(trans_FAC["A"].astype(str).str.rstrip(" -"))
     trans_FAC = trans_FAC[["Upper", "Lower", "A"]]
     assert isinstance(trans_FAC, pd.DataFrame)
     return trans_FAC
@@ -214,7 +218,6 @@ class FACTransition(t.NamedTuple):
     lowerlevel: int
     upperlevel: int
     A: float
-    coll_str: float
 
 
 def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
@@ -239,7 +242,7 @@ def read_lines_data(energy_levels, dflines, ilev_enlevelindex_map):
             row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
         )
 
-        transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"], coll_str=-1)
+        transtuple = FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"])
 
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
@@ -300,8 +303,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
 
 
-def get_level_valence_n(levelname: str):
+def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from an FAC level name.
+
+    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log.
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
@@ -309,8 +315,4 @@ def get_level_valence_n(levelname: str):
     # level names are "<configuration> Ilev=<index>" and the configuration is itself
     # space-separated, so drop the index suffix before taking the last orbital
     part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
-    if part[-1] not in "spdfg":
-        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
-        assert part[-1].isdigit()
-        part = part.rstrip(string.digits)
-    return int(part.rstrip("spdfg"))
+    return parse_orbital_n(part)

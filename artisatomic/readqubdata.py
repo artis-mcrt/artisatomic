@@ -13,6 +13,7 @@ import polars as pl
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
+from artisatomic.base import find_file_check_extension
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
@@ -92,14 +93,10 @@ def adf04_field(index: int) -> pl.Expr:
 def adf04_float(index: int) -> pl.Expr:
     """Return an expression for the field at index as a float.
 
-    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04.
+    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The "E" goes in only after a
+    digit or a point, so a leading sign and a field that already has an "E" stay as they are.
     """
-    return (
-        adf04_field(index)
-        .str.replace_all("-", "E-", literal=True)
-        .str.replace_all("+", "E+", literal=True)
-        .cast(pl.Float64, strict=False)
-    )
+    return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
 def read_adf04(
@@ -122,9 +119,9 @@ def read_adf04(
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
-        # Formatting of the calculation details section at the bottom of each file is not standardised
-        # This ignores it, provided it's put in the correct place. Needs made more robust later.
-        # Currently if it's somewhere random: ¯\_(ツ)_/¯
+        # The calculation-details section at the end of each file has no standard format. The
+        # reader skips it when it follows the data blocks. A note at any other position is not
+        # handled.
         atomic_group_note = False
         while True:
             line = fleveltrans.readline()
@@ -248,8 +245,6 @@ def read_adf04(
             adf04_field(1).cast(pl.Int64, strict=False).alias("lower"),
             adf04_float(2).alias("avalue"),
             adf04_float(upsilonindex).alias("upsilon"),
-            # the caller finds the collision rows by their width
-            pl.col("line").str.len_chars().alias("linelength"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null
@@ -341,33 +336,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
     have their own file layouts. Also returns the effective collision strengths, so this reader
     supplies an upsilondict where most others leave it to be filled in elsewhere.
     """
-    new_qub_calculations = {
-        (38, 1),
-        (38, 2),
-        (38, 3),
-        (38, 4),
-        (38, 5),
-        (39, 2),
-        (39, 3),
-        (40, 1),
-        (40, 2),
-        (40, 3),
-        (52, 1),
-        (52, 2),
-        (52, 3),
-        (52, 4),
-        (52, 5),
-        (60, 2),
-        (74, 1),
-        (74, 2),
-        (74, 3),
-        (78, 1),
-        (78, 2),
-        (78, 3),
-        (79, 1),
-        (79, 2),
-        (79, 3),
-    }
+    # the plain name, not the found path: read_adf04() logs the name it is given, and the
+    # tested log files carry the plain name whether or not the file on disk is compressed
+    atom_filepath = qubpath / f"{atomic_number}_{ion_stage}.adf04"
 
     if (atomic_number == 27) and (ion_stage == 3):
         # Co III takes its A-values from a separate file, so the collision rows are not needed
@@ -402,11 +373,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
 
-    elif (atomic_number, ion_stage) in new_qub_calculations:
-        # qubpath, not a bare relative path: extend_ion_list() discovers these ions by globbing
-        # qubpath, so resolving the read against the working directory instead would let discovery
-        # succeed and the read fail whenever the run is started outside the repository root
-        atom_filepath = qubpath / f"{atomic_number}_{ion_stage}.adf04"
+    elif find_file_check_extension(atom_filepath) is not None:
+        # the same test that extend_ion_list() makes when it discovers these ions by globbing
+        # qubpath, so an adf04 file that discovery registers is one that this reader accepts
         ionization_energy_ev, qub_energylevels, upsilondict, collisiondf = read_adf04(
             atom_filepath, atomic_number, ion_stage, flog
         )
@@ -416,9 +385,11 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
         # W II file has the first two columns swapped around from the standard order
         uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
-        # the widest rows are the collision strengths; a shorter row is a header or a short row
+        # a radiative transition is a collision row with both level ids and an A-value. The
+        # rows were selected by the width of the line before, which dropped a row that was one
+        # character shorter than the widest without a count.
         transitiondf = collisiondf.filter(
-            pl.col("linelength") == collisiondf["linelength"].max(), pl.col("avalue") > 2e-30
+            pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
         for id_upper, id_lower, A in transitiondf.select(uppercolumn, lowercolumn, "avalue").iter_rows():
@@ -433,7 +404,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             )
 
     else:
-        msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage}"
+        msg = f"No QUB data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
         raise ValueError(msg)
 
     log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
@@ -449,7 +420,18 @@ def read_qub_photoionizations(
     Returns the cross sections, the upper-ion target fractions per level, and the threshold
     energies, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
+
+    An ion that this function has no data for gets the empty arrays, not zero-filled ones. The
+    caller reads an empty cross-section array as "no data", and then applies the hydrogenic
+    estimate. A zero-filled array would pass as data and leave the ion with no cross sections.
     """
+    if (atomic_number, ion_stage) not in {(27, 2), (27, 3)}:
+        log_and_print(
+            flog,
+            f"WARNING: no QUB photoionization data for Z={atomic_number} ion_stage {ion_stage}",
+        )
+        return np.empty((0, args.nphixspoints)), [], np.empty(0)
+
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
@@ -656,11 +638,11 @@ def read_qub_photoionizations(
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
-def get_level_valence_n(levelname: str):
+def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a QUB level name.
 
-    Falls back to n=1 with a warning when the name cannot be parsed, since a missing n only
-    affects the hydrogenic photoionisation estimate rather than the level itself.
+    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log.
 
     Kept separate from the other readers' versions: each data source names its levels
     differently, so a shared parser would have to guess which convention it is looking at.
@@ -672,42 +654,34 @@ def get_level_valence_n(levelname: str):
     # `part` is empty for a name that starts with '_', and stripping a leading parent term below
     # can empty it too, so re-test it before every part[-1] rather than raising IndexError
     if len(namesplit) < 2 or not part:
-        print(f"WARNING: Could not find valence n in {levelname}. Using n=1")
-        return 1
+        return None
 
     if part[-1] == ")" and "(" in part:
         part = part[: part.rfind("(")]
 
     if not part:
-        print(f"WARNING: Could not find n in {levelname}. Using n=1")
-        return 1
+        return None
 
     if part[-1] not in lchars.lower():
-        # Last character must be mumber of electrons in the orbital: remove it
+        # the last character must be the number of electrons in the orbital: remove it
         if not part[-1].isdigit():
-            print(f"WARNING: Could not find n in {levelname}. Using n=1")
-            return 1
+            return None
         part = part.rstrip(string.digits)
     part = part.strip(lchars.lower())
 
-    valance_n = None
-
-    # Inefficient way to find the last number in a string
+    # inefficient way to find the last number in a string
     for i in range(len(part)):
         try:
             n = int(part[i:])
         except ValueError:
             continue
         else:
-            assert n >= 0
-            valance_n = n
-            n_start_index = i  # Track where the number starts
-            if n_start_index > 0 and part[n_start_index - 1] in lchars.lower():
-                str_valance_n = str(valance_n)
-                # Strip the first digit of n
-                valance_n = int(str_valance_n[1:] if len(str_valance_n) > 1 else str_valance_n)
-            assert valance_n < 50
-        return valance_n
-    if valance_n is None:
-        print(f"WARNING: Could not find n in {levelname}. Using n=1")
-    return 1
+            # a lower-case orbital letter before the number means that the number is an
+            # electron count of the previous orbital followed by n, e.g. the '24' in '3d24s'
+            # is two electrons and n=4, so the first digit is the electron count
+            if i > 0 and part[i - 1] in lchars.lower():
+                str_n = str(n)
+                n = int(str_n[1:] if len(str_n) > 1 else str_n)
+            return n
+
+    return None

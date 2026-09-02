@@ -12,6 +12,7 @@ from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
@@ -145,11 +146,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
         raise ValueError(msg)
 
-    # a second level within the same distance makes the match a guess. The reader keeps the closest
-    # level, and the count says how much of the ion depends on that choice.
+    # a second level as close as the closest one makes the match a guess. The reader keeps the
+    # closest level, and the count says how much of the ion depends on that choice. Each row is
+    # compared with its own closest distance, not with the largest mismatch of the ion.
     ambiguouscount = int(
-        (np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second]) <= maxmismatch_percm).sum()
-        + (np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second]) <= maxmismatch_percm).sum()
+        (
+            np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second])
+            <= np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels])
+        ).sum()
+        + (
+            np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second])
+            <= np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels])
+        ).sum()
     )
     if ambiguouscount > 0:
         log_and_print(flog, f"WARNING: {ambiguouscount} level matches have a second level equally close")
@@ -159,8 +167,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25, and the
     # sum of gf / g_lower over the lines of one level reaches the electron count, while the sum of
-    # gf does not. 1.49919e-16 is the constant that readkuruczdata and readlisbondata use.
-    A_ul = weighted_oscillator_strength / (1.49919e-16 * g_arr[upperlevels] * transition_wavelength_A**2)
+    # gf does not.
+    A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
 
     # level ids are zero-based in memory
     dftransitions = pl.DataFrame(

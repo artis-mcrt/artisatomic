@@ -9,9 +9,12 @@ import polars as pl
 
 from artisatomic import readhillierdata
 from artisatomic.base import elsymbols
+from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import log_and_print
 from artisatomic.base import parallel_map
+from artisatomic.base import ryd_to_hz
 
 
 def match_hydrogenic_phixs(
@@ -19,8 +22,9 @@ def match_hydrogenic_phixs(
     energy_levels: pl.DataFrame,
     ionization_energy_ev: float,
     ion_handler: str,
-    get_level_valence_n: Callable[[str], int] | None,
+    get_level_valence_n: Callable[[str], int | None] | None,
     args,
+    flog,
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     """Estimate photoionization cross sections for a data set that supplies none.
 
@@ -38,10 +42,17 @@ def match_hydrogenic_phixs(
     get_level_valence_n is the handler's own level-name parser. The handler registry in
     iondata.py holds it. None means that the handler has no parser. The ion then gets no
     estimate, and this function writes a warning.
+
+    The parser returns None for a name it cannot read. Such a level gets no estimate, and the
+    ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only, so a level
+    outside that range is skipped in the same way rather than read past the table.
     """
+    # stdout only, as before: the tested log files must not change for an ion that gets the
+    # same estimate as before. A skipped level below is new information, so that goes to the log.
     if get_level_valence_n is None:
         print(
-            f"WARNING: Can't assign hydrogenic photoionization cross sections because I don't know how to find principle quantum numbers for {ion_handler} levels"
+            f"WARNING: no hydrogenic photoionization cross sections, because no parser gives the principal"
+            f" quantum number of a {ion_handler} level"
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
@@ -59,10 +70,25 @@ def match_hydrogenic_phixs(
         if threshold_ev <= 0.0:
             # level lies above the ionization energy, so there is nothing to ionize from
             continue
-        photoionization_thresholds_ev[levelindex] = threshold_ev
-        lambda_angstrom = hc_in_ev_angstrom / threshold_ev
 
         n = get_level_valence_n(level["levelname"])
+        if n is None:
+            log_and_print(
+                flog,
+                f"WARNING: no principal quantum number found in level name '{level['levelname']}', so the level"
+                " gets no hydrogenic cross section",
+            )
+            continue
+        if n < 1 or n > readhillierdata.max_hyd_gaunt_n:
+            log_and_print(
+                flog,
+                f"WARNING: n={n} of level '{level['levelname']}' is outside the hydrogenic tables"
+                f" (1 to {readhillierdata.max_hyd_gaunt_n}), so the level gets no hydrogenic cross section",
+            )
+            continue
+
+        photoionization_thresholds_ev[levelindex] = threshold_ev
+        lambda_angstrom = hc_in_ev_angstrom / threshold_ev
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
@@ -85,9 +111,10 @@ def reduce_phixs_tables[KeyType](
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
-    Units don't matter, but the first (lowest) energy point is assumed to be the threshold energy
+    The energy unit does not matter. The function reads the first (lowest) energy point as the
+    threshold energy.
 
-    The key type is preserved: callers index the tables by level name or by level id.
+    The result keeps the key type: callers index the tables by level name or by level id.
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
 
@@ -123,8 +150,6 @@ def reduce_phixs_tables_worker(
     nu^2 exp(-h nu / k T) so that the recombination rate at optimaltemperature is preserved
     rather than the cross section itself.
     """
-    ryd_to_hz = 3289841960250880.5
-    h_over_kb_in_K_sec = 4.799243073366221e-11
     minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
