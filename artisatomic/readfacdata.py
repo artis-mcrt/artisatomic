@@ -111,7 +111,10 @@ def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
 
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
     trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    trans_FAC["A"] = trans_FAC["A"].apply(lambda tr: float(tr.rstrip(" -")))
+    # read_fwf() infers the A column as float64 when no row carries the leading "-" of a
+    # negative Monopole in the last column, and as str when one does. Convert through str so
+    # both cases take the same path.
+    trans_FAC["A"] = pd.to_numeric(trans_FAC["A"].astype(str).str.rstrip(" -"))
     trans_FAC = trans_FAC[["Upper", "Lower", "A"]]
     assert isinstance(trans_FAC, pd.DataFrame)
     return trans_FAC

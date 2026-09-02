@@ -73,7 +73,7 @@ class SimpleHandler:
     """
 
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
-    get_level_valence_n: Callable[[str], int] | None = None
+    get_level_valence_n: Callable[[str], int | None] | None = None
     returns_upsilondict: bool = False
 
 
@@ -195,25 +195,25 @@ def read_ion_data(
             msg = f"Unknown handler: {handler}"
             raise ValueError(msg)
 
-    dfenergylevels = leveltuples_to_pldataframe(energy_levels)
+        dfenergylevels = leveltuples_to_pldataframe(energy_levels)
 
-    # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an ion
-    # with even one cross-section table is left alone, so measured data is never replaced. The top
-    # ion is excluded because there is no upper ion for it to photoionise to.
-    if (
-        not is_top_ion
-        and not args.nophixs
-        and len(photoionization_crosssections) == 0
-        and args.nlevels_hydrogenic_for_unknown_phixs > 0
-    ):
-        get_level_valence_n = simplehandler.get_level_valence_n if simplehandler is not None else None
-        (
-            photoionization_crosssections,
-            photoionization_targetfractions,
-            photoionization_thresholds_ev,
-        ) = match_hydrogenic_phixs(
-            atomic_number, dfenergylevels, ionization_energy_ev, handler, get_level_valence_n, args
-        )
+        # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an
+        # ion with even one cross-section table is left alone, so measured data is never replaced.
+        # The top ion is excluded because there is no upper ion for it to photoionise to.
+        if (
+            not is_top_ion
+            and not args.nophixs
+            and len(photoionization_crosssections) == 0
+            and args.nlevels_hydrogenic_for_unknown_phixs > 0
+        ):
+            get_level_valence_n = simplehandler.get_level_valence_n if simplehandler is not None else None
+            (
+                photoionization_crosssections,
+                photoionization_targetfractions,
+                photoionization_thresholds_ev,
+            ) = match_hydrogenic_phixs(
+                atomic_number, dfenergylevels, ionization_energy_ev, handler, get_level_valence_n, args, flog
+            )
 
     dftransitions = transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions)
 

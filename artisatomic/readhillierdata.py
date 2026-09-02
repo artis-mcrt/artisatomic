@@ -624,9 +624,14 @@ def read_levels_and_transitions_from_file(
             if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
                 log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
-            # if this is the ground state
-            if energyabovegsinpercm < 1.0:
-                hillier_ionization_energy_ev = hc_in_ev_angstrom / lambdaangstrom
+            # the ground state gives the ionization energy. The first level below 1 cm^-1 is
+            # the ground state: a second one is a J level of the same split term. CMFGEN writes
+            # a negative Lam(A) for some levels, hence the abs().
+            if energyabovegsinpercm < 1.0 and hillier_ionization_energy_ev == 0.0:
+                if lambdaangstrom == 0.0:
+                    msg = f"Level '{levelname}' has Lam(A) = 0, so the ionization energy cannot be read from it"
+                    raise ValueError(msg)
+                hillier_ionization_energy_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
 
             if hillierlevelid != len(levelrows):
                 log_and_print(
@@ -825,7 +830,9 @@ def read_phixs_tables(
                         log_and_print(
                             flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
                         )
-                        continue  # We are probably in Fe VIII or Ni X phot_data_A, where there a bunch of lines before the header that end in "!Configuration name" and confuse things...
+                        # Fe VIII and Ni X phot_data_A have lines before the header that end in
+                        # "!Configuration name" and are not level blocks
+                        continue
 
                     lowerlevelname = row[0]
                     # with J splitting the name (including any [J] suffix) maps to exactly one
@@ -1489,8 +1496,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                         f" {len(header_row):d} columns",
                     )
 
-                    # Sc I and III have most of their temperatures commented out, so the number of expected temperatures is actually correct
-                    # This will not catch cases with a commented header where len(header_row) == num_expected_t_values + 1 (no such cases exist as far as I am aware)
+                    # Sc I and III have most of their temperatures commented out, so the
+                    # number of expected temperatures is correct there. This test does not
+                    # catch a commented header with len(header_row) == num_expected_t_values + 1.
+                    # No known file has one.
                     if "!" in header_row:
                         log_and_print(
                             flog,

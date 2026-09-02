@@ -12,6 +12,7 @@ from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
@@ -159,8 +160,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25, and the
     # sum of gf / g_lower over the lines of one level reaches the electron count, while the sum of
-    # gf does not. 1.49919e-16 is the constant that readkuruczdata and readlisbondata use.
-    A_ul = weighted_oscillator_strength / (1.49919e-16 * g_arr[upperlevels] * transition_wavelength_A**2)
+    # gf does not.
+    A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
 
     # level ids are zero-based in memory
     dftransitions = pl.DataFrame(

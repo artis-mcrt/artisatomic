@@ -59,6 +59,10 @@ ryd_to_ev = 13.605693122994232
 hc_in_ev_cm = 0.0001239841984332003
 hc_in_ev_angstrom = 12398.419843320025
 h_in_ev_seconds = 4.135667696923859e-15
+ryd_to_hz = 3289841960250880.5  # equal to ryd_to_ev / h_in_ev_seconds
+h_over_kb_in_K_sec = 4.799243073366221e-11
+# A = gf / (gf_to_a_coefficient * g_upper * lambda_angstrom^2) with A in s^-1
+gf_to_a_coefficient = 1.49919e-16
 
 
 def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:

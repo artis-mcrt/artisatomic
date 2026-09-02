@@ -2,6 +2,7 @@
 
 import typing as t
 from collections import defaultdict
+from functools import cache
 
 import pandas as pd
 
@@ -22,6 +23,12 @@ class EnergyLevel(t.NamedTuple):
 datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
 
 
+@cache
+def read_groundstates_table() -> pd.DataFrame:
+    """Read the whole NIST ground-state table once. Every ion reads its row from this frame."""
+    return pd.read_csv(datafilepath, delimiter="\t")
+
+
 def read_ground_levels(atomic_number, ion_stage, flog):
     """Read the ground state of one ion from the NIST ground-state table.
 
@@ -29,7 +36,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     contributes only its ground state and ionization energy to the output.
     """
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
-    groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
+    groundstatesdata = read_groundstates_table()
 
     this_ion = groundstatesdata.loc[(groundstatesdata["Z"] == atomic_number) & (groundstatesdata["ion"] == ion_stage)]
 
@@ -51,7 +58,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
 def extend_ion_list(ion_handlers):
     """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
-    groundstatesdata = pd.read_csv(datafilepath, delimiter="\t")
+    groundstatesdata = read_groundstates_table()
 
     for _index, row in groundstatesdata.iterrows():
         # add_handler_if_not_set() returns a new list rather than mutating its argument,

@@ -387,6 +387,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         ion_handler="kurucz",
         get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
+        flog=io.StringIO(),
     )
 
     assert thresholds[0] == ionization_energy_ev
@@ -413,6 +414,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         ion_handler="kurucz",
         get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
+        flog=io.StringIO(),
     )
     assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
     assert targetfractions[0] == []
@@ -451,6 +453,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
             ion_handler="kurucz",
             get_level_valence_n=readkuruczdata.get_level_valence_n,
             args=args,
+            flog=io.StringIO(),
         )
         assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
@@ -471,6 +474,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         ion_handler="kurucz",
         get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=args,
+        flog=io.StringIO(),
     )
     assert np.count_nonzero(~np.isnan(thresholds)) == 1
 
@@ -732,6 +736,17 @@ def test_read_coldata_term_to_j_redistribution():
     # Fe II collision data is already J-resolved, so every value passes through unscaled
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+
+
+def test_add_level_ids_forbidden_rejects_an_unknown_level_id():
+    """A transition whose level id names no level must fail, not vanish in the inner join."""
+    from artisatomic.output import add_level_ids_forbidden
+
+    dflevels = pl.DataFrame({"levelid": [0, 1, 2], "levelname": ["a", "b", "c"], "parity": [0, 1, 0]})
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0], "upperlevel": [1, 5], "A": [1.0, 1.0]})
+
+    with pytest.raises(ValueError, match="1 transitions name a level id that is not one of the 3 levels"):
+        add_level_ids_forbidden(dflevels, dftransitions)
 
 
 def test_add_level_ids_forbidden_parity():
@@ -1562,6 +1577,69 @@ def test_get_level_valence_n():
     assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
     assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
     assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
+
+    # a Kurucz label can end in a parent term and an odd-parity mark after the valence orbital
+    assert readkuruczdata.get_level_valence_n("4f3(4I*)6s6p*(3P*) 5I,enpercm=12345.0,j=2.5") == 6
+    assert readkuruczdata.get_level_valence_n("f36s *5I,enpercm=0.0,j=4.0") == 36
+    assert readkuruczdata.get_level_valence_n("d5p' 3P,enpercm=37292.106,j=0.0") == 5
+
+    # a name with no readable n gives None, never a guessed n: match_hydrogenic_phixs() then
+    # skips the level and logs it, where a guess would give a cross section of the wrong size
+    assert readkuruczdata.get_level_valence_n(",enpercm=12345.0,j=2.5") is None
+    assert readkuruczdata.get_level_valence_n("N(1S)2H 1,enpercm=76765.9,j=4.5") is None
+    assert readqubdata.get_level_valence_n("_id=1") is None
+    assert readqubdata.get_level_valence_n("(3P)_1Se[0/2]_id=1") is None
+
+
+def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
+    """A level with no readable n, or with n outside the hydrogenic tables, gets no estimate.
+
+    The hydrogenic tables cover n up to max_hyd_gaunt_n (30). Real Kurucz files have ground
+    states such as 'f36s *5I' inside the lowest 100 levels, which gave a KeyError before.
+    """
+    import argparse
+
+    rhd.read_hyd_phixsdata()
+    assert rhd.max_hyd_gaunt_n == 30
+
+    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "energyabovegsinpercm": [0.0, 1000.0, 2000.0],
+            "g": [2.0, 2.0, 2.0],
+            "levelname": [
+                "s1s  1S,enpercm=0.0,j=0.5",  # n=1: gets a table
+                "f36s *5I,enpercm=1000.0,j=4.0",  # n=36: outside the tables
+                "N(1S)2H 1,enpercm=2000.0,j=4.5",  # no readable n
+            ],
+        }
+    )
+    args = argparse.Namespace(
+        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
+    )
+    flog = io.StringIO()
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=args,
+        flog=flog,
+    )
+
+    assert targetfractions == [[(0, 1.0)], [], []]
+    assert not np.isnan(thresholds[0])
+    assert np.isnan(thresholds[1])
+    assert np.isnan(thresholds[2])
+    assert crosssections[0][0] > 0.0
+    assert np.all(crosssections[1] == 0.0)
+    assert np.all(crosssections[2] == 0.0)
+
+    logtext = flog.getvalue()
+    assert "n=36" in logtext
+    assert "no principal quantum number found in level name 'N(1S)2H 1,enpercm=2000.0,j=4.5'" in logtext
 
 
 def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):

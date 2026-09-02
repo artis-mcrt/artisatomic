@@ -9,6 +9,7 @@ import pandas as pd
 
 from artisatomic.base import elsymbols
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
@@ -213,9 +214,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
-    # the constant 1.49919e-16 converts gf to A with the wavelength in Angstrom, as in
-    # readkuruczdata and readmonsdata
-    dflines = dflines.eval("A = gf / (1.49919e-16 * (2 * j_upper + 1) * wavelength ** 2)")
+    # gf to A with the wavelength in Angstrom, as in readkuruczdata and readmonsdata
+    dflines = dflines.assign(
+        A=dflines["gf"] / (gf_to_a_coefficient * (2 * dflines["j_upper"] + 1) * dflines["wavelength"] ** 2)
+    )
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
