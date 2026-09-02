@@ -1590,6 +1590,10 @@ def test_get_level_valence_n():
     assert readkuruczdata.get_level_valence_n("s25p 3P,enpercm=14276.381,j=0.0") == 5
     assert readkuruczdata.get_level_valence_n("d25s 4F,enpercm=1.0,j=1.5") == 5
     assert readkuruczdata.get_level_valence_n("31s 2S,enpercm=1.0,j=0.5") == 31
+    assert readkuruczdata.get_level_valence_n("f125d 2D,enpercm=1.0,j=1.5") == 5
+    assert readkuruczdata.get_level_valence_n("f145d 2D,enpercm=1.0,j=1.5") == 5
+    assert readkuruczdata.get_level_valence_n("d105s 2S,enpercm=1.0,j=0.5") == 5
+    assert readkuruczdata.get_level_valence_n("s10d 2D,enpercm=1.0,j=1.5") == 10
     assert readkuruczdata.get_level_valence_n("d5p' 3P,enpercm=37292.106,j=0.0") == 5
 
     # a name with no readable n gives None, never a guessed n: match_hydrogenic_phixs() then
