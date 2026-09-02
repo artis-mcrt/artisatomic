@@ -27,8 +27,8 @@ TESTMODE = os.environ.get("ARTISATOMIC_TESTMODE") == "1"
 def _read_atomic_properties() -> tuple[list[str], list[float]]:
     """Read the element symbols and masses from atomic_properties.txt, in atomic number order.
 
-    A plain split of each line, not a pandas read: pandas is not needed anywhere else on the
-    import path, and every spawned worker imports this module.
+    A plain split of each line reads the file, not pandas. Every spawned worker imports this
+    module, and nothing else on that import path uses pandas.
     """
     with (PYDIR / "atomic_properties.txt").open(encoding="utf-8") as fproperties:
         rows = [line.split() for line in fproperties if line.strip() and not line.startswith("#")]
