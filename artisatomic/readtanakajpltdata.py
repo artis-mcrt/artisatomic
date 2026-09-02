@@ -9,6 +9,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
+from artisatomic.base import transition_count_of_level_name
 
 jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
@@ -136,7 +137,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             maintain_order="left",
         )
         .with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
-        .select(["lowerlevel", "upperlevel", "A"])
+        # the file names the upper level first, but transitiondata.txt is written with the
+        # lower id first, so a pair that the file lists the other way round is swapped here
+        .select(
+            lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
+            upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
+            A=pl.col("A"),
+        )
     )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
@@ -145,15 +152,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # count after the self-transition filter, so the counts in adata.txt agree with the
     # transitions present in transitiondata.txt
-    transition_count_of_levelid: dict[int, int] = dict(
-        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    transition_count_of_level_name = {
-        levelname: transition_count_of_levelid.get(levelid, 0)
-        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
-    }
+    transition_counts = transition_count_of_level_name(dflevels, dftransitions)
 
-    return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, dftransitions, transition_counts
 
 
 def get_level_valence_n(levelname: str):

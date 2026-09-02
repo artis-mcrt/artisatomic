@@ -15,7 +15,6 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
-import pandas as pd
 import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
@@ -23,12 +22,27 @@ PYDIR = Path(__file__).parent.resolve()
 # read once at import: every reader that has a test data sample keys its data path on this flag,
 # so a change to the variable after the import must not redirect only some of the readers
 TESTMODE = os.environ.get("ARTISATOMIC_TESTMODE") == "1"
-atomicdata = pd.read_csv(PYDIR / "atomic_properties.txt", sep=r"\s+", comment="#")
-# estimate unknown atomic mass as Z / 0.45. Only the mass column: a row-wise fillna() filled every
-# column with it, including the densities and radii, which are not masses and are not read here.
-atomicdata["mass"] = atomicdata["mass"].fillna(atomicdata["number"] / 0.45)
-elsymbols = ["n", *list(atomicdata["symbol"].values)]
-atomic_weights = ["n", *list(atomicdata["mass"].values)]
+
+
+def _read_atomic_properties() -> tuple[list[str], list[float]]:
+    """Read the element symbols and masses from atomic_properties.txt, in atomic number order.
+
+    A plain split of each line, not a pandas read: pandas is not needed anywhere else on the
+    import path, and every spawned worker imports this module.
+    """
+    with (PYDIR / "atomic_properties.txt").open(encoding="utf-8") as fproperties:
+        rows = [line.split() for line in fproperties if line.strip() and not line.startswith("#")]
+    columns = rows[0]
+    symbolcolumn, numbercolumn, masscolumn = columns.index("symbol"), columns.index("number"), columns.index("mass")
+    symbols = [row[symbolcolumn] for row in rows[1:]]
+    # estimate an unknown atomic mass ("NA" in the file) as Z / 0.45
+    masses = [float(row[masscolumn]) if row[masscolumn] != "NA" else int(row[numbercolumn]) / 0.45 for row in rows[1:]]
+    return symbols, masses
+
+
+_symbols, _masses = _read_atomic_properties()
+elsymbols = ["n", *_symbols]
+atomic_weights = ["n", *_masses]
 
 roman_numerals = (
     "",
@@ -86,6 +100,29 @@ def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
 # them. Name-keyed frames get lowerlevel/upperlevel from add_level_ids_forbidden() instead.
 empty_transitions_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
 
+# The level columns that write_adata() and add_level_ids_forbidden() read, for an ion whose reader
+# gave no levels at all.
+empty_levels_schema = pl.Schema(
+    {"levelname": pl.String, "energyabovegsinpercm": pl.Float64, "g": pl.Float64, "parity": pl.Int64}
+)
+
+
+def transition_count_of_level_name(
+    dflevels: pl.DataFrame, dftransitions: pl.DataFrame, levelidcolumn: str = "levelid"
+) -> dict[str, int]:
+    """Count the transitions that touch each level, keyed by level name, for adata.txt.
+
+    Both levels of a transition are counted, and a level with no transition gets 0. Call this
+    after any filter on the transitions, so the counts agree with transitiondata.txt.
+    """
+    counts: dict[int, int] = dict(
+        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
+    )
+    return {
+        levelname: counts.get(levelid, 0)
+        for levelid, levelname in dflevels.select(levelidcolumn, "levelname").iter_rows(named=False)
+    }
+
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
@@ -93,7 +130,14 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     Level ids are zero-based everywhere in memory; the 1-based numbering of the output files is
     applied by the write_*() functions.
     """
-    dflevels = energy_levels if isinstance(energy_levels, pl.DataFrame) else pl.DataFrame(energy_levels)
+    if isinstance(energy_levels, pl.DataFrame):
+        dflevels = energy_levels
+    elif energy_levels:
+        dflevels = pl.DataFrame(energy_levels)
+    else:
+        # an empty list carries no column names, and write_adata() selects the level columns
+        # by name, so an ion with no levels gets the columns that every reader supplies
+        dflevels = pl.DataFrame(schema=empty_levels_schema)
 
     if "levelid" not in dflevels.columns:
         dflevels = dflevels.with_row_index(name="levelid")
@@ -319,15 +363,14 @@ def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, i
             datalines = datalines[:index]
             break
 
-    dfnist = pd.read_csv(
+    dfnist = pl.read_csv(
         io.StringIO("\n".join(datalines)),
-        sep="\t",
-        usecols=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-        dtype=str,
-        keep_default_na=False,
-    )
+        separator="\t",
+        columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+        infer_schema=False,
+    ).fill_null("")
     energies = {}
-    for atomic_number, ion_charge, ioniz_ev in dfnist.itertuples(index=False):
+    for atomic_number, ion_charge, ioniz_ev in dfnist.iter_rows():
         if not ioniz_ev:
             continue  # a blank energy means that NIST lists none
         try:

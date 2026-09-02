@@ -2,7 +2,6 @@
 
 import os
 import re
-import sys
 import typing as t
 from collections import defaultdict
 from collections.abc import Iterable
@@ -634,11 +633,8 @@ def read_levels_and_transitions_from_file(
                 hillier_ionization_energy_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
 
             if hillierlevelid != len(levelrows):
-                log_and_print(
-                    flog,
-                    f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}",
-                )
-                sys.exit(1)
+                msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
+                raise ValueError(msg)
 
         if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
             break
@@ -784,6 +780,10 @@ def read_phixs_tables(
             pointnumber = 0
             crosssectiontype = -1
             fitcoefficients: list[t.Any] = []
+            # the tabulated types (20, 21, 22) set these at the first point of every block
+            curtable = np.empty((0, 2))
+            thresholdenergyryd = 0.0
+            prevenergy = 0.0
 
             # Used to skip problematic lines in Fe VIII and Ni X phot_data_A (see below)
             in_header = False
@@ -801,26 +801,26 @@ def read_phixs_tables(
                     targetlevelname = row[0]
                     log_and_print(flog, "Photoionisation target: " + targetlevelname)
                     if "[" in targetlevelname:
-                        print("STOP! target level contains a bracket (is J-split?)")
-                        sys.exit(1)
+                        msg = f"target level {targetlevelname} contains a bracket (is J-split?)"
+                        raise ValueError(msg)
                     if targetlevelname in phixstargets:
-                        print("STOP! Multiple phixs files for the same target configuration")
-                        sys.exit(1)
+                        msg = f"Multiple phixs files for the same target configuration {targetlevelname}"
+                        raise ValueError(msg)
                     phixstargets[filenum] = targetlevelname
 
                 if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
                     if row[0].lower() in {"true", "false"}:
                         new_j_splitting_on = row[0].lower() == "true"
                         if j_splitting_seen is not None and new_j_splitting_on != j_splitting_seen:
-                            print("STOP! The ion's phot files disagree about J-splitting")
-                            sys.exit(1)
+                            msg = "The ion's phot files disagree about J-splitting"
+                            raise ValueError(msg)
                         j_splitting_seen = new_j_splitting_on
                         j_splitting_on = new_j_splitting_on
                         if j_splitting_on:
                             log_and_print(flog, "File specifies J-splitting enabled")
                     else:
-                        print(f'STOP! J-splitting not true or false: "{row[0]}"')
-                        sys.exit(1)
+                        msg = f'J-splitting not true or false: "{row[0]}"'
+                        raise ValueError(msg)
 
                 if has_marker and (
                     (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name")
@@ -852,8 +852,8 @@ def read_phixs_tables(
                         firstlevelindex_of_levelname if j_splitting_on else firstlevelindex_of_levelnamenoJ
                     ).get(lowerlevelname, 0)
                     if not targetlevelname:
-                        print("ERROR: no upper level name")
-                        sys.exit(1)
+                        msg = f"{photfilename} names a level before its '!Final state in ion' line"
+                        raise ValueError(msg)
 
                 if has_marker and len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
                     # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
@@ -874,8 +874,8 @@ def read_phixs_tables(
                 if has_marker and len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
                     in_header = True  # All phot_data_* in 19apr23 have this line
                     if row[0] != "Megabarns":
-                        print(f"Wrong cross-section unit: {row[0]}")
-                        sys.exit(1)
+                        msg = f"Wrong cross-section unit: {row[0]}"
+                        raise ValueError(msg)
 
                 # a line carrying a "!..." marker has text in it, so it can never be all floats.
                 # Short-circuiting on that skips the parse attempt on every header line.
@@ -885,8 +885,8 @@ def read_phixs_tables(
                         fitcoefficients.append(float(row[0].replace("D", "E")))
 
                         if fitcoefficients[-1] != 0.0:
-                            print("ERROR: Cross section type 0 has non-zero number after it")
-                            sys.exit(1)
+                            msg = f"Cross section type 0 of {lowerlevelname} has a non-zero number after it"
+                            raise ValueError(msg)
 
                 elif crosssectiontype in phixs_fit_functions:
                     # types 1, 5, 6 and 7 share one shape: single-float rows fill fitcoefficients
@@ -977,14 +977,17 @@ def read_phixs_tables(
 
                 elif crosssectiontype in {20, 21, 22}:  # sampled data points
                     if len(row) == 2 and row_is_all_floats and lowerlevelname:
-                        if lowerlevelname not in phixstables[filenum]:
+                        if pointnumber == 0:
+                            # a new array for every block, so a second block for the same level
+                            # name replaces the first rather than writing into it
                             phixstables[filenum][lowerlevelname] = np.zeros((numpointsexpected, 2))
-                        # bind the level's table once: 94% of a phot file is two-column data
-                        # points, and the chained dict lookups ran several times per point
-                        curtable = phixstables[filenum][lowerlevelname]
+                            # bind the level's table and its threshold once per block: 94% of a
+                            # phot file is two-column data points
+                            curtable = phixstables[filenum][lowerlevelname]
+                            lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
+                            thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+                            prevenergy = 0.0
 
-                        lambda_angstrom = abs(lambdaangstroms[lowerlevelindex])
-                        thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
                         enryd = float(row[0].replace("D", "E"))
 
                         # for these types the x value is a fraction of the threshold, not an energy
@@ -995,24 +998,21 @@ def read_phixs_tables(
                             )
                         enryd *= thresholdenergyryd
 
-                        xspoint = enryd, float(row[1].replace("D", "E"))
-                        curtable[pointnumber] = xspoint
+                        curtable[pointnumber] = enryd, float(row[1].replace("D", "E"))
 
                         if pointnumber > 0:
-                            curenergy = curtable[pointnumber][0]
-                            prevenergy = curtable[pointnumber - 1][0]
-                            if curenergy == prevenergy:
+                            if enryd == prevenergy:
                                 print(
                                     f"WARNING: photoionization table for {lowerlevelname} first column duplicated "
                                     f"energy value of {prevenergy}"
                                 )
-                            elif curenergy < prevenergy:
-                                print(
-                                    f"ERROR: photoionization table for {lowerlevelname} first column decreases "
-                                    f"with energy {prevenergy} followed by {curenergy}"
+                            elif enryd < prevenergy:
+                                msg = (
+                                    f"photoionization table for {lowerlevelname} first column decreases "
+                                    f"with energy {prevenergy} followed by {enryd}"
                                 )
-                                print(curtable)
-                                sys.exit(1)
+                                raise ValueError(msg)
+                        prevenergy = enryd
                         pointnumber += 1
 
                 elif crosssectiontype != -1:
@@ -1035,18 +1035,21 @@ def read_phixs_tables(
                         and lowerlevelname in phixstables[filenum]
                         and pointnumber != numpointsexpected
                     ):
-                        print(
-                            f"photoionization_crosssections mismatch: expecting {numpointsexpected:d} rows but found"
-                            f" {pointnumber:d}"
+                        msg = (
+                            f"Z={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname},"
+                            f" crosssectiontype={crosssectiontype}: expecting {numpointsexpected:d} cross-section"
+                            f" rows but found {pointnumber:d}"
                         )
-                        print(
-                            f"A={atomic_number}, ion_stage={ion_stage}, lowerlevel={lowerlevelname},"
-                            f" crosssectiontype={crosssectiontype}"
-                        )
-                        sys.exit(1)
+                        raise ValueError(msg)
                     lowerlevelname = ""
                     crosssectiontype = -1
                     numpointsexpected = 0
+
+        # a file with no "!Cross-section unit" line never leaves the header state, so every
+        # level block above was skipped with a warning and the file gave no cross sections
+        if not in_header:
+            msg = f"{photfilename} has no '!Cross-section unit' line, so none of its cross sections were read"
+            raise ValueError(msg)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
             phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
@@ -1238,8 +1241,8 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
     arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[n, l_start]))
     for l in range(l_start, l_end + 1):
         if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
-            print("TABLE MISMATCH")
-            sys.exit(1)
+            msg = f"The hydrogenic energy grids of (n, l) = ({n}, {l}) and ({n}, {l_start}) differ"
+            raise ValueError(msg)
         arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
 
     return arr_sigma_summed_over_l
@@ -1552,8 +1555,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
                     and float(row[0].replace("D", "E")) != 1.0
                 ):
-                    log_and_print(flog, "ERROR: non-zero scaling factor for OMEGA. what does this mean?")
-                    sys.exit(1)
+                    msg = f"scaling factor for OMEGA is {row[0]}, not 1. The reader does not apply a scaling factor."
+                    raise ValueError(msg)
 
             if header_row != []:
                 namefromnameto = "".join(row[:-num_expected_t_values])
@@ -1636,10 +1639,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
     if number_expected_transitions < 0:
         log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
     elif coll_lines_in < number_expected_transitions:
-        print(
-            f"ERROR: file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
-        )
-        sys.exit(1)
+        msg = f"file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
+        raise ValueError(msg)
     elif coll_lines_in > number_expected_transitions:
         log_and_print(
             flog,
@@ -1847,11 +1848,8 @@ def read_hyd_phixsdata():
                 if len(xs_values) == num_points:
                     break
                 if len(xs_values) > num_points:
-                    print(
-                        f"ERROR: too many datapoints for (n,l)=({n},{l}), expected {num_points} but found"
-                        f" {len(xs_values)}"
-                    )
-                    sys.exit(1)
+                    msg = f"too many datapoints for (n,l)=({n},{l}), expected {num_points} but found {len(xs_values)}"
+                    raise ValueError(msg)
 
             hyd_phixs_energygrid_ryd[n, l] = np.array(
                 [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
@@ -1896,8 +1894,8 @@ def read_hyd_phixsdata():
                 if len(gaunt_values) == num_points:
                     break
                 if len(gaunt_values) > num_points:
-                    print(f"ERROR: too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}")
-                    sys.exit(1)
+                    msg = f"too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}"
+                    raise ValueError(msg)
 
             hyd_gaunt_energygrid_ryd[n] = [
                 e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)

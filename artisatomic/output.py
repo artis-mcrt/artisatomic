@@ -270,11 +270,24 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             else:
                 dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion)
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
-                # the guard matters: set.difference() consumes the whole iterable even for an
-                # empty set, and most handlers have an empty upsilondict against millions of rows
+                # an anti join, not set.difference() over iter_rows(): that built a Python tuple
+                # for each of the millions of transitions of a cmfgen ion. The guard keeps the
+                # join off the handlers with an empty upsilondict.
                 unused_upsilon_transitions = (
-                    set(upsilondict.keys()).difference(
-                        dftransitions_ion[["lowerlevel", "upperlevel"]].iter_rows(named=False)
+                    set(
+                        pl.DataFrame(
+                            list(upsilondict.keys()),
+                            schema=(("lowerlevel", pl.Int64), ("upperlevel", pl.Int64)),
+                            orient="row",
+                        )
+                        .join(
+                            dftransitions_ion.select(
+                                pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
+                            ),
+                            on=["lowerlevel", "upperlevel"],
+                            how="anti",
+                        )
+                        .iter_rows(named=False)
                     )
                     if upsilondict
                     else set()
@@ -411,18 +424,21 @@ def write_adata(
 
 
 def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> None:
-    """Report the transitions whose two levels have the same energy, which ARTIS drops.
+    """Report the transitions whose upper level is not above the lower one, which ARTIS drops.
 
     ARTIS gives every transition a frequency of (E_upper - E_lower) / h and skips the row where
     that is not positive (input.cc), so a pair of levels the source gives the same energy is
     silently lost, along with any collision strength it carried. Nothing here can fix that: a line
     of zero frequency has no place in the radiation field. It should not happen quietly, though.
+
+    A level list that is not in energy order gives the same loss for a pair whose lower id has
+    the higher energy, so that case is reported too, on its own line.
     """
     if dftransitions_ion.is_empty() or "energyabovegsinpercm" not in dfenergylevels_ion.columns:
         return
 
     energy = dfenergylevels_ion.select("levelid", "energyabovegsinpercm")
-    degenerate = (
+    notabove = (
         dftransitions_ion.join(
             energy.select(pl.col("levelid").alias("lowerlevel"), pl.col("energyabovegsinpercm").alias("e_lower")),
             on="lowerlevel",
@@ -431,19 +447,30 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
             energy.select(pl.col("levelid").alias("upperlevel"), pl.col("energyabovegsinpercm").alias("e_upper")),
             on="upperlevel",
         )
-        .filter(pl.col("e_lower") == pl.col("e_upper"))
+        .filter(pl.col("e_lower") >= pl.col("e_upper"))
     )
-    if degenerate.is_empty():
+    if notabove.is_empty():
         return
 
-    withcollstr = degenerate.filter(pl.col("coll_str") > 0.0).height if "coll_str" in degenerate.columns else 0
-    log_and_print(
-        flog,
-        f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
-        f" ({withcollstr:d} of them with a collision strength). ARTIS gives every transition a"
-        " frequency from the level energies and drops the ones that come out at zero, so these"
-        " are written but not used.",
-    )
+    degenerate = notabove.filter(pl.col("e_lower") == pl.col("e_upper"))
+    if not degenerate.is_empty():
+        withcollstr = degenerate.filter(pl.col("coll_str") > 0.0).height if "coll_str" in degenerate.columns else 0
+        log_and_print(
+            flog,
+            f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
+            f" ({withcollstr:d} of them with a collision strength). ARTIS gives every transition a"
+            " frequency from the level energies and drops the ones that come out at zero, so these"
+            " are written but not used.",
+        )
+
+    inverted = notabove.height - degenerate.height
+    if inverted:
+        log_and_print(
+            flog,
+            f"WARNING: {inverted:d} transitions have a lower level id whose energy is above the upper"
+            " level's. The level list is not in energy order. ARTIS drops a transition with a"
+            " negative frequency, so these are written but not used.",
+        )
 
 
 def write_transition_data(
@@ -541,8 +568,10 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     if "energyabovegsinpercm" not in upperiondata.dfenergylevels.columns:
         return thresholds
 
-    energy_ev = [hc_in_ev_cm * energy for energy in iondata.dfenergylevels["energyabovegsinpercm"]]
-    upper_energy_ev = [hc_in_ev_cm * energy for energy in upperiondata.dfenergylevels["energyabovegsinpercm"]]
+    # to_numpy() rather than a Python loop over the Series: the ion can have 10^5 levels, and
+    # only the missing ones are read below
+    energy_ev = hc_in_ev_cm * iondata.dfenergylevels["energyabovegsinpercm"].to_numpy()
+    upper_energy_ev = hc_in_ev_cm * upperiondata.dfenergylevels["energyabovegsinpercm"].to_numpy()
 
     filled = 0
     for levelid in missing:
@@ -555,7 +584,7 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
         if targetlevelid >= len(upper_energy_ev):
             continue
 
-        threshold_ev = iondata.ionization_energy_ev + upper_energy_ev[targetlevelid] - energy_ev[levelid]
+        threshold_ev = float(iondata.ionization_energy_ev + upper_energy_ev[targetlevelid] - energy_ev[levelid])
         if threshold_ev > 0.0:
             thresholds[levelid] = threshold_ev
             filled += 1

@@ -1,10 +1,25 @@
 """Parse level names: split a configuration into orbitals and a term, and derive the parity."""
 
+import string
 from collections.abc import Iterator
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
+
+
+def parse_orbital_n(orbital: str) -> int | None:
+    """Principal quantum number of one orbital token such as "6s", "4f10" or "6h2".
+
+    The token is the principal quantum number, one orbital letter of any l, and an optional
+    electron count. Returns None for any other form, so a caller can skip the level rather
+    than guess.
+    """
+    part = orbital.rstrip(string.digits)
+    if len(part) < 2 or part[-1] not in lchars.lower():
+        return None
+    n_text = part[:-1]
+    return int(n_text) if n_text.isdigit() else None
 
 
 def _split_orbitals(instr: str) -> list[str]:
@@ -107,7 +122,7 @@ def interpret_configuration(
             if warn:
                 print("Warning: Check QUB file formatting")
         else:
-            # Preserve previous behaviour
+            # drop the parity letter, so the term parse below sees the term only
             instr = instr[:-1]
 
     term_twosplusone = -1

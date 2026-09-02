@@ -2,7 +2,6 @@
 """Write recombrates.txt from the Nahar total recombination rate files."""
 
 import string
-import sys
 import typing as t
 from pathlib import Path
 
@@ -41,8 +40,8 @@ def read_nahar_rrcfile(filename, noprint=False):
                 break
 
         if not header_row:
-            print("ERROR: no header found")
-            sys.exit(1)
+            msg = "no header found"
+            raise ValueError(msg)
 
         index_logt = header_row.index("log(T)")
         index_low_n = header_row.index("RRC(low-n)")
@@ -52,10 +51,8 @@ def read_nahar_rrcfile(filename, noprint=False):
         for line in filein:
             if row := line.split():
                 if len(row) != len(header_row):
-                    print("Row contains wrong number of items for header:")
-                    print(header_row)
-                    print(row)
-                    sys.exit(1)
+                    msg = f"Row contains wrong number of items for header:\n{header_row}\n{row}"
+                    raise ValueError(msg)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
     return pd.DataFrame(records)

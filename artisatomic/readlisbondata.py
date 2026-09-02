@@ -75,9 +75,8 @@ class LisbonReader:
             lines["atomic_number"] = atomic_number
             lines["ion_charge"] = ion_charge
             lines["gf"] = lines_data["gf"]
-            lines["j_upper"] = levels.iloc[lines["level_index_upper"]]["j"].to_numpy()
-            # keep the wavelength in Angstrom: the gf-to-A constant in
-            # read_levels_and_transitions() expects Angstrom
+            # keep the wavelength in Angstrom: the gf-to-A constant in read_lines_data()
+            # expects Angstrom
             lines["wavelength"] = lines_data["Wavelength[Ang]"]
             lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
             lns_list.append(lines)
@@ -133,6 +132,11 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     levels by energy, so every one is mapped through levelid_of_fileindex rather than used
     directly. A line naming a level that does not exist is an error, not something to skip.
 
+    A = gf / (gf_to_a_coefficient * g_upper * wavelength^2) with the wavelength in Angstrom, as
+    in readkuruczdata and readmonsdata. g_upper is the g of the level that ends up as the upper
+    level after the ids are resolved, not of the level the file labels "Upper": the file can
+    list a pair the other way round, and the swap must not leave A with the wrong g.
+
     Returns the transitions and the number of them touching each level name.
     """
     transitions = []
@@ -143,7 +147,8 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
             fileindex_lower, fileindex_upper, levelid_of_fileindex, "the Lisbon transitions file"
         )
 
-        transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row.A, coll_str=-1)
+        A = row.gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * row.wavelength**2)
+        transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A)
 
         transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
         transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
@@ -169,7 +174,6 @@ class TransitionTuple(t.NamedTuple):
     lowerlevel: int
     upperlevel: int
     A: float
-    coll_str: float
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -214,10 +218,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
-    # gf to A with the wavelength in Angstrom, as in readkuruczdata and readmonsdata
-    dflines = dflines.assign(
-        A=dflines["gf"] / (gf_to_a_coefficient * (2 * dflines["j_upper"] + 1) * dflines["wavelength"] ** 2)
-    )
 
     transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 

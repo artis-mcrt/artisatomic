@@ -93,14 +93,10 @@ def adf04_field(index: int) -> pl.Expr:
 def adf04_float(index: int) -> pl.Expr:
     """Return an expression for the field at index as a float.
 
-    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04.
+    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The "E" goes in only after a
+    digit or a point, so a leading sign and a field that already has an "E" stay as they are.
     """
-    return (
-        adf04_field(index)
-        .str.replace_all("-", "E-", literal=True)
-        .str.replace_all("+", "E+", literal=True)
-        .cast(pl.Float64, strict=False)
-    )
+    return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
 def read_adf04(
@@ -249,8 +245,6 @@ def read_adf04(
             adf04_field(1).cast(pl.Int64, strict=False).alias("lower"),
             adf04_float(2).alias("avalue"),
             adf04_float(upsilonindex).alias("upsilon"),
-            # the caller finds the collision rows by their width
-            pl.col("line").str.len_chars().alias("linelength"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null
@@ -391,9 +385,11 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
         # W II file has the first two columns swapped around from the standard order
         uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
-        # the widest rows are the collision strengths; a shorter row is a header or a short row
+        # a radiative transition is a collision row with both level ids and an A-value. The
+        # rows were selected by the width of the line before, which dropped a row that was one
+        # character shorter than the widest without a count.
         transitiondf = collisiondf.filter(
-            pl.col("linelength") == collisiondf["linelength"].max(), pl.col("avalue") > 2e-30
+            pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
         for id_upper, id_lower, A in transitiondf.select(uppercolumn, lowercolumn, "avalue").iter_rows():

@@ -146,11 +146,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
         raise ValueError(msg)
 
-    # a second level within the same distance makes the match a guess. The reader keeps the closest
-    # level, and the count says how much of the ion depends on that choice.
+    # a second level as close as the closest one makes the match a guess. The reader keeps the
+    # closest level, and the count says how much of the ion depends on that choice. Each row is
+    # compared with its own closest distance, not with the largest mismatch of the ion.
     ambiguouscount = int(
-        (np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second]) <= maxmismatch_percm).sum()
-        + (np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second]) <= maxmismatch_percm).sum()
+        (
+            np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second])
+            <= np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels])
+        ).sum()
+        + (
+            np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second])
+            <= np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels])
+        ).sum()
     )
     if ambiguouscount > 0:
         log_and_print(flog, f"WARNING: {ambiguouscount} level matches have a second level equally close")

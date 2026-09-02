@@ -16,6 +16,7 @@ from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.base import transition_count_of_level_name
 
 kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
 if TESTMODE:
@@ -322,22 +323,15 @@ def read_levels_and_transitions(
         upperlevel=pl.col("levelid_upper"),
         lowerlevel=pl.col("levelid_lower"),
         A=pl.col("A"),
-        coll_str=pl.lit(-1),
     )
 
-    transition_count_of_levelid: dict[int, int] = dict(
-        pl.concat([transitions["lowerlevel"], transitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    transition_count_of_level_name: dict[str, int] = {
-        levelname: transition_count_of_levelid.get(levelid, 0)
-        for levelid, levelname in dflevels.select("levelid", "levelname").iter_rows(named=False)
-    }
+    transition_counts = transition_count_of_level_name(dflevels, transitions)
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    return ionization_energy_in_ev, dflevels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, transitions, transition_counts
 
 
 def get_level_valence_n(levelname: str) -> int | None:

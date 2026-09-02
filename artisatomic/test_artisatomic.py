@@ -20,6 +20,7 @@ from artisatomic import readmonsdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import PYDIR
@@ -1067,25 +1068,29 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # ...and J is what the delta J rule has to go on, so it must reach the level tuple
     assert [level.j for level in energy_levels] == [0.0, 1.0, 2.0]
 
-    # one line from the file's level 2 (the ground state) to its level 0 (the top level)
+    # one line from the file's level 2 (the ground state) to its level 0 (the top level), and the
+    # same line with the file's labels the other way round
     dflines = pd.DataFrame(
-        {"A": [1.5e8]},
-        index=pd.MultiIndex.from_tuples([(2, 0)], names=["level_index_lower", "level_index_upper"]),
+        {"gf": [1.0, 1.0], "wavelength": [2000.0, 2000.0]},
+        index=pd.MultiIndex.from_tuples([(2, 0), (0, 2)], names=["level_index_lower", "level_index_upper"]),
     )
     transitions, transition_count_of_level_name = readlisbondata.read_lines_data(
         energy_levels, dflines, levelid_of_fileindex
     )
 
-    # ...which is level id 0 -> 2 after the sort, written with the lower id first
-    assert len(transitions) == 1
-    assert (transitions[0].lowerlevel, transitions[0].upperlevel) == (0, 2)
-    assert transitions[0].A == 1.5e8
-    assert transition_count_of_level_name == {energy_levels[0].levelname: 1, energy_levels[2].levelname: 1}
+    # ...which is level id 0 -> 2 after the sort, written with the lower id first, both times
+    assert len(transitions) == 2
+    assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 2), (0, 2)]
+    # A uses the g of the level that ended up as the upper one (J=2, g=5), whichever the file
+    # called "Upper"
+    expected_a = 1.0 / (gf_to_a_coefficient * 5.0 * 2000.0**2)
+    assert all(pytest.approx(expected_a) == transition.A for transition in transitions)
+    assert transition_count_of_level_name == {energy_levels[0].levelname: 2, energy_levels[2].levelname: 2}
 
     # a line naming a level the table does not have means the two files disagree about the
     # numbering. Skipping it would drop every transition and write a silently empty ion.
     dflines_unknown = pd.DataFrame(
-        {"A": [1.0]},
+        {"gf": [1.0], "wavelength": [2000.0]},
         index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
     )
     with pytest.raises(ValueError, match="names level index 99"):
@@ -1589,6 +1594,28 @@ def test_get_level_valence_n():
     assert readkuruczdata.get_level_valence_n("N(1S)2H 1,enpercm=76765.9,j=4.5") is None
     assert readqubdata.get_level_valence_n("_id=1") is None
     assert readqubdata.get_level_valence_n("(3P)_1Se[0/2]_id=1") is None
+
+    # the Floers+25 and FAC names accept any orbital letter, and give None for a bad token
+    assert readfloers25data.get_level_valence_n("4f12.6h1 J=5 index=17") == 6
+    assert readfacdata.get_level_valence_n("4f12 6h1 Ilev=17") == 6
+    assert readfloers25data.get_level_valence_n("4f12.h J=5 index=17") is None
+    assert readfloers25data.get_level_valence_n("4f12.66 J=5 index=17") is None
+
+
+def test_adf04_float_reads_every_exponent_form():
+    """adf04 writes 1.23-04 for 1.23e-04, and the reader must not break a sign or an E that is there."""
+    lines = pl.DataFrame({"line": ["1.23-04", "4.66+04", "-1.23-04", "1.23E-04", "1.23", "-2.5"]})
+    values = lines.select(readqubdata.adf04_float(0)).to_series().to_list()
+    assert values == [1.23e-4, 4.66e4, -1.23e-4, 1.23e-4, 1.23, -2.5]
+
+
+def test_leveltuples_to_pldataframe_empty_list():
+    """An ion with no levels gets the columns the writer reads, not an empty frame with only ids."""
+    from artisatomic.base import leveltuples_to_pldataframe
+
+    dflevels = leveltuples_to_pldataframe([])
+    assert dflevels.height == 0
+    assert set(dflevels.columns) >= {"levelid", "levelname", "energyabovegsinpercm", "g", "parity"}
 
 
 def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
