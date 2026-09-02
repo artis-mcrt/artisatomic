@@ -367,7 +367,8 @@ def get_level_valence_n(levelname: str) -> int | None:
     # the digits before the valence orbital letter. A Kurucz label writes the electron count of
     # the shell before them without a space: "s25p" is 5s2 5p and "f36s" is 4f3 6s. So the first
     # digit of a run that follows an orbital letter is that count, not part of n.
-    nmatch = re.search(r"([a-z]?)(\d+)[spdfghijklmnopqr]$", part)
+    # a lower-case letter is an orbital letter here: the term letters are upper case
+    nmatch = re.search(r"([a-z]?)(\d+)[a-z]$", part)
     if nmatch is None:
         return None
     digits = nmatch.group(2)
