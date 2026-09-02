@@ -150,13 +150,15 @@ def read_ion_data(
                     transition_count_of_level_name,
                     upsilondict,
                 ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
-            else:  # hillier levels and transitions
+            else:  # hillier levels, transitions and collision strengths, as the cmfgen handler reads them
                 (
                     ionization_energy_ev,
                     energy_levels,
                     transitions,
                     transition_count_of_level_name,
                 ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+
+                upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
 
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
                 (

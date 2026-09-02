@@ -1053,6 +1053,12 @@ def read_phixs_tables(
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
+            # The first non-zero point of the grid, not index 0. A table that is zero at the
+            # nominal threshold (a type 8 offset fit, or a tabulated type whose data starts
+            # above nu_edge) has its own edge further up the grid, and its cross section is read
+            # there. So two targets of one level can be compared at different photon energies
+            # (N II 2s_2p2(4Pe)3s_5Pe: nu/nu_edge = 2.47 against 1.0). That is the accepted
+            # choice: each target's branching factor is its cross section at its own edge.
             try:
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
             except IndexError:
