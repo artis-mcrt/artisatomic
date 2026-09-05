@@ -31,6 +31,7 @@ from pathlib import Path
 import numpy as np
 
 from artisatomic.base import elsymbols
+from artisatomic.base import PYDIR
 from artisatomic.base import xopen_check_extension
 
 # KF96 Table 1 and the Table 2 totals, transcribed from the paper: (Z, q) -> (a, b, c, d).
@@ -572,8 +573,8 @@ def write_chargetransfer_file(entries: list[CTEntry], outdir: Path) -> None:
 def main() -> None:
     """Read the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
     parser = argparse.ArgumentParser(description=__doc__)
-    defaultoutdir = Path(__file__).parent.parent.absolute() / "artis_files" / "data"
-    defaultsourcedir = Path(__file__).parent.parent.absolute() / "atomic-data-chargetransfer"
+    defaultoutdir = PYDIR.parent / "artis_files" / "data"
+    defaultsourcedir = PYDIR.parent / "atomic-data-chargetransfer"
     parser.add_argument("-output_folder", default=defaultoutdir, type=Path, help="folder of the output file")
     parser.add_argument(
         "-sourcedir",

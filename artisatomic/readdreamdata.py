@@ -1,36 +1,18 @@
 """Read levels and transitions from the DREAM database of lanthanides and actinides."""
 
-import typing as t
-from collections import defaultdict
-
 import numpy as np
 import pandas as pd
 
 from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
+from artisatomic.base import Transition
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325.h5"
 dreamdata: pd.DataFrame | None = None
-
-
-class DreamEnergyLevelRow(t.NamedTuple):
-    """One DREAM energy level."""
-
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: int
-
-
-class TransitionTuple(t.NamedTuple):
-    """One DREAM bound-bound transition."""
-
-    lowerlevel: int
-    upperlevel: int
-    A: float
 
 
 def init_dreamdata():
@@ -63,12 +45,17 @@ def energytuplefromrow(row, prefix):
     """
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
 
+    # not a default of 0 for any other text: the Laporte rule would get a parity the file did
+    # not state
+    if leveltype not in {"(o)", "(e)"}:
+        msg = f"DREAM level type {leveltype!r} is not '(o)' or '(e)'"
+        raise ValueError(msg)
     parity = 1 if leveltype == "(o)" else 0
     paritystr = "odd" if parity == 1 else "even"
     energyabovegsinpercm = float(energy)
 
     levelname = f"enpercm={energy},{paritystr},g={g}"
-    return DreamEnergyLevelRow(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
+    return EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
 
 
 def read_levels_data(dflines):
@@ -79,7 +66,7 @@ def read_levels_data(dflines):
     """
     # a set for the membership test, not `not in energy_levels`: that was a linear scan of the
     # list per candidate, so building the level list cost O(levels^2)
-    seen: set[DreamEnergyLevelRow] = set()
+    seen: set[EnergyLevel] = set()
     energy_levels = []
 
     for prefix in ["Lower", "Upper"]:
@@ -94,13 +81,9 @@ def read_levels_data(dflines):
     return energy_levels
 
 
-def read_lines_data(dfiondata, energy_levels):
-    """Convert DREAM lines to transitions referencing zero-based level ids.
-
-    Returns the transitions and the number of them touching each level name.
-    """
+def read_lines_data(dfiondata):
+    """Convert DREAM lines to transitions referencing zero-based level ids."""
     transitions = []
-    transition_count_of_level_name = defaultdict(int)
 
     # numpy columns, not iterrows(): that built a Series for each of the 10^5 lines of an ion.
     # The levels were sorted by energy, and transitiondata.txt is written with the lower id
@@ -111,14 +94,9 @@ def read_lines_data(dfiondata, energy_levels):
     A_values = dfiondata["gA"].to_numpy() / dfiondata["Upper_g"].to_numpy()
 
     for lowerindex, upperindex, A in zip(lowerindices.tolist(), upperindices.tolist(), A_values.tolist(), strict=True):
-        transtuple = TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A)
+        transitions.append(Transition(lowerlevel=lowerindex, upperlevel=upperindex, A=A))
 
-        transition_count_of_level_name[energy_levels[lowerindex].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperindex].levelname] += 1
-
-        transitions.append(transtuple)
-
-    return transitions, transition_count_of_level_name
+    return transitions
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -126,7 +104,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     init_dreamdata()
     assert dreamdata is not None
     charge = ion_stage - 1
-    dfiondata = dreamdata.loc[atomic_number, charge]  # ty:ignore[possibly-missing-attribute]
+    # a list of one key, not .loc[atomic_number, charge]: that gives a Series for an ion with a
+    # single line, and the frame methods below then fail
+    dfiondata = dreamdata.loc[[(atomic_number, charge)]].reset_index(drop=True)  # ty:ignore[possibly-missing-attribute]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
 
     energy_levels = read_levels_data(dfiondata)
@@ -152,7 +132,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dfiondata.insert(2, "Lower_index", [get_level_index(row, prefix="Lower") for row in rows], allow_duplicates=True)
     dfiondata.insert(2, "Upper_index", [get_level_index(row, prefix="Upper") for row in rows], allow_duplicates=True)
 
-    transitions, transition_count_of_level_name = read_lines_data(dfiondata, energy_levels)
+    transitions = read_lines_data(dfiondata)
 
     # DREAM has no ionization energies, so take them from NIST as the other handlers do
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
@@ -160,4 +140,4 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, energy_levels, transitions

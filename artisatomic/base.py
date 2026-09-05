@@ -15,6 +15,8 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
 import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
@@ -107,21 +109,56 @@ empty_levels_schema = pl.Schema(
 )
 
 
-def transition_count_of_level_name(
-    dflevels: pl.DataFrame, dftransitions: pl.DataFrame, levelidcolumn: str = "levelid"
-) -> dict[str, int]:
-    """Count the transitions that touch each level, keyed by level name, for adata.txt.
+class EnergyLevel(t.NamedTuple):
+    """One energy level of a data set that gives no other per-level column."""
 
-    Both levels of a transition are counted, and a level with no transition gets 0. Call this
-    after any filter on the transitions, so the counts agree with transitiondata.txt.
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: int | None  # None where the data set gives no parity
+
+
+class Transition(t.NamedTuple):
+    """One bound-bound transition, keyed by zero-based level id."""
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+
+
+class PhixsData(t.NamedTuple):
+    """The photoionisation cross sections of one ion, indexed by zero-based level id.
+
+    A data source with no cross sections for the ion gives empty arrays, not zero-filled ones:
+    iondata.read_ion_data() reads an empty cross-section array as "no data" and applies the
+    hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
+    the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
+    names once the upper ion is read. QUB gives the upper ion's level ids with their fractions.
     """
-    counts: dict[int, int] = dict(
-        pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]]).value_counts().iter_rows()
-    )
-    return {
-        levelname: counts.get(levelid, 0)
-        for levelid, levelname in dflevels.select(levelidcolumn, "levelname").iter_rows(named=False)
-    }
+
+    crosssections: npt.NDArray[np.float64]  # (levelcount, nphixspoints), in Mb
+    thresholds_ev: npt.NDArray[np.float64]  # (levelcount,)
+    targetconfigs: list[list[tuple[str, float]] | None] | None = None
+    targetfractions: list[list[tuple[int, float]]] | None = None
+
+
+def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> list[int]:
+    """Count the transitions that touch each level, indexed by zero-based level id, for adata.txt.
+
+    Both levels of a transition count, and a level with no transition gets 0. The writer calls
+    this on the final transition frame of the ion, after every join and filter, so the counts
+    agree with transitiondata.txt. Keyed by id and not by name: a data set can give two levels
+    one name, and a name-keyed count merged those levels.
+    """
+    if dftransitions.is_empty():
+        return [0] * levelcount
+    levelids = pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]])
+    # not an assert: this guards written output, and a level id outside the level list would
+    # otherwise raise a bare IndexError below
+    if (levelids < 0).any() or (levelids >= levelcount).any():
+        msg = f"transitions name level ids {levelids.min()} to {levelids.max()}, but the ion has {levelcount} levels"
+        raise ValueError(msg)
+    return np.bincount(levelids.to_numpy(), minlength=levelcount).tolist()
 
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
@@ -216,14 +253,19 @@ def log_and_print(flog, strout):
 def path_for_log(filepath: str | Path) -> str:
     """Render an input data path relative to the repository root where possible.
 
-    The log files are compared by checksum in CI, so an absolute path would make them depend on
-    where the repository happens to be checked out. Paths outside the repository (some readers
-    load data from elsewhere) are returned unchanged.
+    The log files must not depend on where the repository is checked out, so an absolute path
+    would be wrong there. Paths outside the repository (some readers load data from elsewhere)
+    come back unchanged.
     """
     try:
         return str(Path(filepath).resolve().relative_to(PYDIR.parent))
     except ValueError:
         return str(filepath)
+
+
+def fortran_float(text: str) -> float:
+    """Convert a number that a Fortran program wrote, where the exponent letter can be D."""
+    return float(text.replace("D", "E"))
 
 
 def isfloat(value: t.Any) -> bool:
@@ -477,7 +519,7 @@ def parallel_map[ResultType](
     else:
         from tqdm.contrib.concurrent import thread_map
 
-        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)  # type: ignore[arg-type] # zuban: ignore[no-untyped-call]
+        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)
 
     assert isinstance(results, list)
     return results

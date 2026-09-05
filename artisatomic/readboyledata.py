@@ -1,7 +1,6 @@
 """Read helium levels and transitions from the Boyle AOIFE data set."""
 
 import typing as t
-from collections import defaultdict
 from functools import cache
 
 from artisatomic.base import PYDIR
@@ -79,8 +78,7 @@ def read_levels_data(atomic_number, ion_stage):
     """Read one ion's energy levels from the AOIFE HDF5 file.
 
     The file numbers ion stages from zero, so ion_stage is matched against ion_number + 1.
-    Levels have no spectroscopic names, so each is named after its zero-based level number,
-    in the same format read_lines_data() uses to count transitions per level.
+    Levels have no spectroscopic names, so each is named after its zero-based level number.
     """
     aoife_dataset = get_aoife_dataset()
     assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
@@ -117,22 +115,30 @@ def read_levels_data(atomic_number, ion_stage):
             )
         )
 
+    # not an assert: read_lines_data() takes the file's level numbers as the zero-based level ids
+    # that leveltuples_to_pldataframe() assigns by row, so the two numberings must agree
+    level_numbers = [int(level.level_number) for level in energy_levels]
+    if level_numbers != list(range(len(energy_levels))):
+        msg = (
+            f"the AOIFE levels of Z={atomic_number} ion_stage {ion_stage} are not numbered 0 to"
+            f" {len(energy_levels) - 1} in file order"
+        )
+        raise ValueError(msg)
+
     return energy_levels
 
 
 def read_lines_data(atomic_number, ion_stage):
     """Read one ion's bound-bound transitions from the AOIFE HDF5 file.
 
-    Returns the transitions and the number of them touching each level name. The file's level
-    numbers are already zero-based, matching the level ids used in memory. The file gives no
-    collision strengths.
+    The file's level numbers are already zero-based, matching the level ids used in memory. The
+    file gives no collision strengths.
     """
     aoife_dataset = get_aoife_dataset()
     assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
     lines_data = aoife_dataset["/lines_data"]
 
     transitions = []
-    transition_count_of_level_name = defaultdict(int)
 
     for rowtuple in lines_data:
         (
@@ -157,23 +163,18 @@ def read_lines_data(atomic_number, ion_stage):
         # the other way round is swapped here.
         levelid_lower = min(int(level_number_lower), int(level_number_upper))
         levelid_upper = max(int(level_number_lower), int(level_number_upper))
-        line = TransitionTuple(atomic_num, ion_number, levelid_lower, levelid_upper, A_ul, wavelength)
-        # must match the levelname format used in read_levels_data
-        transition_count_of_level_name[f"level{levelid_lower:05d}"] += 1
-        transition_count_of_level_name[f"level{levelid_upper:05d}"] += 1
+        transitions.append(TransitionTuple(atomic_num, ion_number, levelid_lower, levelid_upper, A_ul, wavelength))
 
-        transitions.append(line)
-
-    return transitions, transition_count_of_level_name
+    return transitions
 
 
 def read_levels_and_transitions(atomic_number, ion_stage):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
-    transitions, transition_count_of_level_name = read_lines_data(atomic_number, ion_stage)
+    transitions = read_lines_data(atomic_number, ion_stage)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
 
     energy_levels = read_levels_data(atomic_number, ion_stage)
 
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, energy_levels, transitions

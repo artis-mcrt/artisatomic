@@ -5,7 +5,15 @@ from collections.abc import Iterator
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
-lchars = "SPDFGHIKLMNOPQRSTUVWXYZ"
+# the orbital letters in order of l. The sequence skips J, and it skips P and S at l = 12 and
+# l = 14, because those letters are l = 1 and l = 0.
+lchars = "SPDFGHIKLMNOQRTUVWXYZ"
+
+# CMFGEN names a level that lumps the high-l orbitals of one n with one of these letters, whatever
+# the n: '3s2_18w_2W' has g = 648 = 2 x 18^2, the whole n = 18 shell, and '3s2_7z_2Z' lumps the
+# l >= 6 orbitals. No CMFGEN file names a single orbital of l = 17 (w) or l = 20 (z). Such a
+# level spans both parities, so it has none.
+merged_orbital_letters = frozenset("wz")
 
 
 def parse_orbital_n(orbital: str) -> int | None:
@@ -81,8 +89,6 @@ def _split_orbitals(instr: str) -> list[str]:
                 instr = instr[:startpos]
             else:
                 instr = instr[:-1]
-        elif instr[-1] in {"_", " "}:
-            instr = instr[:-1]
         else:
             instr = instr[:-1]
 
@@ -109,6 +115,10 @@ def interpret_configuration(
     All the term components come back as -1, there being no term to read.
     """
     instr = instr_orig.split("[", maxsplit=1)[0]  # remove trailing bracketed J value
+
+    if not instr:
+        # a name with nothing before its J bracket has no orbital and no term to read
+        return [], -1, -1, -1, -1
 
     if not hasterm:
         return _split_orbitals(instr), -1, -1, -1, -1
@@ -168,8 +178,10 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
 
     Parent terms in parentheses are not occupied orbitals and are skipped. An orbital must
     satisfy l <= n - 1; CMFGEN's merged high-l levels ('2s2_13w_2W', '2s2_2p3(4So)5z_5Z') fail
-    this, because the letter is a merge marker spanning several l rather than one orbital. Those
-    are yielded with merged=True so callers can tell the two cases apart.
+    this, because the letter is a merge marker spanning several l rather than one orbital. A w or
+    a z is such a marker at any n ('3s2_18w_2W' lumps the whole n = 18 shell, and l = 17 < 18
+    would pass the test). Those are yielded with merged=True so callers can tell the two cases
+    apart.
 
     One token can hold more than one orbital, because interpret_configuration() keeps a
     digit-letter-letter run together: '4sp(3P)_7Po' gives '4sp', which is 4s and 4p sharing the
@@ -210,7 +222,8 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
             # l >= n identifies a merge marker, but only where the token actually carried an n.
             # Tokens such as the 'sp' of '3d8(2H)sp_2Go' have none, and calling those merged
             # would discard the parity their name states outright.
-            yield l, nelec, nend > 0 and l >= principalquantumnumber
+            merged = orbitalchar in merged_orbital_letters or (nend > 0 and l >= principalquantumnumber)
+            yield l, nelec, merged
 
         if not foundorbital and warn:
             # don't fail silently: a skipped orbital means the parity (and hence the forbidden

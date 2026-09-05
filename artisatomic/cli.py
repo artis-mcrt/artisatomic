@@ -4,8 +4,6 @@
 
 import argparse
 import json
-import typing as t
-from collections.abc import Sequence
 from pathlib import Path
 
 import argcomplete
@@ -18,63 +16,62 @@ from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
 
 
-def main(args: argparse.Namespace | None = None, argsraw: Sequence[str] | None = None, **kwargs: t.Any) -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser. Every option has a default, so parse_args([]) gives a full namespace."""
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description="Produce an ARTIS atomic database from published atomic data sets.",
+    )
+    parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
+    parser.add_argument("-output_folder_logs", action="store", default="atomic_data_logs", help="Folder for log files")
+    parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points to save in output")
+    parser.add_argument(
+        "-phixsnuincrement",
+        type=float,
+        default=0.03,
+        help="Fraction of nu_edge incremented for each cross section point",
+    )
+    parser.add_argument(
+        "-optimaltemperature",
+        type=int,
+        default=6000,
+        help=(
+            "(Electron and excitation) temperature at which recombination rate "
+            "should be constant when downsampling cross sections"
+        ),
+    )
+    parser.add_argument(
+        "-electrontemperature",
+        type=int,
+        default=6000,
+        help="Temperature for choosing effective collision strengths",
+    )
+    parser.add_argument(
+        "--nophixs", action="store_true", help="Don't generate cross sections and write to phixsdata_v2.txt file"
+    )
+
+    parser.add_argument(
+        "-nlevels_hydrogenic_for_unknown_phixs",
+        type=int,
+        default=100,
+        help=(
+            "Consider this many of the lowest levels of any ion whose handler supplied no"
+            " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
+            " Negative values are rejected. Fewer tables than this can result, because a level"
+            " at or above the ionization energy is skipped but still counts towards the limit."
+            " An ion with even one cross section from its data source is left untouched, so"
+            " this never replaces or extends measured data. Excludes the top ion, which has no"
+            " upper ion to photoionise to."
+        ),
+    )
+    return parser
+
+
+def main() -> None:
     """Write an ARTIS atomic database from the configured ions and handlers."""
-    if args is None:
-        parser = argparse.ArgumentParser(
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-            description="Produce an ARTIS atomic database from published atomic data sets.",
-        )
-        parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
-        parser.add_argument(
-            "-output_folder_logs", action="store", default="atomic_data_logs", help="Folder for log files"
-        )
-        parser.add_argument(
-            "-nphixspoints", type=int, default=100, help="Number of cross section points to save in output"
-        )
-        parser.add_argument(
-            "-phixsnuincrement",
-            type=float,
-            default=0.03,
-            help="Fraction of nu_edge incremented for each cross section point",
-        )
-        parser.add_argument(
-            "-optimaltemperature",
-            type=int,
-            default=6000,
-            help=(
-                "(Electron and excitation) temperature at which recombination rate "
-                "should be constant when downsampling cross sections"
-            ),
-        )
-        parser.add_argument(
-            "-electrontemperature",
-            type=int,
-            default=6000,
-            help="Temperature for choosing effective collision strengths",
-        )
-        parser.add_argument(
-            "--nophixs", action="store_true", help="Don't generate cross sections and write to phixsdata_v2.txt file"
-        )
-
-        parser.add_argument(
-            "-nlevels_hydrogenic_for_unknown_phixs",
-            type=int,
-            default=100,
-            help=(
-                "Consider this many of the lowest levels of any ion whose handler supplied no"
-                " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
-                " Negative values are rejected. Fewer tables than this can result, because a level"
-                " at or above the ionization energy is skipped but still counts towards the limit."
-                " An ion with even one cross section from its data source is left untouched, so"
-                " this never replaces or extends measured data. Excludes the top ion, which has no"
-                " upper ion to photoionise to."
-            ),
-        )
-
-        parser.set_defaults(**kwargs)
-        argcomplete.autocomplete(parser)
-        args = parser.parse_args(argsraw)
+    parser = build_parser()
+    argcomplete.autocomplete(parser)
+    args = parser.parse_args()
 
     # 0 is the way to switch the estimate off, so a negative value is a typo rather than a
     # quieter way of saying the same thing

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the artisatomic readers, parsers and output writers."""
 
+import argparse
 import functools
 import io
 import operator
@@ -21,18 +22,34 @@ from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import gf_to_a_coefficient
+from artisatomic.base import h_in_ev_seconds
+from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
+from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
+from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
+from artisatomic.cli import build_parser
+from artisatomic.levelnames import get_config_parity
+from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import interpret_configuration
 from artisatomic.output import add_level_ids_forbidden
 from artisatomic.output import write_adata
 from artisatomic.output import write_phixs_data
+from artisatomic.output import write_transition_data
 from artisatomic.phixs import match_hydrogenic_phixs
 from artisatomic.phixs import reduce_phixs_tables_worker
+
+
+def phixs_args(**overrides: t.Any) -> argparse.Namespace:
+    """Build the command-line options with their defaults, so the tests run the values the command runs."""
+    args = build_parser().parse_args([])
+    for name, value in overrides.items():
+        setattr(args, name, value)
+    return args
 
 
 def test_interpret_term():
@@ -87,11 +104,9 @@ def test_get_level_parity():
 
 
 def test_has_merged_orbital():
-    """Merge markers are orbital letters standing for several l at once, so l >= n gives them away."""
-    from artisatomic.levelnames import has_merged_orbital
-
-    assert has_merged_orbital("2s2_13w_2W")  # 'w' would be l=19, but n=13
-    assert has_merged_orbital("10z_2Z")  # 'z' would be l=22, but n=10
+    """Merge markers are orbital letters that stand for several l at once: w and z, or a letter with l >= n."""
+    assert has_merged_orbital("2s2_13w_2W")  # w is a merge marker at any n
+    assert has_merged_orbital("10z_2Z")  # z too
     assert has_merged_orbital("2s2_2p3(4So)5z_5Z")
 
     assert not has_merged_orbital("3d6(5D)10d_5Pe")  # 10d is a real orbital, l=2 < n=10
@@ -113,8 +128,6 @@ def test_has_merged_orbital():
 
 def test_get_parity_from_multi_orbital_token():
     """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
-    from artisatomic.levelnames import get_config_parity
-
     # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
     # Reading only the first letter and calling the rest an occupation raises on int('p').
     assert get_config_parity("4sp(3P)_7Po") == 1
@@ -123,8 +136,6 @@ def test_get_parity_from_multi_orbital_token():
 
 def test_get_config_parity():
     """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
-    from artisatomic.levelnames import get_config_parity
-
     # sum of l over the occupied orbitals, mod 2
     assert get_config_parity("3d64s2") == 0  # 2 * 6 = 12
     assert get_config_parity("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
@@ -137,9 +148,9 @@ def test_get_config_parity():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_config_parity("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
-    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
-    # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
-    # the real orbitals decide the parity.
+    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker
+    # (w or z), not a real l. It spans several l of both parities, so only the real orbitals
+    # decide the parity.
     assert get_config_parity("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_config_parity("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
@@ -154,8 +165,6 @@ def test_get_config_parity():
 
 def test_parity_of_a_bare_configuration():
     """A name with no term is all configuration, and adf04 writes its orbitals in upper case."""
-    from artisatomic.levelnames import get_config_parity
-
     # the whole string is orbitals, so nothing is lost off the end and odd really reads as odd
     assert get_config_parity("3d7", hasterm=False) == 0  # 2 * 7 = 14
     assert get_config_parity("5s2", hasterm=False) == 0  # 0 * 2
@@ -361,8 +370,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     a second factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a
     typical E_th = 11 eV, n = 5 valence level).
     """
-    import argparse
-
     rhd.read_hyd_phixsdata()
 
     ryd_to_ev = rhd.ryd_to_ev
@@ -377,9 +384,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=100)
 
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -424,8 +429,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
 
 def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
-    import argparse
-
     rhd.read_hyd_phixsdata()
 
     ionization_energy_ev = 4 * rhd.ryd_to_ev
@@ -441,12 +444,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     )
 
     for nlevels_option, n_expected in ((0, 0), (2, 2), (nlevels + 10, nlevels)):
-        args = argparse.Namespace(
-            nphixspoints=100,
-            phixsnuincrement=0.03,
-            optimaltemperature=6000,
-            nlevels_hydrogenic_for_unknown_phixs=nlevels_option,
-        )
+        args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=nlevels_option)
         _, targetfractions, thresholds = match_hydrogenic_phixs(
             atomic_number=2,
             energy_levels=dflevels,
@@ -465,9 +463,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     dflevels_partly_unbound = dflevels.with_columns(
         energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=3
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=3)
     _, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_partly_unbound,
@@ -488,9 +484,7 @@ def test_write_phixs_data_with_no_phixs_arrays():
     reader also left the cross-section and threshold arrays empty, the level ids from those target
     lists have nothing behind them.
     """
-    import argparse
-
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = phixs_args()
     flog = io.StringIO()
     fphixs = io.StringIO()
 
@@ -527,7 +521,6 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
             }
         ),
         dftransitions=pl.DataFrame(),
-        transition_count_of_level_name={},
         upsilondict={},
         photoion_targetconfigs=targetconfigs,
         photoionization_crosssections=np.empty((0, 100)),
@@ -630,7 +623,6 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     phot file alone gives that target's raw table, and the combined read must reproduce the winner
     divided by its fraction.
     """
-    import argparse
     import contextlib
 
     ionfiles = readhillierdata.ions_data[8, 1]
@@ -638,15 +630,17 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     assert len(ionfiles.photfilenames) == 2, f"O I is expected to have two phot files, got {ionfiles.photfilenames}"
 
     rhd.read_hyd_phixsdata()
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = phixs_args()
 
     def read_phixs(photfilenames):
         """Read O I's cross sections using only the named phot files."""
         monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=photfilenames))
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
-            _, dflevels, _, _ = rhd.read_levels_and_transitions(8, 1, flog)
-            crosssections, targetconfigs, _thresholds = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+            _, dflevels, _ = rhd.read_levels_and_transitions(8, 1, flog)
+            phixs = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+            crosssections, targetconfigs = phixs.crosssections, phixs.targetconfigs
+            assert targetconfigs is not None
         return crosssections, targetconfigs, flog.getvalue()
 
     file_a, file_b = ionfiles.photfilenames
@@ -709,8 +703,8 @@ def test_read_coldata_term_to_j_redistribution():
     def read_ion(atomic_number, ion_stage):
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
-            _, dflevels, _, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, flog, args)
+            _, dflevels, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog)
         levelids_of_term = defaultdict(list)
         for levelid, levelname in enumerate(dflevels["levelname"]):
             levelids_of_term[levelname.split("[")[0]].append(levelid)
@@ -734,9 +728,11 @@ def test_read_coldata_term_to_j_redistribution():
     for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
         assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
 
-    # Fe II collision data is already J-resolved, so every value passes through unscaled
+    # Fe II collision data is already J-resolved, so every value passes through unscaled: the
+    # first row of col_data, a6De[9/2] -> a6De[7/2], gives 3.230 in the T = 0.5e4 K column
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
+    assert upsilondict_fe2[0, 1] == pytest.approx(3.23)
 
 
 def test_add_level_ids_forbidden_rejects_an_unknown_level_id():
@@ -936,7 +932,6 @@ def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):
 
     # a readable string parity is a real parity and still counts; the rest are unknown
     assert forbidden == [dtype == pl.String]
-    assert forbidden[0] is not None  # would raise in write_transition_data
 
 
 def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
@@ -946,7 +941,7 @@ def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
     Treating those as a matching parity made all 435 H I transitions forbidden, Lyman alpha
     included -- the strongest permitted line there is, listed in hi_osc.dat with f = 0.4162.
     """
-    _, dflevels, dftransitions, _ = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
+    _, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
 
     # no level has a parity that could match another's
     assert dflevels["parity"].is_null().all()
@@ -1008,7 +1003,7 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
         monkeypatch.setattr(readboyledata, "get_aoife_dataset", lambda: fakefile)
 
         energy_levels = readboyledata.read_levels_data(2, 1)
-        transitions, transition_count_of_level_name = readboyledata.read_lines_data(2, 1)
+        transitions = readboyledata.read_lines_data(2, 1)
 
     # the other ion's level is filtered out
     assert len(energy_levels) == 3
@@ -1035,10 +1030,8 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
     )
     assert not any(add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list())
 
-    # the two readers must agree on the level names, or the adata.txt transition counts land on
-    # levels that do not exist: one formatted the number through int() and the other did not
-    assert set(transition_count_of_level_name) <= {level.levelname for level in energy_levels}
-    assert transition_count_of_level_name[energy_levels[2].levelname] == 2
+    # the file's level numbers are the level ids, so the writer's count lands on the right level
+    assert transition_count_of_level(dftransitions, len(energy_levels))[2] == 2
 
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
@@ -1074,9 +1067,7 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
         {"gf": [1.0, 1.0], "wavelength": [2000.0, 2000.0]},
         index=pd.MultiIndex.from_tuples([(2, 0), (0, 2)], names=["level_index_lower", "level_index_upper"]),
     )
-    transitions, transition_count_of_level_name = readlisbondata.read_lines_data(
-        energy_levels, dflines, levelid_of_fileindex
-    )
+    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     # ...which is level id 0 -> 2 after the sort, written with the lower id first, both times
     assert len(transitions) == 2
@@ -1085,7 +1076,16 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # called "Upper"
     expected_a = 1.0 / (gf_to_a_coefficient * 5.0 * 2000.0**2)
     assert all(pytest.approx(expected_a) == transition.A for transition in transitions)
-    assert transition_count_of_level_name == {energy_levels[0].levelname: 2, energy_levels[2].levelname: 2}
+    dftransitions = pl.DataFrame(
+        {"lowerlevel": [t.lowerlevel for t in transitions], "upperlevel": [t.upperlevel for t in transitions]}
+    )
+    assert transition_count_of_level(dftransitions, len(energy_levels)) == [2, 0, 2]
+    # the names carry the file index, so two levels with one label and J stay apart
+    assert [level.levelname for level in energy_levels] == [
+        "gs, j=0.0, index=2",
+        "mid, j=1.0, index=1",
+        "top, j=2.0, index=0",
+    ]
 
     # a line naming a level the table does not have means the two files disagree about the
     # numbering. Skipping it would drop every transition and write a silently empty ion.
@@ -1338,7 +1338,9 @@ def adf04_sample_path() -> Path:
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(adf04_sample_path(), 27, 3, flog)
+    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
+        adf04_sample_path(), flog, electrontemperature=5010.0
+    )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
@@ -1375,7 +1377,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
@@ -1390,7 +1392,7 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
     assert len(upsilondict) == 235
 
 
@@ -1401,7 +1403,7 @@ def test_extend_ion_list_finds_a_compressed_adf04():
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
     """A file written before a handler was renamed still names the old handler, so map it."""
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
     from artisatomic.ionhandlers import parse_ion_handlers
     from artisatomic.ionhandlers import renamed_handlers
 
@@ -1409,14 +1411,14 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
     # a name that was never renamed passes through unchanged
     assert parse_ion_handlers([[27, [[2, "qub_cobalt"]]]]) == [(27, [(2, "qub_cobalt")])]
     # every alias must point at a handler that read_ion_data() can dispatch
-    assert set(renamed_handlers.values()) <= set(simple_handlers) | {"qub_cobalt"}
+    assert set(renamed_handlers.values()) <= set(handlers)
 
 
 def test_read_qub_sr1():
     """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, transitions, _, upsilondict = readqubdata.read_qub_levels_and_transitions(
-        38, 1, flog
+    ionization_energy_ev, energylevels, transitions, upsilondict = readqubdata.read_qub_levels_and_transitions(
+        38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
     )
     assert abs(ionization_energy_ev - 5.694867) < 1e-5
     assert len(energylevels) == 57
@@ -1431,8 +1433,7 @@ def test_write_adata_level_comment():
 
     artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
     not whitespace, so any padding written here ends up inside the level name it reports. The
-    Hillier display replacements are applied here rather than in the reader, where the name is the
-    key that transitions are matched on.
+    name is written as the reader gave it.
     """
     dfhillier = leveltuples_to_pldataframe(
         pl.DataFrame(
@@ -1447,7 +1448,7 @@ def test_write_adata_level_comment():
         )
     )
     buf = io.StringIO()
-    write_adata(buf, 26, 2, dfhillier, 10.0, {}, io.StringIO())
+    write_adata(buf, 26, 2, dfhillier, 10.0, [0], io.StringIO())
     hillier_line = buf.getvalue().splitlines()[1]
     assert hillier_line.endswith(" someion_gs")
     assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
@@ -1459,7 +1460,7 @@ def test_write_adata_level_comment():
         pl.DataFrame({"levelname": [spacedlevelname], "energyabovegsinpercm": [0.0], "g": [9.0]})
     )
     buf = io.StringIO()
-    write_adata(buf, 8, 1, dfspaced, 13.6, {}, io.StringIO())
+    write_adata(buf, 8, 1, dfspaced, 13.6, [0], io.StringIO())
     spaced_line = buf.getvalue().splitlines()[1]
     assert spaced_line.endswith(" " + spacedlevelname)
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
@@ -1531,13 +1532,15 @@ def test_parse_transition_lines_stops_at_a_second_table():
     assert rhd.parse_transition_lines(emptyframe, Path("test_osc")).height == 0
 
 
-def test_parse_gfall_collapses_label_whitespace():
+def test_parse_gfall_collapses_label_whitespace(monkeypatch):
     r"""Kurucz labels are fixed-width padded, so their whitespace runs must be collapsed.
 
     Expr.replace() swaps whole values equal to a literal, so `.replace(r"\s+", " ")` on a label
     column matched nothing and every run survived into the level names written to adata.txt.
     Only `.str.replace_all()` treats the argument as a pattern.
     """
+    # the sample, so the answer does not depend on which corpus is unpacked or on ARTISATOMIC_TESTMODE
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
     gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(38, 0))).collect()
 
     labels = pl.concat([gfall["label_lower"], gfall["label_upper"]]).unique().to_list()
@@ -1634,8 +1637,6 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     The hydrogenic tables cover n up to max_hyd_gaunt_n (30). A level outside them gave a
     KeyError before.
     """
-    import argparse
-
     rhd.read_hyd_phixsdata()
     assert rhd.max_hyd_gaunt_n == 30
 
@@ -1652,9 +1653,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
             ],
         }
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=100)
     flog = io.StringIO()
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -1703,7 +1702,7 @@ def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
 
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
 
-    _, dflevels, transitions, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+    _, dflevels, transitions = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
 
     # the repeat is gone, and no level pair is left with two rows for ARTIS to add up
     assert transitions.height == gfall.height - 1
@@ -1730,11 +1729,9 @@ def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
 
 def test_write_phixs_data_keeps_a_table_with_no_threshold():
     """A cross section is real data; a threshold ARTIS never reads is not a reason to drop it."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
     targetfractions = [[(0, 1.0)], [(0, 1.0)]]
     thresholds = np.array([13.6, np.nan])  # the second level's threshold is unknown
@@ -1906,11 +1903,9 @@ def test_strip_name_separators():
 
 def test_write_phixs_data_rejects_a_duplicated_target():
     """A target level that occurs two times would give the same target two fractions in ARTIS."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
     targetfractions = [[(0, 0.4), (1, 0.3), (0, 0.3)]]  # target level 0 occurs two times
     thresholds = np.array([13.6])
@@ -1925,11 +1920,9 @@ def test_write_phixs_data_rejects_a_duplicated_target():
 
 def test_write_phixs_data_rejects_a_bad_fraction_sum_before_output():
     """A bad fraction sum fails before any part of the ion goes out."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
     targetfractions = [[(0, 0.4), (1, 0.3)]]  # the fractions sum to 0.7
     thresholds = np.array([13.6])
@@ -1988,12 +1981,10 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
     iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
     estimate, so the ion would be written with no cross sections at all.
     """
-    import argparse
-
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
-    crosssections, targetfractions, thresholds = readqubdata.read_qub_photoionizations(
-        38, 1, levelcount=5, args=args, flog=io.StringIO()
-    )
+    args = phixs_args()
+    phixs = readqubdata.read_qub_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
+    crosssections, targetfractions, thresholds = phixs.crosssections, phixs.targetfractions, phixs.thresholds_ev
+    assert targetfractions is not None
     assert crosssections.shape == (0, 100)
     assert targetfractions == []
     assert thresholds.shape == (0,)
@@ -2012,7 +2003,6 @@ def test_fill_missing_phixs_thresholds():
             ionization_energy_ev=ionpot,
             dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
             dftransitions=pl.DataFrame(),
-            transition_count_of_level_name={},
             upsilondict={},
             photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
@@ -2104,7 +2094,6 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
             ionization_energy_ev=ionpot,
             dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
             dftransitions=pl.DataFrame(),
-            transition_count_of_level_name={},
             upsilondict={},
             photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
@@ -2166,9 +2155,7 @@ def test_parse_nist_ionization_table():
 def test_readmonsdata_reads_the_sample(monkeypatch):
     """Read Ce V from the committed sample and check the first level and transition."""
     monkeypatch.setattr(readmonsdata, "datafilepath", PYDIR / ".." / "atomic-data-mons" / "test_sample")
-    ionization_energy_ev, dflevels, dftransitions, transition_count_of_level_name = (
-        readmonsdata.read_levels_and_transitions(58, 5, io.StringIO())
-    )
+    ionization_energy_ev, dflevels, dftransitions = readmonsdata.read_levels_and_transitions(58, 5, io.StringIO())
 
     assert ionization_energy_ev == 65.55  # the NIST table gives Ce V exactly this value
     assert dflevels.height == 450
@@ -2192,8 +2179,9 @@ def test_readmonsdata_reads_the_sample(monkeypatch):
 
     # 32 lines of the sample transition file have the ground state as their lower level, and none
     # has it as the upper level
-    assert transition_count_of_level_name[dflevels["levelname"][0]] == 32
-    assert sum(transition_count_of_level_name.values()) == 2 * dftransitions.height
+    counts = transition_count_of_level(dftransitions, dflevels.height)
+    assert counts[0] == 32
+    assert sum(counts) == 2 * dftransitions.height
 
 
 def test_get_nearest_level_indices():
@@ -2233,7 +2221,7 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
     flog = io.StringIO()
-    _, dflevels, dftransitions, counts = readfloers25data.read_levels_and_transitions(
+    _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
         57, 2, flog, calibrated=True, withforbidden=True
     )
     assert "Discarded 1 transitions" in flog.getvalue()
@@ -2244,7 +2232,8 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
         for upper, lower, A, forbidden in dftransitions[["upperlevel", "lowerlevel", "A", "forbidden"]].iter_rows()
     }
     assert rows == {(0, 1): (1.0e6, False), (0, 2): (5.0, True)}
-    assert counts == {"5d1 J=0 index=0": 2, "5p1 J=1 index=1": 1, "4f1 J=2 index=2": 1}
+    assert dflevels["levelname"].to_list() == ["5d1 J=0 index=0", "5p1 J=1 index=1", "4f1 J=2 index=2"]
+    assert transition_count_of_level(dftransitions, dflevels.height) == [2, 1, 1]
 
     # an unknown transition type must stop the run rather than count as forbidden
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 XX\n")
@@ -2276,7 +2265,7 @@ def test_readfloers25data_ragged_rows(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
-    _, dflevels, _, _ = readfloers25data.read_levels_and_transitions(
+    _, dflevels, _ = readfloers25data.read_levels_and_transitions(
         57, 2, io.StringIO(), calibrated=True, withforbidden=True
     )
 
@@ -2317,12 +2306,13 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(header + "\n" + transheader)
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
-    _, _, dftransitions, counts = readfloers25data.read_levels_and_transitions(
+    _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
         57, 2, io.StringIO(), calibrated=True, withforbidden=True
     )
     assert dftransitions.height == 1
     assert not dftransitions["forbidden"][0]
-    assert counts == {"5d1 J=0 index=0": 1, "5p1 J=1 index=1": 1}
+    assert dflevels["levelname"].to_list()[:2] == ["5d1 J=0 index=0", "5p1 J=1 index=1"]
+    assert transition_count_of_level(dftransitions, dflevels.height) == [1, 1] + [0] * (dflevels.height - 2)
 
     # a file that names none of the columns that the reader takes must say so
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + " Lower Upper A\n 0 1 1.0e+00\n")
@@ -2335,7 +2325,7 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
 
 
-def test_iondata_simple_handlers_registry():
+def test_iondata_handlers_registry():
     """Each handler must keep its own level-name parser and its own return shape.
 
     The parsers used to be a second table in phixs.py, and the return shape used to be read
@@ -2347,9 +2337,11 @@ def test_iondata_simple_handlers_registry():
     from artisatomic import groundstatesonlynist
     from artisatomic import readdreamdata
     from artisatomic import readlisbondata
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
 
     expected_parsers = {
+        "cmfgen": readhillierdata.get_level_valence_n,
+        "qub_cobalt": readhillierdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
@@ -2359,12 +2351,12 @@ def test_iondata_simple_handlers_registry():
         "qub": readqubdata.get_level_valence_n,
     }
     assert {
-        name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
+        name: handler.get_level_valence_n for name, handler in handlers.items() if handler.get_level_valence_n
     } == expected_parsers
 
     # no parser is registered for these handlers, so their ions get no hydrogenic estimate
     # and match_hydrogenic_phixs() writes a warning. Registering one is what changes that.
-    assert {name for name, handler in simple_handlers.items() if handler.get_level_valence_n is None} == {
+    assert {name for name, handler in handlers.items() if handler.get_level_valence_n is None} == {
         "boyle",
         "dream",
         "lisbon",
@@ -2372,11 +2364,24 @@ def test_iondata_simple_handlers_registry():
         "gsnist",
     }
 
-    # only the QUB reader returns collision strengths beside the levels and the transitions
-    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub"}
+    # only the QUB readers return collision strengths beside the levels and the transitions, and
+    # only they take args, for the temperature that picks the tabulated collision strengths
+    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"qub", "qub_cobalt"}
+    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"qub", "qub_cobalt"}
 
-    # the readers that the registry calls with (atomic_number, ion_stage, flog)
+    # the two data sources with collision strengths in their own file and with cross sections
+    assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
+        "cmfgen": readhillierdata.read_coldata,
+    }
+    assert {name: handler.read_phixs for name, handler in handlers.items() if handler.read_phixs} == {
+        "cmfgen": readhillierdata.read_phixs_tables,
+        "qub_cobalt": readqubdata.read_cobalt_photoionizations,
+    }
+
+    # the readers that the registry calls with (atomic_number, ion_stage, flog[, args])
     expected_readers = {
+        "cmfgen": readhillierdata.read_levels_and_transitions,
+        "qub_cobalt": readqubdata.read_cobalt_levels_and_transitions,
         "kurucz": readkuruczdata.read_levels_and_transitions,
         "dream": readdreamdata.read_levels_and_transitions,
         "lisbon": readlisbondata.read_levels_and_transitions,
@@ -2387,7 +2392,7 @@ def test_iondata_simple_handlers_registry():
         "qub": readqubdata.read_qub_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
-        assert simple_handlers[name].read_levels_and_transitions is reader, name
+        assert handlers[name].read_levels_and_transitions is reader, name
 
     # the three floers25 entries call one reader and select the data set by keyword, so each
     # entry must bind its own keywords
@@ -2397,7 +2402,7 @@ def test_iondata_simple_handlers_registry():
         "floers25uncalib": {"calibrated": False},
     }
     for name, keywords in expected_keywords.items():
-        reader = simple_handlers[name].read_levels_and_transitions
+        reader = handlers[name].read_levels_and_transitions
         assert isinstance(reader, functools.partial)
         assert reader.func is readfloers25data.read_levels_and_transitions
         assert reader.keywords == keywords
@@ -2410,7 +2415,7 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
     drop it. A comparison of the callables cannot catch a mis-wired adapter here.
     """
     from artisatomic import readboyledata
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
 
     calls = []
     monkeypatch.setattr(
@@ -2418,7 +2423,7 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
         "read_levels_and_transitions",
         lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
     )
-    simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
+    handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
 
     assert calls == [(2, 1)]
 
@@ -2440,3 +2445,304 @@ def test_console_script_entry_points_resolve():
 
     for name, entrypoint in declared.items():
         assert callable(entrypoint.load()), name
+
+
+def test_lchars_orbital_letters_skip_j_p_and_s():
+    """The orbital letter sequence gives every letter its own l, so q, r and the letters after t parse correctly.
+
+    The sequence skips J, and it skips P and S at l = 12 and l = 14 because those letters are
+    already l = 1 and l = 0. A table that repeated them read a 13q orbital as l = 13, which
+    inverted its parity and made the l >= n merge test fire on a real orbital.
+    """
+    orbitals, twosplusone, term_l, parity, _ = interpret_configuration("13q_2Q")
+    assert (orbitals, twosplusone, term_l, parity) == (["13q"], 2, 12, 0)
+    assert get_config_parity("13q_2Q") == 0
+    assert not has_merged_orbital("13q_2Q")
+    assert get_config_parity("14r_2R") == 1
+    # w and z are CMFGEN's merge markers at any n: 18w is the whole n = 18 shell (g = 2 x 18^2),
+    # so l = 17 < 18 must not make it a single orbital with a parity
+    assert has_merged_orbital("4z_2Z")
+    assert has_merged_orbital("2s2_13w_2W")
+    assert has_merged_orbital("2s2_2p3(4So)18w_5W")
+    assert has_merged_orbital("3s2_30w_2W")
+    assert readhillierdata.get_level_parity("3s2_30w_2W") == -1
+
+
+def test_interpret_configuration_empty_name():
+    """A name with nothing before its J bracket has no parity, and does not raise."""
+    assert interpret_configuration("") == ([], -1, -1, -1, -1)
+    assert interpret_configuration("[1/2]") == ([], -1, -1, -1, -1)
+    assert get_config_parity("") is None
+    assert not has_merged_orbital("[3/2]")
+
+
+def test_parse_ion_handlers_rejects_unknown_handlers_and_bad_entries():
+    """A misspelt handler or a malformed entry fails at parse time, before any output file is written."""
+    from artisatomic.ionhandlers import parse_ion_handlers
+
+    # the renamed handler is still accepted under its old name
+    assert parse_ion_handlers([[26, [[2, "cmfgen"], [3, "qub_data"]]]]) == [(26, [(2, "cmfgen"), (3, "qub")])]
+
+    with pytest.raises(ValueError, match="unknown handler 'cmfgne'"):
+        parse_ion_handlers([[26, [[2, "cmfgne"]]]])
+    with pytest.raises(TypeError, match="names no handler"):
+        parse_ion_handlers([[26, [2]]])
+    with pytest.raises(TypeError, match=r"not an \[ion_stage, handler\] pair"):
+        parse_ion_handlers([[26, [["2"]]]])
+    with pytest.raises(TypeError, match=r"not an \[ion_stage, handler\] pair"):
+        parse_ion_handlers([[26, ["2"]]])
+
+
+def test_add_level_ids_forbidden_name_joins():
+    """Name-keyed transitions get their ids in the reader's row order, and a bad name fails.
+
+    An inner join drops a transition whose name matches no level without a word, and a name that
+    two levels share multiplies its rows. Both used to print a warning; adata.txt then disagreed
+    with transitiondata.txt.
+    """
+    dflevels = pl.DataFrame({"levelid": [0, 1, 2], "levelname": ["a", "b", "c"], "parity": [0, 1, 0]})
+    dftransitions = pl.DataFrame({"namefrom": ["b", "a"], "nameto": ["c", "c"], "A": [1.0, 2.0]})
+
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    assert result["lowerlevel"].to_list() == [1, 0]
+    assert result["upperlevel"].to_list() == [2, 2]
+    assert result["forbidden"].to_list() == [False, True]
+
+    with pytest.raises(ValueError, match="nameto join changed the transition count from 1 to 0"):
+        add_level_ids_forbidden(dflevels, pl.DataFrame({"namefrom": ["a"], "nameto": ["x"], "A": [1.0]}))
+
+    dflevels_duplicate = pl.DataFrame({"levelid": [0, 1, 2], "levelname": ["a", "b", "a"], "parity": [0, 1, 0]})
+    with pytest.raises(ValueError, match="namefrom join changed the transition count from 1 to 2"):
+        add_level_ids_forbidden(dflevels_duplicate, pl.DataFrame({"namefrom": ["a"], "nameto": ["b"], "A": [1.0]}))
+
+
+def test_transition_count_of_level():
+    """Both levels of every transition count, by level id, and an id outside the level list fails."""
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0, 1], "upperlevel": [1, 2, 2], "A": [1.0, 1.0, 1.0]})
+    assert transition_count_of_level(dftransitions, 4) == [2, 2, 2, 0]
+    assert transition_count_of_level(pl.DataFrame(), 3) == [0, 0, 0]
+    with pytest.raises(ValueError, match="name level ids 0 to 2, but the ion has 2 levels"):
+        transition_count_of_level(dftransitions, 2)
+
+
+def test_write_transition_data_format():
+    """The %-format writer gives the bytes of the f-string it replaced, for every column type."""
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": [0, 1],
+            "upperlevel": [1, 2],
+            "A": [1.5e-3, 2.0e8],
+            "coll_str": [-1.0, 3.5],
+            "forbidden": [False, True],
+        }
+    )
+    out = io.StringIO()
+    write_transition_data(out, 26, 2, dftransitions, io.StringIO())
+
+    expected = f"{26:7d}{2:7d}{2:12d}\n"
+    expected += f"{1:4d} {2:4d} {1.5e-3:11.5e} {-1.0:9.2e} {0:d}\n"
+    expected += f"{2:4d} {3:4d} {2.0e8:11.5e} {3.5:9.2e} {1:d}\n"
+    expected += "\n"
+    assert out.getvalue() == expected
+
+
+def test_readhillierdata_bare_proton_has_one_state():
+    """The H II placeholder level has g = 1: ARTIS divides the H I to H II Saha ratio by it."""
+    ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(1, 2, io.StringIO())
+    assert ionization_energy_ev == 0.0
+    assert dflevels["g"].to_list() == [1.0]
+    assert dftransitions.is_empty()
+
+
+def test_get_level_valence_n_glued_digit_runs():
+    """A digit run after an orbital letter is a count and an n, and the split follows one rule.
+
+    A two-digit run that ends in 0 is a two-digit n. A three-digit run is a two-digit count and
+    a one-digit n, unless that n would be 0. The QUB parser took the first digit alone as the
+    count, so 4f145d gave n = 45, and the Kurucz parser always split a three-digit run as 2 + 1,
+    so s210d gave n = 0.
+    """
+    assert readqubdata.get_level_valence_n("4f145d_2De[3/2]_id=1") == 5
+    assert readqubdata.get_level_valence_n("4f146s_2Se[1/2]_id=2") == 6
+    assert readqubdata.get_level_valence_n("5s210d_2De[3/2]_id=3") == 10
+    assert readqubdata.get_level_valence_n("3d104s_2Se[1/2]_id=4") == 4
+    assert readqubdata.get_level_valence_n("3d24s_x") == 4
+    assert readqubdata.get_level_valence_n("5s10d_x") == 10
+
+    assert readkuruczdata.get_level_valence_n("s210d 2D,enpercm=1.0,j=0.5") == 10
+    assert readkuruczdata.get_level_valence_n("f125d 2D,enpercm=1.0,j=0.5") == 5
+    assert readkuruczdata.get_level_valence_n("s25p 3P,enpercm=1.0,j=0.0") == 5
+    assert readkuruczdata.get_level_valence_n("s10d 1D,enpercm=1.0,j=2.0") == 10
+    assert readkuruczdata.get_level_valence_n("p610s 2S,enpercm=1.0,j=0.5") == 10
+
+
+def test_readdreamdata_rejects_an_unknown_level_type():
+    """A level type other than (o) or (e) fails instead of becoming even parity."""
+    from artisatomic import readdreamdata
+
+    row = {"Lower_Level": 0, "Lower_Type": "(o)", "Lower_g": 1}
+    assert readdreamdata.energytuplefromrow(row, "Lower").parity == 1
+    with pytest.raises(ValueError, match=r"level type '\(x\)'"):
+        readdreamdata.energytuplefromrow({**row, "Lower_Type": "(x)"}, "Lower")
+
+
+def test_groundstatesonlynist_names_a_missing_ion():
+    """An ion that the NIST ground-state table lacks fails with the ion in the message."""
+    from artisatomic import groundstatesonlynist
+
+    with pytest.raises(ValueError, match="no row for Z=1 ion_stage 1"):
+        groundstatesonlynist.read_ground_levels(1, 1, io.StringIO())
+
+
+def test_photfilereader_short_block_and_unknown_type(tmp_path):
+    """The reader stores a short tabulated block as read, and an unknown type does not clear the next block's name.
+
+    Both cases have no blank line between the blocks. The reader used to fill a short block with
+    zero rows up to the declared count, which the downsampling then read as sorted energies. It
+    also used to clear the name of the block after an unknown type on that block's own
+    "!Configuration name" line.
+    """
+    from artisatomic.readhillierdata import PhotFileReader
+
+    header = (
+        "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+        "3                                       !Number of energy levels\n"
+        "2.0D0                                   !Screened nuclear charge\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+    )
+    body = (
+        "A                                       !Configuration name\n"
+        "4                                       !Type of cross-section\n"
+        "2                                       !Number of cross-section points\n"
+        "1.0\n2.0\n"
+        "B                                       !Configuration name\n"
+        "20                                      !Type of cross-section\n"
+        "3                                       !Number of cross-section points\n"
+        "1.0 2.0\n1.5 1.0\n"
+        "C                                       !Configuration name\n"
+        "20                                      !Type of cross-section\n"
+        "2                                       !Number of cross-section points\n"
+        "1.0 4.0\n1.5 3.0\n"
+    )
+    photfile = tmp_path / "phot_test"
+    photfile.write_text(header + body)
+
+    flog = io.StringIO()
+    levelindices = {"A": 0, "B": 1, "C": 2}
+    reader = PhotFileReader(56, 2, 1, [911.0, 455.5, 300.0], levelindices, levelindices, flog)
+    reader.read_file(0, photfile, photfile.name)
+
+    assert reader.unknown_phixs_types == [4]
+    assert reader.phixs_type_levels[4] == {"A"}
+    assert reader.phixs_type_levels[20] == {"B", "C"}
+    assert set(reader.phixstables[0]) == {"B", "C"}
+    # the short block keeps its two rows, and the log says so. The file gives the energy as a
+    # multiple of the level's threshold, and the table holds it in Rydberg.
+    threshold_b = hc_in_ev_angstrom / 455.5 / ryd_to_ev
+    assert reader.phixstables[0]["B"].shape == (2, 2)
+    assert reader.phixstables[0]["B"][:, 0].tolist() == pytest.approx([1.0 * threshold_b, 1.5 * threshold_b])
+    assert reader.phixstables[0]["B"][:, 1].tolist() == [2.0, 1.0]
+    assert "B declares 3 cross-section rows but the block ends after 2" in flog.getvalue()
+    assert reader.phixstables[0]["C"].shape == (2, 2)
+    assert reader.phixstables[0]["C"][:, 1].tolist() == [4.0, 3.0]
+    # the D exponent of the screened nuclear charge is read, and 2 matches the ion stage
+    assert "screened nuclear charge" not in flog.getvalue()
+
+
+def test_readhillierdata_get_level_valence_n():
+    """The last orbital of a CMFGEN configuration gives n; a merged shell gives its n; no orbital gives None."""
+    assert readhillierdata.get_level_valence_n("2s2_2p3(4So)3p_5Pe[1]") == 3
+    assert readhillierdata.get_level_valence_n("3d6(5D)4s_a6De[9/2]") == 4
+    assert readhillierdata.get_level_valence_n("2s2_18w_2W") == 18
+    assert readhillierdata.get_level_valence_n("3d5(4D)4po[3]") == 4
+    # the seniority digit and parity letter of a term are not an orbital
+    assert readhillierdata.get_level_valence_n("3d7_a2D2e[5/2]") == 3
+    assert readhillierdata.get_level_valence_n("3d5_4s2_2F1e[5/2]") == 4
+    assert readhillierdata.get_level_valence_n("1___") is None
+    assert readhillierdata.get_level_valence_n("8SNG") is None
+
+
+def test_adf04_level_layout():
+    """The adf04 column layout is read from the line, not from the element."""
+    tyndall_co = "    1   3s23p63d7(4F)   (4)3( 4.5)               0.0000"
+    tyndall_fe = "    1 3S2 3P6 3D6       (5)2( 4.0)               0.0000"
+    standard_sr = "    1          4p65s2(1S)   (1)0( 0.0)            0.0000"
+    assert readqubdata.adf04_level_layout(tyndall_co) == "tyndall"
+    assert readqubdata.adf04_level_layout(tyndall_fe) == "tyndall"
+    assert readqubdata.adf04_level_layout(standard_sr) == "standard"
+    with pytest.raises(ValueError, match="no \\(2S\\+1\\) group"):
+        readqubdata.adf04_level_layout("    1 3S2 3P6 3D6 0.0000")
+
+
+def test_cmfgen_fit_functions():
+    """Each analytic fit gives its formula's value at the threshold and at one point above it.
+
+    The grid is 1 + 20 x^2 times the threshold for x from 0 to 1 in steps of 0.001, so index 500
+    is 6 times the threshold.
+    """
+    lambda_angstrom = 911.753  # the H I edge
+    threshold_ev = hc_in_ev_angstrom / lambda_angstrom
+    threshold_ryd = threshold_ev / ryd_to_ev
+
+    # type 1: sigma_t (beta + (1 - beta) / u) u^-s
+    table = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0)
+    assert table.shape == (1000, 2)
+    assert table[0, 0] == pytest.approx(threshold_ryd)
+    assert table[0, 1] == 2.0
+    u = table[500, 0] / threshold_ryd
+    assert u == pytest.approx(6.0)
+    assert table[500, 1] == pytest.approx(2.0 * (0.5 + 0.5 / u) * u**-3.0)
+
+    # type 7: the same fit with the edge moved up by nu_o, so the cross section is zero below it.
+    # nu_o = E_th / h puts the edge at twice the threshold energy.
+    nu_o_1e15hz = threshold_ev / h_in_ev_seconds / 1e15
+    table7 = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=nu_o_1e15hz)
+    assert table7[0, 1] == 0.0
+    assert table7[200, 1] == 0.0  # u = 1.8
+    assert table7[300, 1] > 0.0  # u = 2.8
+
+    # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
+    table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
+    assert table5[0, 1] == pytest.approx(10.0)
+    x = np.log10(3.0)
+    assert table5[500, 1] == pytest.approx(10 ** (1.0 + 0.5 * x) * (3.0 / 6.0) ** 2)
+
+    # type 6: a cubic in x = log10(u) below the break e, a straight line 10^(f + g x) above it
+    table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.0, 0.0, 0.5, 0.0, -2.0, 0.0)
+    assert table6[0, 1] == pytest.approx(10.0)
+    assert table6[500, 1] == pytest.approx(6.0**-2.0)
+
+    # type 9: the Verner et al. (1996) H I ground-state fit gives the 6.3 Mb threshold cross section
+    fit = readhillierdata.VY95PhixsFitRow(
+        n=1, l=0, E_th_eV=13.6, E_0=0.4298, sigma_0=5.475e4, y_a=32.88, P=2.963, y_w=0.0
+    )
+    table9 = readhillierdata.get_vy95_phixstable(lambda_angstrom, [fit])
+    y = threshold_ev / 0.4298
+    q = 5.5 - 0.5 * 2.963
+    expected = 5.475e4 * (y - 1) ** 2 * y**-q * (1 + np.sqrt(y / 32.88)) ** -2.963
+    assert table9[0, 1] == pytest.approx(expected)
+    assert table9[0, 1] == pytest.approx(6.3, rel=0.02)
+
+
+def test_read_adf04_selects_the_nearest_temperature():
+    """The collision strengths come from the tabulated temperature nearest to -electrontemperature.
+
+    The Co III grid runs from 3150 K to 7590 K in steps of about 5 percent, so 6000 K picks the
+    6030 K column and a low temperature picks the first column. A hard-coded string per element
+    chose 5010 K before, whatever the command line said.
+    """
+    flog = io.StringIO()
+    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=6000.0)
+    assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
+
+    flog = io.StringIO()
+    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=1000.0)
+    assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
+
+    assert set(upsilons_6000) == set(upsilons_low)
+    assert any(upsilons_6000[key] != upsilons_low[key] for key in upsilons_6000)
+
+    assert readqubdata.adf04_number("5.01+03") == 5010.0
+    assert readqubdata.adf04_number("1.00-02") == 0.01

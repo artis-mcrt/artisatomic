@@ -9,7 +9,6 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
-from artisatomic.base import transition_count_of_level_name
 
 jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
@@ -38,6 +37,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
+
+    def require(condition: bool, message: str) -> None:
+        # not an assert: input validation must survive python -O
+        if not condition:
+            msg = f"{filename}: {message}"
+            raise ValueError(msg)
+
     # the header holds at most 6 lines before the "# Z ion_stage" line, and 5 lines after it.
     # A blank line reads as a null, which strip() cannot take.
     headerlines = [(line or "").strip() for line in scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"]]
@@ -48,7 +54,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
         if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
             break
-    assert readlinein == f"# {atomic_number} {ion_stage}"
+    require(readlinein == f"# {atomic_number} {ion_stage}", f"no '# {atomic_number} {ion_stage}' line in the header")
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
     log_and_print(flog, f"levels: {levelcount}")
@@ -56,10 +62,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
-    assert headerlines[linenumber + 4] == "# Energy levels"
+    require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionization energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
-    assert all(item in read_column_headers for item in expected_column_headers)
+    require(
+        all(item in read_column_headers for item in expected_column_headers),
+        f"the level column headers {read_column_headers} lack one of {expected_column_headers}",
+    )
 
     # the level section starts on the line after the column headers
     dflines = scan_file_lines(jpltpath / filename, skip_lines=linenumber + 6)
@@ -67,13 +76,18 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # the transitions follow the levels, after a section title that some files leave out
     sectionheaders = dflines.slice(levelcount, 2).collect()["line"].to_list()
     line = sectionheaders[0].strip()
-    assert line in {"# Transitions", "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"}
+    transitionheader = "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
+    require(line in {"# Transitions", transitionheader}, f"unexpected line after the level section: {line!r}")
     if line == "# Transitions":
-        assert sectionheaders[1].strip() == "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
+        require(sectionheaders[1].strip() == transitionheader, "no transition column header after '# Transitions'")
     transitionsectionstart = levelcount + (2 if line == "# Transitions" else 1)
 
     dflevels = (
         dflines.slice(0, levelcount)
+        # a line with no text holds no level: an empty line reads as a null and a line of spaces
+        # as "", and neither has a character left. The count test below rejects
+        # the file if such a line falls inside the section rather than after it.
+        .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
         .select(
             levelid=pl.col("line").str.slice(0, 7).str.strip_chars(),
             g=pl.col("line").str.slice(7, 8).str.strip_chars(),
@@ -83,7 +97,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         )
         .select(
             energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
-            parity=pl.when(pl.col("parity") == "odd").then(1).otherwise(0),
+            # odd -> 1, even -> 0, and anything else stays null, which the check below rejects:
+            # a silent 0 would give the Laporte rule a parity the file did not state
+            parity=pl.when(pl.col("parity") == "odd").then(1).when(pl.col("parity") == "even").then(0),
             g=pl.col("g").cast(pl.Float64),
             # Every expression in one select() reads the INPUT frame, so both columns below
             # are the file's own values, not the ones being computed alongside them: the name
@@ -93,28 +109,29 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             levelname=pl.format("{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration")),
             levelid=pl.col("levelid").cast(pl.Int64) - 1,
         )
-        # an empty line holds no level, and gives a null in every column. The count test below
-        # rejects the file if such a line falls inside the section rather than after it.
-        .filter(pl.col("levelid").is_not_null())
         .collect()
     )
 
-    assert dflevels.height == levelcount
+    require(dflevels.height == levelcount, f"the header declares {levelcount} levels but {dflevels.height} were read")
+    require(dflevels["parity"].null_count() == 0, "a level has a parity that is not 'odd' or 'even'")
 
     dftransitions = (
         dflines.slice(transitionsectionstart)
+        # the file may end with a blank line, which holds no transition
+        .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
         .select(
             # the file numbers levels from one; level ids are zero-based in memory
             lowerlevel=pl.col("line").str.slice(7, 8).str.strip_chars().cast(pl.Int64) - 1,
             upperlevel=pl.col("line").str.slice(0, 7).str.strip_chars().cast(pl.Int64) - 1,
             g_u_times_A=pl.col("line").str.slice(30, 13).str.strip_chars().cast(pl.Float64),
         )
-        # the file may end with a blank line, which holds no transition
-        .filter(pl.col("lowerlevel").is_not_null())
         .collect()
     )
 
-    assert dftransitions.height == transitioncount
+    require(
+        dftransitions.height == transitioncount,
+        f"the header declares {transitioncount} transitions but {dftransitions.height} were read",
+    )
 
     # a level number outside the level section would vanish in the inner joins of
     # add_level_ids_forbidden() without a message, while adata.txt still counts the transition.
@@ -150,11 +167,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
         dftransitions = dftransitions_filtered
 
-    # count after the self-transition filter, so the counts in adata.txt agree with the
-    # transitions present in transitiondata.txt
-    transition_counts = transition_count_of_level_name(dflevels, dftransitions)
-
-    return ionization_energy_in_ev, dflevels, dftransitions, transition_counts
+    return ionization_energy_in_ev, dflevels, dftransitions
 
 
 def get_level_valence_n(levelname: str) -> int | None:

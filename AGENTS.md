@@ -50,7 +50,7 @@ CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly erro
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionization cross sections.
-- `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `simple_handlers` registry maps each handler name to the reader, the level-name parser, and the return shape. Add a data source with an entry there.
+- `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
 - `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makerecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makechargetransferfile` entry point.
 - `tests/` contains test configurations and reference checksums for each data source. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.

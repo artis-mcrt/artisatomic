@@ -17,14 +17,8 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
-from artisatomic.base import transition_count_of_level_name
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
-
-
-def in_testmode() -> bool:
-    """Say whether the test mode is active. The test mode reads only the test_sample directory."""
-    return TESTMODE
 
 
 def get_basepath(withforbidden: bool) -> Path:
@@ -35,7 +29,7 @@ def get_basepath(withforbidden: bool) -> Path:
     every request resolves to the test_sample directory from testdata.tar.xz.
     """
     datapath = PYDIR / ".." / "atomic-data-floers25"
-    if in_testmode():
+    if TESTMODE:
         return datapath / "test_sample"
     return datapath / ("OutputFiles_withforbidden" if withforbidden else "OutputFiles")
 
@@ -60,8 +54,8 @@ def extend_ion_list(ion_handlers, calibrated=True):
         raise FileNotFoundError(msg)
 
     # in the test mode the private path equals the public path, so no private search may run
-    use_private = not in_testmode() and basepath_private.is_dir()
-    if not use_private and not in_testmode():
+    use_private = not TESTMODE and basepath_private.is_dir()
+    if not use_private and not TESTMODE:
         print(f"Floers+25: skipped the private directory {basepath_private} because it does not exist")
 
     # the searches run in priority order, because add_handler_if_not_set() keeps the first
@@ -226,7 +220,7 @@ def read_levels_and_transitions(
 
     # the handler name selects the directory. The floers25uncalib handler has no "withforbidden"
     # variant, so it searches the private directory and then the public directory.
-    if withforbidden or calibrated or in_testmode():
+    if withforbidden or calibrated or TESTMODE:
         basepaths = [get_basepath(withforbidden=withforbidden)]
     else:
         basepaths = [get_basepath(withforbidden=True), get_basepath(withforbidden=False)]
@@ -364,11 +358,6 @@ def read_levels_and_transitions(
     if n_paritymatch > 0:
         log_and_print(flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity")
 
-    # count after the merge of duplicate level pairs. The counts in adata.txt then agree with
-    # transitiondata.txt. Count per level index, not per configuration string: several levels
-    # share a configuration.
-    transition_counts = transition_count_of_level_name(dflevels, dftransitions, levelidcolumn="Index")
-
     # use standard artisatomic column names. The forbidden flag comes from the Type column
     # above, so add_level_ids_forbidden() does not derive it from the parity.
     dflevels = dflevels.select(
@@ -378,7 +367,7 @@ def read_levels_and_transitions(
         energyabovegsinpercm=pl.col("Energy"),
     )
 
-    return ionization_energy_in_ev, dflevels, dftransitions, transition_counts
+    return ionization_energy_in_ev, dflevels, dftransitions
 
 
 def get_level_valence_n(levelname: str) -> int | None:
