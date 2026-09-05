@@ -457,8 +457,8 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
-    # the limit bounds the levels considered, not the tables produced: an unbound level inside it
-    # is skipped but still counts, so asking for 3 here yields only the one bound level below them
+    # the lowest levels are the lowest by energy, not the first rows: with two unbound levels in
+    # rows 1 and 2, asking for 3 gives the three bound levels in rows 0, 3 and 4
     unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
     dflevels_partly_unbound = dflevels.with_columns(
         energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
@@ -473,7 +473,50 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         args=args,
         flog=io.StringIO(),
     )
-    assert np.count_nonzero(~np.isnan(thresholds)) == 1
+    assert [bool(targets) for targets in targetfractions] == [True, False, False, True, True]
+
+    # the limit bounds the levels considered, not the tables produced: an unbound level among the
+    # lowest by energy is skipped but still counts, so asking for 4 here gives the same three
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=4)
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_partly_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=args,
+        flog=io.StringIO(),
+    )
+    assert np.count_nonzero(~np.isnan(thresholds)) == 3
+
+
+def test_match_hydrogenic_phixs_takes_the_lowest_levels_by_energy():
+    """A reader that keeps its file's order still gets the estimate for its lowest levels by energy."""
+    rhd.read_hyd_phixsdata()
+    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    # row 0 is the highest level and row 1 the ground state
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "energyabovegsinpercm": [5000.0, 0.0, 2500.0],
+            "g": [2.0, 2.0, 2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * 3,
+        }
+    )
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=phixs_args(nlevels_hydrogenic_for_unknown_phixs=2),
+        flog=io.StringIO(),
+    )
+    assert [bool(targets) for targets in targetfractions] == [False, True, True]
+    # each threshold belongs to its own level id, not to its position in the sorted order
+    assert thresholds[1] == ionization_energy_ev
+    assert thresholds[2] == pytest.approx(ionization_energy_ev - hc_in_ev_cm * 2500.0)
+    assert np.isnan(thresholds[0])
 
 
 def test_write_phixs_data_with_no_phixs_arrays():
@@ -2746,3 +2789,59 @@ def test_read_adf04_selects_the_nearest_temperature():
 
     assert readqubdata.adf04_number("5.01+03") == 5010.0
     assert readqubdata.adf04_number("1.00-02") == 0.01
+
+
+def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypatch, tmp_path):
+    """The ground level's Lam(A) must give the header's ionization energy to four significant figures.
+
+    The header value is the one adata.txt gets. A difference above that precision means the header
+    and the level table disagree, which the ion log must say. The H I file is copied with its
+    header value raised by one percent; the unchanged file gives no warning.
+    """
+    import contextlib
+
+    ionfiles = readhillierdata.ions_data[1, 1]
+    with xopen_check_extension(readhillierdata.hillier_osc_filename(1, 1)) as fosc:
+        lines = fosc.readlines()
+    for index, line in enumerate(lines):
+        if line.rstrip().endswith("!Ionization energy"):
+            value = line.split()[0]
+            lines[index] = line.replace(value, f"{float(value) * 1.01:.4f}", 1)
+            break
+    else:
+        pytest.fail("the H I oscillator file has no '!Ionization energy' line")
+    (tmp_path / "hi_osc.dat").write_text("".join(lines))
+
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        ionization_energy_ev, _, _ = readhillierdata.read_levels_and_transitions(1, 1, flog)
+    assert "WARNING: the ground level Lam(A)" not in flog.getvalue()
+
+    # an absolute folder path replaces the ion folder in the joined path
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (1, 1),
+        ionfiles._replace(folder=str(tmp_path), levelstransitionsfilename="hi_osc.dat"),
+    )
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        ionization_energy_raised_ev, _, _ = readhillierdata.read_levels_and_transitions(1, 1, flog)
+    assert ionization_energy_raised_ev == pytest.approx(ionization_energy_ev * 1.01, rel=1e-5)
+    assert "WARNING: the ground level Lam(A)" in flog.getvalue()
+
+
+def test_readhillierdata_rejects_a_file_with_no_ionization_energy(monkeypatch, tmp_path):
+    """A file with no '!Ionization energy' line fails with that message, not with a division by zero."""
+    import contextlib
+
+    ionfiles = readhillierdata.ions_data[1, 1]
+    with xopen_check_extension(readhillierdata.hillier_osc_filename(1, 1)) as fosc:
+        lines = [line for line in fosc.readlines() if not line.rstrip().endswith("!Ionization energy")]
+    (tmp_path / "hi_osc.dat").write_text("".join(lines))
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (1, 1),
+        ionfiles._replace(folder=str(tmp_path), levelstransitionsfilename="hi_osc.dat"),
+    )
+    with contextlib.redirect_stdout(io.StringIO()), pytest.raises(ValueError, match="no '!Ionization energy' line"):
+        readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
