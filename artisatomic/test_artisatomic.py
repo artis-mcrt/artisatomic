@@ -2644,7 +2644,7 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     """The reader stores a short tabulated block as read, and an unknown type does not clear the next block's name.
 
     Both cases have no blank line between the blocks. The reader used to fill a short block with
-    zero rows up to the declared count, which the downsampling then read as sorted energies. It
+    zero rows up to the declared count, which the downsample then read as sorted energies. It
     also used to clear the name of the block after an unknown type on that block's own
     "!Configuration name" line.
     """
