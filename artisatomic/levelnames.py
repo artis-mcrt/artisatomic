@@ -130,7 +130,7 @@ def interpret_configuration(
         if all(char not in lchars for char in instr):
             # This will be an incorrectly formatted QUB file with no term
             if warn:
-                print("Warning: Check QUB file formatting")
+                print("Warning: Check the format of the QUB file")
         else:
             # drop the parity letter, so the term parse below sees the term only
             instr = instr[:-1]
@@ -151,7 +151,7 @@ def interpret_configuration(
         instr = instr[:-1]
         if all(char not in lchars for char in instr):
             if warn:
-                print("Warning: Check QUB file formatting")
+                print("Warning: Check the format of the QUB file")
             break
 
     if instr and str.isdigit(instr[-1]):
@@ -228,7 +228,7 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
         if not foundorbital and warn:
             # Do not fail silently: a skipped orbital means the parity (and therefore the forbidden
             # flags of every transition of this level) could come out wrong.
-            print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}', skipping it for the parity")
+            print(f"WARNING: could not read an orbital from '{orbitalstr}' in '{instr}'. The parity ignores it.")
 
 
 def has_merged_orbital(instr, hasterm: bool = True) -> bool:

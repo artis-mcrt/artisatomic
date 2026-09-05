@@ -29,25 +29,25 @@ def build_parser() -> argparse.ArgumentParser:
         "-phixsnuincrement",
         type=float,
         default=0.03,
-        help="Fraction of nu_edge incremented for each cross section point",
+        help="Step between two cross section points, as a fraction of nu_edge",
     )
     parser.add_argument(
         "-optimaltemperature",
         type=int,
         default=6000,
         help=(
-            "(Electron and excitation) temperature at which recombination rate "
-            "should be constant when downsampling cross sections"
+            "(Electron and excitation) temperature in K. When artisatomic downsamples the cross sections,"
+            " it keeps the recombination rate constant at this temperature."
         ),
     )
     parser.add_argument(
         "-electrontemperature",
         type=int,
         default=6000,
-        help="Temperature for choosing effective collision strengths",
+        help="Temperature in K at which artisatomic selects the effective collision strengths",
     )
     parser.add_argument(
-        "--nophixs", action="store_true", help="Don't generate cross sections and write to phixsdata_v2.txt file"
+        "--nophixs", action="store_true", help="Do not generate cross sections. Do not write phixsdata_v2.txt."
     )
 
     parser.add_argument(
@@ -55,13 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help=(
-            "Consider this many of the lowest levels by energy of any ion whose handler supplied no"
-            " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
-            " Negative values are rejected. Fewer tables than this can result, because a level"
-            " at or above the ionization energy is skipped but still counts towards the limit."
-            " An ion with even one cross section from its data source is left untouched, so"
-            " this never replaces or extends measured data. Excludes the top ion, which has no"
-            " upper ion to photoionise to."
+            "Estimate a hydrogenic cross section for this many of the lowest levels (by energy) of an ion"
+            " whose handler supplied no cross sections. Give 0 to disable the estimate. The program"
+            " rejects a negative value. The result can have fewer tables than this number, because a level"
+            " at or above the ionisation energy gets no table but still counts towards the limit."
+            " An ion with one or more cross sections from its data source keeps them unchanged, so"
+            " the estimate never replaces or extends measured data. The option does not apply to the"
+            " top ion, which has no upper ion to photoionise to."
         ),
     )
     return parser

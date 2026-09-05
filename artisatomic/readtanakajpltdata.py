@@ -62,8 +62,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     log_and_print(flog, f"transitions: {transitioncount}")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
-    require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionization energy")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
     require(
@@ -113,7 +113,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         .collect()
     )
 
-    require(dflevels.height == levelcount, f"the header declares {levelcount} levels but {dflevels.height} were read")
+    require(
+        dflevels.height == levelcount, f"the header declares {levelcount} levels but the file has {dflevels.height}"
+    )
     require(dflevels["parity"].null_count() == 0, "a level has a parity that is not 'odd' or 'even'")
 
     dftransitions = (
@@ -131,7 +133,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     require(
         dftransitions.height == transitioncount,
-        f"the header declares {transitioncount} transitions but {dftransitions.height} were read",
+        f"the header declares {transitioncount} transitions but the file has {dftransitions.height}",
     )
 
     # a level number outside the level section would vanish in the inner joins of

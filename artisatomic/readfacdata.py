@@ -155,7 +155,7 @@ def extend_ion_list(ion_handlers):
     if not basepath.is_dir():
         msg = (
             f"FAC data directory {basepath} not found."
-            " Set ARTISATOMIC_FAC_PATH to the directory holding the OptimizedFAC_lanthanides* folders."
+            " Set ARTISATOMIC_FAC_PATH to the directory that holds the OptimizedFAC_lanthanides* folders."
         )
         raise FileNotFoundError(msg)
 
@@ -221,7 +221,7 @@ def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[
 
     if skipped_count > 0:
         log_and_print(
-            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionization energy"
+            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
         )
 
     return transitions

@@ -264,7 +264,8 @@ def resolve_photoion_targetfractions(
     # rule, and the target levels would belong to the wrong ion.
     if not iondatalist[-1].is_top_ion or any(iondata.is_top_ion for iondata in iondatalist[:-1]):
         msg = (
-            "iondatalist must be one element's ions in ascending ion stage order, with only the last being the top ion"
+            "iondatalist must hold the ions of one element in ascending ion stage order."
+            " Only the last ion can be the top ion."
         )
         raise ValueError(msg)
 

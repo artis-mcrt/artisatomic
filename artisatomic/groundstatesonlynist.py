@@ -35,7 +35,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
         msg = f"groundstates.dat has no row for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
     energy_levels = [
         EnergyLevel(
             levelname=this_ion["config"].to_numpy()[0],

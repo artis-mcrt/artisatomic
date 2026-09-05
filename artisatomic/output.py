@@ -208,8 +208,8 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
         flog,
         f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
         f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
-        f" {strengthcol} values of this data set disagree. The {strengthcol} values are used, so"
-        f" these stay permitted.",
+        f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
+        f" these transitions stay permitted.",
     )
 
 
@@ -293,7 +293,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
             log_and_print(
                 flog,
-                f"Adding in {dfupsilon_only_transitions.height:d} extra transitions with only upsilon values",
+                f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values",
             )
 
             if not dfupsilon_only_transitions.is_empty():
@@ -350,7 +350,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 # its tables without a message.
                 if len(iondata.photoionization_crosssections) > 0 and not iondata.photoionization_targetfractions:
                     msg = (
-                        f"Z={atomic_number} ion_stage={ion_stage} has photoionization cross sections but no target"
+                        f"Z={atomic_number} ion_stage={ion_stage} has photoionisation cross sections but no target"
                         " fractions: call resolve_photoion_targetfractions() before write_output_files()"
                     )
                     raise ValueError(msg)
@@ -439,9 +439,9 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
         log_and_print(
             flog,
             f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
-            f" ({withcollstr:d} of them with a collision strength). ARTIS gives every transition a"
-            " frequency from the level energies and drops the ones that come out at zero, so these"
-            " are written but not used.",
+            f" ({withcollstr:d} of them with a collision strength). ARTIS computes the frequency of"
+            " each transition from the level energies and drops a transition with a frequency of zero."
+            " The output file has these transitions, but ARTIS does not use them.",
         )
 
     inverted = notabove.height - degenerate.height
@@ -450,7 +450,7 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
             flog,
             f"WARNING: {inverted:d} transitions have a lower level id whose energy is above the upper"
             " level's. The level list is not in energy order. ARTIS drops a transition with a"
-            " negative frequency, so these are written but not used.",
+            " negative frequency. The output file has these transitions, but ARTIS does not use them.",
         )
 
 
@@ -477,8 +477,8 @@ def write_transition_data(
         if not misordered.is_empty():
             levelid_lower, levelid_upper = misordered.select("lowerlevel", "upperlevel").row(0)
             msg = (
-                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that are not"
-                f" ordered with the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
+                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that do not"
+                f" name the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
             )
             raise ValueError(msg)
 
@@ -576,8 +576,8 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     if filled:
         log_and_print(
             flog,
-            f"Worked out a photoionization threshold for {filled} levels whose reader gave none,"
-            " from the ionization energy and the two level energies, as ARTIS does",
+            f"Computed a photoionisation threshold for {filled} levels whose reader gave none."
+            " The threshold comes from the ionisation energy and the two level energies, as in ARTIS.",
         )
     return thresholds
 
@@ -620,12 +620,12 @@ def write_phixs_data(
     if nothreshold:
         log_and_print(
             flog,
-            f"{nothreshold} of them have no threshold energy, and are written with a threshold of"
-            " zero. ARTIS takes the threshold from the level energies, so their cross sections are"
-            " used in full.",
+            f"{nothreshold} of them have no threshold energy, so the output gives them a threshold of"
+            " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
+            " in full.",
         )
     flog.write(
-        f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
+        f"Downsample of the cross sections with T={args.optimaltemperature} Kelvin, "
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
@@ -633,7 +633,7 @@ def write_phixs_data(
     # purpose, and that is not an error. An example is match_hydrogenic_phixs, which does this
     # for a ground state at or above the ionisation energy.
     if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
-        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
+        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionisation cross section"
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)
 

@@ -59,7 +59,7 @@ def read_ionization_data(atomic_number, ion_stage):
     He III is a bare nucleus, so the file has no entry for it. The function uses a sentinel instead.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
@@ -81,7 +81,7 @@ def read_levels_data(atomic_number, ion_stage):
     Levels have no spectroscopic names, so the name of each level holds its zero-based level number.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     levels_data = aoife_dataset["/levels_data"]
 
     energy_levels: list[EnergyLevelRow] = []
@@ -135,7 +135,7 @@ def read_lines_data(atomic_number, ion_stage):
     file gives no collision strengths.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     lines_data = aoife_dataset["/lines_data"]
 
     transitions = []

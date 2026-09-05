@@ -71,7 +71,7 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
             if isinstance(entry, int):
                 msg = (
                     f"Z={atomic_number} ion stage {entry} in artisatomicionhandlers.json names no handler."
-                    " Every ion must be given as [ion_stage, handler]."
+                    " Write every ion as [ion_stage, handler]."
                 )
                 raise TypeError(msg)
             try:

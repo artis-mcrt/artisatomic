@@ -140,7 +140,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
         msg = (
             f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
-            f" from its closest level, above the tolerance of {MATCH_TOLERANCE_PERCM} cm^-1."
+            f" from its closest level. The tolerance is {MATCH_TOLERANCE_PERCM} cm^-1."
             " The level file and the transition file do not match."
         )
         raise ValueError(msg)
@@ -157,7 +157,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         log_and_print(flog, f"WARNING: {ambiguouscount} level matches have a second level equally close")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV (NIST)")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
     # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does

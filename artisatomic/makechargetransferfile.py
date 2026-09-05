@@ -321,12 +321,12 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
     for k, line in enumerate(line for line in lines[1:] if line.strip()):
         vals = [float(x) for x in line.split()]
         if len(vals) != ncols:
-            msg = f"expected {ncols} columns: {line}"
+            msg = f"the Cloudy line does not have {ncols} columns: {line}"
             raise ValueError(msg)
         nelem, ionindex = divmod(k, 4)
         rows[nelem + 1, ionindex + 1] = vals
     if len(rows) != 120:
-        msg = "expected 30 elements with 4 rows each"
+        msg = "the Cloudy file does not have 30 elements with 4 rows each"
         raise ValueError(msg)
     return rows
 
@@ -392,7 +392,7 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
         parts = line.split()
         # not an assert: input validation must survive python -O
         if len(parts) != 8:
-            msg = f"expected 8 columns in the AR85 table: {line}"
+            msg = f"the AR85 table line does not have 8 columns: {line}"
             raise ValueError(msg)
         z, nelectrons = int(parts[0]), int(parts[1])
         a, b, c, d, tmin, tmax = (float(x) for x in parts[2:8])
@@ -584,7 +584,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print("Reactions with hydrogen (Cloudy carrying KF96 plus updates):")
+    print("Reactions with hydrogen (Cloudy, with KF96 plus updates):")
     kf96_entries, kf96_report = get_kf96_h_entries(args.sourcedir)
     print("Recombination with neutral helium (AR85):")
     he_entries = get_he_entries(args.sourcedir)

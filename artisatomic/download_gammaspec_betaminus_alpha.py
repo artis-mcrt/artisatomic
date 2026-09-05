@@ -94,7 +94,7 @@ def main():
                 response.raise_for_status()
                 textdata = response.text
                 if "<pre>" not in textdata:
-                    print(f"  no table data returned from {url}")
+                    print(f"  NuDat returned no table data from {url}")
                     nuclides_without_table.append(strnuclide)
                     continue
 
@@ -216,7 +216,7 @@ def main():
                     else:
                         print("empty DataFrame")
                 if not found_groundlevel:
-                    print("  ERROR! did not find ground level")
+                    print("  ERROR! the table has no ground level")
 
     # a run that skipped a nuclide must not end with an exit code of 0 and a missing file
     if nuclides_without_table:

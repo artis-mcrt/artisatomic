@@ -295,8 +295,8 @@ def read_adf04(
             else:
                 log_and_print(
                     flog,
-                    f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
-                    f" {upsilondict[levelidpair]:5.2e} instead of using {upsilon:5.2e}",
+                    f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
+                    f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
 
     log_and_print(flog, f"Read {len(energylevels):d} levels")
@@ -304,7 +304,7 @@ def read_adf04(
     if skipped_rows:
         log_and_print(flog, f"Skipped rows without a numeric level id: {skipped_rows:d}")
     if unreadable_rows:
-        log_and_print(flog, f"Skipped collision rows that could not be read: {unreadable_rows:d}")
+        log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
@@ -497,7 +497,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 .collect()
             )
             if photdata.null_count().sum_horizontal().item() > 0:
-                msg = f"Columns of {filename} are not where they are expected: a value is missing."
+                msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
                 raise ValueError(msg)
             phixstables = {}
 
@@ -512,7 +512,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                     log_and_print(
                         flog,
                         f"WARNING: level {lowerlevelid} has no positive cross section to target"
-                        f" {targetcolumn - 1}, so that target is dropped",
+                        f" {targetcolumn - 1}, so the reader drops that target",
                     )
                     continue
                 phixstables[targetcolumn] = phixstable
@@ -680,7 +680,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 photoionization_crosssections[levelid] = phixsvalues
 
     else:
-        log_and_print(flog, f"WARNING: no QUB photoionization data for Z={atomic_number} ion_stage {ion_stage}")
+        log_and_print(flog, f"WARNING: no QUB photoionisation data for Z={atomic_number} ion_stage {ion_stage}")
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
 
     return PhixsData(

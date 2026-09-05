@@ -137,7 +137,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # DREAM has no ionisation energies, so take them from NIST as the other handlers do
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 

@@ -187,8 +187,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     lisbonpath = Path(os.environ.get("ARTISATOMIC_LISBON_PATH", PYDIR / ".." / "atomic-data-lisbon")).resolve()
     if not lisbonpath.is_dir():
         msg = (
-            f"Lisbon data directory {lisbonpath} not found. Set ARTISATOMIC_LISBON_PATH to the directory holding the"
-            " per-ion <El>/<El><Stage>/<El><Stage>_Levels.csv and _Transitions.csv files."
+            f"Lisbon data directory {lisbonpath} not found. Set ARTISATOMIC_LISBON_PATH to the directory that holds"
+            " the per-ion <El>/<El><Stage>/<El><Stage>_Levels.csv and _Transitions.csv files."
         )
         raise FileNotFoundError(msg)
 
@@ -215,7 +215,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # from NIST, as every other reader whose data set carries no ionisation energy does. This was
     # -1, which went into adata.txt verbatim as the ion's ionisation energy.
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 

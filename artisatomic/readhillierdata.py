@@ -329,7 +329,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
         if parity < 0:
-            print(f"WARNING: Can't read parity from JJ coupling state '{config}'")
+            print(f"WARNING: could not read the parity from the JJ coupling state '{config}'")
         return (-1, -1, parity)
 
     lposition = -1
@@ -566,7 +566,7 @@ def read_levels_and_transitions_from_file(
                 # the header gives the value in cm^-1 to the full precision of the file. The Lam(A)
                 # column of the level table has four significant figures only.
                 hillier_ionization_energy_ev = fortran_float(row[0]) * hc_in_ev_cm
-                log_and_print(flog, f"File specifies an ionization energy of {row[0]} cm^-1")
+                log_and_print(flog, f"File specifies an ionisation energy of {row[0]} cm^-1")
             elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
                 format_date = row[0]
                 print(f"Format date: {format_date}")
@@ -581,7 +581,7 @@ def read_levels_and_transitions_from_file(
                 msg = f"{filename} gives a format date of {format_date} but carries no column header"
                 raise ValueError(msg)
             row_format_energy_level = hillier_rowformat_noheader
-            print("File has no column header, assuming columns:")
+            print("The file has no column header. The reader assumes these columns:")
             print(f"  {row_format_energy_level}")
 
         # the file columns vary by ion, so find where the ones we keep sit in each row
@@ -595,8 +595,8 @@ def read_levels_and_transitions_from_file(
         missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
         if missingcolumns:
             msg = (
-                f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
-                f" it has {row_format_energy_level}"
+                f"The level table of {filename} does not have the {', '.join(missingcolumns)} column(s)."
+                f" It has {row_format_energy_level}"
             )
             raise ValueError(msg)
 
@@ -621,7 +621,7 @@ def read_levels_and_transitions_from_file(
                     if relative_difference > 1e-3:
                         log_and_print(
                             flog,
-                            f"WARNING: the ground level Lam(A) {lambdaangstrom} gives an ionization energy of"
+                            f"WARNING: the ground level Lam(A) {lambdaangstrom} gives an ionisation energy of"
                             f" {ionization_energy_from_lambda_ev:.5f} eV, but the header gives"
                             f" {hillier_ionization_energy_ev:.5f} eV",
                         )
@@ -654,7 +654,7 @@ def read_levels_and_transitions_from_file(
                 # Neither is worth a line here. What remains is a name that we expected to read
                 # and could not.
                 if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                    log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
+                    log_and_print(flog, f"The Hillier level name '{levelname}' has no LS term")
 
                 if hillierlevelid != len(levelrows):
                     msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
@@ -669,12 +669,12 @@ def read_levels_and_transitions_from_file(
         # not a warning per level. H I and He II have only merged levels.
         log_and_print(
             flog,
-            f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity"
-            f" (every transition touching one is treated as permitted), e.g."
-            f" {', '.join(levels_without_parity[:5])}",
+            f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity, e.g."
+            f" {', '.join(levels_without_parity[:5])}. Every transition of such a level counts as"
+            " permitted.",
         )
     if len(levelrows) != expected_energy_levels:
-        msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
+        msg = f"{filename} declares {expected_energy_levels} levels but has {len(levelrows)}"
         raise ValueError(msg)
 
     # not an assert: this guards the ionisation energy that adata.txt gets. H II returns above
@@ -689,7 +689,7 @@ def read_levels_and_transitions_from_file(
 
     log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
-        msg = f"{filename} declares {expected_transitions} transitions but {dftransitions.height} were read"
+        msg = f"{filename} declares {expected_transitions} transitions but has {dftransitions.height}"
         raise ValueError(msg)
 
     # filter out levels with no transitions
@@ -854,7 +854,7 @@ class PhotFileReader:
         # a file with no "!Cross-section unit" line never leaves the header state. The reader
         # then skipped every level block with a warning, and the file gave no cross sections.
         if not self.in_header:
-            msg = f"{photfilename} has no '!Cross-section unit' line, so none of its cross sections were read"
+            msg = f"{photfilename} has no '!Cross-section unit' line, so the reader read none of its cross sections"
             raise ValueError(msg)
 
     def take_event_line(self, line: str) -> None:
@@ -889,9 +889,9 @@ class PhotFileReader:
                 self.j_splitting_seen = new_j_splitting_on
                 self.j_splitting_on = new_j_splitting_on
                 if self.j_splitting_on:
-                    log_and_print(self.flog, "File specifies J-splitting enabled")
+                    log_and_print(self.flog, "File specifies J-splitting = true")
             else:
-                msg = f'J-splitting not true or false: "{row[0]}"'
+                msg = f'J-splitting is not "true" or "false": "{row[0]}"'
                 raise ValueError(msg)
 
         if (len(row) >= 2 and " ".join(row[-2:]) == "!Configuration name") or " ".join(
@@ -899,7 +899,7 @@ class PhotFileReader:
         ) == "!Configuration name [*]":
             if not self.in_header:
                 log_and_print(
-                    self.flog, f"WARNING: no photoionisation target ({line.strip()}), skipping to the next line"
+                    self.flog, f"WARNING: no photoionisation target ({line.strip()}). The reader skips to the next line"
                 )
                 # Fe VIII and Ni X phot_data_A have lines before the header that end in
                 # "!Configuration name" and are not level blocks
@@ -934,8 +934,8 @@ class PhotFileReader:
             if zion_from_photfile != self.ion_stage:
                 log_and_print(
                     self.flog,
-                    f"WARNING: ignoring screened nuclear charge {zion_from_photfile} in {self.photfilename},"
-                    f" which disagrees with ion_stage {self.ion_stage}",
+                    f"WARNING: the screened nuclear charge {zion_from_photfile} in {self.photfilename}"
+                    f" disagrees with ion_stage {self.ion_stage}. The reader ignores it.",
                 )
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
@@ -985,14 +985,14 @@ class PhotFileReader:
         if len(energyryd) != self.pending_numpoints and (validate or len(energyryd) > self.pending_numpoints):
             msg = (
                 f"Z={self.atomic_number}, ion_stage={self.ion_stage}, lowerlevel={self.pending_levelname},"
-                f" crosssectiontype={self.crosssectiontype}: expecting {self.pending_numpoints:d}"
-                f" cross-section rows but found {len(energyryd):d}"
+                f" crosssectiontype={self.crosssectiontype}: the block declares {self.pending_numpoints:d}"
+                f" cross section rows but has {len(energyryd):d}"
             )
             raise ValueError(msg)
         if len(energyryd) < self.pending_numpoints:
             log_and_print(
                 self.flog,
-                f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross-section rows but"
+                f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
         # the rows the file gave, and no zero rows up to the declared count. The downsampling
@@ -1036,8 +1036,8 @@ class PhotFileReader:
             # for these types the x value is a fraction of the threshold, not an energy
             if abs(x[0] - 1.0) > 0.5:
                 print(
-                    f"{self.lowerlevelname} cross section type:{self.crosssectiontype}, {x[0]:.3f} is not near"
-                    f" one? might be energy instead? E_threshold = {self.thresholdenergyryd:.3f} Ry"
+                    f"{self.lowerlevelname} cross section type {self.crosssectiontype}: the first value {x[0]:.3f}"
+                    f" is not near one, so it can be an energy. E_threshold = {self.thresholdenergyryd:.3f} Ry"
                 )
         energyryd = x * self.thresholdenergyryd
         # the order test includes the last point of the block read so far
@@ -1048,14 +1048,14 @@ class PhotFileReader:
         decreasing = np.flatnonzero(steps < 0)
         if len(decreasing) > 0:
             msg = (
-                f"photoionization table for {self.lowerlevelname} first column decreases "
-                f"with energy {allenergy[decreasing[0]]} followed by {allenergy[decreasing[0] + 1]}"
+                f"the first column of the photoionisation table for {self.lowerlevelname} decreases"
+                f" from energy {allenergy[decreasing[0]]} to {allenergy[decreasing[0] + 1]}"
             )
             raise ValueError(msg)
         for index in np.flatnonzero(steps == 0):
             print(
-                f"WARNING: photoionization table for {self.lowerlevelname} first column duplicated "
-                f"energy value of {allenergy[index]}"
+                f"WARNING: the first column of the photoionisation table for {self.lowerlevelname} has the"
+                f" energy value {allenergy[index]} two times"
             )
         self.pending_energyryd.append(energyryd)
         self.pending_sigma.append(seg_f1[ispoint])
@@ -1100,9 +1100,11 @@ class PhotFileReader:
             if len(fitcoefficients) == 3:
                 n, l_start, l_end = fitcoefficients
                 if n > max_hyd_l_n:
-                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
+                    log_and_print(
+                        flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table"
+                    )
                 elif l_end > n - 1:
-                    log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                    log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
                 else:
                     lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
                     self.store_table(get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end))
@@ -1113,7 +1115,9 @@ class PhotFileReader:
             if len(fitcoefficients) == 2:
                 scale, n = fitcoefficients
                 if n > max_hyd_gaunt_n:
-                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_gaunt_n ({max_hyd_gaunt_n}), skipping table")
+                    log_and_print(
+                        flog, f"WARNING: n ({n}) > max_hyd_gaunt_n ({max_hyd_gaunt_n}), so the reader skips the table"
+                    )
                     return
                 lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
                 # scale the cross sections but not the energy grid
@@ -1128,9 +1132,11 @@ class PhotFileReader:
             if len(fitcoefficients) == 4:
                 n, l_start, l_end, nu_o = fitcoefficients
                 if n > max_hyd_l_n:
-                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), skipping table")
+                    log_and_print(
+                        flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table"
+                    )
                 elif l_end > n - 1:
-                    log_and_print(flog, f"ERROR: can't have l_end = {l_end} > n - 1 = {n - 1}")
+                    log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
                 else:
                     lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
                     self.store_table(
@@ -1229,7 +1235,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 # nu_edge + nu_o lies beyond the grid that reduce_phixs_tables() samples.
                 num_levelnames_with_zero_crosssection += 1
                 log_and_print(
-                    flog, f"WARNING: No non-zero cross section points for {lowerlevelname}, so it will have no phixs"
+                    flog, f"WARNING: every cross section point of {lowerlevelname} is zero, so it will have no phixs"
                 )
             else:
                 phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
@@ -1267,13 +1273,13 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         if crosssectiontype in reader.unknown_phixs_types:
             log_and_print(
                 flog,
-                f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross-section type"
+                f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross section type"
                 f" {crosssectiontype}: {typelabel}",
             )
         else:
             log_and_print(
                 flog,
-                f"{len(reader.phixs_type_levels[crosssectiontype])} levels with cross-section type {crosssectiontype}:"
+                f"{len(reader.phixs_type_levels[crosssectiontype])} levels with cross section type {crosssectiontype}:"
                 f" {typelabel}",
             )
 
@@ -1281,7 +1287,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         log_and_print(
             flog,
             f"WARNING: {num_levelnames_with_zero_crosssection} level names have a cross section that is zero"
-            " everywhere on the output energy grid, so those levels get no photoionization",
+            " everywhere on the output energy grid, so those levels get no photoionisation",
         )
 
     # normalise the target factors into fractions
@@ -1302,7 +1308,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 log_and_print(
                     flog,
                     f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
-                    f" ({target_configfactors_nofilter}), so keeping them unfiltered",
+                    f" ({target_configfactors_nofilter}), so the reader keeps all of them",
                 )
                 target_configfactors = target_configfactors_nofilter
 
@@ -1443,7 +1449,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
         arr_sigma = arr_sigma_summed_over_l * scale_factor
     else:
-        assert zion is not None, "the ion charge is required for offset (type 8) hydrogenic cross sections"
+        assert zion is not None, "offset (type 8) hydrogenic cross sections need the ion charge"
         # type 8: CMFGEN ignores the n_eff correction and uses 1 / zion**2 (see sub_phot_gen.f)
         scale_factor = 1 / (zion**2) / l_degeneracy
         e_o_ev = nu_o * 1e15 * h_in_ev_seconds
@@ -1609,7 +1615,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
-        log_and_print(flog, "No collisional data file specified")
+        log_and_print(flog, "The ion has no collisional data file")
         return upsilondict
 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
@@ -1622,7 +1628,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         if levelname != levelnamenoJ:  # levels are J split
             level_ids_of_level_name[levelname] = [levelid]
         elif not found_nonjsplit_transition:
-            log_and_print(flog, "Found at least one transition specifying level name with no J value")
+            log_and_print(flog, "Found at least one transition that names a level with no J value")
             found_nonjsplit_transition = True
 
         # keep the level ids of states that differ by J only, for the case that the collision
@@ -1663,7 +1669,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 and re.match(r"^\*{5,}+", line.strip())
             ):
                 log_and_print(
-                    flog, "WARNING: Found line of *'s after reading header, assuming that's the end of the table"
+                    flog, "WARNING: Found a line of *'s after the header. The reader assumes that the table ends there."
                 )
                 break  # some files have lines of stars at the end, e.g. Na VI and Ne V. Stop at the first one.
 
@@ -1675,8 +1681,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 if len(header_row) != num_expected_t_values + 1:
                     log_and_print(
                         flog,
-                        f"WARNING: Expected {num_expected_t_values:d} temperature values, but header has"
-                        f" {len(header_row):d} columns",
+                        f"WARNING: the file declares {num_expected_t_values:d} temperature values, but the header"
+                        f" has {len(header_row):d} columns",
                     )
 
                     # Sc I and III have most of their temperatures commented out, so the
@@ -1686,13 +1692,15 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     if "!" in header_row:
                         log_and_print(
                             flog,
-                            f"Some temperatures are commented out, assuming header is correct, num_expected_t_values={num_expected_t_values:d}",
+                            "The header comments out some temperatures. The reader assumes that the header is"
+                            f" correct, num_expected_t_values={num_expected_t_values:d}",
                         )
                     else:
                         num_expected_t_values = len(header_row) - 1
                         log_and_print(
                             flog,
-                            f"Assuming header is incorrect and setting num_expected_t_values={num_expected_t_values:d}",
+                            "The reader assumes that the header is incorrect and sets"
+                            f" num_expected_t_values={num_expected_t_values:d}",
                         )
 
                 # a header can comment out part of its temperature list ('0.2 100.0 ! 0.5 ...').
@@ -1750,14 +1758,14 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     unlisted_to_message = " (unlisted)" if nameto in unlisted else ""
                     log_and_print(
                         flog,
-                        f"Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
+                        f"Discarded upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
                         f" {nameto}{unlisted_to_message}",
                     )
                     continue
                 if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
                     log_and_print(
                         flog,
-                        f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
+                        f"WARNING: Swapped transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
                         f"-> {nameto} {level_ids_of_level_name[nameto]}.",
                     )
                     namefrom, nameto = nameto, namefrom
@@ -1793,22 +1801,22 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                             log_and_print(
                                 flog,
                                 f"ERROR: Duplicate collisional transition from {namefrom} <->"
-                                f" {nameto} ({key[0]} -> {key[1]}). Keeping existing collision strength of"
-                                f" {upsilondict[key]:.2e} instead of new value of"
+                                f" {nameto} ({key[0]} -> {key[1]}). The reader keeps the existing collision"
+                                f" strength {upsilondict[key]:.2e} and ignores the new value"
                                 f" {upsilonscaled:.2e}.",
                             )
                         else:
                             upsilondict[key] = upsilonscaled
 
     if number_expected_transitions < 0:
-        log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
+        log_and_print(flog, "WARNING: the collision data file has no '!Number of transitions' line")
     elif coll_lines_in < number_expected_transitions:
-        msg = f"file specified {number_expected_transitions:d} transitions, but only {coll_lines_in:d} were found"
+        msg = f"the file declares {number_expected_transitions:d} transitions but has only {coll_lines_in:d}"
         raise ValueError(msg)
     elif coll_lines_in > number_expected_transitions:
         log_and_print(
             flog,
-            f"WARNING: file specified {number_expected_transitions:d} transitions, but {coll_lines_in:d} were found",
+            f"WARNING: the file declares {number_expected_transitions:d} transitions but has {coll_lines_in:d}",
         )
     else:
         log_and_print(flog, f"Read {coll_lines_in} effective collision strengths")
@@ -1910,9 +1918,9 @@ def get_photoiontargetfractions(
                             if len(partnames) > 1:
                                 msg = (
                                     f"Photoionisation target part '{strippedpart}' of '{targetconfig}' matched"
-                                    f" more than one level name of the upper ion with the name separators"
-                                    f" removed: {sorted(partnames)}. The part is ambiguous, so artisatomic"
-                                    " cannot share the fraction."
+                                    f" more than one level name of the upper ion: {sorted(partnames)}."
+                                    " The match ignores the name separators. The part is ambiguous, so"
+                                    " artisatomic cannot share the fraction."
                                 )
                                 logprint(f"ERROR: {msg}")
                                 raise ValueError(msg)
@@ -1973,8 +1981,8 @@ def read_hyd_phixsdata(force: bool = False) -> None:
     # assert: every hydrogenic threshold depends on it, so it must survive python -O.
     if dfhillier_energy_levels["hillierlevelid"].to_list() != list(range(1, dfhillier_energy_levels.height + 1)):
         msg = (
-            "H I level list is not indexed by principal quantum number, so the hydrogenic"
-            " cross-section thresholds would be taken from the wrong levels"
+            "The H I level list is not indexed by principal quantum number. The hydrogenic"
+            " cross section thresholds would then come from the wrong levels."
         )
         raise ValueError(msg)
     # the index is n - 1, i.e. the ionisation threshold wavelength of the level with principal
@@ -1982,7 +1990,7 @@ def read_hyd_phixsdata(force: bool = False) -> None:
     lambdaangstrom_of_n = dfhillier_energy_levels["lambdaangstrom"].to_list()
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
-    print(f"Reading hydrogen photoionization cross sections from {hyd_filename}")
+    print(f"Reading hydrogen photoionisation cross sections from {hyd_filename}")
     max_n = -1
     l_start_u = 0.0
     l_del_u = 0.0
@@ -2016,7 +2024,10 @@ def read_hyd_phixsdata(force: bool = False) -> None:
                 if len(xs_values) == num_points:
                     break
                 if len(xs_values) > num_points:
-                    msg = f"too many datapoints for (n,l)=({n},{l}), expected {num_points} but found {len(xs_values)}"
+                    msg = (
+                        f"too many data points for (n,l)=({n},{l}): the table declares {num_points}"
+                        f" but has {len(xs_values)}"
+                    )
                     raise ValueError(msg)
 
             hyd_phixs_energygrid_ryd[n, l] = np.array(
@@ -2061,7 +2072,7 @@ def read_hyd_phixsdata(force: bool = False) -> None:
                 if len(gaunt_values) == num_points:
                     break
                 if len(gaunt_values) > num_points:
-                    msg = f"too many datapoints for n={n}, expected {num_points} but found {len(gaunt_values)}"
+                    msg = f"too many data points for n={n}: the table declares {num_points} but has {len(gaunt_values)}"
                     raise ValueError(msg)
 
             hyd_gaunt_energygrid_ryd[n] = [

@@ -56,12 +56,14 @@ def match_hydrogenic_phixs(
     # same estimate as before. A skipped level below is new information, so that goes to the log.
     if get_level_valence_n is None:
         print(
-            f"WARNING: no hydrogenic photoionization cross sections, because no parser gives the principal"
+            f"WARNING: no hydrogenic photoionisation cross sections, because no parser gives the principal"
             f" quantum number of a {ion_handler} level"
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
-    print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
+    print(
+        f"artisatomic uses hydrogenic photoionisation cross sections for Z={atomic_number} {elsymbols[atomic_number]}"
+    )
     # This loads the tables on the first call. The range test below reads max_hyd_gaunt_n, which
     # is -1 before the load, and the loop would then skip every level as out of range.
     readhillierdata.read_hyd_phixsdata()
@@ -89,7 +91,7 @@ def match_hydrogenic_phixs(
         if n is None:
             log_and_print(
                 flog,
-                f"WARNING: no principal quantum number found in level name '{level['levelname']}', so the level"
+                f"WARNING: level name '{level['levelname']}' has no principal quantum number, so the level"
                 " gets no hydrogenic cross section",
             )
             continue

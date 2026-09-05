@@ -328,7 +328,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions
 

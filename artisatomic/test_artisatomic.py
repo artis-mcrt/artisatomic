@@ -1722,7 +1722,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
 
     logtext = flog.getvalue()
     assert "n=31" in logtext
-    assert "no principal quantum number found in level name 'N(1S)2H 1,enpercm=2000.0,j=4.5'" in logtext
+    assert "level name 'N(1S)2H 1,enpercm=2000.0,j=4.5' has no principal quantum number" in logtext
 
 
 def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
@@ -2690,7 +2690,7 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     assert reader.phixstables[0]["B"].shape == (2, 2)
     assert reader.phixstables[0]["B"][:, 0].tolist() == pytest.approx([1.0 * threshold_b, 1.5 * threshold_b])
     assert reader.phixstables[0]["B"][:, 1].tolist() == [2.0, 1.0]
-    assert "B declares 3 cross-section rows but the block ends after 2" in flog.getvalue()
+    assert "B declares 3 cross section rows but the block ends after 2" in flog.getvalue()
     assert reader.phixstables[0]["C"].shape == (2, 2)
     assert reader.phixstables[0]["C"][:, 1].tolist() == [4.0, 3.0]
     # the reader accepts the D exponent of the screened nuclear charge, and 2 matches the ion stage

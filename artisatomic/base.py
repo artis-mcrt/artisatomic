@@ -230,9 +230,9 @@ def resolve_transition_levelids(
         upperlevel = levelid_of_fileindex[int(fileindex_upper)]
     except KeyError as exc:
         msg = (
-            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]},"
-            f" which is not one of the {len(levelid_of_fileindex)} levels read. The transition and level files"
-            " may disagree about the level numbering."
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]}."
+            f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
+            " The transition file and the level file can disagree about the level numbering."
         )
         raise ValueError(msg) from exc
 
@@ -340,7 +340,7 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     else:
         return False
 
-    print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
+    print(f"{filepath} is not utf-8. artisatomic rewrites the file as utf-8 from iso-8859-1.")
     # every byte is a character in iso-8859-1, so this decode cannot fail
     text = filebytes.decode("iso-8859-1")
     try:
@@ -349,7 +349,7 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     except OSError as exc:
         msg = (
             f"Could not rewrite {filepath} as utf-8: {exc}\n"
-            f"Convert the file by hand, then run this again:\n"
+            f"Convert the file by hand. Then run this again:\n"
             f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
         )
         raise RuntimeError(msg) from exc
@@ -496,7 +496,7 @@ def parallel_map[ResultType](
     lengths = [len(x) for x in lists]
     # not an assert: this check decides how much of the work runs, so it must survive python -O
     if len(set(lengths)) > 1:
-        msg = f"parallel_map() was given iterables of different lengths: {lengths}"
+        msg = f"parallel_map() received iterables of different lengths: {lengths}"
         raise ValueError(msg)
     nitems = lengths[0] if lengths else 0
 

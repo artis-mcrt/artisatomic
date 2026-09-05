@@ -39,7 +39,7 @@ def read_nahar_rrcfile(filename, noprint=False):
                 break
 
         if not header_row:
-            msg = "no header found"
+            msg = "the file has no header row"
             raise ValueError(msg)
 
         index_logt = header_row.index("log(T)")
@@ -50,7 +50,7 @@ def read_nahar_rrcfile(filename, noprint=False):
         for line in filein:
             if row := line.split():
                 if len(row) != len(header_row):
-                    msg = f"Row contains wrong number of items for header:\n{header_row}\n{row}"
+                    msg = f"The row does not have the number of items of the header:\n{header_row}\n{row}"
                     raise ValueError(msg)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
@@ -87,7 +87,7 @@ def main():
                         f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n" for _, row in dfrecombrates.iterrows()
                     )
                 else:  # use Chianti with ChiantiPy
-                    print("  using Chianti")
+                    print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                     arr_temperature = 10**arr_logT_e
