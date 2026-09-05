@@ -2828,3 +2828,20 @@ def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypa
         ionization_energy_raised_ev, _, _ = readhillierdata.read_levels_and_transitions(1, 1, flog)
     assert ionization_energy_raised_ev == pytest.approx(ionization_energy_ev * 1.01, rel=1e-5)
     assert "WARNING: the ground level Lam(A)" in flog.getvalue()
+
+
+def test_readhillierdata_rejects_a_file_with_no_ionization_energy(monkeypatch, tmp_path):
+    """A file with no '!Ionization energy' line fails with that message, not with a division by zero."""
+    import contextlib
+
+    ionfiles = readhillierdata.ions_data[1, 1]
+    with xopen_check_extension(readhillierdata.hillier_osc_filename(1, 1)) as fosc:
+        lines = [line for line in fosc.readlines() if not line.rstrip().endswith("!Ionization energy")]
+    (tmp_path / "hi_osc.dat").write_text("".join(lines))
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (1, 1),
+        ionfiles._replace(folder=str(tmp_path), levelstransitionsfilename="hi_osc.dat"),
+    )
+    with contextlib.redirect_stdout(io.StringIO()), pytest.raises(ValueError, match="no '!Ionization energy' line"):
+        readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())

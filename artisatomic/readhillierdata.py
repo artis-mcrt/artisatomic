@@ -604,8 +604,10 @@ def read_levels_and_transitions_from_file(
                 # the ground level's Lam(A) is the ionization edge to four significant figures, so
                 # it must agree with the header's value to that precision. A larger difference
                 # means the header and the level table are not for the same ion or the same
-                # energy zero. CMFGEN writes a negative Lam(A) for some levels, hence the abs().
-                if not levelrows and lambdaangstrom != 0.0:
+                # energy zero. CMFGEN writes a negative Lam(A) for some levels, hence the abs(). A
+                # header with no ionization energy leaves 0.0 here, which the check after the loop
+                # reports; the comparison would divide by it.
+                if not levelrows and lambdaangstrom != 0.0 and hillier_ionization_energy_ev > 0.0:
                     ionization_energy_from_lambda_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
                     relative_difference = abs(ionization_energy_from_lambda_ev / hillier_ionization_energy_ev - 1.0)
                     if relative_difference > 1e-3:
