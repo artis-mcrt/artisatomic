@@ -33,8 +33,6 @@ from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import parse_orbital_n
 
-# the reader does not yet include collision strengths from e.g. o2col.dat
-
 # Column layout of the level table in the oldest oscillator files, which carry no header line
 # (no "!Format date"). Its fourth column is a threshold FREQUENCY, not an energy.
 hillier_rowformat_noheader = "levelname g energyabovegsinpercm freqtentothe15hz lambdaangstrom hillierlevelid"
@@ -169,7 +167,7 @@ ions_data |= {
     # Fe
     (26, 1): IonFiles("19apr23", "osc_data", ("REV_PHOT_DATA",), "col_data"),
     (26, 4): IonFiles("19apr23", "feiv_osc_rev2", phot_data_names(1), "col_data"),
-    # Cu, Zn and above are not in CMFGEN?
+    # Cu, Zn and above are probably not in CMFGEN.
     # Ba
     # (56, 2): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
 }
@@ -208,7 +206,7 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 
 
 class VY95PhixsFitRow(t.NamedTuple):
-    """One Verner & Yakovlev (1995) analytic photoionization cross-section fit."""
+    """One Verner & Yakovlev (1995) analytic photoionisation cross section fit."""
 
     n: int
     l: int
@@ -426,8 +424,7 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
             j=part(6).cast(pl.Int64),
             # the when() masks the id column before the cast, not after. The other layout holds a
             # bar there, and polars evaluates both arms of a when(). Only the 8-part layout carries
-            # the id there. In the wide layout the column holds another number in some files (O III
-            # 19apr23 has 0, 0, 1, 2, ...), so the position fills in.
+            # the id there. In the wide layout the column holds a bar, so the position fills in.
             hilliertransitionid=pl.when(pl.col("partcount") == 8)
             .then(part(7))
             .cast(pl.Int64)
@@ -436,15 +433,15 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
         .collect()
     )
 
-    # one line per file, not one per transition: the O III 19apr23 file numbers its transitions
-    # from 0 and gave 6519 lines
+    # one line per file, not one per transition: a file that numbers its transitions from 0 (O III
+    # 19apr23) has a mismatch on every line
     mismatched = (
         dftransitions.select("hilliertransitionid")
         .with_row_index("entrynumber", offset=1)
         .filter(pl.col("hilliertransitionid") != pl.col("entrynumber"))
     )
     if not mismatched.is_empty():
-        first_id, first_entry = mismatched.select("hilliertransitionid", "entrynumber").row(0)
+        first_entry, first_id = mismatched.row(0)  # with_row_index() puts its column first
         print(
             f"{filename} WARNING: {mismatched.height:d} transition ids differ from their entry numbers."
             f" The first is id {first_id:d} at entry {first_entry:d}."
@@ -757,7 +754,7 @@ class PhotFileReader:
         self.atomic_number = atomic_number
         self.ion_stage = ion_stage
         # charge of the ion that remains, i.e. CMFGEN's ZION (= ZXzV from the oscillator file,
-        # which equals the ionisation stage for every ion here)
+        # which equals the ion stage for every ion here)
         self.zion = ion_stage
         self.lambdaangstroms = lambdaangstroms
         self.firstlevelindex_of_levelname = firstlevelindex_of_levelname
@@ -995,7 +992,7 @@ class PhotFileReader:
                 f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
-        # the rows the file gave, and no zero rows up to the declared count. The downsampling
+        # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
 
@@ -1263,8 +1260,8 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                     kepttarget_of_levelname[lowerlevelname] = reader.phixstargets[filenum]
                     keptthreshold_of_levelname[lowerlevelname] = phixs_at_threshold
 
-    # one summary for the ion, not one per photoionisation file: the counts below accumulate
-    # over every file, so a log inside that loop repeated them with partial totals
+    # one summary for the ion, not one per photoionisation file. The counts below accumulate
+    # over every file, so a log inside that loop repeated them with partial totals.
     for crosssectiontype in sorted(reader.phixs_type_levels.keys()):
         # .get(): the branch below fires for exactly the types that this parser does not handle.
         # Those are the types least likely to have a label, so an index lookup would fail in the
@@ -1362,7 +1359,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
 
 
 def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
-    """Evaluate a Seaton formula fit (CMFGEN cross section type 1, or type 7 when nu_o is given).
+    """Evaluate a Seaton formula fit (CMFGEN cross section type 1, or type 7 with nu_o).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge has an
     offset, so the cross section is zero up to the offset threshold.
@@ -1473,7 +1470,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
 
 # test: hydrogen n = 1: 13.606 eV threshold cross section is near 6.3029 Mb
-# test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb?? the source of this value is unknown
+# test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb. The source of this value is unknown.
 # gives the same results as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
@@ -1526,7 +1523,7 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 
 # only applies to helium
 # the threshold cross sections seem correct, but the energy dependence could be slightly wrong
-# what is the h parameter, which the fit does not use??
+# the fit does not use the h parameter; its meaning is unknown
 def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ignore[unused-function-argument]
     """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
 
@@ -1631,8 +1628,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
             log_and_print(flog, "Found at least one transition that names a level with no J value")
             found_nonjsplit_transition = True
 
-        # keep the level ids of states that differ by J only, for the case that the collision
-        # data level names are not J split
+        # keep the level ids of states that differ by J only, for the case that the level names
+        # in the collision file have no J
         level_ids_of_level_name.setdefault(levelnamenoJ, []).append(levelid)
 
     # total statistical weight per term, to share a term-resolved collision strength over its
@@ -1977,11 +1974,12 @@ def read_hyd_phixsdata(force: bool = False) -> None:
         )
 
     # the index of the tables below is the principal quantum number, so the H I level list must
-    # have every level. read_levels_and_transitions drops levels with no transitions. Not an
-    # assert: every hydrogenic threshold depends on it, so it must survive python -O.
+    # have every level. The check exists because read_levels_and_transitions() drops levels with
+    # no transitions. Not an assert: every hydrogenic threshold depends on it, so it must survive
+    # python -O.
     if dfhillier_energy_levels["hillierlevelid"].to_list() != list(range(1, dfhillier_energy_levels.height + 1)):
         msg = (
-            "The H I level list is not indexed by principal quantum number. The hydrogenic"
+            "The index of the H I level list is not the principal quantum number. The hydrogenic"
             " cross section thresholds would then come from the wrong levels."
         )
         raise ValueError(msg)

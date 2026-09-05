@@ -263,7 +263,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.loc[above_ionization, "Ilev"]}
     dflevels = dfalllevels.loc[~above_ionization]
 
-    # map associates source file level numbers with energy-sorted level numbers (0 indexed)
+    # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
@@ -283,11 +283,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from an FAC level name.
 
-    Returns None when it cannot parse the name. The caller, match_hydrogenic_phixs(), then
+    Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    This parser stays separate from the versions of the other readers. Each data source names
-    its levels differently, so a shared parser would have to guess the convention of the name.
+    Kept separate from the other readers' versions. Each data source names its levels
+    differently, so a shared parser would have to guess the convention of each name.
     """
     # level names are "<configuration> Ilev=<index>", and the configuration itself contains
     # spaces. Drop the index suffix first, then take the last orbital

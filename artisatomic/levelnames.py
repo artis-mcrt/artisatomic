@@ -9,8 +9,8 @@ reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 # l = 14, because those letters are l = 1 and l = 0.
 lchars = "SPDFGHIKLMNOQRTUVWXYZ"
 
-# CMFGEN names a level that lumps the high-l orbitals of one n with one of these letters, whatever
-# the n. '3s2_18w_2W' has g = 648 = 2 x 18^2, the whole n = 18 shell, and '3s2_7z_2Z' lumps the
+# CMFGEN names a level that merges the high-l orbitals of one n with one of these letters, whatever
+# the n. '3s2_18w_2W' has g = 648 = 2 x 18^2, the whole n = 18 shell, and '3s2_7z_2Z' merges the
 # l >= 6 orbitals. No CMFGEN file names a single orbital of l = 17 (w) or l = 20 (z). Such a
 # level spans both parities, so it has none.
 merged_orbital_letters = frozenset("wz")
@@ -179,7 +179,7 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
     Parent terms in parentheses are not occupied orbitals, and the walk skips them. An orbital
     must satisfy l <= n - 1. CMFGEN's merged high-l levels ('2s2_13w_2W', '2s2_2p3(4So)5z_5Z')
     fail this test, because the letter is a merge marker that spans several l and not one
-    orbital. A w or a z is such a marker at any n. '3s2_18w_2W' lumps the whole n = 18 shell, and
+    orbital. A w or a z is such a marker at any n. '3s2_18w_2W' merges the whole n = 18 shell, and
     l = 17 < 18 would pass the test. The walk yields those with merged=True, so callers can tell
     the two cases apart.
 

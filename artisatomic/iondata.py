@@ -250,8 +250,7 @@ def resolve_photoion_targetfractions(
     The writer needs the fractions and does not resolve them itself. Give atomic_number and
     log_folder to append the resolve messages to each ion's log file.
     """
-    # A half-given pair is always a caller bug, so the function raises an error and does not skip
-    # the log without a message.
+    # a half-given pair is always a caller bug, so the function raises
     if (atomic_number is None) != (log_folder is None):
         msg = "give both atomic_number and log_folder, or neither"
         raise ValueError(msg)

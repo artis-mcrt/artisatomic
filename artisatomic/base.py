@@ -199,8 +199,8 @@ def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> d
     i.e. fileindices[n] is the file index of the level that ended up at level id n.
 
     A duplicated file index would overwrite its entry and misroute every transition that
-    references it. This function rejects the duplicate here. Otherwise it would appear later as a
-    transition on the wrong level.
+    references it. This function rejects the duplicate, so it cannot appear later as a transition
+    on the wrong level.
     """
     fileindices = list(fileindices)
     levelid_of_fileindex = {int(fileindex): levelid for levelid, fileindex in enumerate(fileindices)}
@@ -208,7 +208,7 @@ def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> d
     # not an assert: input validation must survive python -O
     if len(levelid_of_fileindex) != len(fileindices):
         msg = (
-            f"Duplicate level indices in {sourcename}: {len(fileindices)} levels but only"
+            f"Duplicate file indices in {sourcename}: {len(fileindices)} levels but only"
             f" {len(levelid_of_fileindex)} unique indices"
         )
         raise ValueError(msg)
@@ -221,7 +221,7 @@ def resolve_transition_levelids(
 ) -> tuple[int, int]:
     """Resolve one transition's file-numbered levels to zero-based level ids, lower id first.
 
-    The function raises on an index that names no level, and does not skip it. A reader whose
+    The function raises on an index that names no level. A reader whose
     transition and level files disagree about the numbering (0- or 1-based, for example) would
     otherwise drop every transition. It would then write an empty ion without an error.
     """
@@ -230,9 +230,9 @@ def resolve_transition_levelids(
         upperlevel = levelid_of_fileindex[int(fileindex_upper)]
     except KeyError as exc:
         msg = (
-            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]}."
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names file index {exc.args[0]}."
             f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
-            " The transition file and the level file can disagree about the level numbering."
+            " The transition file and the level file can disagree about the file indices."
         )
         raise ValueError(msg) from exc
 

@@ -32,16 +32,15 @@ def clear_files(args: argparse.Namespace) -> None:
 
 
 # A transition this strong is an electric dipole line, whatever the level names say. Below these
-# values, the code reads a line that breaks the delta J rule as a forbidden line. The source then
-# listed the line with its own small strength, which agrees with the label and does not contradict
-# it.
+# values, the code reads a line that breaks the delta J rule as a forbidden line that the source
+# listed with its own small strength, which agrees with the label.
 #
 # The two need their own values because they are not the same quantity. f has no units. A is a
-# rate in s-1 that spans many decades. Neither cut is a law of physics. A weak E1 line can sit
+# rate in s-1 that spans many decades. Neither cut is a law of physics. A weak E1 line can lie
 # well below either cut (an intercombination line, or one between high levels). A strong M1 or E2
-# line in a highly charged ion can sit above the A cut.
+# line in a highly charged ion can lie above the A cut.
 #
-# The cuts sit where the two populations separate in these data sets. Forbidden lines end near
+# The cuts lie where the two populations separate in these data sets. Forbidden lines end near
 # f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1). The lines that contradict their own J
 # labels start at f = 7.8e-4 (F III's smallest), only eight times above the cut. A mislabelled
 # line weaker than that falls on the wrong side, and that is the accepted cost.
@@ -218,12 +217,11 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
 
     A negative upsilon is not a collision strength. It is the reader's mark for "this pair is
     forbidden and I have no value". readhillierdata writes -2 for the J pairs within a term. The
-    mark therefore sets the flag, and not the parities alone.
+    mark therefore sets the flag, and not the parities alone: a merged term has no parity, so the
+    parities alone would leave the pair permitted.
 
-    A merged term has no parity, and the pair would then come out permitted. Those pairs carry no
-    A, so van Regemorter would get an
-    oscillator strength of zero, which is no collisional coupling at all. The -2 asks instead for
-    Axelrod's approximation.
+    Those pairs carry no A, so van Regemorter would give an oscillator strength of zero, which is
+    no collisional coupling at all. The -2 asks instead for Axelrod's approximation.
 
     coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
     reaches the -1, because a negative one has already made the flag true.

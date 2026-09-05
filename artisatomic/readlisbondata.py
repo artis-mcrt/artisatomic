@@ -100,7 +100,7 @@ def get_levelname(row, fileindex: int):
 def read_levels_data(dflevels):
     """Convert the Lisbon level table to level tuples, sorted by energy.
 
-    Also returns the map from the file's level index to the zero-based level id, which
+    Also returns the map from the file index to the zero-based level id, which
     read_lines_data() needs because the sort by energy reorders the levels.
 
     The lines name their levels by POSITION. LisbonReader reads their energies with
@@ -205,7 +205,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     lisbon_reader = LisbonReader(lisbon_data)
 
     dflevels = lisbon_reader.levels.loc[atomic_number, ion_charge]
-    # the map associates source file level indices with energy-sorted level ids (0 indexed)
+    # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]

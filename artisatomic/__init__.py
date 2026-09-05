@@ -1,7 +1,8 @@
 """Build an ARTIS atomic database from published atomic data sets.
 
 Each data source has its own read*.py module. This package selects a handler for each ion, calls
-it, and writes the combined result to adata.txt, transitiondata.txt and phixsdata_v2.txt.
+it, and writes the combined result to adata.txt, compositiondata.txt, transitiondata.txt and
+phixsdata_v2.txt.
 
 The implementation lives in the submodules (base, levelnames, ionhandlers, phixs, iondata,
 output, cli). Every caller imports from the submodule that defines the name. This module

@@ -665,8 +665,8 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     The writer can write only one table per level, so the one with the largest threshold cross
     section wins. write_phixs_data() writes it as the level's TOTAL and splits it over the targets.
     The reader must therefore first divide the table by the kept target's own fraction. This test
-    checks that: a read of each phot file alone gives that target's raw table, and the combined
-    read must reproduce the winner divided by its fraction.
+    checks two things. A read of each phot file alone gives that target's raw table. The combined
+    read reproduces the winner divided by its fraction.
     """
     import contextlib
 
@@ -1140,7 +1140,7 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
         {"gf": [1.0], "wavelength": [2000.0]},
         index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
     )
-    with pytest.raises(ValueError, match="names level index 99"):
+    with pytest.raises(ValueError, match="names file index 99"):
         readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
 
 
@@ -2038,7 +2038,7 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
 
 
 def test_fill_missing_phixs_thresholds():
-    """fill_missing_phixs_thresholds() computes a threshold that the reader could not give the way ARTIS derives it."""
+    """fill_missing_phixs_thresholds() derives a missing threshold as ARTIS does."""
     from artisatomic.iondata import IonData
     from artisatomic.output import fill_missing_phixs_thresholds
 

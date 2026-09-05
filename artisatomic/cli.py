@@ -57,8 +57,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Estimate a hydrogenic cross section for this many of the lowest levels (by energy) of an ion"
             " whose handler supplied no cross sections. Give 0 to disable the estimate. The program"
-            " rejects a negative value. The result can have fewer tables than this number, because a level"
-            " at or above the ionisation energy gets no table but still counts towards the limit."
+            " rejects a negative value. The result can have fewer tables than this number. A level at or"
+            " above the ionisation energy gets no table but still counts towards the limit."
             " An ion with one or more cross sections from its data source keeps them unchanged, so"
             " the estimate never replaces or extends measured data. The option does not apply to the"
             " top ion, which has no upper ion to photoionise to."
