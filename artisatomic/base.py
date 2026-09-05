@@ -15,6 +15,8 @@ from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
+import numpy.typing as npt
 import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
@@ -122,6 +124,22 @@ class Transition(t.NamedTuple):
     lowerlevel: int
     upperlevel: int
     A: float
+
+
+class PhixsData(t.NamedTuple):
+    """The photoionisation cross sections of one ion, indexed by zero-based level id.
+
+    A data source with no cross sections for the ion gives empty arrays, not zero-filled ones:
+    iondata.read_ion_data() reads an empty cross-section array as "no data" and applies the
+    hydrogenic estimate. The targets of a level are given one of two ways: as the names of the
+    upper ion's levels with their fractions, which get_photoiontargetfractions() resolves once the
+    upper ion is read (CMFGEN), or as the upper ion's level ids with their fractions (QUB).
+    """
+
+    crosssections: npt.NDArray[np.float64]  # (levelcount, nphixspoints), in Mb
+    thresholds_ev: npt.NDArray[np.float64]  # (levelcount,)
+    targetconfigs: list[list[tuple[str, float]] | None] | None = None
+    targetfractions: list[list[tuple[int, float]]] | None = None
 
 
 def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> list[int]:

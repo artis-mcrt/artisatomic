@@ -10,7 +10,6 @@ from pathlib import Path
 from string import ascii_uppercase
 
 import numpy as np
-import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import add_handler_if_not_set
@@ -21,6 +20,7 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
+from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import roman_numerals
@@ -1113,13 +1113,11 @@ class PhotFileReader:
                     )
 
 
-def read_phixs_tables(
-    atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog
-) -> tuple[npt.NDArray[np.float64], list[list[tuple[str, float]] | None], npt.NDArray[np.float64]]:
+def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog) -> PhixsData:
     """Read one ion's CMFGEN photoionization cross sections, downsampled onto the output grid.
 
-    Returns the cross sections, the target configurations and their fractions per level, and the
-    threshold energies, all indexed by zero-based level id. A level with no data keeps None in
+    Returns the cross sections, the threshold energies, and the target configurations with their
+    fractions per level, all indexed by zero-based level id. A level with no data keeps None in
     the target list, which get_photoiontargetfractions() relies on to tell it apart from a level
     whose targets all came out zero. The files give fit coefficients rather than tabulated cross
     sections for most levels; see phixs_type_labels for the fit types and the get_*_phixstable()
@@ -1137,7 +1135,7 @@ def read_phixs_tables(
         # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross-section array
         # as "no data" and applies the hydrogenic estimate. A zero-filled array passed as data.
         log_and_print(flog, "No photoionisation files for this ion")
-        return np.empty((0, args.nphixspoints)), [None] * levelcount, np.empty(0)
+        return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetconfigs=[None] * levelcount)
 
     # the type 2, 3 and 8 fits interpolate the hydrogenic tables
     read_hyd_phixsdata()
@@ -1323,7 +1321,11 @@ def read_phixs_tables(
             if lambdaangstroms[levelindex] != 0.0:
                 photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
-    return photoionization_crosssections, photoionization_targetconfig_fractions, photoionization_thresholds_ev
+    return PhixsData(
+        photoionization_crosssections,
+        photoionization_thresholds_ev,
+        targetconfigs=photoionization_targetconfig_fractions,
+    )
 
 
 def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
@@ -1564,7 +1566,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     return parse_orbital_n(orbitals[-1]) if orbitals else None
 
 
-def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
+def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
     Returns a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids.

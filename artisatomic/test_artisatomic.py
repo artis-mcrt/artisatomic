@@ -636,7 +636,9 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
             _, dflevels, _ = rhd.read_levels_and_transitions(8, 1, flog)
-            crosssections, targetconfigs, _thresholds = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+            phixs = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+            crosssections, targetconfigs = phixs.crosssections, phixs.targetconfigs
+            assert targetconfigs is not None
         return crosssections, targetconfigs, flog.getvalue()
 
     file_a, file_b = ionfiles.photfilenames
@@ -700,7 +702,7 @@ def test_read_coldata_term_to_j_redistribution():
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
             _, dflevels, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, flog, args)
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog)
         levelids_of_term = defaultdict(list)
         for levelid, levelname in enumerate(dflevels["levelname"]):
             levelids_of_term[levelname.split("[")[0]].append(levelid)
@@ -1334,7 +1336,9 @@ def adf04_sample_path() -> Path:
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(adf04_sample_path(), 27, 3, flog)
+    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
+        adf04_sample_path(), flog, electrontemperature=5010.0
+    )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
@@ -1371,7 +1375,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
@@ -1386,7 +1390,7 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, 27, 3, flog)
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
     assert len(upsilondict) == 235
 
 
@@ -1397,7 +1401,7 @@ def test_extend_ion_list_finds_a_compressed_adf04():
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
     """A file written before a handler was renamed still names the old handler, so map it."""
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
     from artisatomic.ionhandlers import parse_ion_handlers
     from artisatomic.ionhandlers import renamed_handlers
 
@@ -1405,14 +1409,14 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
     # a name that was never renamed passes through unchanged
     assert parse_ion_handlers([[27, [[2, "qub_cobalt"]]]]) == [(27, [(2, "qub_cobalt")])]
     # every alias must point at a handler that read_ion_data() can dispatch
-    assert set(renamed_handlers.values()) <= set(simple_handlers) | {"qub_cobalt"}
+    assert set(renamed_handlers.values()) <= set(handlers)
 
 
 def test_read_qub_sr1():
     """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
     flog = io.StringIO()
     ionization_energy_ev, energylevels, transitions, upsilondict = readqubdata.read_qub_levels_and_transitions(
-        38, 1, flog
+        38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
     )
     assert abs(ionization_energy_ev - 5.694867) < 1e-5
     assert len(energylevels) == 57
@@ -1976,9 +1980,9 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
     estimate, so the ion would be written with no cross sections at all.
     """
     args = phixs_args()
-    crosssections, targetfractions, thresholds = readqubdata.read_qub_photoionizations(
-        38, 1, levelcount=5, args=args, flog=io.StringIO()
-    )
+    phixs = readqubdata.read_qub_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
+    crosssections, targetfractions, thresholds = phixs.crosssections, phixs.targetfractions, phixs.thresholds_ev
+    assert targetfractions is not None
     assert crosssections.shape == (0, 100)
     assert targetfractions == []
     assert thresholds.shape == (0,)
@@ -2319,7 +2323,7 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
 
 
-def test_iondata_simple_handlers_registry():
+def test_iondata_handlers_registry():
     """Each handler must keep its own level-name parser and its own return shape.
 
     The parsers used to be a second table in phixs.py, and the return shape used to be read
@@ -2331,9 +2335,11 @@ def test_iondata_simple_handlers_registry():
     from artisatomic import groundstatesonlynist
     from artisatomic import readdreamdata
     from artisatomic import readlisbondata
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
 
     expected_parsers = {
+        "cmfgen": readhillierdata.get_level_valence_n,
+        "qub_cobalt": readqubdata.get_cobalt_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
@@ -2343,12 +2349,12 @@ def test_iondata_simple_handlers_registry():
         "qub": readqubdata.get_level_valence_n,
     }
     assert {
-        name: handler.get_level_valence_n for name, handler in simple_handlers.items() if handler.get_level_valence_n
+        name: handler.get_level_valence_n for name, handler in handlers.items() if handler.get_level_valence_n
     } == expected_parsers
 
     # no parser is registered for these handlers, so their ions get no hydrogenic estimate
     # and match_hydrogenic_phixs() writes a warning. Registering one is what changes that.
-    assert {name for name, handler in simple_handlers.items() if handler.get_level_valence_n is None} == {
+    assert {name for name, handler in handlers.items() if handler.get_level_valence_n is None} == {
         "boyle",
         "dream",
         "lisbon",
@@ -2356,11 +2362,25 @@ def test_iondata_simple_handlers_registry():
         "gsnist",
     }
 
-    # only the QUB reader returns collision strengths beside the levels and the transitions
-    assert {name for name, handler in simple_handlers.items() if handler.returns_upsilondict} == {"qub"}
+    # only the QUB readers return collision strengths beside the levels and the transitions, and
+    # only they take args, for the temperature that picks the tabulated collision strengths
+    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"qub", "qub_cobalt"}
+    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"qub", "qub_cobalt"}
 
-    # the readers that the registry calls with (atomic_number, ion_stage, flog)
+    # the two data sources with collision strengths in their own file and with cross sections
+    assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
+        "cmfgen": readhillierdata.read_coldata,
+        "qub_cobalt": readqubdata.read_cobalt_coldata,
+    }
+    assert {name: handler.read_phixs for name, handler in handlers.items() if handler.read_phixs} == {
+        "cmfgen": readhillierdata.read_phixs_tables,
+        "qub_cobalt": readqubdata.read_cobalt_photoionizations,
+    }
+
+    # the readers that the registry calls with (atomic_number, ion_stage, flog[, args])
     expected_readers = {
+        "cmfgen": readhillierdata.read_levels_and_transitions,
+        "qub_cobalt": readqubdata.read_cobalt_levels_and_transitions,
         "kurucz": readkuruczdata.read_levels_and_transitions,
         "dream": readdreamdata.read_levels_and_transitions,
         "lisbon": readlisbondata.read_levels_and_transitions,
@@ -2371,7 +2391,7 @@ def test_iondata_simple_handlers_registry():
         "qub": readqubdata.read_qub_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
-        assert simple_handlers[name].read_levels_and_transitions is reader, name
+        assert handlers[name].read_levels_and_transitions is reader, name
 
     # the three floers25 entries call one reader and select the data set by keyword, so each
     # entry must bind its own keywords
@@ -2381,7 +2401,7 @@ def test_iondata_simple_handlers_registry():
         "floers25uncalib": {"calibrated": False},
     }
     for name, keywords in expected_keywords.items():
-        reader = simple_handlers[name].read_levels_and_transitions
+        reader = handlers[name].read_levels_and_transitions
         assert isinstance(reader, functools.partial)
         assert reader.func is readfloers25data.read_levels_and_transitions
         assert reader.keywords == keywords
@@ -2394,7 +2414,7 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
     drop it. A comparison of the callables cannot catch a mis-wired adapter here.
     """
     from artisatomic import readboyledata
-    from artisatomic.iondata import simple_handlers
+    from artisatomic.iondata import handlers
 
     calls = []
     monkeypatch.setattr(
@@ -2402,7 +2422,7 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
         "read_levels_and_transitions",
         lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
     )
-    simple_handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
+    handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
 
     assert calls == [(2, 1)]
 
@@ -2700,3 +2720,25 @@ def test_cmfgen_fit_functions():
     expected = 5.475e4 * (y - 1) ** 2 * y**-q * (1 + np.sqrt(y / 32.88)) ** -2.963
     assert table9[0, 1] == pytest.approx(expected)
     assert table9[0, 1] == pytest.approx(6.3, rel=0.02)
+
+
+def test_read_adf04_selects_the_nearest_temperature():
+    """The collision strengths come from the tabulated temperature nearest to -electrontemperature.
+
+    The Co III grid runs from 3150 K to 7590 K in steps of about 5 percent, so 6000 K picks the
+    6030 K column and a low temperature picks the first column. A hard-coded string per element
+    chose 5010 K before, whatever the command line said.
+    """
+    flog = io.StringIO()
+    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=6000.0)
+    assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
+
+    flog = io.StringIO()
+    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=1000.0)
+    assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
+
+    assert set(upsilons_6000) == set(upsilons_low)
+    assert any(upsilons_6000[key] != upsilons_low[key] for key in upsilons_6000)
+
+    assert readqubdata.adf04_number("5.01+03") == 5010.0
+    assert readqubdata.adf04_number("1.00-02") == 0.01
