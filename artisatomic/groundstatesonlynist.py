@@ -6,18 +6,9 @@ from functools import cache
 import pandas as pd
 
 from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import EnergyLevel
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
-
-
-class EnergyLevel(t.NamedTuple):
-    """A ground state read from the NIST table."""
-
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: float
-
 
 datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
 

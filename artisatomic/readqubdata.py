@@ -98,6 +98,21 @@ def adf04_float(index: int) -> pl.Expr:
     return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
+def adf04_level_layout(line: str) -> str:
+    """Name the column layout of one adf04 level line, "standard" or "tyndall".
+
+    The standard layout puts the (2S+1) group at column 28, after a 22-column configuration. The
+    Tyndall Co III and Fe III files put it at column 24, after a 16-column configuration. The
+    layout is a property of the file, not of the element, so it is read from the line.
+    """
+    if line[28:29] == "(" and line[30:31] == ")":
+        return "standard"
+    if line[24:25] == "(" and line[26:27] == ")":
+        return "tyndall"
+    msg = f"adf04 level line has no (2S+1) group at column 24 or 28: {line.rstrip()!r}"
+    raise ValueError(msg)
+
+
 def read_adf04(
     filepath: str | Path, atomic_number: int, ion_stage: int, flog
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float], pl.DataFrame]:
@@ -132,9 +147,8 @@ def read_adf04(
             if atomic_group_note:
                 continue
 
-            if atomic_number == 27:
+            if adf04_level_layout(line) == "tyndall":
                 config = line[5:21].strip()
-                config_for_parity = config
                 energylevel = QUBEnergyLevel(
                     config,
                     int(line[:5]),
@@ -147,15 +161,9 @@ def read_adf04(
                 )
 
             else:
-                config_full = line[5:27].strip()
-                # Accounting for files which have multiple sets of brackets in this string
-                # Some files include parent terms
-                config_parts = config_full.split(")")
-                relevant_config = config_parts[-2].strip() + ")" if len(config_parts) > 1 else config_full
-                config = relevant_config
-                # the parity comes from the full configuration: the truncation above can drop an
-                # orbital before or after the parent term, which would flip the computed parity
-                config_for_parity = config_full
+                # the whole configuration, with any parent term and any orbital after it: a name
+                # cut at the parent term lost the orbital that followed it
+                config = line[5:27].strip()
                 energylevel = QUBEnergyLevel(
                     config,
                     int(line[:5]),
@@ -166,6 +174,7 @@ def read_adf04(
                     0.0,
                     0,
                 )
+            config_for_parity = config
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
             # L in their own columns (read just above). Stripping a term off the end would lose
             # the last orbital of '3S2 3P6 3D5 4P1', and would read the bare '5s2' as a term

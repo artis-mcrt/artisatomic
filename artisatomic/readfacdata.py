@@ -3,13 +3,13 @@
 import os
 import re
 import string
-import typing as t
 from pathlib import Path
 
 import pandas as pd
 
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
+from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
@@ -18,6 +18,7 @@ from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
 from artisatomic.base import split_element_ionstage_str
+from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
 
 USE_CALIBRATED = True
@@ -43,16 +44,7 @@ def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
     levels_FAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
 
     levels_FAC["Config"] = levels_FAC["Configs"].apply(lambda x: " ".join(x.split(".")))
-    levels_FAC["g"] = levels_FAC["2J"] + 1
-
-    levels_FAC = levels_FAC[["Ilev", "Config", "P", "2J", "g", "Energy_ev"]]
-
-    # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits
-    levels_FAC["Config"] = levels_FAC["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
-    levels_FAC["energypercm"] = levels_FAC["Energy_ev"] / hc_in_ev_cm
-
-    assert isinstance(levels_FAC, pd.DataFrame)
-    return levels_FAC
+    return finish_levels(levels_FAC)
 
 
 def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
@@ -63,17 +55,19 @@ def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
     levels_cFAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
 
     levels_cFAC["Config"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[0])
+    return finish_levels(levels_cFAC)
 
-    levels_cFAC["g"] = levels_cFAC["2J"] + 1
 
-    levels_cFAC = levels_cFAC[["Ilev", "Config", "P", "g", "Energy_ev"]]
-
+def finish_levels(levels: pd.DataFrame) -> pd.DataFrame:
+    """Derive the columns that read_levels_data() takes, the same way for the FAC and cFAC layouts."""
+    levels["g"] = levels["2J"] + 1
     # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits
-    levels_cFAC["Config"] = levels_cFAC["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
-    levels_cFAC["energypercm"] = [en_ev / hc_in_ev_cm for en_ev in levels_cFAC["Energy_ev"]]
+    levels["Config"] = levels["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
+    levels["energypercm"] = levels["Energy_ev"] / hc_in_ev_cm
 
-    assert isinstance(levels_cFAC, pd.DataFrame)
-    return levels_cFAC
+    levels = levels[["Ilev", "Config", "P", "g", "Energy_ev", "energypercm"]]
+    assert isinstance(levels, pd.DataFrame)
+    return levels
 
 
 def GetLevels(filename: Path | str) -> pd.DataFrame:
@@ -175,15 +169,6 @@ def extend_ion_list(ion_handlers):
     return ion_handlers
 
 
-class FACEnergyLevel(t.NamedTuple):
-    """One energy level of an FAC calculation."""
-
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: int
-
-
 def read_levels_data(dflevels):
     """Convert the FAC level table to level tuples, in the energy order of the sorted frame.
 
@@ -199,7 +184,7 @@ def read_levels_data(dflevels):
     energy_levels = [
         # Config is not unique (levels of one configuration differ in J), so append the FAC level
         # index. The configuration stays first, for get_level_valence_n() and the adata.txt comment.
-        FACEnergyLevel(
+        EnergyLevel(
             levelname=f"{row['Config']} Ilev={int(row['Ilev'])}",
             parity=row["P"],
             g=row["g"],
@@ -209,14 +194,6 @@ def read_levels_data(dflevels):
     ]
 
     return energy_levels, levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
-
-
-class FACTransition(t.NamedTuple):
-    """One bound-bound transition of an FAC calculation, keyed by zero-based level id."""
-
-    lowerlevel: int
-    upperlevel: int
-    A: float
 
 
 def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[int], flog):
@@ -241,7 +218,7 @@ def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[
             row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
         )
 
-        transitions.append(FACTransition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"]))
+        transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"]))
 
     if skipped_count > 0:
         log_and_print(

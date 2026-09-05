@@ -14,6 +14,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
+from artisatomic.base import Transition
 
 
 class LisbonReader:
@@ -149,7 +150,7 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
         )
 
         A = row.gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * row.wavelength**2)
-        transitions.append(TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
+        transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
 
     return transitions
 
@@ -162,14 +163,6 @@ class EnergyLevelTuple(t.NamedTuple):
     g: float
     parity: int | None  # None where the data set gives no parity
     j: float  # the level's J, which its name is keyed on and its g derived from
-
-
-class TransitionTuple(t.NamedTuple):
-    """One Lisbon bound-bound transition."""
-
-    lowerlevel: int
-    upperlevel: int
-    A: float
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):

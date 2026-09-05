@@ -1,35 +1,18 @@
 """Read levels and transitions from the DREAM database of lanthanides and actinides."""
 
-import typing as t
-
 import numpy as np
 import pandas as pd
 
 from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
+from artisatomic.base import Transition
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325.h5"
 dreamdata: pd.DataFrame | None = None
-
-
-class DreamEnergyLevelRow(t.NamedTuple):
-    """One DREAM energy level."""
-
-    levelname: str
-    energyabovegsinpercm: float
-    g: float
-    parity: int
-
-
-class TransitionTuple(t.NamedTuple):
-    """One DREAM bound-bound transition."""
-
-    lowerlevel: int
-    upperlevel: int
-    A: float
 
 
 def init_dreamdata():
@@ -72,7 +55,7 @@ def energytuplefromrow(row, prefix):
     energyabovegsinpercm = float(energy)
 
     levelname = f"enpercm={energy},{paritystr},g={g}"
-    return DreamEnergyLevelRow(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
+    return EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
 
 
 def read_levels_data(dflines):
@@ -83,7 +66,7 @@ def read_levels_data(dflines):
     """
     # a set for the membership test, not `not in energy_levels`: that was a linear scan of the
     # list per candidate, so building the level list cost O(levels^2)
-    seen: set[DreamEnergyLevelRow] = set()
+    seen: set[EnergyLevel] = set()
     energy_levels = []
 
     for prefix in ["Lower", "Upper"]:
@@ -111,7 +94,7 @@ def read_lines_data(dfiondata):
     A_values = dfiondata["gA"].to_numpy() / dfiondata["Upper_g"].to_numpy()
 
     for lowerindex, upperindex, A in zip(lowerindices.tolist(), upperindices.tolist(), A_values.tolist(), strict=True):
-        transitions.append(TransitionTuple(lowerlevel=lowerindex, upperlevel=upperindex, A=A))
+        transitions.append(Transition(lowerlevel=lowerindex, upperlevel=upperindex, A=A))
 
     return transitions
 

@@ -15,6 +15,7 @@ import polars as pl
 
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
+from artisatomic.base import fortran_float
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import isfloat
@@ -29,6 +30,7 @@ from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import parse_orbital_n
 
 # need to also include collision strengths from e.g., o2col.dat
 
@@ -418,7 +420,9 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
             i=part(5).str.strip_chars_end("-").cast(pl.Int64),
             j=part(6).cast(pl.Int64),
             # the id column is masked before the cast, not after: the other layout holds a bar
-            # there, and both arms of a when() are evaluated
+            # there, and both arms of a when() are evaluated. Only the 8-part layout carries the
+            # id there: in the wide layout the column holds another number in some files (O III
+            # 19apr23 has 0, 0, 1, 2, ...), so the position fills in.
             hilliertransitionid=pl.when(pl.col("partcount") == 8)
             .then(part(7))
             .cast(pl.Int64)
@@ -588,8 +592,8 @@ def read_levels_and_transitions_from_file(
             if len(row) == levelcolcount and all(map(isfloat, row[1:])):
                 hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
                 levelname = row[colindex["levelname"]]
-                energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
-                lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
+                energyabovegsinpercm = fortran_float(row[colindex["energyabovegsinpercm"]])
+                lambdaangstrom = fortran_float(row[colindex["lambdaangstrom"]])
                 (twosplusone, _l, parity) = get_term_as_tuple(levelname)
                 ismerged = parity < 0
                 isjjcoupled = "{" in levelname and "}" in levelname
@@ -901,7 +905,7 @@ class PhotFileReader:
             # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
             # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
             # matches the oscillator value for every ion in ions_data) and just report it.
-            zion_from_photfile = int(float(row[0].replace("D", "E")))
+            zion_from_photfile = int(fortran_float(row[0]))
             if zion_from_photfile != self.ion_stage:
                 log_and_print(
                     self.flog,
@@ -1033,9 +1037,7 @@ class PhotFileReader:
 
     def take_vy95_row(self, row: list[str]) -> None:
         """Add one eight-column row of a type 9 (Verner & Yakovlev 1995) block."""
-        self.fitcoefficients.append(
-            VY95PhixsFitRow(int(row[0]), int(row[1]), *[float(x.replace("D", "E")) for x in row[2:]])
-        )
+        self.fitcoefficients.append(VY95PhixsFitRow(int(row[0]), int(row[1]), *[fortran_float(x) for x in row[2:]]))
         if len(self.fitcoefficients) * 8 == self.numpointsexpected:
             lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
             self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
@@ -1127,11 +1129,19 @@ def read_phixs_tables(
     # of reduce_phixs_tables here would be circular
     from artisatomic.phixs import reduce_phixs_tables
 
+    # pulled out of the frame once: the loops below index these per level, per cross-section table
+    levelcount = dfenergy_levels.height
+
+    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
+    if not photfilenames:
+        # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross-section array
+        # as "no data" and applies the hydrogenic estimate. A zero-filled array passed as data.
+        log_and_print(flog, "No photoionisation files for this ion")
+        return np.empty((0, args.nphixspoints)), [None] * levelcount, np.empty(0)
+
     # the type 2, 3 and 8 fits interpolate the hydrogenic tables
     read_hyd_phixsdata()
 
-    # pulled out of the frame once: the loops below index these per level, per cross-section table
-    levelcount = dfenergy_levels.height
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     lambdaangstroms: list[float] = dfenergy_levels["lambdaangstrom"].to_list()
 
@@ -1150,7 +1160,6 @@ def read_phixs_tables(
     # relies on, so this must not be initialised to empty lists
     photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None] * levelcount
 
-    photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     reader = PhotFileReader(
         atomic_number,
         ion_stage,
@@ -1540,6 +1549,21 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
+def get_level_valence_n(levelname: str) -> int | None:
+    """Principal quantum number of the valence electron, read from a CMFGEN level name.
+
+    The last orbital of the configuration is the valence one: '2s2_2p3(4So)3p_5Pe[1]' gives 3,
+    '3d5(4D)4po[3]' gives 4, and a merged shell such as '2s2_18w_2W' gives 18. Returns None for a
+    name with no readable orbital ('1___', '8SNG'). The caller, match_hydrogenic_phixs(), then
+    gives the level no estimate and writes a warning to the ion log.
+
+    An orbital is digits and a lower-case orbital letter. A term is a digit, an upper-case letter
+    and an optional e or o, so it never matches, and a seniority letter ('_a6De') follows no digit.
+    """
+    orbitals = re.findall(r"\d+[a-z]", levelname.split("[", maxsplit=1)[0])
+    return parse_orbital_n(orbitals[-1]) if orbitals else None
+
+
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, args):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
@@ -1642,8 +1666,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 # and the slice below counts from the end of the row, so it read the commented
                 # labels as the real ones. Cut the row at the comment first. header_row keeps the
                 # full row: the commented-out test above needs the '!'.
-                if "!" in row:
-                    row = row[: row.index("!")]
+                # cut at the first comment token, whether "!" stands alone or is attached ("!0.5")
+                row = row[: next((i for i, token in enumerate(row) if token.startswith("!")), len(row))]
                 temperatures = row[-num_expected_t_values:]
                 log_and_print(
                     flog,
@@ -1652,7 +1676,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 )
                 best_temperature = min(
                     temperatures,
-                    key=lambda t: abs(float(t.replace("D", "E")) * t_scale_factor - args.electrontemperature),
+                    key=lambda t: abs(fortran_float(t) * t_scale_factor - args.electrontemperature),
                 )
                 temperature_index = temperatures.index(best_temperature)
                 log_and_print(
@@ -1669,7 +1693,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     num_expected_t_values = int(row[0])
                 elif (
                     row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
-                    and float(row[0].replace("D", "E")) != 1.0
+                    and fortran_float(row[0]) != 1.0
                 ):
                     msg = f"scaling factor for OMEGA is {row[0]}, not 1. The reader does not apply a scaling factor."
                     raise ValueError(msg)
@@ -1683,7 +1707,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 else:
                     # Assume there is just a space between them (as is the case in Ni XIV)
                     namefrom, nameto = row[:2]
-                upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
+                upsilon = fortran_float(upsilonvalues[temperature_index])
                 coll_lines_in += 1
 
                 # the collision file can name a level that the oscillator file does not have.
@@ -1939,10 +1963,10 @@ def read_hyd_phixsdata(force: bool = False) -> None:
                 max_hyd_l_n = max_n
 
             if " ".join(row[1:]) == "!L_ST_U":
-                l_start_u = float(row[0].replace("D", "E"))
+                l_start_u = fortran_float(row[0])
 
             if " ".join(row[1:]) == "!L_DEL_U":
-                l_del_u = float(row[0].replace("D", "E"))
+                l_del_u = fortran_float(row[0])
 
             if max_n >= 0 and not line.strip():
                 break
@@ -1985,9 +2009,9 @@ def read_hyd_phixsdata(force: bool = False) -> None:
 
             if len(row) > 1:
                 if row[1] == "!N_ST_U":
-                    n_start_u = float(row[0].replace("D", "E"))
+                    n_start_u = fortran_float(row[0])
                 elif row[1] == "!N_DEL_U":
-                    n_del_u = float(row[0].replace("D", "E"))
+                    n_del_u = fortran_float(row[0])
 
             if max_n >= 0 and not line.strip():
                 break

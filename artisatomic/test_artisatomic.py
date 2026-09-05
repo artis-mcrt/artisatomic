@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Tests for the artisatomic readers, parsers and output writers."""
 
+import argparse
 import functools
 import io
 import operator
@@ -21,6 +22,7 @@ from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import gf_to_a_coefficient
+from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
@@ -39,6 +41,13 @@ from artisatomic.output import write_phixs_data
 from artisatomic.output import write_transition_data
 from artisatomic.phixs import match_hydrogenic_phixs
 from artisatomic.phixs import reduce_phixs_tables_worker
+
+
+def phixs_args(**overrides: t.Any) -> argparse.Namespace:
+    """Build the photoionisation options of the command line, with the values the tests share."""
+    values: dict[str, t.Any] = {"nphixspoints": 100, "phixsnuincrement": 0.03, "optimaltemperature": 6000}
+    values.update(overrides)
+    return argparse.Namespace(**values)
 
 
 def test_interpret_term():
@@ -359,8 +368,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     a second factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a
     typical E_th = 11 eV, n = 5 valence level).
     """
-    import argparse
-
     rhd.read_hyd_phixsdata()
 
     ryd_to_ev = rhd.ryd_to_ev
@@ -375,9 +382,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"],
         }
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=100)
 
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -422,8 +427,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
 
 def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
-    import argparse
-
     rhd.read_hyd_phixsdata()
 
     ionization_energy_ev = 4 * rhd.ryd_to_ev
@@ -439,12 +442,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     )
 
     for nlevels_option, n_expected in ((0, 0), (2, 2), (nlevels + 10, nlevels)):
-        args = argparse.Namespace(
-            nphixspoints=100,
-            phixsnuincrement=0.03,
-            optimaltemperature=6000,
-            nlevels_hydrogenic_for_unknown_phixs=nlevels_option,
-        )
+        args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=nlevels_option)
         _, targetfractions, thresholds = match_hydrogenic_phixs(
             atomic_number=2,
             energy_levels=dflevels,
@@ -463,9 +461,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     dflevels_partly_unbound = dflevels.with_columns(
         energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=3
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=3)
     _, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
         energy_levels=dflevels_partly_unbound,
@@ -486,9 +482,7 @@ def test_write_phixs_data_with_no_phixs_arrays():
     reader also left the cross-section and threshold arrays empty, the level ids from those target
     lists have nothing behind them.
     """
-    import argparse
-
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = phixs_args()
     flog = io.StringIO()
     fphixs = io.StringIO()
 
@@ -627,7 +621,6 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     phot file alone gives that target's raw table, and the combined read must reproduce the winner
     divided by its fraction.
     """
-    import argparse
     import contextlib
 
     ionfiles = readhillierdata.ions_data[8, 1]
@@ -635,7 +628,7 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     assert len(ionfiles.photfilenames) == 2, f"O I is expected to have two phot files, got {ionfiles.photfilenames}"
 
     rhd.read_hyd_phixsdata()
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = phixs_args()
 
     def read_phixs(photfilenames):
         """Read O I's cross sections using only the named phot files."""
@@ -1638,8 +1631,6 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     The hydrogenic tables cover n up to max_hyd_gaunt_n (30). A level outside them gave a
     KeyError before.
     """
-    import argparse
-
     rhd.read_hyd_phixsdata()
     assert rhd.max_hyd_gaunt_n == 30
 
@@ -1656,9 +1647,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
             ],
         }
     )
-    args = argparse.Namespace(
-        nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000, nlevels_hydrogenic_for_unknown_phixs=100
-    )
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=100)
     flog = io.StringIO()
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -1734,11 +1723,9 @@ def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
 
 def test_write_phixs_data_keeps_a_table_with_no_threshold():
     """A cross section is real data; a threshold ARTIS never reads is not a reason to drop it."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
     targetfractions = [[(0, 1.0)], [(0, 1.0)]]
     thresholds = np.array([13.6, np.nan])  # the second level's threshold is unknown
@@ -1910,11 +1897,9 @@ def test_strip_name_separators():
 
 def test_write_phixs_data_rejects_a_duplicated_target():
     """A target level that occurs two times would give the same target two fractions in ARTIS."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
     targetfractions = [[(0, 0.4), (1, 0.3), (0, 0.3)]]  # target level 0 occurs two times
     thresholds = np.array([13.6])
@@ -1929,11 +1914,9 @@ def test_write_phixs_data_rejects_a_duplicated_target():
 
 def test_write_phixs_data_rejects_a_bad_fraction_sum_before_output():
     """A bad fraction sum fails before any part of the ion goes out."""
-    import argparse
-
     from artisatomic.output import write_phixs_data
 
-    args = argparse.Namespace(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
+    args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
     targetfractions = [[(0, 0.4), (1, 0.3)]]  # the fractions sum to 0.7
     thresholds = np.array([13.6])
@@ -1992,9 +1975,7 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
     iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
     estimate, so the ion would be written with no cross sections at all.
     """
-    import argparse
-
-    args = argparse.Namespace(nphixspoints=100, phixsnuincrement=0.03, optimaltemperature=6000)
+    args = phixs_args()
     crosssections, targetfractions, thresholds = readqubdata.read_qub_photoionizations(
         38, 1, levelcount=5, args=args, flog=io.StringIO()
     )
@@ -2647,3 +2628,75 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     assert reader.phixstables[0]["C"][:, 1].tolist() == [4.0, 3.0]
     # the D exponent of the screened nuclear charge is read, and 2 matches the ion stage
     assert "screened nuclear charge" not in flog.getvalue()
+
+
+def test_readhillierdata_get_level_valence_n():
+    """The last orbital of a CMFGEN configuration gives n; a merged shell gives its n; no orbital gives None."""
+    assert readhillierdata.get_level_valence_n("2s2_2p3(4So)3p_5Pe[1]") == 3
+    assert readhillierdata.get_level_valence_n("3d6(5D)4s_a6De[9/2]") == 4
+    assert readhillierdata.get_level_valence_n("2s2_18w_2W") == 18
+    assert readhillierdata.get_level_valence_n("3d5(4D)4po[3]") == 4
+    assert readhillierdata.get_level_valence_n("1___") is None
+    assert readhillierdata.get_level_valence_n("8SNG") is None
+
+
+def test_adf04_level_layout():
+    """The adf04 column layout is read from the line, not from the element."""
+    tyndall_co = "    1   3s23p63d7(4F)   (4)3( 4.5)               0.0000"
+    tyndall_fe = "    1 3S2 3P6 3D6       (5)2( 4.0)               0.0000"
+    standard_sr = "    1          4p65s2(1S)   (1)0( 0.0)            0.0000"
+    assert readqubdata.adf04_level_layout(tyndall_co) == "tyndall"
+    assert readqubdata.adf04_level_layout(tyndall_fe) == "tyndall"
+    assert readqubdata.adf04_level_layout(standard_sr) == "standard"
+    with pytest.raises(ValueError, match="no \\(2S\\+1\\) group"):
+        readqubdata.adf04_level_layout("    1 3S2 3P6 3D6 0.0000")
+
+
+def test_cmfgen_fit_functions():
+    """Each analytic fit gives its formula's value at the threshold and at one point above it.
+
+    The grid is 1 + 20 x^2 times the threshold for x from 0 to 1 in steps of 0.001, so index 500
+    is 6 times the threshold.
+    """
+    lambda_angstrom = 911.753  # the H I edge
+    threshold_ev = hc_in_ev_angstrom / lambda_angstrom
+    threshold_ryd = threshold_ev / ryd_to_ev
+
+    # type 1: sigma_t (beta + (1 - beta) / u) u^-s
+    table = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0)
+    assert table.shape == (1000, 2)
+    assert table[0, 0] == pytest.approx(threshold_ryd)
+    assert table[0, 1] == 2.0
+    u = table[500, 0] / threshold_ryd
+    assert u == pytest.approx(6.0)
+    assert table[500, 1] == pytest.approx(2.0 * (0.5 + 0.5 / u) * u**-3.0)
+
+    # type 7: the same fit with the edge moved up by nu_o, so the cross section is zero below it.
+    # nu_o = E_th / h puts the edge at twice the threshold energy.
+    nu_o_1e15hz = threshold_ev / h_in_ev_seconds / 1e15
+    table7 = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=nu_o_1e15hz)
+    assert table7[0, 1] == 0.0
+    assert table7[200, 1] == 0.0  # u = 1.8
+    assert table7[300, 1] > 0.0  # u = 2.8
+
+    # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
+    table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
+    assert table5[0, 1] == pytest.approx(10.0)
+    x = np.log10(3.0)
+    assert table5[500, 1] == pytest.approx(10 ** (1.0 + 0.5 * x) * (3.0 / 6.0) ** 2)
+
+    # type 6: a cubic in x = log10(u) below the break e, a straight line 10^(f + g x) above it
+    table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.0, 0.0, 0.5, 0.0, -2.0, 0.0)
+    assert table6[0, 1] == pytest.approx(10.0)
+    assert table6[500, 1] == pytest.approx(6.0**-2.0)
+
+    # type 9: the Verner et al. (1996) H I ground-state fit gives the 6.3 Mb threshold cross section
+    fit = readhillierdata.VY95PhixsFitRow(
+        n=1, l=0, E_th_eV=13.6, E_0=0.4298, sigma_0=5.475e4, y_a=32.88, P=2.963, y_w=0.0
+    )
+    table9 = readhillierdata.get_vy95_phixstable(lambda_angstrom, [fit])
+    y = threshold_ev / 0.4298
+    q = 5.5 - 0.5 * 2.963
+    expected = 5.475e4 * (y - 1) ** 2 * y**-q * (1 + np.sqrt(y / 32.88)) ** -2.963
+    assert table9[0, 1] == pytest.approx(expected)
+    assert table9[0, 1] == pytest.approx(6.3, rel=0.02)

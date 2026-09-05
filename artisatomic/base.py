@@ -107,6 +107,23 @@ empty_levels_schema = pl.Schema(
 )
 
 
+class EnergyLevel(t.NamedTuple):
+    """One energy level of a data set that gives no other per-level column."""
+
+    levelname: str
+    energyabovegsinpercm: float
+    g: float
+    parity: int | None  # None where the data set gives no parity
+
+
+class Transition(t.NamedTuple):
+    """One bound-bound transition, keyed by zero-based level id."""
+
+    lowerlevel: int
+    upperlevel: int
+    A: float
+
+
 def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> list[int]:
     """Count the transitions that touch each level, indexed by zero-based level id, for adata.txt.
 
@@ -229,6 +246,11 @@ def path_for_log(filepath: str | Path) -> str:
         return str(Path(filepath).resolve().relative_to(PYDIR.parent))
     except ValueError:
         return str(filepath)
+
+
+def fortran_float(text: str) -> float:
+    """Convert a number that a Fortran program wrote, where the exponent letter can be D."""
+    return float(text.replace("D", "E"))
 
 
 def isfloat(value: t.Any) -> bool:
