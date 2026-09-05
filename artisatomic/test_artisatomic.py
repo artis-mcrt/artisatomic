@@ -457,8 +457,8 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
-    # the limit bounds the levels considered, not the tables produced: an unbound level inside it
-    # is skipped but still counts, so asking for 3 here yields only the one bound level below them
+    # the lowest levels are the lowest by energy, not the first rows: with two unbound levels in
+    # rows 1 and 2, asking for 3 gives the three bound levels in rows 0, 3 and 4
     unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
     dflevels_partly_unbound = dflevels.with_columns(
         energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
@@ -473,7 +473,50 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         args=args,
         flog=io.StringIO(),
     )
-    assert np.count_nonzero(~np.isnan(thresholds)) == 1
+    assert [bool(targets) for targets in targetfractions] == [True, False, False, True, True]
+
+    # the limit bounds the levels considered, not the tables produced: an unbound level among the
+    # lowest by energy is skipped but still counts, so asking for 4 here gives the same three
+    args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=4)
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels_partly_unbound,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=args,
+        flog=io.StringIO(),
+    )
+    assert np.count_nonzero(~np.isnan(thresholds)) == 3
+
+
+def test_match_hydrogenic_phixs_takes_the_lowest_levels_by_energy():
+    """A reader that keeps its file's order still gets the estimate for its lowest levels by energy."""
+    rhd.read_hyd_phixsdata()
+    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    # row 0 is the highest level and row 1 the ground state
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "energyabovegsinpercm": [5000.0, 0.0, 2500.0],
+            "g": [2.0, 2.0, 2.0],
+            "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * 3,
+        }
+    )
+    _, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=2,
+        energy_levels=dflevels,
+        ionization_energy_ev=ionization_energy_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=phixs_args(nlevels_hydrogenic_for_unknown_phixs=2),
+        flog=io.StringIO(),
+    )
+    assert [bool(targets) for targets in targetfractions] == [False, True, True]
+    # each threshold belongs to its own level id, not to its position in the sorted order
+    assert thresholds[1] == ionization_energy_ev
+    assert thresholds[2] == pytest.approx(ionization_energy_ev - hc_in_ev_cm * 2500.0)
+    assert np.isnan(thresholds[0])
 
 
 def test_write_phixs_data_with_no_phixs_arrays():

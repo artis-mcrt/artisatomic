@@ -12,6 +12,7 @@ from artisatomic.base import elsymbols
 from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import parallel_map
 from artisatomic.base import ryd_to_hz
@@ -29,10 +30,11 @@ def match_hydrogenic_phixs(
     """Estimate photoionization cross sections for a data set that supplies none.
 
     Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
-    the lowest -nlevels_hydrogenic_for_unknown_phixs levels, scaled to that level's own ionisation
-    threshold, with the upper ion's ground state as the only target. That option defaults to 100,
-    so this is on unless it is set to 0. It bounds the levels considered rather than the tables
-    produced: a level at or above the ionization energy is skipped but still counts towards it.
+    the -nlevels_hydrogenic_for_unknown_phixs lowest levels by energy, scaled to that level's own
+    ionisation threshold, with the upper ion's ground state as the only target. That option
+    defaults to 100, so this is on unless it is set to 0. It bounds the levels considered rather
+    than the tables produced: a level at or above the ionization energy is skipped but still counts
+    towards it. The levels are sorted by energy here, because a reader can keep its file's order.
 
     The caller only reaches this for an ion whose handler returned no cross sections at all, so
     real data is never replaced or extended by an estimate. The granularity is the whole ion: an
@@ -65,9 +67,15 @@ def match_hydrogenic_phixs(
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.full(energy_levels.height, np.nan)
     phixstables = {}
-    for levelindex, level in enumerate(energy_levels.iter_rows(named=True)):
-        if levelindex >= args.nlevels_hydrogenic_for_unknown_phixs:
-            break
+    # the lowest levels by energy, whatever order the reader kept them in. The stable sort keeps
+    # levels of one energy in id order, and every array here is indexed by level id.
+    lowest_levels = (
+        leveltuples_to_pldataframe(energy_levels)
+        .sort("energyabovegsinpercm", maintain_order=True)
+        .head(args.nlevels_hydrogenic_for_unknown_phixs)
+    )
+    for level in lowest_levels.iter_rows(named=True):
+        levelindex = level["levelid"]
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
         if threshold_ev <= 0.0:
@@ -225,8 +233,9 @@ def reduce_phixs_tables_worker(
             arr_energyryd = sample_energyryd
             arr_sigma_megabarns = sample_sigma
         else:
-            nsteps = 50  # was 500
-            arr_energyryd = np.linspace(enlow, enhigh, num=nsteps, endpoint=False)
+            # 51 points from one bin edge to the other, so the integrals below cover the whole
+            # bin. With endpoint=False the last two percent of every resampled bin were missing.
+            arr_energyryd = np.linspace(enlow, enhigh, num=51)
             # np.interp holds the last cross section constant past the table's end. Apply the
             # same power-law decay that the interval edges above use, so a bin that straddles
             # the table end does not overweight its tail.

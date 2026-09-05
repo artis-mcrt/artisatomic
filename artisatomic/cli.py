@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help=(
-            "Consider this many of the lowest levels of any ion whose handler supplied no"
+            "Consider this many of the lowest levels by energy of any ion whose handler supplied no"
             " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
             " Negative values are rejected. Fewer tables than this can result, because a level"
             " at or above the ionization energy is skipped but still counts towards the limit."

@@ -17,6 +17,7 @@ from artisatomic.base import elsymbols
 from artisatomic.base import fortran_float
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
+from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
@@ -553,6 +554,11 @@ def read_levels_and_transitions_from_file(
             elif line.rstrip().endswith("!Number of transitions"):
                 expected_transitions = int(row[0])
                 log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+            elif line.rstrip().endswith("!Ionization energy"):
+                # the header gives the value in cm^-1 to the full precision of the file. The Lam(A)
+                # column of the level table has four significant figures only.
+                hillier_ionization_energy_ev = fortran_float(row[0]) * hc_in_ev_cm
+                log_and_print(flog, f"File specifies an ionization energy of {row[0]} cm^-1")
             elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
                 format_date = row[0]
                 print(f"Format date: {format_date}")
@@ -623,15 +629,6 @@ def read_levels_and_transitions_from_file(
                 if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
                     log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
 
-                # the ground state gives the ionization energy. The first level below 1 cm^-1 is
-                # the ground state: a second one is a J level of the same split term. CMFGEN writes
-                # a negative Lam(A) for some levels, hence the abs().
-                if energyabovegsinpercm < 1.0 and hillier_ionization_energy_ev == 0.0:
-                    if lambdaangstrom == 0.0:
-                        msg = f"Level '{levelname}' has Lam(A) = 0, so the ionization energy cannot be read from it"
-                        raise ValueError(msg)
-                    hillier_ionization_energy_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
-
                 if hillierlevelid != len(levelrows):
                     msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
                     raise ValueError(msg)
@@ -654,9 +651,9 @@ def read_levels_and_transitions_from_file(
         raise ValueError(msg)
 
     # not an assert: this guards the ionization energy that adata.txt gets. H II returns above
-    # with 0.0, because a bare nucleus has no level to read one from.
+    # with 0.0, because a bare nucleus has no file to read one from.
     if hillier_ionization_energy_ev == 0.0:
-        msg = f"{filename} has no level below 1 cm^-1, so it gives no ionization energy"
+        msg = f"{filename} has no '!Ionization energy' line in its header"
         raise ValueError(msg)
 
     # the rest of the file holds the transitions, which polars reads rather than Python: one ion
