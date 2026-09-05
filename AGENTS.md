@@ -13,13 +13,19 @@ Write all English in ASD-STE100 (Simplified Technical English). This rule applie
 - Use one approved word for each meaning. Do not use a different word for the same thing.
 - Use a noun with an article ("the file", "a level") where possible.
 - Do not use slang or idioms.
-- Keep the British spellings of the prose: ionisation, photoionisation, normalise, behaviour. Write "cross section" and "data set" as two words. Call the zero-based in-memory number of a level its "level id" and the number in a source file its "file index". Identifiers, output-file formats and quoted file text are exempt.
+
+Use these terms and spellings in the prose. Identifiers, output-file formats and quoted file text are exempt.
+
+- British spellings: ionisation, photoionisation, normalise, behaviour.
+- Two words: "cross section", "data set".
+- "level id": the zero-based number of a level in memory.
+- "file index": the number of a level in a source file.
 
 ## What this project is
 
-artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design: to change ions or data sources, you edit the Python code or supply an ion handlers JSON file.
+artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design. To change ions or data sources, edit the Python code or supply an ion handlers JSON file.
 
-The Python package has no public API. The command-line scripts (`makeartisatomicfiles`, `makerecombratefile`, and `makechargetransferfile`) are the only callers, and this repository holds all of them. Change a function signature or a module layout when you must. No external caller depends on either.
+The command-line scripts (`makeartisatomicfiles`, `makerecombratefile`, and `makechargetransferfile`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
 
 ## Setup
 
@@ -27,11 +33,11 @@ The project requires Python >= 3.13 and uses [uv](https://docs.astral.sh/uv/):
 
 ```sh
 uv sync --frozen
-source .venv/bin/activate
-uv pip install -e .[dev]
 ```
 
-Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The exception is `atomic-data-chargetransfer`, whose source files are small and tracked.
+This installs the package in editable mode with the `dev` dependency group.
+
+Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, QUB, MONS and Floers+25 tests read committed samples, so the full test suite needs only the CMFGEN download. The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
 
 ## Commands
 
@@ -40,14 +46,23 @@ Run all commands through uv so they use the locked environment:
 - Tests: `uv run -m pytest`
 - Lint and autofix: `uv run ruff check --fix .`
 - Format: `uv run ruff format .`
-- Type checks (CI runs both of these): `uv run pyrefly check`, `uv run ty check`
+- Type checks: `uv run pyrefly check`, `uv run ty check`
 - Pre-commit hooks: `prek install` once, then hooks run on each commit
 
-CI (`.github/workflows/test.yml`) fails on ruff format differences, pyrefly errors, ty errors, and test failures. Run these checks locally before you push.
+CI (`.github/workflows/test.yml`) runs the format check, both type checks, the tests, and the output checksums. Run them locally before you push.
+
+## Output checksums
+
+The output files must stay byte-identical unless the change intends a different output. Each directory in `tests/` (except `chargetransfer`) holds an ion handlers file and the MD5 checksums of the four output files. [tests/README.md](tests/README.md) gives the recipe to regenerate a set and explains which ions each set covers. Two rules from it matter for every run:
+
+- Set `ARTISATOMIC_TESTMODE=1`. It redirects the Kurucz, QUB, MONS and Floers+25 readers to their committed samples.
+- Remove `artisatomicionhandlers.json` from the repository root after the run. A copy left there silently overrides the ion selection of every later run.
+
+When a change alters the output on purpose, verify the new values, then regenerate every set that the change touches.
 
 ## Code layout
 
-- `artisatomic/__init__.py` re-exports nothing, because the package has no public API. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readqubdata` needs no line in `__init__.py`.
+- `artisatomic/__init__.py` re-exports nothing. The package has no public API. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readqubdata` needs no line in `__init__.py`.
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionisation cross sections.
