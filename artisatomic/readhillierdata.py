@@ -656,7 +656,7 @@ def read_levels_and_transitions_from_file(
     # not an assert: this guards the ionization energy that adata.txt gets. H II returns above
     # with 0.0, because a bare nucleus has no level to read one from.
     if hillier_ionization_energy_ev == 0.0:
-        msg = f"{filename} has no level below 1 cm^-1, so the ionization energy could not be read"
+        msg = f"{filename} has no level below 1 cm^-1, so it gives no ionization energy"
         raise ValueError(msg)
 
     # the rest of the file holds the transitions, which polars reads rather than Python: one ion
@@ -671,7 +671,8 @@ def read_levels_and_transitions_from_file(
     # filter out levels with no transitions
     names_with_transitions = pl.concat([dftransitions["namefrom"], dftransitions["nameto"]]).unique()
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
-        pl.col("levelname").is_in(names_with_transitions)
+        # implode(): is_in() with a bare Series of the same dtype is deprecated in polars 1.44
+        pl.col("levelname").is_in(names_with_transitions.implode())
     )
 
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
@@ -949,7 +950,7 @@ class PhotFileReader:
         """Store the points of the tabulated block that ends here.
 
         A blank line ends a block, and then the point count must match the declared one.
-        Without a blank line a short block is stored as read, with a warning.
+        Without a blank line the reader stores a short block as read, with a warning.
         """
         if not self.pending_energyryd:
             return
@@ -971,7 +972,7 @@ class PhotFileReader:
                 f" the block ends after {len(energyryd):d}",
             )
         # the rows the file gave, and no zero rows up to the declared count: the downsampling
-        # takes the energy column as sorted, and a zero energy at the end of the table is not
+        # takes the energy column as sorted, and a zero energy after the last row would break that
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
 
     def take_data_rows(self, start: int, end: int) -> None:
@@ -1559,10 +1560,11 @@ def get_level_valence_n(levelname: str) -> int | None:
     name with no readable orbital ('1___', '8SNG'). The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    An orbital is digits and a lower-case orbital letter. A term is a digit, an upper-case letter
-    and an optional e or o, so it never matches, and a seniority letter ('_a6De') follows no digit.
+    An orbital is digits and a lower-case orbital letter. A term is an upper-case letter with an
+    optional seniority digit and parity letter ('2D2e'), so the digit run that follows an
+    upper-case letter is not an orbital, and 'e' is not an orbital letter.
     """
-    orbitals = re.findall(r"\d+[a-z]", levelname.split("[", maxsplit=1)[0])
+    orbitals = re.findall(r"(?<![A-Z])\d+[spdfghiklmnoqrtuvwxyz]", levelname.split("[", maxsplit=1)[0])
     return parse_orbital_n(orbitals[-1]) if orbitals else None
 
 
@@ -1681,9 +1683,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     key=lambda t: abs(fortran_float(t) * t_scale_factor - args.electrontemperature),
                 )
                 temperature_index = temperatures.index(best_temperature)
-                log_and_print(
-                    flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K"
-                )
+                log_and_print(flog, f"Selecting {fortran_float(best_temperature) * t_scale_factor:.3f} K")
                 continue
 
             if len(row) >= 2:

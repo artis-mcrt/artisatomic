@@ -107,7 +107,7 @@ def adf04_level_layout(line: str) -> str:
 
     The standard layout puts the (2S+1) group at column 28, after a 22-column configuration. The
     Tyndall Co III and Fe III files put it at column 24, after a 16-column configuration. The
-    layout is a property of the file, not of the element, so it is read from the line.
+    layout is a property of the file, not of the element, so the line gives it.
     """
     if line[28:29] == "(" and line[30:31] == ")":
         return "standard"
@@ -134,8 +134,7 @@ def read_adf04(
     (lower, upper) pair of zero-based level ids, and the parsed collision rows. The caller takes
     the A-values from that frame, which saves a second read and a second parse of the file. The
     file numbers levels from one, and the rest of the code looks up id n at list index n - 1, so
-    the level ids are validated as contiguous and 1-based. Collision strengths are taken at one
-    temperature, chosen per element.
+    the level ids are validated as contiguous and 1-based.
     """
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
@@ -149,6 +148,7 @@ def read_adf04(
         # reader skips it when it follows the data blocks. A note at any other position is not
         # handled.
         atomic_group_note = False
+        layout = ""  # the layout of the file, from its first level line
         while True:
             line = fleveltrans.readline()
             if not line or is_adf04_terminator(line):
@@ -159,7 +159,9 @@ def read_adf04(
             if atomic_group_note:
                 continue
 
-            if adf04_level_layout(line) == "tyndall":
+            if not layout:
+                layout = adf04_level_layout(line)
+            if layout == "tyndall":
                 config = line[5:21].strip()
                 energylevel = QUBEnergyLevel(
                     config,
@@ -186,12 +188,11 @@ def read_adf04(
                     0.0,
                     0,
                 )
-            config_for_parity = config
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
             # L in their own columns (read just above). Stripping a term off the end would lose
             # the last orbital of '3S2 3P6 3D5 4P1', and would read the bare '5s2' as a term
             # rather than an orbital, which is how every level of some files came out even.
-            parity = get_config_parity(config_for_parity, hasterm=False)
+            parity = get_config_parity(config, hasterm=False)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
@@ -347,26 +348,16 @@ qub_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
 def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
     """Read one ion of the "qub_cobalt" handler: the QUB lists for its stages, the CMFGEN lists otherwise.
 
-    Returns the same four values as read_qub_levels_and_transitions(). A CMFGEN stage gives an
-    empty upsilondict here, and read_cobalt_coldata() adds its collision strengths.
+    Returns the same four values as read_qub_levels_and_transitions(). The CMFGEN collision
+    strengths of a CMFGEN stage are the fourth value, as the QUB ones are for a QUB stage.
     """
     if ion_stage in qub_cobalt_stages:
         return read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args)
     ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(
         atomic_number, ion_stage, flog
     )
-    upsilondict: dict[tuple[int, int], float] = {}
+    upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog)
     return ionization_energy_ev, dflevels, dftransitions, upsilondict
-
-
-def read_cobalt_coldata(atomic_number, ion_stage, dfenergylevels, args, flog) -> dict[tuple[int, int], float]:
-    """Read the CMFGEN collision strengths of a "qub_cobalt" stage that has CMFGEN levels.
-
-    A stage in qub_cobalt_stages carries its collision strengths with its levels, so it gets none here.
-    """
-    if ion_stage in qub_cobalt_stages:
-        return {}
-    return readhillierdata.read_coldata(atomic_number, ion_stage, dfenergylevels, args, flog)
 
 
 def read_cobalt_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
@@ -380,11 +371,6 @@ def read_cobalt_photoionizations(atomic_number, ion_stage, dfenergylevels, args,
             atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog
         )
     return readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfenergylevels, args, flog)
-
-
-def get_cobalt_level_valence_n(levelname: str) -> int | None:
-    """Principal quantum number of the valence electron of a "qub_cobalt" level, QUB or CMFGEN named."""
-    return get_level_valence_n(levelname) if "_id=" in levelname else readhillierdata.get_level_valence_n(levelname)
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
@@ -425,8 +411,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
                     )
 
     elif (atomic_number == 27) and (ion_stage == 4):
-        # one level, the 3d6 5D4 ground state: g = 2J + 1 = 9, as the CMFGEN Co IV level list gives it
-        qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 9, 0)]
+        # one level, the 3d6 5D4 ground state, with g = 2J + 1 as read_adf04() derives it
+        qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 5, 2, 4.0, 0.0, 2 * 4.0 + 1, 0)]
         qub_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015

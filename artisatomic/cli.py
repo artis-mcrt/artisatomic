@@ -16,8 +16,8 @@ from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
 
 
-def main() -> None:
-    """Write an ARTIS atomic database from the configured ions and handlers."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser. Every option has a default, so parse_args([]) gives a full namespace."""
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description="Produce an ARTIS atomic database from published atomic data sets.",
@@ -64,7 +64,12 @@ def main() -> None:
             " upper ion to photoionise to."
         ),
     )
+    return parser
 
+
+def main() -> None:
+    """Write an ARTIS atomic database from the configured ions and handlers."""
+    parser = build_parser()
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
 

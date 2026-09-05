@@ -131,9 +131,9 @@ class PhixsData(t.NamedTuple):
 
     A data source with no cross sections for the ion gives empty arrays, not zero-filled ones:
     iondata.read_ion_data() reads an empty cross-section array as "no data" and applies the
-    hydrogenic estimate. The targets of a level are given one of two ways: as the names of the
-    upper ion's levels with their fractions, which get_photoiontargetfractions() resolves once the
-    upper ion is read (CMFGEN), or as the upper ion's level ids with their fractions (QUB).
+    hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
+    the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
+    names once the upper ion is read. QUB gives the upper ion's level ids with their fractions.
     """
 
     crosssections: npt.NDArray[np.float64]  # (levelcount, nphixspoints), in Mb
@@ -150,18 +150,15 @@ def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> l
     agree with transitiondata.txt. Keyed by id and not by name: a data set can give two levels
     one name, and a name-keyed count merged those levels.
     """
-    counts = [0] * levelcount
     if dftransitions.is_empty():
-        return counts
+        return [0] * levelcount
     levelids = pl.concat([dftransitions["lowerlevel"], dftransitions["upperlevel"]])
     # not an assert: this guards written output, and a level id outside the level list would
     # otherwise raise a bare IndexError below
     if (levelids < 0).any() or (levelids >= levelcount).any():
         msg = f"transitions name level ids {levelids.min()} to {levelids.max()}, but the ion has {levelcount} levels"
         raise ValueError(msg)
-    for levelid, count in levelids.value_counts().iter_rows():
-        counts[levelid] = count
-    return counts
+    return np.bincount(levelids.to_numpy(), minlength=levelcount).tolist()
 
 
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:

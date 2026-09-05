@@ -32,6 +32,7 @@ from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
+from artisatomic.cli import build_parser
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import interpret_configuration
@@ -44,10 +45,11 @@ from artisatomic.phixs import reduce_phixs_tables_worker
 
 
 def phixs_args(**overrides: t.Any) -> argparse.Namespace:
-    """Build the photoionisation options of the command line, with the values the tests share."""
-    values: dict[str, t.Any] = {"nphixspoints": 100, "phixsnuincrement": 0.03, "optimaltemperature": 6000}
-    values.update(overrides)
-    return argparse.Namespace(**values)
+    """Build the command-line options with their defaults, so the tests run the values the command runs."""
+    args = build_parser().parse_args([])
+    for name, value in overrides.items():
+        setattr(args, name, value)
+    return args
 
 
 def test_interpret_term():
@@ -102,9 +104,9 @@ def test_get_level_parity():
 
 
 def test_has_merged_orbital():
-    """Merge markers are orbital letters standing for several l at once, so l >= n gives them away."""
-    assert has_merged_orbital("2s2_13w_2W")  # 'w' would be l=19, but n=13
-    assert has_merged_orbital("10z_2Z")  # 'z' would be l=22, but n=10
+    """Merge markers are orbital letters that stand for several l at once: w and z, or a letter with l >= n."""
+    assert has_merged_orbital("2s2_13w_2W")  # w is a merge marker at any n
+    assert has_merged_orbital("10z_2Z")  # z too
     assert has_merged_orbital("2s2_2p3(4So)5z_5Z")
 
     assert not has_merged_orbital("3d6(5D)10d_5Pe")  # 10d is a real orbital, l=2 < n=10
@@ -146,9 +148,9 @@ def test_get_config_parity():
     # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
     assert get_config_parity("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
-    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker,
-    # not a real l ('5z' would be l=22, '13w' l=19). It spans several l of both parities, so only
-    # the real orbitals decide the parity.
+    # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker
+    # (w or z), not a real l. It spans several l of both parities, so only the real orbitals
+    # decide the parity.
     assert get_config_parity("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_config_parity("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
@@ -2339,7 +2341,7 @@ def test_iondata_handlers_registry():
 
     expected_parsers = {
         "cmfgen": readhillierdata.get_level_valence_n,
-        "qub_cobalt": readqubdata.get_cobalt_level_valence_n,
+        "qub_cobalt": readhillierdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
@@ -2370,7 +2372,6 @@ def test_iondata_handlers_registry():
     # the two data sources with collision strengths in their own file and with cross sections
     assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
         "cmfgen": readhillierdata.read_coldata,
-        "qub_cobalt": readqubdata.read_cobalt_coldata,
     }
     assert {name: handler.read_phixs for name, handler in handlers.items() if handler.read_phixs} == {
         "cmfgen": readhillierdata.read_phixs_tables,
@@ -2447,7 +2448,7 @@ def test_console_script_entry_points_resolve():
 
 
 def test_lchars_orbital_letters_skip_j_p_and_s():
-    """The orbital letter sequence gives every letter its own l, so q, r and t.. parse right.
+    """The orbital letter sequence gives every letter its own l, so q, r and the letters after t parse correctly.
 
     The sequence skips J, and it skips P and S at l = 12 and l = 14 because those letters are
     already l = 1 and l = 0. A table that repeated them read a 13q orbital as l = 13, which
@@ -2594,11 +2595,11 @@ def test_groundstatesonlynist_names_a_missing_ion():
 
 
 def test_photfilereader_short_block_and_unknown_type(tmp_path):
-    """A short tabulated block is stored as read, and an unknown type does not eat the next block's name.
+    """The reader stores a short tabulated block as read, and an unknown type does not clear the next block's name.
 
     Both cases have no blank line between the blocks. The reader used to fill a short block with
-    zero rows up to the declared count, which the downsampling then read as sorted energies, and
-    it used to clear the name of the block after an unknown type on that block's own
+    zero rows up to the declared count, which the downsampling then read as sorted energies. It
+    also used to clear the name of the block after an unknown type on that block's own
     "!Configuration name" line.
     """
     from artisatomic.readhillierdata import PhotFileReader
@@ -2656,6 +2657,9 @@ def test_readhillierdata_get_level_valence_n():
     assert readhillierdata.get_level_valence_n("3d6(5D)4s_a6De[9/2]") == 4
     assert readhillierdata.get_level_valence_n("2s2_18w_2W") == 18
     assert readhillierdata.get_level_valence_n("3d5(4D)4po[3]") == 4
+    # the seniority digit and parity letter of a term are not an orbital
+    assert readhillierdata.get_level_valence_n("3d7_a2D2e[5/2]") == 3
+    assert readhillierdata.get_level_valence_n("3d5_4s2_2F1e[5/2]") == 4
     assert readhillierdata.get_level_valence_n("1___") is None
     assert readhillierdata.get_level_valence_n("8SNG") is None
 

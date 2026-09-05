@@ -136,18 +136,19 @@ handlers: dict[str, Handler] = {
     ),
     # the QUB Co III and Co IV level lists and the QUB Co II and Co III cross sections, with the
     # CMFGEN files for every other stage of the ion
+    # the parser is the CMFGEN one: a stage with QUB levels takes the QUB cross sections, so the
+    # hydrogenic estimate never parses a QUB level name here
     "qub_cobalt": Handler(
         readqubdata.read_cobalt_levels_and_transitions,
-        readqubdata.get_cobalt_level_valence_n,
+        readhillierdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
-        read_coldata=readqubdata.read_cobalt_coldata,
         read_phixs=readqubdata.read_cobalt_photoionizations,
     ),
 }
 
 # every handler name that read_ion_data() dispatches. parse_ion_handlers() checks a JSON file
-# against this before any output file is written.
+# against this before the run writes any output file.
 known_handlers: frozenset[str] = frozenset(handlers)
 
 
@@ -191,10 +192,7 @@ def read_ion_data(
         dfenergylevels = leveltuples_to_pldataframe(energy_levels)
 
         if handlerspec.read_coldata is not None:
-            upsilondict = {
-                **upsilondict,
-                **handlerspec.read_coldata(atomic_number, ion_stage, dfenergylevels, args, flog),
-            }
+            upsilondict.update(handlerspec.read_coldata(atomic_number, ion_stage, dfenergylevels, args, flog))
 
         # the top ion has no upper ion to photoionise to, so it gets no cross sections
         if not is_top_ion and not args.nophixs and handlerspec.read_phixs is not None:
@@ -202,7 +200,7 @@ def read_ion_data(
             photoionization_crosssections = phixs.crosssections
             photoionization_thresholds_ev = phixs.thresholds_ev
             photoion_targetconfigs = phixs.targetconfigs
-            photoionization_targetfractions = phixs.targetfractions if phixs.targetfractions is not None else []
+            photoionization_targetfractions = phixs.targetfractions or []
 
         # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an
         # ion with even one cross-section table is left alone, so measured data is never replaced.

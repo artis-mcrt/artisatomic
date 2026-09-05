@@ -91,8 +91,6 @@ def GetLevels(filename: Path | str) -> pd.DataFrame:
         msg = "No FAC-like code detected on output file"
         raise ValueError(msg)
 
-    assert isinstance(levels, pd.DataFrame)
-
     return levels
 
 
