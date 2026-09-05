@@ -600,6 +600,22 @@ def read_levels_and_transitions_from_file(
                 levelname = row[colindex["levelname"]]
                 energyabovegsinpercm = fortran_float(row[colindex["energyabovegsinpercm"]])
                 lambdaangstrom = fortran_float(row[colindex["lambdaangstrom"]])
+
+                # the ground level's Lam(A) is the ionization edge to four significant figures, so
+                # it must agree with the header's value to that precision. A larger difference
+                # means the header and the level table are not for the same ion or the same
+                # energy zero. CMFGEN writes a negative Lam(A) for some levels, hence the abs().
+                if not levelrows and lambdaangstrom != 0.0:
+                    ionization_energy_from_lambda_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
+                    relative_difference = abs(ionization_energy_from_lambda_ev / hillier_ionization_energy_ev - 1.0)
+                    if relative_difference > 1e-3:
+                        log_and_print(
+                            flog,
+                            f"WARNING: the ground level Lam(A) {lambdaangstrom} gives an ionization energy of"
+                            f" {ionization_energy_from_lambda_ev:.5f} eV, but the header gives"
+                            f" {hillier_ionization_energy_ev:.5f} eV",
+                        )
+
                 (twosplusone, _l, parity) = get_term_as_tuple(levelname)
                 ismerged = parity < 0
                 isjjcoupled = "{" in levelname and "}" in levelname

@@ -2789,3 +2789,42 @@ def test_read_adf04_selects_the_nearest_temperature():
 
     assert readqubdata.adf04_number("5.01+03") == 5010.0
     assert readqubdata.adf04_number("1.00-02") == 0.01
+
+
+def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypatch, tmp_path):
+    """The ground level's Lam(A) must give the header's ionization energy to four significant figures.
+
+    The header value is the one adata.txt gets. A difference above that precision means the header
+    and the level table disagree, which the ion log must say. The H I file is copied with its
+    header value raised by one percent; the unchanged file gives no warning.
+    """
+    import contextlib
+
+    ionfiles = readhillierdata.ions_data[1, 1]
+    with xopen_check_extension(readhillierdata.hillier_osc_filename(1, 1)) as fosc:
+        lines = fosc.readlines()
+    for index, line in enumerate(lines):
+        if line.rstrip().endswith("!Ionization energy"):
+            value = line.split()[0]
+            lines[index] = line.replace(value, f"{float(value) * 1.01:.4f}", 1)
+            break
+    else:
+        pytest.fail("the H I oscillator file has no '!Ionization energy' line")
+    (tmp_path / "hi_osc.dat").write_text("".join(lines))
+
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        ionization_energy_ev, _, _ = readhillierdata.read_levels_and_transitions(1, 1, flog)
+    assert "WARNING: the ground level Lam(A)" not in flog.getvalue()
+
+    # an absolute folder path replaces the ion folder in the joined path
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (1, 1),
+        ionfiles._replace(folder=str(tmp_path), levelstransitionsfilename="hi_osc.dat"),
+    )
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        ionization_energy_raised_ev, _, _ = readhillierdata.read_levels_and_transitions(1, 1, flog)
+    assert ionization_energy_raised_ev == pytest.approx(ionization_energy_ev * 1.01, rel=1e-5)
+    assert "WARNING: the ground level Lam(A)" in flog.getvalue()
