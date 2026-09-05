@@ -130,7 +130,7 @@ class PhixsData(t.NamedTuple):
     """The photoionisation cross sections of one ion, indexed by zero-based level id.
 
     A data source with no cross sections for the ion gives empty arrays, not zero-filled ones:
-    iondata.read_ion_data() reads an empty cross-section array as "no data" and applies the
+    iondata.read_ion_data() reads an empty cross section array as "no data" and applies the
     hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
     the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
     names once the upper ion is read. QUB gives the upper ion's level ids with their fractions.
@@ -390,7 +390,7 @@ NIST_IONIZATION_PATH = PYDIR / "nist_ionization.txt.zst"
 
 
 def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, int], float]]:
-    """Parse the tab-separated NIST table of ionization energies.
+    """Parse the tab-separated NIST table of ionisation energies.
 
     The result holds the provenance lines at the top of the table (the lines that start with "#")
     and the energies, keyed by (atomic_number, ion_stage). The footnotes of the table follow the
@@ -498,7 +498,7 @@ def parallel_map[ResultType](
     nitems = lengths[0] if lengths else 0
 
     # even with the pool already up, handing a handful of items to it costs more in IPC than doing
-    # them here (readqubdata reduces four cross-section tables at a time)
+    # them here (readqubdata reduces four cross section tables at a time)
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 

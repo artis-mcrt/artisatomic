@@ -130,7 +130,7 @@ def read_adf04(
     The collision strengths come from the tabulated temperature nearest to electrontemperature,
     as readhillierdata.read_coldata() picks them for the CMFGEN files.
 
-    Returns the ionization energy in eV, the levels, a dict of upsilon values keyed by a
+    Returns the ionisation energy in eV, the levels, a dict of upsilon values keyed by a
     (lower, upper) pair of zero-based level ids, and the parsed collision rows. The caller takes
     the A-values from that frame, which saves a second read and a second parse of the file. The
     file numbers levels from one, and the rest of the code looks up id n at list index n - 1, so
@@ -222,7 +222,7 @@ def read_adf04(
         temperatures = upsilonheader[2:]
 
         # ADAS writes auxiliary rows with a process code in the first field: R for recombination,
-        # S and I for ionization, P for proton impact. Only a row that starts with a level id is
+        # S and I for ionisation, P for proton impact. Only a row that starts with a level id is
         # a collision strength. A blank line is not a bad row, so it is not counted.
         collision_lines: list[str] = []
         skipped_rows = 0
@@ -455,14 +455,14 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
 
 def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
-    """Read QUB photoionization cross sections for one ion, downsampled onto the output grid.
+    """Read QUB photoionisation cross sections for one ion, downsampled onto the output grid.
 
     Returns the cross sections, the threshold energies and the upper-ion target fractions per
     level, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
 
     An ion that this function has no data for gets the empty arrays, not zero-filled ones. The
-    caller reads an empty cross-section array as "no data", and then applies the hydrogenic
+    caller reads an empty cross section array as "no data", and then applies the hydrogenic
     estimate. A zero-filled array would pass as data and leave the ion with no cross sections.
     """
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
@@ -472,7 +472,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in range(8):
-            # the cross-section files are named after the level's number in the source data,
+            # the cross section files are named after the level's number in the source data,
             # which counts from one
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
             log_and_print(flog, f"Reading {path_for_log(filename)}")
@@ -532,7 +532,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
             scalefactorsum = sum(target_scalefactors)
 
             # NaN, the arrays' initial value, says: the threshold energy comes from the level
-            # energies, not from the first energy point of the cross-section table
+            # energies, not from the first energy point of the cross section table
             photoionization_thresholds_ev[lowerlevelid] = np.nan
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors):
                 target_fraction = target_scalefactor / scalefactorsum

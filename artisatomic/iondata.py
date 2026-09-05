@@ -35,7 +35,7 @@ from artisatomic.phixs import match_hydrogenic_phixs
 
 @dataclass(slots=True)
 class IonData:
-    """Levels, transitions, and photoionisation data for a single ion, read from one of the source datasets.
+    """Levels, transitions, and photoionisation data for a single ion, read from one of the source data sets.
 
     A dataclass rather than a NamedTuple because resolve_photoion_targetfractions() fills in the
     target fractions after the whole element has been read.
@@ -155,7 +155,7 @@ known_handlers: frozenset[str] = frozenset(handlers)
 def read_ion_data(
     atomic_number: int, ion_stage_entry: tuple[int, str], is_top_ion: bool, args: argparse.Namespace
 ) -> IonData:
-    """Read a single ion's data from its source dataset.
+    """Read a single ion's data from its source data set.
 
     Every ion names the handler that reads it; there is no default per element.
     """
@@ -203,7 +203,7 @@ def read_ion_data(
             photoionization_targetfractions = phixs.targetfractions or []
 
         # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an
-        # ion with even one cross-section table is left alone, so measured data is never replaced.
+        # ion with even one cross section table is left alone, so measured data is never replaced.
         # The top ion is excluded because there is no upper ion for it to photoionise to.
         if (
             not is_top_ion

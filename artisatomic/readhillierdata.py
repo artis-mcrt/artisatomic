@@ -476,7 +476,7 @@ def read_levels_and_transitions_from_file(
 ) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
 
-    Returns the ionization energy in eV, a level frame, and a transition frame. Levels with no
+    Returns the ionisation energy in eV, a level frame, and a transition frame. Levels with no
     transitions are dropped. The level
     table's columns are read from the header the file carries above it, so the layout varies by
     ion; see hillier_rowformat_noheader for the oldest files, which have no header.
@@ -601,11 +601,11 @@ def read_levels_and_transitions_from_file(
                 energyabovegsinpercm = fortran_float(row[colindex["energyabovegsinpercm"]])
                 lambdaangstrom = fortran_float(row[colindex["lambdaangstrom"]])
 
-                # the ground level's Lam(A) is the ionization edge to four significant figures, so
+                # the ground level's Lam(A) is the ionisation edge to four significant figures, so
                 # it must agree with the header's value to that precision. A larger difference
                 # means the header and the level table are not for the same ion or the same
                 # energy zero. CMFGEN writes a negative Lam(A) for some levels, hence the abs(). A
-                # header with no ionization energy leaves 0.0 here, which the check after the loop
+                # header with no ionisation energy leaves 0.0 here, which the check after the loop
                 # reports; the comparison would divide by it.
                 if not levelrows and lambdaangstrom != 0.0 and hillier_ionization_energy_ev > 0.0:
                     ionization_energy_from_lambda_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
@@ -668,7 +668,7 @@ def read_levels_and_transitions_from_file(
         msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
         raise ValueError(msg)
 
-    # not an assert: this guards the ionization energy that adata.txt gets. H II returns above
+    # not an assert: this guards the ionisation energy that adata.txt gets. H II returns above
     # with 0.0, because a bare nucleus has no file to read one from.
     if hillier_ionization_energy_ev == 0.0:
         msg = f"{filename} has no '!Ionization energy' line in its header"
@@ -716,7 +716,7 @@ phixs_type_labels = {
 
 
 class PhotFileReader:
-    """Read the photoionization files of one CMFGEN ion, one file at a time.
+    """Read the photoionisation files of one CMFGEN ion, one file at a time.
 
     A file is a header, then one block for each level. A block starts with three marker
     lines: "!Configuration name", "!Type of cross-section" and "!Number of cross-section
@@ -1130,7 +1130,7 @@ class PhotFileReader:
 
 
 def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog) -> PhixsData:
-    """Read one ion's CMFGEN photoionization cross sections, downsampled onto the output grid.
+    """Read one ion's CMFGEN photoionisation cross sections, downsampled onto the output grid.
 
     Returns the cross sections, the threshold energies, and the target configurations with their
     fractions per level, all indexed by zero-based level id. A level with no data keeps None in
@@ -1143,12 +1143,12 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     # of reduce_phixs_tables here would be circular
     from artisatomic.phixs import reduce_phixs_tables
 
-    # pulled out of the frame once: the loops below index these per level, per cross-section table
+    # pulled out of the frame once: the loops below index these per level, per cross section table
     levelcount = dfenergy_levels.height
 
     photfilenames = ions_data[atomic_number, ion_stage].photfilenames
     if not photfilenames:
-        # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross-section array
+        # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross section array
         # as "no data" and applies the hydrogenic estimate. A zero-filled array passed as data.
         log_and_print(flog, "No photoionisation files for this ion")
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetconfigs=[None] * levelcount)
@@ -1216,7 +1216,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 phixs_at_threshold = reduced_phixstable[np.nonzero(reduced_phixstable)][0]
             except IndexError:
                 # The cross section is zero everywhere on the output grid, so the level gets no
-                # photoionization. For type 8 (offset) this happens when the offset edge
+                # photoionisation. For type 8 (offset) this happens when the offset edge
                 # nu_edge + nu_o lies beyond the grid that reduce_phixs_tables() samples.
                 num_levelnames_with_zero_crosssection += 1
                 log_and_print(
@@ -1345,7 +1345,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
 
 
 def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
-    """Evaluate a Seaton formula fit (CMFGEN cross-section type 1, or type 7 when nu_o is given).
+    """Evaluate a Seaton formula fit (CMFGEN cross section type 1, or type 7 when nu_o is given).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
     so the cross section is zero until the offset threshold.
@@ -1362,7 +1362,7 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
         # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
         # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
         #                       Offset was being added to the current frequency instead
-        #                       of the ionization edge.
+        #                       of the ionisation edge.
 
         threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
         offset_threshold_div_energy = (energy_div_threshold**-1) * (
@@ -1401,7 +1401,7 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
 
 
 def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, zion=None):
-    """Hydrogenic split-l cross section table (CMFGEN cross-section types 2 and 8).
+    """Hydrogenic split-l cross section table (CMFGEN cross section types 2 and 8).
 
     With nu_o given this is type 8 ("modified hydrogenic split l"), where the cross section is
     zero below an offset edge nu_edge + nu_o and the tabulated hydrogenic cross section is read
@@ -1526,7 +1526,7 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-# the cross-section types whose data rows are single floats collected into fitcoefficients:
+# the cross section types whose data rows are single floats collected into fitcoefficients:
 # {crosssectiontype: (coefficient count, fit function)}. read_phixs_tables() dispatches on this.
 phixs_fit_functions = {
     1: (3, get_seaton_phixstable),
@@ -1537,7 +1537,7 @@ phixs_fit_functions = {
 
 
 def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
-    """Verner & Yakovlev (1995) multi-shell ground-state fits (CMFGEN cross-section type 9).
+    """Verner & Yakovlev (1995) multi-shell ground-state fits (CMFGEN cross section type 9).
 
     Each shell contributes only above its own threshold E_th, and the fit is evaluated at the
     actual photon energy. See the type-9 branch of SUB_PHOT_GEN in CMFGEN's
@@ -1558,7 +1558,7 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
         y_a = params.y_a
         y_w = params.y_w
         shellcrosssection = params.sigma_0 * ((y - 1) ** 2 + y_w**2) * (y**-Q) * ((1 + np.sqrt(y / y_a)) ** -P)
-        # the first shell starts at the level's own ionization edge, later (inner) shells
+        # the first shell starts at the level's own ionisation edge, later (inner) shells
         # only contribute above their own threshold
         if shellnum > 0:
             shellcrosssection = np.where(energy_ev < params.E_th_eV, 0.0, shellcrosssection)
@@ -1829,7 +1829,7 @@ def get_photoiontargetfractions(
     entry with the summed fraction. A target configuration that names several J-split levels of
     the upper ion shares its fraction over them in proportion to their statistical weights. For a
     name that matches no level, the comparison runs again with the separators removed. If that
-    also fails, the target becomes the upper ion's ground state. A level with no cross-section
+    also fails, the target becomes the upper ion's ground state. A level with no cross section
     data (None) keeps an empty target list, and write_phixs_data() skips it.
 
     In the second comparison, each part of the name must come to one level name of the upper ion.
@@ -1934,7 +1934,7 @@ def get_photoiontargetfractions(
 
 
 def read_hyd_phixsdata(force: bool = False) -> None:
-    """Load the hydrogenic photoionization tables that the type 2, 3 and 8 fits interpolate.
+    """Load the hydrogenic photoionisation tables that the type 2, 3 and 8 fits interpolate.
 
     Fills the module-level hyd_phixs / hyd_gaunt tables. The functions that read the tables
     call this first, so a caller needs no call of its own. A second call does nothing unless

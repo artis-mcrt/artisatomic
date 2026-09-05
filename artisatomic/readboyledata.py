@@ -54,7 +54,7 @@ class TransitionTuple(t.NamedTuple):
 
 
 def read_ionization_data(atomic_number, ion_stage):
-    """Ionization energy in eV of one ion, from the AOIFE HDF5 file.
+    """Ionisation energy in eV of one ion, from the AOIFE HDF5 file.
 
     He III is a bare nucleus, so the file has no entry for it and a sentinel is used instead.
     """

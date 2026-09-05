@@ -519,9 +519,9 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
 
     Returns the ion's threshold array with its unreadable entries replaced, and the rest as they
     were. This is the same quantity ARTIS derives in get_phixs_threshold(), where a level's
-    epsilon carries the ionization energies of every stage below it:
+    epsilon carries the ionisation energies of every stage below it:
 
-        threshold = ionization energy of this ion + E(target level) - E(this level)
+        threshold = ionisation energy of this ion + E(target level) - E(this level)
 
     with both level energies above their own ion's ground state. The target is the first one, as
     ARTIS uses phixstargetindex 0 for a level's continuum edge (input.cc).
@@ -582,7 +582,7 @@ def write_phixs_data(
     args,
     flog,
 ) -> None:
-    """Append one ion's photoionization cross sections to phixsdata_v2.txt.
+    """Append one ion's photoionisation cross sections to phixsdata_v2.txt.
 
     Every level with targets is written. Level ids, of this ion and of the upper ion's targets,
     are zero-based in memory but numbered from one in the output.
@@ -594,7 +594,7 @@ def write_phixs_data(
     over a number the consumer ignores; such a level is written with a threshold of zero.
     """
     # the target fractions are filled in per level by the caller, but a reader that found no
-    # photoionization data at all returns the cross-section and threshold arrays still empty, so
+    # photoionisation data at all returns the cross section and threshold arrays still empty, so
     # bound the ids by what those arrays actually hold rather than indexing off the end
     levelids_to_write = [
         levelid
@@ -621,7 +621,7 @@ def write_phixs_data(
 
     # only for a ground state that is actually being written: a level with no targets is
     # deliberately skipped (match_hydrogenic_phixs does this for a ground state at or above the
-    # ionization energy), and that is not an error
+    # ionisation energy), and that is not an error
     if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
         msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
         log_and_print(flog, f"ERROR: {msg}")

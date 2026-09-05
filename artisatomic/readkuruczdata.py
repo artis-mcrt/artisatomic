@@ -160,7 +160,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     """Read one ion from the Kurucz line lists.
 
     The files are transition lists rather than level lists, so the levels are recovered by
-    taking the distinct lower and upper levels of every transition. The ionization energy comes
+    taking the distinct lower and upper levels of every transition. The ionisation energy comes
     from NIST rather than the file.
     """
     ion_charge = ion_stage - 1

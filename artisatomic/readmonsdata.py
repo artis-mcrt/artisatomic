@@ -102,7 +102,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     strength of each E1 transition. The reader finds the levels of a transition by their energy:
     the upper level energy is the lower level energy plus the photon energy. Each level name is
     the energy plus the zero-based level id, so two levels with one energy keep separate names.
-    NIST supplies the ionization energy.
+    NIST supplies the ionisation energy.
     """
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_and_print(flog, f"levels: {len(energy_levels1000percm)}")

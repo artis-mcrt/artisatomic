@@ -210,8 +210,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
-    # from NIST, as every other reader whose data set carries no ionization energy does. This was
-    # -1, which went into adata.txt verbatim as the ion's ionization energy.
+    # from NIST, as every other reader whose data set carries no ionisation energy does. This was
+    # -1, which went into adata.txt verbatim as the ion's ionisation energy.
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 

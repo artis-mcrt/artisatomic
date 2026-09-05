@@ -278,7 +278,7 @@ def test_hydrogenic_phixs():
 
 
 def test_hydrogenic_nl_phixs_offset_type8():
-    """CMFGEN cross-section type 8 (modified hydrogenic split l).
+    """CMFGEN cross section type 8 (modified hydrogenic split l).
 
     Pinned against the SUB_PHOT_GEN type-8 branch in CMFGEN's newsubs/sub_phot_gen.f:
 
@@ -348,7 +348,7 @@ def test_hydrogenic_phixs_effective_charge_scaling():
 
     for atomic_number in (1, 2, 3, 6, 26):
         for n in (1, 2, 5):
-            # a hydrogenic level of charge Z and principal quantum number n ionizes at Z**2 / n**2 Ryd
+            # a hydrogenic level of charge Z and principal quantum number n ionises at Z**2 / n**2 Ryd
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
@@ -404,7 +404,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     # the downsampled first point is a bin average, so allow a few percent
     assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
 
-    # levels above the ionization energy must be skipped rather than dividing by a negative threshold
+    # levels above the ionisation energy must be skipped rather than dividing by a negative threshold
     dflevels_unbound = pl.DataFrame(
         {
             "levelid": [0],
@@ -436,7 +436,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     dflevels = pl.DataFrame(
         {
             "levelid": list(range(nlevels)),
-            # ascending, and all well below the ionization energy so none is skipped as unbound
+            # ascending, and all well below the ionisation energy so none is skipped as unbound
             "energyabovegsinpercm": [i * 1000.0 for i in range(nlevels)],
             "g": [2.0] * nlevels,
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * nlevels,
@@ -520,11 +520,11 @@ def test_match_hydrogenic_phixs_takes_the_lowest_levels_by_energy():
 
 
 def test_write_phixs_data_with_no_phixs_arrays():
-    """A reader that found no photoionization data must not make write_phixs_data() index off the end.
+    """A reader that found no photoionisation data must not make write_phixs_data() index off the end.
 
     resolve_photoion_targetfractions() fills a target list for every level whenever the reader supplied none, and
     readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
-    reader also left the cross-section and threshold arrays empty, the level ids from those target
+    reader also left the cross section and threshold arrays empty, the level ids from those target
     lists have nothing behind them.
     """
     args = phixs_args()
@@ -652,7 +652,7 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
 
 
 def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
-    """A level with a cross-section table in more than one phot file keeps the largest, rescaled.
+    """A level with a cross section table in more than one phot file keeps the largest, rescaled.
 
     Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
     state of the upper ion, and a level is normally present in all of them: O I's phot_nosm_A and
@@ -2060,7 +2060,7 @@ def test_fill_missing_phixs_thresholds():
 
     filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
 
-    # ionization energy + target level energy - this level's energy
+    # ionisation energy + target level energy - this level's energy
     assert filled[0] == pytest.approx(10.0 + 0.0 - 0.0)
     assert filled[1] == pytest.approx(10.0 + 1.0 - 2.0)
 
@@ -2122,7 +2122,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     """A reader marks a threshold it does not have in two ways, and both have to count.
 
     The arrays start as NaN, and readqubdata writes -1.0 to say that the threshold comes from the
-    level energies rather than from its cross-section table. Only NaN counted at first, which left
+    level energies rather than from its cross section table. Only NaN counted at first, which left
     every QUB level with its -1 and made the calculation dead code for the one reader that asks
     for it.
     """
@@ -2150,7 +2150,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
 
     filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
 
-    # a ground state ionizing to the upper ion's ground state has the ionization energy itself
+    # a ground state ionizing to the upper ion's ground state has the ionisation energy itself
     assert filled[0] == pytest.approx(17.084)
     assert filled[1] == pytest.approx(17.084)
 
@@ -2792,7 +2792,7 @@ def test_read_adf04_selects_the_nearest_temperature():
 
 
 def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypatch, tmp_path):
-    """The ground level's Lam(A) must give the header's ionization energy to four significant figures.
+    """The ground level's Lam(A) must give the header's ionisation energy to four significant figures.
 
     The header value is the one adata.txt gets. A difference above that precision means the header
     and the level table disagree, which the ion log must say. The H I file is copied with its

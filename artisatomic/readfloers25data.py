@@ -207,7 +207,7 @@ def read_levels_and_transitions(
 ):
     """Read one ion from the Floers+25 data set.
 
-    The ionization energy comes from NIST rather than the file. Configurations are not unique
+    The ionisation energy comes from NIST rather than the file. Configurations are not unique
     (levels of one configuration differ by J), so level names combine the configuration, J and
     the file's index. The level indices are validated, since a gap would silently misattach
     transitions. A transition to a level that the levels file does not list is discarded, with

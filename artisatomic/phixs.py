@@ -27,19 +27,19 @@ def match_hydrogenic_phixs(
     args,
     flog,
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
-    """Estimate photoionization cross sections for a data set that supplies none.
+    """Estimate photoionisation cross sections for a data set that supplies none.
 
     Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
     the -nlevels_hydrogenic_for_unknown_phixs lowest levels by energy, scaled to that level's own
     ionisation threshold, with the upper ion's ground state as the only target. That option
     defaults to 100, so this is on unless it is set to 0. It bounds the levels considered rather
-    than the tables produced: a level at or above the ionization energy is skipped but still counts
+    than the tables produced: a level at or above the ionisation energy is skipped but still counts
     towards it. The levels are sorted by energy here, because a reader can keep its file's order.
 
     The caller only reaches this for an ion whose handler returned no cross sections at all, so
     real data is never replaced or extended by an estimate. The granularity is the whole ion: an
     ion whose handler covered even one level keeps exactly the levels that handler covered, and
-    the rest are left without photoionization rather than filled in hydrogenically.
+    the rest are left without photoionisation rather than filled in hydrogenically.
 
     get_level_valence_n is the handler's own level-name parser. The handler registry in
     iondata.py holds it. None means that the handler has no parser. The ion then gets no
@@ -79,7 +79,7 @@ def match_hydrogenic_phixs(
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
         if threshold_ev <= 0.0:
-            # level lies above the ionization energy, so there is nothing to ionize from
+            # level lies above the ionisation energy, so there is nothing to ionise from
             continue
 
         n = get_level_valence_n(level["levelname"])
@@ -146,7 +146,7 @@ def reduce_phixs_tables[KeyType](
     )
 
 
-# this method downsamples the photoionization cross section table to a
+# this method downsamples the photoionisation cross section table to a
 # regular grid while keeping the recombination rate integral constant
 # (assuming that the temperature matches)
 def reduce_phixs_tables_worker(
@@ -155,7 +155,7 @@ def reduce_phixs_tables_worker(
     phixsnuincrement: float,
     tablein: np.ndarray,
 ) -> np.ndarray:
-    """Downsample one cross-section table onto the output's nu/nu_edge grid.
+    """Downsample one cross section table onto the output's nu/nu_edge grid.
 
     Each output point is the average of the input over that point's frequency bin, weighted by
     nu^2 exp(-h nu / k T) so that the recombination rate at optimaltemperature is preserved

@@ -309,7 +309,7 @@ def read_cloudy_table(text: str, ncols: int) -> dict[tuple[int, int], list[float
     """Parse one charge transfer file of Cloudy into {(Z, rowindex + 1): column values}.
 
     The files hold four rows for each element from H to Zn, after a magic number line. For the
-    recombination file, the row index + 1 is the ion charge before the capture. For the ionization
+    recombination file, the row index + 1 is the ion charge before the capture. For the ionisation
     file, the row index + 1 is the charge after the electron loss.
     """
     lines = text.split("\n")

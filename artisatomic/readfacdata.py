@@ -73,7 +73,7 @@ def finish_levels(levels: pd.DataFrame) -> pd.DataFrame:
 def GetLevels(filename: Path | str) -> pd.DataFrame:
     """Get a dataframe of every energy level in the ascii level output of FAC or cFAC.
 
-    The caller drops the levels above the ionization energy, and keeps their Ilev values so that
+    The caller drops the levels above the ionisation energy, and keeps their Ilev values so that
     a transition that names one is told apart from a transition that names an unknown level.
     """
     headerlines: list[str] = []
@@ -197,7 +197,7 @@ def read_levels_data(dflevels):
 def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[int], flog):
     """Convert FAC lines to transitions referencing zero-based level ids.
 
-    A line that names a level above the ionization energy is skipped, because the level list
+    A line that names a level above the ionisation energy is skipped, because the level list
     stops there. A line that names an Ilev the level file does not have at all is an error: the
     two files disagree about the numbering, and skipping it would empty the ion without a word.
     The two levels are ordered lower id first.
@@ -256,7 +256,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         msg = f"FAC levels file {levels_file} not found"
         raise FileNotFoundError(msg)
     dfalllevels = GetLevels(filename=levels_file)
-    # the levels above the ionization energy are dropped, and their Ilev values kept so that
+    # the levels above the ionisation energy are dropped, and their Ilev values kept so that
     # read_lines_data() can tell a transition to one of them from a transition to an unknown level
     above_ionization = dfalllevels["energypercm"] > (ionization_energy_in_ev / hc_in_ev_cm)
     ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.loc[above_ionization, "Ilev"]}

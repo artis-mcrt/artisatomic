@@ -157,7 +157,7 @@ def test_makechargetransferfile_kf96_autoreverse(patch_sources, tmp_path):
     # the S reactions are a pair, so each one is the explicit reverse of the other
     assert autoreverse_of_reaction[16, 2, 1, 1] == 0
     assert autoreverse_of_reaction[1, 2, 16, 1] == 0
-    # Fe+3 + H0 -> Fe+2 + H+ has no ionization row for Fe+2. Li0 + H+ -> Li+1 + H0 has no
+    # Fe+3 + H0 -> Fe+2 + H+ has no ionisation row for Fe+2. Li0 + H+ -> Li+1 + H0 has no
     # recombination row for Li+1.
     assert autoreverse_of_reaction[26, 4, 1, 1] == 1
     assert autoreverse_of_reaction[1, 2, 3, 1] == 1

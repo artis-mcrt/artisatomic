@@ -23,7 +23,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     """Read the ground state of one ion from the NIST ground-state table.
 
     This handler supplies a single level per ion and never any transitions, so an ion using it
-    contributes only its ground state and ionization energy to the output.
+    contributes only its ground state and ionisation energy to the output.
     """
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
     groundstatesdata = read_groundstates_table()
