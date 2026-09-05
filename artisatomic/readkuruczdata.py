@@ -16,7 +16,6 @@ from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
-from artisatomic.base import transition_count_of_level_name
 
 kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
 if TESTMODE:
@@ -157,9 +156,7 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
-def read_levels_and_transitions(
-    atomic_number: int, ion_stage: int, flog
-) -> tuple[float, pl.DataFrame, pl.DataFrame, dict[str, int]]:
+def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
     The files are transition lists rather than level lists, so the levels are recovered by
@@ -319,19 +316,20 @@ def read_levels_and_transitions(
     if transitions.height < transitions_in:
         log_and_print(flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once")
 
+    # the level ids follow a sort on (energy, J), while the file's pair was ordered by energy
+    # alone, so two levels of one energy can come out with the higher id first: order the ids
     transitions = transitions.select(
-        upperlevel=pl.col("levelid_upper"),
-        lowerlevel=pl.col("levelid_lower"),
+        upperlevel=pl.max_horizontal("levelid_lower", "levelid_upper"),
+        lowerlevel=pl.min_horizontal("levelid_lower", "levelid_upper"),
         A=pl.col("A"),
     )
 
-    transition_counts = transition_count_of_level_name(dflevels, transitions)
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
 
-    return ionization_energy_in_ev, dflevels, transitions, transition_counts
+    return ionization_energy_in_ev, dflevels, transitions
 
 
 def get_level_valence_n(levelname: str) -> int | None:
@@ -377,7 +375,9 @@ def get_level_valence_n(levelname: str) -> int | None:
         if len(digits) == 2 and digits[1] != "0":
             digits = digits[1:]
         elif len(digits) == 3:
-            digits = digits[2:]
+            # a two-digit count and a one-digit n ("f125d"), unless that n would be 0: then a
+            # one-digit count and a two-digit n ("s210d" is 5s2 10d)
+            digits = digits[2:] if digits[2] != "0" else digits[1:]
         elif len(digits) > 3:
             return None
     return int(digits)

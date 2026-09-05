@@ -67,7 +67,8 @@ def main():
     )
     assert dfalpha.height == dfalpha.unique(("Z", "A")).height
 
-    nuclist = sorted(list(dfbetaminus.select(["Z", "A"]).iter_rows()) + list(dfalpha.select(["Z", "A"]).iter_rows()))
+    # a set: a nuclide in both lists is downloaded once
+    nuclist = sorted(set(dfbetaminus.select(["Z", "A"]).iter_rows()) | set(dfalpha.select(["Z", "A"]).iter_rows()))
     for z, a in nuclist:
         strnuclide = elsymbols[z].lower() + str(a)
         nucoutfilepath = outfolder / f"gamma_{strnuclide}.txt"
@@ -112,11 +113,13 @@ def main():
                 newcols.append(colname)
             dfnuclide.columns = newcols
             dfnuclide = dfnuclide.with_columns(pl.col(pl.Utf8).str.strip_chars()).with_columns(
-                # anchored, so only a level that IS 0.0 is renamed: str.replace() takes a pattern
-                # and matches anywhere, so a bare "0.0" also rewrote "10.05" to "105" and
-                # "100.0" to "100", silently moving those levels to the wrong group below.
-                # The point is only to keep "0" and "0.0" from forming two ground-state groups.
-                pl.col("parent_elevel").str.replace(r"^0\.0$", "0"),
+                # every spelling of a zero level ("0", "0.0", "0.00") becomes one value, so the
+                # ground level's lines form one group below and not two that each rewrite the
+                # file. A blank or non-numeric level stays as it is.
+                pl.when(pl.col("parent_elevel").cast(pl.Float64, strict=False) == 0.0)
+                .then(pl.lit("0"))
+                .otherwise(pl.col("parent_elevel"))
+                .alias("parent_elevel"),
                 pl.col("radiationenergy_kev").cast(pl.Float64),
                 pl.col("intensity").cast(pl.Float64),
                 pl.col("halflife_s").cast(pl.Float64),
@@ -138,7 +141,8 @@ def main():
 
                 dfgammadecays = dfdecay.filter(
                     (pl.col("Radiation") == "G")
-                    & pl.col("radsubtype").is_in(["", "Annihil."])
+                    # fill_null: an empty cell reads as null, and is_in() on a null drops the row
+                    & pl.col("radsubtype").fill_null("").is_in(["", "Annihil."])
                     & (pl.col("intensity") > 0.0)
                 )
 

@@ -114,8 +114,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
 
     dflevels = pl.DataFrame(
         {
-            # the id makes the name unique: two levels with one energy would otherwise share a
-            # name, and dict(zip(...)) below would keep only one transition count for both
+            # the id makes the name unique: two levels with one energy would otherwise share a name
             "levelname": [f"{energy},id={levelid}" for levelid, energy in enumerate(energiesabovegsinpercm)],
             "energyabovegsinpercm": energiesabovegsinpercm,
             "g": g_arr,
@@ -170,9 +169,4 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         {"lowerlevel": lowerlevels, "upperlevel": upperlevels, "A": A_ul}, schema=empty_transitions_schema
     )
 
-    transitioncounts = np.bincount(lowerlevels, minlength=dflevels.height) + np.bincount(
-        upperlevels, minlength=dflevels.height
-    )
-    transition_count_of_level_name = dict(zip(dflevels["levelname"].to_list(), transitioncounts.tolist(), strict=True))
-
-    return ionization_energy_in_ev, dflevels, dftransitions, transition_count_of_level_name
+    return ionization_energy_in_ev, dflevels, dftransitions

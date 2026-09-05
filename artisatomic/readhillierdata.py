@@ -118,7 +118,7 @@ default_ion_stages: dict[int, Iterable[int]] = {
     19: range(1, 12),  # K
     20: range(1, 12),  # Ca
     21: range(1, 4),  # Sc (only I-III are in CMFGEN)
-    22: range(2, 4),  # Ti (only II and III are in CMFGEN)
+    22: range(2, 4),  # Ti (Ti IV is left out, see ions_data below)
     24: range(1, 15),  # Cr
     25: range(2, 8),  # Mn (Mn I is not in CMFGEN)
     26: (2, 3, *range(5, 17)),  # Fe
@@ -158,8 +158,9 @@ ions_data |= {
     (14, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # P
     (15, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
-    # Ti IV has dummy files with a single level.
-    # (22, 4): IonFiles("18oct00", "tkiv_osc.dat", ("phot_data.dat",), "col_guess.dat"),
+    # Ti IV: the 19apr23 files hold 126 levels and 1000 transitions, but the collision file is a
+    # header only, and the 18oct00 files hold a single level. Not included.
+    # (22, 4): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
     # V (only V I is in CMFGEN and it has a single level)
     # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot.dat",), "col_guess.dat"),
     # Fe
@@ -413,7 +414,7 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
             f=pl.col("f"),
             A=pl.col("A"),
             # the wavelength column holds a dash where the transition has no measured wavelength
-            lambdaangstrom=part(4).cast(pl.Float64, strict=False).fill_null(-1.0),
+            lambdaangstrom=as_float(4).fill_null(-1.0),
             i=part(5).str.strip_chars_end("-").cast(pl.Int64),
             j=part(6).cast(pl.Int64),
             # the id column is masked before the cast, not after: the other layout holds a bar
@@ -439,9 +440,7 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
     return dftransitions.cast(hillier_transition_schema)
 
 
-def read_levels_and_transitions(
-    atomic_number: int, ion_stage: int, flog
-) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion, and rewrite its file as utf-8 first if CMFGEN wrote it in iso-8859-1.
 
     Python raises a UnicodeDecodeError for such a file and polars raises a ComputeError, so
@@ -469,18 +468,17 @@ def hillier_osc_filename(atomic_number: int, ion_stage: int) -> Path:
 
 def read_levels_and_transitions_from_file(
     atomic_number: int, ion_stage: int, flog
-) -> tuple[float, pl.DataFrame, pl.DataFrame, defaultdict[str, int]]:
+) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
 
-    Returns the ionization energy in eV, a level frame, a transition frame, and the number of
-    transitions touching each level name. Levels with no transitions are dropped. The level
+    Returns the ionization energy in eV, a level frame, and a transition frame. Levels with no
+    transitions are dropped. The level
     table's columns are read from the header the file carries above it, so the layout varies by
     ion; see hillier_rowformat_noheader for the oldest files, which have no header.
 
     Transitions are keyed by level name here. add_level_ids_forbidden() joins the level ids on
     afterwards, once the level frame has been given its ids.
     """
-    transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
     hillier_ionization_energy_ev = 0.0
 
     if atomic_number == 1 and ion_stage == 2:
@@ -491,7 +489,8 @@ def read_levels_and_transitions_from_file(
                 [
                     HillierEnergyLevel(
                         levelname="I",
-                        g=10.0,
+                        # one state: ARTIS divides the Saha ratio of H I to H II by this g
+                        g=1.0,
                         energyabovegsinpercm=0.0,
                         lambdaangstrom=0.0,
                         hillierlevelid=1,
@@ -503,7 +502,6 @@ def read_levels_and_transitions_from_file(
                 orient="row",
             ),
             pl.DataFrame(schema=hillier_transition_schema),
-            transition_count_of_level_name,
         )
 
     filename = hillier_osc_filename(atomic_number, ion_stage)
@@ -514,130 +512,128 @@ def read_levels_and_transitions_from_file(
     levels_without_parity: list[str] = []
 
     prev_line = ""
-    # threads=0 decompresses in this process. The default starts a process that writes into a
-    # pipe, which reports a broken pipe when the reader stops at the end of the level table.
-    fhillierosc = xopen_check_extension(filename, threads=0)
-    # the two loops below read the header and the levels. polars reads the transitions, and
-    # starts at the line after the last line that they read.
+    # the loop below reads the header and the levels. polars reads the transitions, and starts
+    # at the line after the last line that the loop read.
     linesread = 0
     expected_energy_levels = -1
     expected_transitions = -1
     row_format_energy_level = None
     format_date = "NOT_SPECIFIED"
-    for line in fhillierosc:
-        linesread += 1
-        row = line.split()
-        if (
-            re.match(r"x*\*{5,}", line) and prev_line
-        ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
-            if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
-                print("Fe VIII has a bespoke header")
-                row_format_energy_level = (
-                    "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
-                )
-            else:
-                headerline = prev_line
-                headerline = headerline.replace("ID", "hillierlevelid")
-                headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
-                headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
-                headerline = headerline.replace("eV", "thresholdenergyev")
-                headerline = headerline.replace("Lam(A)", "lambdaangstrom")
-                headerline = headerline.replace("ARAD", "arad")
-                row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
+    # threads=0 decompresses in this process. The default starts a process that writes into a
+    # pipe, which reports a broken pipe when the reader stops at the end of the level table.
+    with xopen_check_extension(filename, threads=0) as fhillierosc:
+        for line in fhillierosc:
+            linesread += 1
+            row = line.split()
+            if (
+                re.match(r"x*\*{5,}", line) and prev_line
+            ):  # The x is not a mistake, one of the lines of stars somewhere starts with an x and breaks otherwise
+                if atomic_number == 26 and ion_stage == 8:  # Fe VIII has its own bespoke header...
+                    print("Fe VIII has a bespoke header")
+                    row_format_energy_level = "levelname g energyabovegsinpercm thresholdenergyev freqtentothe15hz lambdaangstrom hillierlevelid"
+                else:
+                    headerline = prev_line
+                    headerline = headerline.replace("ID", "hillierlevelid")
+                    headerline = headerline.replace("E(cm^-1)", "energyabovegsinpercm")
+                    headerline = headerline.replace("10^15 Hz", "freqtentothe15hz")
+                    headerline = headerline.replace("eV", "thresholdenergyev")
+                    headerline = headerline.replace("Lam(A)", "lambdaangstrom")
+                    headerline = headerline.replace("ARAD", "arad")
+                    row_format_energy_level = "levelname " + " ".join(headerline.lower().split())
 
-            print("File contains columns:")
-            print(f"  {row_format_energy_level}")
-        elif line.rstrip().endswith("!Number of energy levels"):
-            expected_energy_levels = int(row[0])
-            log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
-        elif line.rstrip().endswith("!Number of transitions"):
-            expected_transitions = int(row[0])
-            log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
-        elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
-            format_date = row[0]
-            print(f"Format date: {format_date}")
+                print("File contains columns:")
+                print(f"  {row_format_energy_level}")
+            elif line.rstrip().endswith("!Number of energy levels"):
+                expected_energy_levels = int(row[0])
+                log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
+            elif line.rstrip().endswith("!Number of transitions"):
+                expected_transitions = int(row[0])
+                log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+            elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
+                format_date = row[0]
+                print(f"Format date: {format_date}")
 
-        if expected_energy_levels >= 0 and not row:
-            break
-        prev_line = line.strip()
+            if expected_energy_levels >= 0 and not row:
+                break
+            prev_line = line.strip()
 
-    if not row_format_energy_level:
-        # the files that predate the header also predate the format date line
-        if format_date != "NOT_SPECIFIED":
-            msg = f"{filename} gives a format date of {format_date} but carries no column header"
-            raise ValueError(msg)
-        row_format_energy_level = hillier_rowformat_noheader
-        print("File has no column header, assuming columns:")
-        print(f"  {row_format_energy_level}")
-
-    # the file columns vary by ion, so find where the ones we keep sit in each row
-    headercolumns = row_format_energy_level.split()
-    colindex = {colname: index for index, colname in enumerate(headercolumns)}
-    levelcolcount = len(headercolumns)
-    if len(colindex) != levelcolcount:
-        # a repeated header token would silently shadow an earlier column's position
-        msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
-        raise ValueError(msg)
-    missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
-    if missingcolumns:
-        msg = (
-            f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
-            f" it has {row_format_energy_level}"
-        )
-        raise ValueError(msg)
-
-    for line in fhillierosc:
-        linesread += 1
-        row = line.split()
-        if len(row) == levelcolcount and all(map(isfloat, row[1:])):
-            hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
-            levelname = row[colindex["levelname"]]
-            energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
-            lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
-            (twosplusone, _l, parity) = get_term_as_tuple(levelname)
-            ismerged = parity < 0
-            isjjcoupled = "{" in levelname and "}" in levelname
-
-            if ismerged:
-                # No definite parity: a merged level, which is normal CMFGEN, or a name we
-                # could not read. Null rather than a number, so that add_level_ids_forbidden()
-                # cannot match it against another level's absent parity.
-                parity = None
-                levels_without_parity.append(levelname)
-
-            levelrows.append(
-                HillierEnergyLevel(
-                    levelname=levelname,
-                    g=float(row[colindex["g"]]),
-                    energyabovegsinpercm=energyabovegsinpercm,
-                    lambdaangstrom=lambdaangstrom,
-                    hillierlevelid=hillierlevelid,
-                    parity=parity,
-                    j=get_level_j(levelname, g=float(row[colindex["g"]])),
-                )
-            )
-
-            # -1 indicates that the term could not be interpreted. JJ-coupled names have no
-            # LS term by construction and merged levels are summarised once below, so neither
-            # is worth a line here; what is left is a name we expected to read and could not.
-            if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
-
-            # the ground state gives the ionization energy. The first level below 1 cm^-1 is
-            # the ground state: a second one is a J level of the same split term. CMFGEN writes
-            # a negative Lam(A) for some levels, hence the abs().
-            if energyabovegsinpercm < 1.0 and hillier_ionization_energy_ev == 0.0:
-                if lambdaangstrom == 0.0:
-                    msg = f"Level '{levelname}' has Lam(A) = 0, so the ionization energy cannot be read from it"
-                    raise ValueError(msg)
-                hillier_ionization_energy_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
-
-            if hillierlevelid != len(levelrows):
-                msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
+        if not row_format_energy_level:
+            # the files that predate the header also predate the format date line
+            if format_date != "NOT_SPECIFIED":
+                msg = f"{filename} gives a format date of {format_date} but carries no column header"
                 raise ValueError(msg)
+            row_format_energy_level = hillier_rowformat_noheader
+            print("File has no column header, assuming columns:")
+            print(f"  {row_format_energy_level}")
 
-        if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
-            break
+        # the file columns vary by ion, so find where the ones we keep sit in each row
+        headercolumns = row_format_energy_level.split()
+        colindex = {colname: index for index, colname in enumerate(headercolumns)}
+        levelcolcount = len(headercolumns)
+        if len(colindex) != levelcolcount:
+            # a repeated header token would silently shadow an earlier column's position
+            msg = f"Level table header of {filename} contains duplicate column names: {row_format_energy_level}"
+            raise ValueError(msg)
+        missingcolumns = [colname for colname in hillier_required_filecolumns if colname not in colindex]
+        if missingcolumns:
+            msg = (
+                f"Level table of {filename} is missing the {', '.join(missingcolumns)} column(s):"
+                f" it has {row_format_energy_level}"
+            )
+            raise ValueError(msg)
+
+        for line in fhillierosc:
+            linesread += 1
+            row = line.split()
+            if len(row) == levelcolcount and all(map(isfloat, row[1:])):
+                hillierlevelid = int(row[colindex["hillierlevelid"]].lstrip("-"))
+                levelname = row[colindex["levelname"]]
+                energyabovegsinpercm = float(row[colindex["energyabovegsinpercm"]].replace("D", "E"))
+                lambdaangstrom = float(row[colindex["lambdaangstrom"]].replace("D", "E"))
+                (twosplusone, _l, parity) = get_term_as_tuple(levelname)
+                ismerged = parity < 0
+                isjjcoupled = "{" in levelname and "}" in levelname
+
+                if ismerged:
+                    # No definite parity: a merged level, which is normal CMFGEN, or a name we
+                    # could not read. Null rather than a number, so that add_level_ids_forbidden()
+                    # cannot match it against another level's absent parity.
+                    parity = None
+                    levels_without_parity.append(levelname)
+
+                levelrows.append(
+                    HillierEnergyLevel(
+                        levelname=levelname,
+                        g=float(row[colindex["g"]]),
+                        energyabovegsinpercm=energyabovegsinpercm,
+                        lambdaangstrom=lambdaangstrom,
+                        hillierlevelid=hillierlevelid,
+                        parity=parity,
+                        j=get_level_j(levelname, g=float(row[colindex["g"]])),
+                    )
+                )
+
+                # -1 indicates that the term could not be interpreted. JJ-coupled names have no
+                # LS term by construction and merged levels are summarised once below, so neither
+                # is worth a line here; what is left is a name we expected to read and could not.
+                if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
+                    log_and_print(flog, f"Can't find LS term in Hillier level name '{levelname}'")
+
+                # the ground state gives the ionization energy. The first level below 1 cm^-1 is
+                # the ground state: a second one is a J level of the same split term. CMFGEN writes
+                # a negative Lam(A) for some levels, hence the abs().
+                if energyabovegsinpercm < 1.0 and hillier_ionization_energy_ev == 0.0:
+                    if lambdaangstrom == 0.0:
+                        msg = f"Level '{levelname}' has Lam(A) = 0, so the ionization energy cannot be read from it"
+                        raise ValueError(msg)
+                    hillier_ionization_energy_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
+
+                if hillierlevelid != len(levelrows):
+                    msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
+                    raise ValueError(msg)
+
+            if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
+                break
 
     log_and_print(flog, f"Read {len(levelrows):d} levels")
     if levels_without_parity:
@@ -653,33 +649,33 @@ def read_levels_and_transitions_from_file(
         msg = f"{filename} declares {expected_energy_levels} levels but {len(levelrows)} were read"
         raise ValueError(msg)
 
-    fhillierosc.close()
+    # not an assert: this guards the ionization energy that adata.txt gets. H II returns above
+    # with 0.0, because a bare nucleus has no level to read one from.
+    if hillier_ionization_energy_ev == 0.0:
+        msg = f"{filename} has no level below 1 cm^-1, so the ionization energy could not be read"
+        raise ValueError(msg)
 
     # the rest of the file holds the transitions, which polars reads rather than Python: one ion
     # carries half a million of them
     dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
-
-    for namecolumn in ("namefrom", "nameto"):
-        for levelname, count in dftransitions[namecolumn].value_counts().iter_rows():
-            transition_count_of_level_name[levelname] += count
 
     log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
         msg = f"{filename} declares {expected_transitions} transitions but {dftransitions.height} were read"
         raise ValueError(msg)
 
-    # filter out levels with no transitions: a name is only counted above when one is read for it
+    # filter out levels with no transitions
+    names_with_transitions = pl.concat([dftransitions["namefrom"], dftransitions["nameto"]]).unique()
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
-        pl.col("levelname").is_in(set(transition_count_of_level_name))
+        pl.col("levelname").is_in(names_with_transitions)
     )
 
-    return (
-        hillier_ionization_energy_ev,
-        dfhillier_energy_levels,
-        dftransitions,
-        transition_count_of_level_name,
-    )
+    return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
 
+
+# the energy grid of the analytic fits (types 1, 5, 6, 7 and 9) as a multiple of the threshold
+# energy: 1000 points from the threshold to 21 times the threshold, denser near the threshold
+fit_energy_div_threshold = 1 + 20 * (np.arange(0, 1.0, 0.001) ** 2)
 
 # cross section types
 phixs_type_labels = {
@@ -905,7 +901,7 @@ class PhotFileReader:
             # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
             # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
             # matches the oscillator value for every ion in ions_data) and just report it.
-            zion_from_photfile = int(float(row[0]))
+            zion_from_photfile = int(float(row[0].replace("D", "E")))
             if zion_from_photfile != self.ion_stage:
                 log_and_print(
                     self.flog,
@@ -924,12 +920,14 @@ class PhotFileReader:
                 msg = f"Wrong cross-section unit: {row[0]}"
                 raise ValueError(msg)
 
-        if self.crosssectiontype != -1 and not self.type_is_known():
-            self.note_unknown_type()
-
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
             self.crosssectiontype = int(row[0])
             self.phixs_type_levels[self.crosssectiontype].add(self.lowerlevelname)
+            # dropped here, once, and not on every marker line: a check that ran on the next
+            # block's "!Configuration name" line cleared that block's name when no blank line
+            # separated the two blocks
+            if not self.type_is_known():
+                self.note_unknown_type()
 
     def type_is_known(self) -> bool:
         """Whether the current cross-section type is one that this reader evaluates."""
@@ -947,8 +945,7 @@ class PhotFileReader:
         """Store the points of the tabulated block that ends here.
 
         A blank line ends a block, and then the point count must match the declared one.
-        Without a blank line the table keeps the declared size, with zeros where the file
-        gave no point.
+        Without a blank line a short block is stored as read, with a warning.
         """
         if not self.pending_energyryd:
             return
@@ -963,10 +960,15 @@ class PhotFileReader:
                 f" cross-section rows but found {len(energyryd):d}"
             )
             raise ValueError(msg)
-        table = np.zeros((self.pending_numpoints, 2))
-        table[: len(energyryd), 0] = energyryd
-        table[: len(energyryd), 1] = sigma
-        self.phixstables[self.filenum][self.pending_levelname] = table
+        if len(energyryd) < self.pending_numpoints:
+            log_and_print(
+                self.flog,
+                f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross-section rows but"
+                f" the block ends after {len(energyryd):d}",
+            )
+        # the rows the file gave, and no zero rows up to the declared count: the downsampling
+        # takes the energy column as sorted, and a zero energy at the end of the table is not
+        self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
 
     def take_data_rows(self, start: int, end: int) -> None:
         """Read the data rows start to end - 1 into the current block."""
@@ -1084,7 +1086,7 @@ class PhotFileReader:
             if len(fitcoefficients) == 2:
                 scale, n = fitcoefficients
                 if n > max_hyd_gaunt_n:
-                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_gaunt_n}), skipping table")
+                    log_and_print(flog, f"WARNING: n ({n}) > max_hyd_gaunt_n ({max_hyd_gaunt_n}), skipping table")
                     return
                 lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
                 # scale the cross sections but not the energy grid
@@ -1321,11 +1323,9 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge is offset,
     so the cross section is zero until the offset threshold.
     """
-    energygrid = np.arange(0, 1.0, 0.001)
-
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energy_div_threshold = 1 + 20 * (energygrid**2)
+    energy_div_threshold = fit_energy_div_threshold
 
     if nu_o is None:
         threshold_div_energy = energy_div_threshold**-1
@@ -1465,11 +1465,9 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs.
     """
-    energygrid = np.arange(0, 1.0, 0.001)
-
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energydivthreshold = 1 + 20 * (energygrid**2)
+    energydivthreshold = fit_energy_div_threshold
     u = energydivthreshold
 
     x = np.log10(np.minimum(u, e))
@@ -1490,11 +1488,9 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
     Returns (energy in Rydberg, cross section in Megabarns) pairs. A cubic in log10(E/E_th)
     below the break at e, a straight line above it.
     """
-    energygrid = np.arange(0, 1.0, 0.001)
-
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energydivthreshold = 1 + 20 * (energygrid**2)
+    energydivthreshold = fit_energy_div_threshold
 
     x = np.log10(energydivthreshold)
 
@@ -1521,14 +1517,13 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     newsubs/sub_phot_gen.f, where U = FREQ / CROSS_A(LMIN+3) / EV_TO_HZ is the photon energy in
     eV divided by E_0, and each shell after the first is gated on FREQ >= EV_TO_HZ * E_th_eV.
     """
-    energygrid = np.arange(0, 1.0, 0.001)
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    energydivthreshold = 1 + 20 * (energygrid**2)
+    energydivthreshold = fit_energy_div_threshold
     energy_ev = energydivthreshold * thresholdenergyev
 
-    crosssection = np.zeros(len(energygrid))
+    crosssection = np.zeros(len(energydivthreshold))
     for shellnum, params in enumerate(fitcoefficients):
         y = energy_ev / params.E_0
         P = params.P
@@ -1575,10 +1570,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
 
         # keep track of the level ids of states that differ by J only
         # in case the collisional data level names are not J split
-        try:
-            level_ids_of_level_name[levelnamenoJ].append(levelid)
-        except KeyError:
-            level_ids_of_level_name[levelnamenoJ] = [levelid]
+        level_ids_of_level_name.setdefault(levelnamenoJ, []).append(levelid)
 
     # total statistical weight per term, for sharing a term-resolved collision strength over its
     # J levels. Depends only on the level list, so build it once.
@@ -1658,11 +1650,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                     "Temperatures available for effective collision strengths (units of"
                     f" {t_scale_factor:.1e} K):\n{', '.join(temperatures)}",
                 )
-                match_sorted_temperatures = sorted(
+                best_temperature = min(
                     temperatures,
                     key=lambda t: abs(float(t.replace("D", "E")) * t_scale_factor - args.electrontemperature),
                 )
-                best_temperature = match_sorted_temperatures[0]
                 temperature_index = temperatures.index(best_temperature)
                 log_and_print(
                     flog, f"Selecting {float(temperatures[temperature_index].replace('D', 'E')) * t_scale_factor:.3f} K"
@@ -1695,71 +1686,64 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, flog, 
                 upsilon = float(upsilonvalues[temperature_index].replace("D", "E"))
                 coll_lines_in += 1
 
-                # any level lookup below can raise KeyError for a name not in the level list,
-                # so guard the whole block rather than each lookup
-                try:  # ruff: ignore[too-many-statements-in-try-clause]
-                    if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
-                        log_and_print(
-                            flog,
-                            f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
-                            f"-> {nameto} {level_ids_of_level_name[nameto]}.",
-                        )
-                        namefrom, nameto = nameto, namefrom
-
-                    # add forbidden collisions between states within lower and upper terms if
-                    # the upper and lower levels have no J specified
-                    if namefrom not in names_expanded:
-                        for id_lower in level_ids_of_level_name[namefrom]:
-                            for id_lower2 in level_ids_of_level_name[namefrom]:
-                                if id_lower < id_lower2 and (id_lower, id_lower2) not in upsilondict:
-                                    upsilondict[id_lower, id_lower2] = -2.0
-                        names_expanded.add(namefrom)
-
-                    if nameto not in names_expanded:
-                        for id_upper in level_ids_of_level_name[nameto]:
-                            for id_upper2 in level_ids_of_level_name[nameto]:
-                                if id_upper < id_upper2 and (id_upper, id_upper2) not in upsilondict:
-                                    upsilondict[id_upper, id_upper2] = -2.0
-                        names_expanded.add(nameto)
-
-                    # A term-resolved collision strength is shared over the J levels of both
-                    # terms in proportion to their statistical weights:
-                    #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)  # ruff: ignore[commented-out-code]
-                    # so that sum_ij upsilon_ij = upsilon_term, which is what makes the total
-                    # term-to-term rate right (ARTIS builds the rate from upsilon_ij / g_i).
-                    lower_g_sum = g_sum_of_level_name[namefrom]
-                    upper_g_sum = g_sum_of_level_name[nameto]
-
-                    for id_lower in level_ids_of_level_name[namefrom]:
-                        for id_upper in level_ids_of_level_name[nameto]:
-                            if id_lower == id_upper:
-                                continue
-                            upsilonscaled = (
-                                upsilon * (gvalues[id_lower] / lower_g_sum) * (gvalues[id_upper] / upper_g_sum)
-                            )
-                            # upsilon is symmetric and the output wants lower id < upper id; the
-                            # terms' J levels can interleave, so order the key rather than
-                            # dropping the pairs that come out reversed
-                            key = (min(id_lower, id_upper), max(id_lower, id_upper))
-                            if key in upsilondict and upsilondict[key] >= 0.0:
-                                log_and_print(
-                                    flog,
-                                    f"ERROR: Duplicate collisional transition from {namefrom} <->"
-                                    f" {nameto} ({key[0]} -> {key[1]}). Keeping existing collision strength of"
-                                    f" {upsilondict[key]:.2e} instead of new value of"
-                                    f" {upsilonscaled:.2e}.",
-                                )
-                            else:
-                                upsilondict[key] = upsilonscaled
-
-                except KeyError:
-                    unlisted_from_message = " (unlisted)" if namefrom not in level_ids_of_level_name else ""
-                    unlisted_to_message = " (unlisted)" if nameto not in level_ids_of_level_name else ""
+                # the collision file can name a level that the oscillator file does not have.
+                # A membership test, not a try/except KeyError around the whole block: that
+                # reported any KeyError below as an unlisted level.
+                unlisted = [name for name in (namefrom, nameto) if name not in level_ids_of_level_name]
+                if unlisted:
+                    unlisted_from_message = " (unlisted)" if namefrom in unlisted else ""
+                    unlisted_to_message = " (unlisted)" if nameto in unlisted else ""
                     log_and_print(
                         flog,
                         f"Discarding upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
                         f" {nameto}{unlisted_to_message}",
                     )
+                    continue
+                if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
+                    log_and_print(
+                        flog,
+                        f"WARNING: Swapping transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
+                        f"-> {nameto} {level_ids_of_level_name[nameto]}.",
+                    )
+                    namefrom, nameto = nameto, namefrom
+
+                # add forbidden collisions between states within lower and upper terms if
+                # the upper and lower levels have no J specified
+                for name in (namefrom, nameto):
+                    if name not in names_expanded:
+                        for id1 in level_ids_of_level_name[name]:
+                            for id2 in level_ids_of_level_name[name]:
+                                if id1 < id2 and (id1, id2) not in upsilondict:
+                                    upsilondict[id1, id2] = -2.0
+                        names_expanded.add(name)
+
+                # A term-resolved collision strength is shared over the J levels of both
+                # terms in proportion to their statistical weights:
+                #     upsilon_ij = upsilon_term * (g_i / g_lower_term) * (g_j / g_upper_term)  # ruff: ignore[commented-out-code]
+                # so that sum_ij upsilon_ij = upsilon_term, which is what makes the total
+                # term-to-term rate right (ARTIS builds the rate from upsilon_ij / g_i).
+                lower_g_sum = g_sum_of_level_name[namefrom]
+                upper_g_sum = g_sum_of_level_name[nameto]
+
+                for id_lower in level_ids_of_level_name[namefrom]:
+                    for id_upper in level_ids_of_level_name[nameto]:
+                        if id_lower == id_upper:
+                            continue
+                        upsilonscaled = upsilon * (gvalues[id_lower] / lower_g_sum) * (gvalues[id_upper] / upper_g_sum)
+                        # upsilon is symmetric and the output wants lower id < upper id; the
+                        # terms' J levels can interleave, so order the key rather than
+                        # dropping the pairs that come out reversed
+                        key = (min(id_lower, id_upper), max(id_lower, id_upper))
+                        if key in upsilondict and upsilondict[key] >= 0.0:
+                            log_and_print(
+                                flog,
+                                f"ERROR: Duplicate collisional transition from {namefrom} <->"
+                                f" {nameto} ({key[0]} -> {key[1]}). Keeping existing collision strength of"
+                                f" {upsilondict[key]:.2e} instead of new value of"
+                                f" {upsilonscaled:.2e}.",
+                            )
+                        else:
+                            upsilondict[key] = upsilonscaled
 
     if number_expected_transitions < 0:
         log_and_print(flog, "WARNING: no '!Number of transitions' line found in collision data file")
@@ -1925,19 +1909,19 @@ def read_hyd_phixsdata(force: bool = False) -> None:
     get_hydrogenic_sigma_summed_over_l.cache_clear()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
-        (
-            _hillier_ionization_energy_ev,
-            dfhillier_energy_levels,
-            _transitions,
-            _transition_count_of_level_name,
-        ) = read_levels_and_transitions(1, 1, devnull)
+        _hillier_ionization_energy_ev, dfhillier_energy_levels, _transitions = read_levels_and_transitions(
+            1, 1, devnull
+        )
 
     # the tables below are indexed by principal quantum number, so the H I level list must not
-    # have been filtered (read_levels_and_transitions drops levels with no transitions)
-    assert dfhillier_energy_levels["hillierlevelid"].to_list() == list(range(1, dfhillier_energy_levels.height + 1)), (
-        "H I level list is not indexed by principal quantum number, so the hydrogenic"
-        " cross-section thresholds would be taken from the wrong levels"
-    )
+    # have been filtered (read_levels_and_transitions drops levels with no transitions). Not an
+    # assert: every hydrogenic threshold depends on it, so it must survive python -O.
+    if dfhillier_energy_levels["hillierlevelid"].to_list() != list(range(1, dfhillier_energy_levels.height + 1)):
+        msg = (
+            "H I level list is not indexed by principal quantum number, so the hydrogenic"
+            " cross-section thresholds would be taken from the wrong levels"
+        )
+        raise ValueError(msg)
     # indexed by n - 1, i.e. the ionisation threshold wavelength of the level with principal
     # quantum number n
     lambdaangstrom_of_n = dfhillier_energy_levels["lambdaangstrom"].to_list()
@@ -2028,7 +2012,7 @@ def read_hyd_phixsdata(force: bool = False) -> None:
             hyd_gaunt_energygrid_ryd[n] = [
                 e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)
             ]
-            hyd_gaunt_factor[n] = gaunt_values  # cross sections in Megabarns
+            hyd_gaunt_factor[n] = gaunt_values
 
 
 def extend_ion_list(

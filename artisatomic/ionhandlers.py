@@ -14,6 +14,7 @@ from artisatomic import readhillierdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import sort_ion_handlers
+from artisatomic.iondata import known_handlers
 
 
 def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
@@ -54,11 +55,13 @@ renamed_handlers = {"qub_data": "qub"}
 
 
 def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Convert the JSON form of an ion_handlers list into tuples, rejecting entries with no handler.
+    """Convert the JSON form of an ion_handlers list into tuples, and reject a malformed entry.
 
     json.load() gives nested lists, and a hand-written file can carry a bare ion stage from when
-    the handler was optional. Both are caught here rather than several frames later, where a bare
-    stage would surface only as an unpacking TypeError naming neither the element nor the file.
+    the handler was optional, a misspelt handler name, or an entry of the wrong shape. All are
+    caught here, before any output file is written: read_ion_data() would reject the name only
+    after compositiondata.txt and the earlier elements have gone out, and an unpacking error
+    several frames later would name neither the element nor the file.
     """
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
     for atomic_number, listions in loaded:
@@ -70,9 +73,22 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
                     " Every ion must be given as [ion_stage, handler]."
                 )
                 raise TypeError(msg)
-            ion_stage, handler = entry
-            handlername = str(handler)
-            ions.append((int(ion_stage), renamed_handlers.get(handlername, handlername)))
+            try:
+                ion_stage, handler = entry
+            except (TypeError, ValueError):
+                msg = (
+                    f"Z={atomic_number} entry {entry!r} in artisatomicionhandlers.json is not an"
+                    " [ion_stage, handler] pair."
+                )
+                raise TypeError(msg) from None
+            handlername = renamed_handlers.get(str(handler), str(handler))
+            if handlername not in known_handlers:
+                msg = (
+                    f"Z={atomic_number} ion stage {ion_stage} in artisatomicionhandlers.json names the unknown"
+                    f" handler {handlername!r}. The handlers are: {', '.join(sorted(known_handlers))}."
+                )
+                raise ValueError(msg)
+            ions.append((int(ion_stage), handlername))
         ion_handlers.append((int(atomic_number), ions))
 
     return ion_handlers

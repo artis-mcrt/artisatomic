@@ -1,7 +1,6 @@
 """Read ground states only, from the NIST ground-state table."""
 
 import typing as t
-from collections import defaultdict
 from functools import cache
 
 import pandas as pd
@@ -40,6 +39,10 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
     this_ion = groundstatesdata.loc[(groundstatesdata["Z"] == atomic_number) & (groundstatesdata["ion"] == ion_stage)]
 
+    # not an assert: the bare IndexError from an empty selection names neither Z nor the stage
+    if this_ion.empty:
+        msg = f"groundstates.dat has no row for Z={atomic_number} ion_stage {ion_stage}"
+        raise ValueError(msg)
     ionization_energy_in_ev = this_ion["IonizationEnergy"].to_numpy()[0]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
     energy_levels = [
@@ -51,9 +54,8 @@ def read_ground_levels(atomic_number, ion_stage, flog):
         ),
     ]
     transitions: list[t.Any] = []  # this handler provides ground states only, so never any transitions
-    transition_count_of_level_name: defaultdict[str, int] = defaultdict(int)
 
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, energy_levels, transitions
 
 
 def extend_ion_list(ion_handlers):

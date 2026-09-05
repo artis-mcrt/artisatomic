@@ -48,7 +48,6 @@ class IonData:
     ionization_energy_ev: float
     dfenergylevels: pl.DataFrame
     dftransitions: pl.DataFrame
-    transition_count_of_level_name: dict[str, int]
     upsilondict: dict[tuple[int, int], float]
     # None where a level has no photoionisation data (and None entirely if none was read).
     # readhillierdata.get_photoiontargetfractions() matches these names to the upper ion's
@@ -65,8 +64,9 @@ class SimpleHandler:
     """One entry of the simple-handler registry.
 
     The reader takes (atomic_number, ion_stage, flog) and returns (ionization_energy_ev,
-    energy_levels, transitions, transition_count_of_level_name), with an upsilondict appended
-    when returns_upsilondict is set. The shapes differ by design, so the Callable stays untyped
+    energy_levels, transitions), with an upsilondict appended when returns_upsilondict is set.
+    The writer counts the transitions of each level itself, from the final transition frame, so
+    a reader returns no counts. The shapes differ by design, so the Callable stays untyped
     in its return. get_level_valence_n is the handler's own level-name parser. The
     hydrogenic photoionisation estimate uses it. None leaves the ion without cross sections,
     and match_hydrogenic_phixs() then writes a warning.
@@ -113,6 +113,13 @@ simple_handlers: dict[str, SimpleHandler] = {
     ),
 }
 
+# the two handlers that read CMFGEN files outside the registry: both also read collision
+# strengths and photoionisation cross sections, which SimpleHandler does not model
+cmfgen_based_handlers: frozenset[str] = frozenset({"cmfgen", "qub_cobalt"})
+# every handler name that read_ion_data() dispatches. parse_ion_handlers() checks a JSON file
+# against this before any output file is written.
+known_handlers: frozenset[str] = frozenset(simple_handlers) | cmfgen_based_handlers
+
 
 def read_ion_data(
     atomic_number: int, ion_stage_entry: tuple[int, str], is_top_ion: bool, args: argparse.Namespace
@@ -126,7 +133,6 @@ def read_ion_data(
 
     # no default for ionization_energy_ev: every handler branch below sets it, and an unknown
     # handler raises, so a branch that forgets should fail rather than write a 0 eV threshold
-    transition_count_of_level_name: dict[str, int] = {}
     upsilondict: dict[tuple[int, int], float] = {}
     photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
     # empty until a handler below reads photoionisation data (and left empty for the top ion)
@@ -141,25 +147,12 @@ def read_ion_data(
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
         )
         log_and_print(flog, f"Source handler: {handler}")
-        if handler == "qub_cobalt":
-            if ion_stage in readqubdata.qub_cobalt_stages:
-                (
-                    ionization_energy_ev,
-                    energy_levels,
-                    transitions,
-                    transition_count_of_level_name,
-                    upsilondict,
-                ) = readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
-            else:  # hillier levels, transitions and collision strengths, as the cmfgen handler reads them
-                (
-                    ionization_energy_ev,
-                    energy_levels,
-                    transitions,
-                    transition_count_of_level_name,
-                ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-
-                upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
-
+        if handler == "qub_cobalt" and ion_stage in readqubdata.qub_cobalt_stages:
+            # the QUB level lists, and QUB cross sections where the data has them (a stage with
+            # none gets a warning and empty arrays from read_qub_photoionizations)
+            (ionization_energy_ev, energy_levels, transitions, upsilondict) = (
+                readqubdata.read_qub_levels_and_transitions(atomic_number, ion_stage, flog)
+            )
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
                 (
                     photoionization_crosssections,
@@ -169,29 +162,38 @@ def read_ion_data(
                     atomic_number, ion_stage, levelcount=len(energy_levels), args=args, flog=flog
                 )
 
-        elif handler == "cmfgen":  # Hillier CMFGEN data only
-            (
-                ionization_energy_ev,
-                energy_levels,
-                transitions,
-                transition_count_of_level_name,
-            ) = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, energy_levels, flog, args)
+        elif handler in cmfgen_based_handlers:
+            # the CMFGEN levels and collision strengths. A qub_cobalt ion in qub_phixs_ions takes
+            # the QUB cross sections (Co II, with CMFGEN levels); every other ion here takes the
+            # CMFGEN phot files, so no stage of a qub_cobalt ion is left without cross sections.
+            ionization_energy_ev, dfhillierlevels, transitions = readhillierdata.read_levels_and_transitions(
+                atomic_number, ion_stage, flog
+            )
+            energy_levels = dfhillierlevels
+            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dfhillierlevels, flog, args)
 
             if not is_top_ion and not args.nophixs:  # don't get cross sections for top ion
-                (
-                    photoionization_crosssections,
-                    photoion_targetconfigs,
-                    photoionization_thresholds_ev,
-                ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, energy_levels, args, flog)
+                if handler == "qub_cobalt" and (atomic_number, ion_stage) in readqubdata.qub_phixs_ions:
+                    (
+                        photoionization_crosssections,
+                        photoionization_targetfractions,
+                        photoionization_thresholds_ev,
+                    ) = readqubdata.read_qub_photoionizations(
+                        atomic_number, ion_stage, levelcount=dfhillierlevels.height, args=args, flog=flog
+                    )
+                else:
+                    (
+                        photoionization_crosssections,
+                        photoion_targetconfigs,
+                        photoionization_thresholds_ev,
+                    ) = readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfhillierlevels, args, flog)
 
         elif simplehandler is not None:
             result = simplehandler.read_levels_and_transitions(atomic_number, ion_stage, flog)
             if simplehandler.returns_upsilondict:
-                (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name, upsilondict) = result
+                (ionization_energy_ev, energy_levels, transitions, upsilondict) = result
             else:
-                (ionization_energy_ev, energy_levels, transitions, transition_count_of_level_name) = result
+                (ionization_energy_ev, energy_levels, transitions) = result
 
         else:
             msg = f"Unknown handler: {handler}"
@@ -226,7 +228,6 @@ def read_ion_data(
         ionization_energy_ev=ionization_energy_ev,
         dfenergylevels=dfenergylevels,
         dftransitions=dftransitions,
-        transition_count_of_level_name=transition_count_of_level_name,
         upsilondict=upsilondict,
         photoion_targetconfigs=photoion_targetconfigs,
         photoionization_crosssections=photoionization_crosssections,

@@ -15,6 +15,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_log_path
 from artisatomic.base import log_and_print
 from artisatomic.base import roman_numerals
+from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
 
 
@@ -94,30 +95,26 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     if dftransitions_ion.is_empty():
         return dftransitions_ion
 
-    if "upperlevel" not in dftransitions_ion.columns:
+    # the name-keyed joins keep the reader's row order (maintain_order) and fail on a height
+    # change, as the id-keyed joins below do. An inner join drops a transition whose name matches
+    # no level without a word, and a level name that two levels share multiplies its rows. Both
+    # mean the reader's level list and transition list disagree. Not an assert: this guards
+    # written output.
+    for idcolumn, namecolumn in (("upperlevel", "nameto"), ("lowerlevel", "namefrom")):
+        if idcolumn in dftransitions_ion.columns:
+            continue
         height_before = dftransitions_ion.height
         dftransitions_ion = dftransitions_ion.join(
-            dfenergylevels_ion.select(pl.col("levelid").alias("upperlevel"), pl.col("levelname").alias("nameto")),
-            on="nameto",
+            dfenergylevels_ion.select(pl.col("levelid").alias(idcolumn), pl.col("levelname").alias(namecolumn)),
+            on=namecolumn,
+            maintain_order="left",
         )
         if dftransitions_ion.height != height_before:
-            # an inner join drops the row quietly, and adata.txt counts the transition anyway
-            print(
-                f"WARNING: the nameto join dropped {height_before - dftransitions_ion.height:d} transitions"
-                " whose upper level name matches no level"
+            msg = (
+                f"the {namecolumn} join changed the transition count from {height_before:d} to"
+                f" {dftransitions_ion.height:d}: a level name in the transitions matches no level, or more than one"
             )
-
-    if "lowerlevel" not in dftransitions_ion.columns:
-        height_before = dftransitions_ion.height
-        dftransitions_ion = dftransitions_ion.join(
-            dfenergylevels_ion.select(pl.col("levelid").alias("lowerlevel"), pl.col("levelname").alias("namefrom")),
-            on="namefrom",
-        )
-        if dftransitions_ion.height != height_before:
-            print(
-                f"WARNING: the namefrom join dropped {height_before - dftransitions_ion.height:d} transitions"
-                " whose lower level name matches no level"
-            )
+            raise ValueError(msg)
 
     if "forbidden" not in dftransitions_ion.columns:
         # null for anything that is not a number, so a NaN cannot compare equal to itself and a
@@ -253,7 +250,6 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
     for iondata in iondatalist:
         ion_stage = iondata.ion_stage
         upsilondict = iondata.upsilondict
-        transition_count_of_level_name = iondata.transition_count_of_level_name
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
         with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as flog:
@@ -293,13 +289,6 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
             if not dfupsilon_only_transitions.is_empty():
                 dfupsilon_only_transitions = dfupsilon_only_transitions.with_columns(A=0.0)
-                levelnames = dfenergylevels_ion["levelname"].to_list()
-                for id_lower, id_upper in dfupsilon_only_transitions[["lowerlevel", "upperlevel"]].iter_rows(
-                    named=False
-                ):
-                    transition_count_of_level_name[levelnames[id_upper]] += 1
-                    transition_count_of_level_name[levelnames[id_lower]] += 1
-
                 dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
@@ -313,6 +302,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
                 ).pipe(resolve_coll_str)
 
+            # the counts come from the final transition frame, so they include the upsilon-only
+            # rows and agree with transitiondata.txt whatever the reader counted
+            transition_counts = transition_count_of_level(dftransitions_ion, dfenergylevels_ion.height)
             with (outdir / "adata.txt").open("a", encoding="utf-8") as fatommodels:
                 write_adata(
                     fatommodels,
@@ -320,7 +312,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     ion_stage,
                     dfenergylevels_ion,
                     iondata.ionization_energy_ev,
-                    transition_count_of_level_name,
+                    transition_counts,
                     flog,
                 )
 
@@ -373,14 +365,14 @@ def write_adata(
     ion_stage: int,
     dfenergylevels: pl.DataFrame,
     ionization_energy: float,
-    transition_count_of_level_name,
+    transition_counts: list[int],
     flog,
 ) -> None:
     """Append one ion's level list to adata.txt.
 
-    Level ids are zero-based in memory but numbered from one in the output. Each level line ends
-    with the level's name as a free-text comment; artistools reads it back as everything after the
-    fourth field, so it must not be padded.
+    Level ids are zero-based in memory but numbered from one in the output. transition_counts is
+    indexed by level id. Each level line ends with the level's name as a free-text comment;
+    artistools reads it back as everything after the fourth field, so it must not be padded.
     """
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
@@ -393,7 +385,7 @@ def write_adata(
     # writelines() with a generator, as in write_transition_data(): a write() call per level
     # costs more than the formatting.
     fatommodels.writelines(
-        f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm):19.16f} {float(g):8.3f} {transition_count_of_level_name.get(levelname, 0):4d} {levelname:}\n"
+        f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm):19.16f} {float(g):8.3f} {transition_counts[levelid]:4d} {levelname:}\n"
         for levelid, energyabovegsinpercm, g, levelname in dfout.select(
             "levelid", "energyabovegsinpercm", "g", "levelname"
         ).iter_rows(named=False)
@@ -483,15 +475,18 @@ def write_transition_data(
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        # writelines() over a generator, not a write() per row: this loop runs 2.6M times for the
-        # cmfgen set, where the per-call overhead is a measurable part of the whole run
-        # level ids are zero-based in memory, but the output format numbers them from one
-        ftransitiondata.writelines(
-            f"{levelid_lower + 1:4d} {levelid_upper + 1:4d} {float(A):11.5e} {coll_str:9.2e} {forbidden:d}\n"
-            for levelid_lower, levelid_upper, A, coll_str, forbidden in dftransitions_ion[
-                ["lowerlevel", "upperlevel", "A", "coll_str", "forbidden"]
-            ].iter_rows()
-        )
+        # one %-format over the column lists, not an f-string per row from iter_rows(): this runs
+        # 2.6M times for the cmfgen set and was the largest single cost of the build. The two
+        # forms give the same bytes for every value. Level ids are zero-based in memory, but the
+        # output format numbers them from one.
+        columns = [
+            (dftransitions_ion["lowerlevel"] + 1).to_list(),
+            (dftransitions_ion["upperlevel"] + 1).to_list(),
+            dftransitions_ion["A"].to_list(),
+            dftransitions_ion["coll_str"].to_list(),
+            dftransitions_ion["forbidden"].to_list(),
+        ]
+        ftransitiondata.writelines(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*columns, strict=True)))
 
     ftransitiondata.write("\n")
 
@@ -684,9 +679,9 @@ def write_phixs_data(
                 for upperionlevelid, targetprobability in targetlist
             )
 
-        # one writelines() per table rather than a write() per point: nphixspoints lines per level,
-        # 1.5M of them for the cmfgen set
-        fphixs.writelines(f"{crosssection:16.8E}\n" for crosssection in photoionization_crosssections[lowerlevelid])
+        # one write() per table with a %-format over the points, not a generator per point:
+        # nphixspoints lines per level, 1.5M of them for the cmfgen set
+        fphixs.write("".join(map("%16.8E\n".__mod__, photoionization_crosssections[lowerlevelid].tolist())))
 
 
 def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

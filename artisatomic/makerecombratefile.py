@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Write recombrates.txt from the Nahar total recombination rate files."""
 
-import string
 import typing as t
 from pathlib import Path
 
@@ -60,23 +59,6 @@ def read_nahar_rrcfile(filename, noprint=False):
 
 def main():
     """Write recombrates.txt from the Nahar recombination rate files."""
-    # Shull & Steenberg 1982
-    A_rad: dict[tuple[int, int], float] = {}
-    X_rad: dict[tuple[int, int], float] = {}
-    A_rad[26, 1], X_rad[26, 1] = 1.42e-13, 0.891
-    A_rad[26, 2], X_rad[26, 2] = 1.02e-12, 0.843
-    A_rad[26, 3], X_rad[26, 3] = 3.32e-12, 0.746
-    A_rad[26, 4], X_rad[26, 4] = 7.80e-12, 0.682
-    A_rad[26, 5], X_rad[26, 5] = 1.51e-11, 0.699
-    A_rad[26, 6], X_rad[26, 6] = 2.62e-11, 0.728
-
-    A_rad[28, 1], X_rad[28, 1] = 3.60e-13, 0.700
-    A_rad[28, 2], X_rad[28, 2] = 1.00e-12, 0.700
-    A_rad[28, 3], X_rad[28, 3] = 1.40e-12, 0.700
-    A_rad[28, 4], X_rad[28, 4] = 1.60e-12, 0.700
-    A_rad[28, 5], X_rad[28, 5] = 3.85e-12, 0.746
-    A_rad[28, 6], X_rad[28, 6] = 9.05e-12, 0.682
-
     artis_files_path = PYDIR.parent / "artis_files"
     dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
@@ -99,11 +81,6 @@ def main():
                 )
                 if rrcfiles:  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
-                    ionstr = Path(naharfilename).name.split(".")[0]  # should be something like 'fe2'
-                    elsymbol = ionstr.rstrip(string.digits)
-                    lowerionstage = int(ionstr[len(elsymbol) :])
-                    upperionstage = lowerionstage + 1
-                    atomic_number = elsymbols.index(elsymbol.title())
                     dfrecombrates = read_nahar_rrcfile(naharfilename)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(dfrecombrates)}\n")
                     frecombrates.writelines(

@@ -3,7 +3,6 @@
 
 import string
 import typing as t
-from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
@@ -284,9 +283,7 @@ def read_adf04(
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
 
-def append_qub_transition(
-    qub_energylevels, qub_transitions, transition_count_of_level_name, id_lower, id_upper, A, filepath
-) -> None:
+def append_qub_transition(qub_energylevels, qub_transitions, id_lower, id_upper, A, filepath) -> None:
     """Validate one radiative transition row and append it to the transition list.
 
     The ids are the file's 1-based level ids.
@@ -307,8 +304,6 @@ def append_qub_transition(
     level_lower = qub_energylevels[id_lower]
     levelname_upper = level_upper.levelname
     levelname_lower = level_lower.levelname
-    transition_count_of_level_name[levelname_upper] += 1
-    transition_count_of_level_name[levelname_lower] += 1
     delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
     lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
     transition = QUBTransitionRow(
@@ -327,6 +322,11 @@ def append_qub_transition(
 # the CMFGEN reader. read_qub_levels_and_transitions() below has one branch for each stage
 # in this set, so a new stage needs an entry here and a branch there.
 qub_cobalt_stages: frozenset[int] = frozenset({3, 4})
+
+# the ions whose photoionisation cross sections the QUB Co data covers, one branch each in
+# read_qub_photoionizations(). iondata.read_ion_data() takes the CMFGEN phot files for every
+# other stage of a "qub_cobalt" ion.
+qub_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
 
 
 def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -347,7 +347,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
-        transition_count_of_level_name = defaultdict(int)
         transitionfile = tyndall_co3_path / "adf04rad_v1"
         with xopen_check_extension(transitionfile) as ftrans:
             for line in ftrans:
@@ -359,7 +358,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     append_qub_transition(
                         qub_energylevels,
                         qub_transitions,
-                        transition_count_of_level_name,
                         id_lower,
                         id_upper,
                         A,
@@ -367,8 +365,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
                     )
 
     elif (atomic_number == 27) and (ion_stage == 4):
-        transition_count_of_level_name = defaultdict(int)
-        qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 10, 0)]
+        # one level, the 3d6 5D4 ground state: g = 2J + 1 = 9, as the CMFGEN Co IV level list gives it
+        qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 0, 0, 0, 0.0, 9, 0)]
         qub_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = 54.9000015
@@ -381,7 +379,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
-        transition_count_of_level_name = defaultdict(int)
 
         # W II file has the first two columns swapped around from the standard order
         uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
@@ -396,7 +393,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
             append_qub_transition(
                 qub_energylevels,
                 qub_transitions,
-                transition_count_of_level_name,
                 id_lower,
                 id_upper,
                 A,
@@ -409,7 +405,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog):
 
     log_and_print(flog, f"Read {len(qub_transitions):d} transitions")
 
-    return ionization_energy_ev, qub_energylevels, qub_transitions, transition_count_of_level_name, upsilondict
+    return ionization_energy_ev, qub_energylevels, qub_transitions, upsilondict
 
 
 def read_qub_photoionizations(
@@ -675,10 +671,18 @@ def get_level_valence_n(levelname: str) -> int | None:
         else:
             # a lower-case orbital letter before the number means that the number is an
             # electron count of the previous orbital followed by n, e.g. the '24' in '3d24s'
-            # is two electrons and n=4, so the first digit is the electron count
+            # is two electrons and n=4. The same rule as readkuruczdata: a two-digit run that
+            # ends in 0 is a two-digit n ('5s10d'), and a three-digit run is a two-digit count
+            # and a one-digit n ('4f145d') unless that n would be 0 ('5s210d').
             if i > 0 and part[i - 1] in lchars.lower():
-                str_n = str(n)
-                n = int(str_n[1:] if len(str_n) > 1 else str_n)
+                digits = part[i:]
+                if len(digits) == 2 and digits[1] != "0":
+                    digits = digits[1:]
+                elif len(digits) == 3:
+                    digits = digits[2:] if digits[2] != "0" else digits[1:]
+                elif len(digits) > 3:
+                    return None
+                n = int(digits)
             return n
 
     return None

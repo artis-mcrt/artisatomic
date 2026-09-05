@@ -2,7 +2,6 @@
 
 import os
 import typing as t
-from collections import defaultdict
 from pathlib import Path
 
 import pandas as pd
@@ -87,9 +86,14 @@ class LisbonReader:
         self.lines = lines
 
 
-def get_levelname(row):
-    """Name a Lisbon level from its label and J, since the label alone is not unique."""
-    return f"{row.label}, j={row.j}"
+def get_levelname(row, fileindex: int):
+    """Name a Lisbon level from its label, J and file index.
+
+    The label alone is not unique, and neither is the label with J: in Nd II most levels share
+    their relativistic configuration and J with another level. The file index makes the name
+    unique, as the FAC, Floers+25 and MONS readers do with theirs.
+    """
+    return f"{row.label}, j={row.j}, index={fileindex}"
 
 
 def read_levels_data(dflevels):
@@ -113,13 +117,13 @@ def read_levels_data(dflevels):
 
     energy_levels = [
         EnergyLevelTuple(
-            levelname=get_levelname(row),
+            levelname=get_levelname(row, fileposition),
             parity=None,  # no parity in this data set, so the Laporte rule cannot fire
             j=float(row.j),
             g=2 * row.j + 1,
             energyabovegsinpercm=float(row.energy),
         )
-        for levelid, (_fileposition, row) in enumerate(dflevels.iterrows())
+        for fileposition, row in dflevels.iterrows()
     ]
 
     return energy_levels, levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
@@ -136,11 +140,8 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     in readkuruczdata and readmonsdata. g_upper is the g of the level that ends up as the upper
     level after the ids are resolved, not of the level the file labels "Upper": the file can
     list a pair the other way round, and the swap must not leave A with the wrong g.
-
-    Returns the transitions and the number of them touching each level name.
     """
     transitions = []
-    transition_count_of_level_name = defaultdict(int)
 
     for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
         lowerlevel, upperlevel = resolve_transition_levelids(
@@ -148,14 +149,9 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
         )
 
         A = row.gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * row.wavelength**2)
-        transtuple = TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A)
+        transitions.append(TransitionTuple(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
 
-        transition_count_of_level_name[energy_levels[lowerlevel].levelname] += 1
-        transition_count_of_level_name[energy_levels[upperlevel].levelname] += 1
-
-        transitions.append(transtuple)
-
-    return transitions, transition_count_of_level_name
+    return transitions
 
 
 class EnergyLevelTuple(t.NamedTuple):
@@ -219,7 +215,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
 
-    transitions, transition_count_of_level_name = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
+    transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     # from NIST, as every other reader whose data set carries no ionization energy does. This was
     # -1, which went into adata.txt verbatim as the ion's ionization energy.
@@ -228,4 +224,4 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
-    return ionization_energy_in_ev, energy_levels, transitions, transition_count_of_level_name
+    return ionization_energy_in_ev, energy_levels, transitions
