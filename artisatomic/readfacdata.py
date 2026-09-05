@@ -25,11 +25,12 @@ USE_CALIBRATED = True
 
 
 def get_basepath() -> Path:
-    """Directory holding the OptimizedFAC lanthanide data.
+    """Return the directory that holds the OptimizedFAC lanthanide data.
 
-    Not part of this repository, so ARTISATOMIC_FAC_PATH overrides where it is looked for, as
-    ARTISATOMIC_LISBON_PATH does for the Lisbon files. The default is the Google Drive mount
-    path, which is where the shared drive appears on the machine this was written for.
+    The data is not part of this repository. ARTISATOMIC_FAC_PATH overrides the directory that
+    this function searches, as ARTISATOMIC_LISBON_PATH does for the Lisbon files. The default is
+    the Google Drive mount path. That is where the shared drive appears on the machine of the
+    original author.
     """
     calibstr = "_calibrated" if USE_CALIBRATED else ""
     default = Path.home() / "Google Drive/Shared drives/Atomic Data Group/OptimizedFACdata"
@@ -73,14 +74,14 @@ def finish_levels(levels: pd.DataFrame) -> pd.DataFrame:
 def GetLevels(filename: Path | str) -> pd.DataFrame:
     """Get a dataframe of every energy level in the ascii level output of FAC or cFAC.
 
-    The caller drops the levels above the ionisation energy, and keeps their Ilev values so that
-    a transition that names one is told apart from a transition that names an unknown level.
+    The caller drops the levels above the ionisation energy and keeps their Ilev values. The
+    values show whether a transition names a dropped level or an unknown level.
     """
     headerlines: list[str] = []
     with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(10))
 
-    # headerlines[7] holds the ground state and headerlines[5] the ion charge; neither is needed here
+    # headerlines[7] holds the ground state and headerlines[5] the ion charge. This function needs neither.
     version_FAC = headerlines[0].split(" ")[0]
     print("FAC/cFAC: ", version_FAC)
     if version_FAC == "FAC":
@@ -101,7 +102,7 @@ def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
     widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
     trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
     # read_fwf() infers the A column as float64 when no row carries the leading "-" of a
-    # negative Monopole in the last column, and as str when one does. Only the str form
+    # negative Monopole in the last column. It infers str when one row does. Only the str form
     # needs the "-" removed.
     if not pd.api.types.is_numeric_dtype(trans_FAC["A"]):
         trans_FAC["A"] = pd.to_numeric(trans_FAC["A"].str.rstrip(" -"))
@@ -132,7 +133,7 @@ def GetLines(filename: Path | str) -> pd.DataFrame:
     headerlines: list[str] = []
     with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
-    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge; none is needed here
+    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge. This function needs none.
     version_FAC = headerlines[0].split(" ")[0]
 
     if version_FAC == "FAC":
@@ -149,8 +150,8 @@ def GetLines(filename: Path | str) -> pd.DataFrame:
 def extend_ion_list(ion_handlers):
     """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
     basepath = get_basepath()
-    # not an assert: this reports a missing data directory and must survive python -O, and it
-    # names the environment variable rather than just failing the glob silently
+    # not an assert: this reports a missing data directory and must survive python -O. It also
+    # names the environment variable, which a silent failure of the glob would not
     if not basepath.is_dir():
         msg = (
             f"FAC data directory {basepath} not found."
@@ -171,12 +172,12 @@ def read_levels_data(dflevels):
     """Convert the FAC level table to level tuples, in the energy order of the sorted frame.
 
     Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
-    needs because sorting by energy reorders the levels.
+    needs because the sort by energy reorders the levels.
     """
-    # astype(float) first: the level order is now the frame's order alone, and sorting a column
-    # that arrived as strings (pd.read_fwf can yield those) would order it lexicographically
-    # a stable sort, so levels of one energy keep the file's order and their ids do not depend on
-    # the sort algorithm
+    # astype(float) first: the level order is now the frame's order alone. A column that arrived
+    # as strings (pd.read_fwf can yield those) would sort lexicographically. The sort is stable, so
+    # levels of one energy keep the file's order. Their ids then do not depend on the sort
+    # algorithm.
     dflevels = dflevels.astype({"energypercm": float}).sort_values(by="energypercm", kind="stable", ignore_index=True)
 
     energy_levels = [
@@ -197,10 +198,10 @@ def read_levels_data(dflevels):
 def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[int], flog):
     """Convert FAC lines to transitions referencing zero-based level ids.
 
-    A line that names a level above the ionisation energy is skipped, because the level list
-    stops there. A line that names an Ilev the level file does not have at all is an error: the
-    two files disagree about the numbering, and skipping it would empty the ion without a word.
-    The two levels are ordered lower id first.
+    The reader skips a line that names a level above the ionisation energy, because the level
+    list stops there. A line that names an Ilev that the level file does not have is an error.
+    The two files then disagree about the numbering, and a skip would empty the ion without a
+    message. The reader orders the two levels with the lower id first.
     """
     transitions = []
     skipped_count = 0
@@ -210,8 +211,8 @@ def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[
             skipped_count += 1
             continue
 
-        # not an assert: this decides which levels a transition is written between, so it must
-        # survive python -O, and it names the offending Ilev values rather than just failing
+        # not an assert: this decides between which levels the output writes a transition, so it
+        # must survive python -O. It also names the offending Ilev values instead of a bare failure
         lowerlevel, upperlevel = resolve_transition_levelids(
             row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
         )
@@ -256,8 +257,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         msg = f"FAC levels file {levels_file} not found"
         raise FileNotFoundError(msg)
     dfalllevels = GetLevels(filename=levels_file)
-    # the levels above the ionisation energy are dropped, and their Ilev values kept so that
-    # read_lines_data() can tell a transition to one of them from a transition to an unknown level
+    # drop the levels above the ionisation energy, but keep their Ilev values. With them,
+    # read_lines_data() knows whether a transition names a dropped level or an unknown level
     above_ionization = dfalllevels["energypercm"] > (ionization_energy_in_ev / hc_in_ev_cm)
     ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.loc[above_ionization, "Ilev"]}
     dflevels = dfalllevels.loc[~above_ionization]
@@ -282,13 +283,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from an FAC level name.
 
-    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    Returns None when it cannot parse the name. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    Kept separate from the other readers' versions: each data source names its levels
-    differently, so a shared parser would have to guess which convention it is looking at.
+    This parser stays separate from the versions of the other readers. Each data source names
+    its levels differently, so a shared parser would have to guess the convention of the name.
     """
-    # level names are "<configuration> Ilev=<index>" and the configuration is itself
-    # space-separated, so drop the index suffix before taking the last orbital
+    # level names are "<configuration> Ilev=<index>", and the configuration itself contains
+    # spaces. Drop the index suffix first, then take the last orbital
     part = levelname.split(" Ilev=", maxsplit=1)[0].rsplit(" ", maxsplit=1)[-1]
     return parse_orbital_n(part)

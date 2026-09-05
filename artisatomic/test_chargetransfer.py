@@ -161,7 +161,7 @@ def test_makechargetransferfile_kf96_autoreverse(patch_sources, tmp_path):
     # recombination row for Li+1.
     assert autoreverse_of_reaction[26, 4, 1, 1] == 1
     assert autoreverse_of_reaction[1, 2, 3, 1] == 1
-    # a zero rate would stop ARTIS from its own estimate, so the Ca+2 row is reported and not written
+    # a zero rate would stop ARTIS from its own estimate, so the script reports the Ca+2 row and does not write it
     assert (20, 3, 1, 1) not in autoreverse_of_reaction
     assert any("Z=20 q=2" in line and "Table 4" in line for line in report)
 
@@ -218,7 +218,7 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     """main() writes the file that tests/chargetransfer/checksums.txt records, byte for byte.
 
     The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
-    after a deliberate change of the output; tests/README.md gives the commands.
+    after a deliberate change of the output. tests/README.md gives the commands.
     """
     monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-output_folder", str(tmp_path)])
     makechargetransferfile.main()

@@ -159,7 +159,7 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     # A row with more tokens than the header moves every value into the column on its left. No
     # later test can find that. A row with fewer tokens has an empty cell, and keeps the columns
     # in front of that cell. The level tables leave the LS2 cell of a high-l level empty. The
-    # callers take no column after LS2, so such a row is permitted.
+    # callers take no column after LS2, so the function permits such a row.
     #
     # Not an assert: input validation must survive python -O.
     nlongrows = dftable.select((pl.col(countcol) > len(columns)).sum()).item()
@@ -209,9 +209,9 @@ def read_levels_and_transitions(
 
     The ionisation energy comes from NIST rather than the file. Configurations are not unique
     (levels of one configuration differ by J), so level names combine the configuration, J and
-    the file's index. The level indices are validated, since a gap would silently misattach
-    transitions. A transition to a level that the levels file does not list is discarded, with
-    a warning in the log.
+    the file's index. The function checks the level indices, because a gap would silently
+    misattach transitions. The function discards a transition to a level that the levels file
+    does not list, with a warning in the log.
     """
     elsym = elsymbols[atomic_number]
     ion_stage_roman = roman_numerals[ion_stage]
@@ -286,12 +286,12 @@ def read_levels_and_transitions(
         .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
         .otherwise(
             pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1
-        )  # the strip_suffix should not be needed (does not end in "/2" but prevents a polars error)
+        )  # the strip_suffix is not necessary here (J does not end in "/2") but it prevents a polars error
         .alias("g"),
     )
 
-    # the levels are indexed from zero in file order and the transitions refer to those indices,
-    # so a gap would misattach them. Not an assert: input validation must survive python -O.
+    # the file indexes the levels from zero in file order, and the transitions refer to those
+    # indices. So a gap would misattach them. Not an assert: input validation must survive python -O.
     if dflevels["Index"].to_list() != list(range(dflevels.height)):
         msg = f"Level indices in {levels_file} are not contiguous and zero-based"
         raise ValueError(msg)
@@ -373,11 +373,11 @@ def read_levels_and_transitions(
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Floers+25 level name.
 
-    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    Kept separate from the other readers' versions: each data source names its levels
-    differently, so a shared parser would have to guess which convention it is looking at.
+    Kept separate from the other readers' versions. Each data source names its levels
+    differently, so a shared parser would have to guess the convention of each name.
     """
     # level names are "<configuration> J=<J> index=<index>", so drop everything after the config
     part = levelname.split(" ", maxsplit=1)[0].rsplit(".", maxsplit=1)[-1]

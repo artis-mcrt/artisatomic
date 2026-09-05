@@ -22,7 +22,7 @@ def read_groundstates_table() -> pd.DataFrame:
 def read_ground_levels(atomic_number, ion_stage, flog):
     """Read the ground state of one ion from the NIST ground-state table.
 
-    This handler supplies a single level per ion and never any transitions, so an ion using it
+    This handler supplies a single level per ion and never any transitions. An ion that uses it
     contributes only its ground state and ionisation energy to the output.
     """
     print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
@@ -54,8 +54,8 @@ def extend_ion_list(ion_handlers):
     groundstatesdata = read_groundstates_table()
 
     for _index, row in groundstatesdata.iterrows():
-        # add_handler_if_not_set() returns a new list rather than mutating its argument,
-        # and normalises the pandas numpy integers to plain ints
+        # add_handler_if_not_set() returns a new list and does not change its argument. It also
+        # normalises the pandas numpy integers to plain ints
         ion_handlers = add_handler_if_not_set(ion_handlers, row["Z"], row["ion"], "gsnist")
 
     return ion_handlers

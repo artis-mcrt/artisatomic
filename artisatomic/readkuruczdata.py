@@ -25,10 +25,10 @@ if TESTMODE:
 def parse_gfall(fname: str) -> pl.LazyFrame:
     """Parse one Kurucz gfall line list into a frame of transitions with their two levels.
 
-    Each gfall row is a transition carrying both of its levels inline, in a fixed-width Fortran
-    format. The two levels are ordered into lower/upper by energy here, since the file lists
-    them in an arbitrary order. A negative energy in the file means a predicted (rather than
-    measured) level, which is recorded in a "theoretical" flag and the magnitude kept.
+    Each gfall row is a transition that carries both of its levels inline, in a fixed-width
+    Fortran format. This function orders the two levels into lower/upper by energy, because the
+    file lists them in an arbitrary order. A negative energy in the file means a predicted (not
+    measured) level. The parser records that in a "theoretical" flag and keeps the magnitude.
     """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
@@ -93,7 +93,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     gfall = gfall.drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
     double_columns = [col.replace("_first", "") for col in gfall.collect_schema().names() if col.endswith("first")]
 
-    # due to the fact that energy is stored in 1/cm
+    # because the file stores the energy in 1/cm
     gfall = gfall.with_columns(
         order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     )
@@ -112,10 +112,11 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     )
 
     # Clean labels. str.replace_all(), not Expr.replace(): the latter swaps whole values that
-    # equal the literal string "\s+", so the internal whitespace runs the gfall columns are padded
-    # with ('s4d  1D') were never collapsed and went into the level names as-is.
-    # fill_null(""): a blank label parsed to null, and a null is_in() result made filter() drop
-    # the row, so U II lost 495 of its 595 lines. Only the three pseudo-level labels are ignored.
+    # equal the literal string "\s+". So it never collapsed the internal whitespace runs that pad
+    # the gfall columns ('s4d  1D'), and those went into the level names as they were.
+    # fill_null(""): a blank label parsed to null. A null is_in() result made filter() drop the
+    # row, so U II lost 495 of its 595 lines. The filter removes only the three pseudo-level
+    # labels.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
     gfall = gfall.with_columns(
         pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
@@ -137,7 +138,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 
 
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
-    """Locate one ion's Kurucz line list, trying the extendedatoms and zztar layouts.
+    """Locate one ion's Kurucz line list in the extendedatoms layout or the zztar layout.
 
     Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
     has no data for it.
@@ -159,9 +160,9 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
-    The files are transition lists rather than level lists, so the levels are recovered by
-    taking the distinct lower and upper levels of every transition. The ionisation energy comes
-    from NIST rather than the file.
+    The files are transition lists, not level lists. So this function recovers the levels as the
+    distinct lower and upper levels of every transition. The ionisation energy comes from NIST
+    rather than the file.
     """
     ion_charge = ion_stage - 1
 
@@ -224,8 +225,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
-        # maintain_order so that which label survives for a duplicated (energy, j) is reproducible;
-        # without it the level names in adata.txt can differ from run to run
+        # maintain_order makes the label that survives for a duplicated (energy, j) reproducible.
+        # Without it the level names in adata.txt can differ from run to run.
         .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
         .sort("energyabovegsinpercm", "j")
         .select(
@@ -251,17 +252,17 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
 
     transitions = (
         gfall.select(transition_columns)
-        # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one
-        # (Y II has one such pair at 241.7267 and 241.7308 nm, both loggf = 0). ARTIS adds the A
-        # values of two rows that share a level pair, so a repeat would double the line.
+        # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one.
+        # Y II has one such pair at 241.7267 and 241.7308 nm, both with loggf = 0. ARTIS adds
+        # the A values of two rows that share a level pair, so a repeat would double the line.
         #
         # A row only counts as a repeat if the levels, the labels AND the strength all match.
         # Each on its own keeps rows that are separate lines:
-        #  - Sr I has 785 rows sharing a level pair with different labels, whose strengths follow
-        #    the spin rule, so they are lines whose levels the (energy, J) key above merged.
-        #  - Sr III has 46 rows sharing a level pair and both labels whose loggf still differs,
-        #    by as much as -1.911 against -5.742, and Sr II in the zztar layout has five more.
-        # Dropping either kind would delete a real transition, and in Sr III would keep the
+        #  - Sr I has 785 rows that share a level pair but have different labels. Their strengths
+        #    follow the spin rule, so they are lines whose levels the (energy, J) key above merged.
+        #  - Sr III has 46 rows that share a level pair and both labels but differ in loggf, by
+        #    as much as -1.911 against -5.742. Sr II in the zztar layout has five more.
+        # A drop of either kind would delete a real transition, and in Sr III it would keep the
         # weaker of the two.
         .with_columns(gf=10 ** pl.col("loggf"))
         .join(
@@ -301,7 +302,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             "label_upper",
             "loggf",
             # an isotope or hyperfine component is its own line and can share everything above
-            # with another, so the fields that tell them apart belong in the identity too
+            # with another. So the fields that tell them apart belong in the identity too.
             "isotope",
             "isotope2",
             "log_f_hyperfine",
@@ -316,8 +317,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     if transitions.height < transitions_in:
         log_and_print(flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once")
 
-    # the level ids follow a sort on (energy, J), while the file's pair was ordered by energy
-    # alone, so two levels of one energy can come out with the higher id first: order the ids
+    # the level ids follow a sort on (energy, J), but the file ordered its pair by energy alone.
+    # So two levels of one energy can come out with the higher id first: order the ids.
     transitions = transitions.select(
         upperlevel=pl.max_horizontal("levelid_lower", "levelid_upper"),
         lowerlevel=pl.min_horizontal("levelid_lower", "levelid_upper"),
@@ -335,16 +336,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Kurucz level label.
 
-    Returns None when the label cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    Returns None for a label that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log. A guessed n would give the
     level a cross section of the wrong size without a trace in the output.
 
     A label can end in a parent term ("6s6p*(3P*)"), an odd-parity mark ("*"), or a prime that
-    marks a second series ("d5p'"). All come after the valence orbital, so they are removed
-    before the orbital is read.
+    marks a second series ("d5p'"). All come after the valence orbital, so the parser removes
+    them before it reads the orbital.
 
-    Kept separate from the other readers' versions: each data source names its levels
-    differently, so a shared parser would have to guess which convention it is looking at.
+    Kept separate from the other readers' versions. Each data source names its levels
+    differently, so a shared parser would have to guess the convention of each name.
     """
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
@@ -357,13 +358,13 @@ def get_level_valence_n(levelname: str) -> int | None:
         return None
 
     if part[-1] not in "spdfghijklmnopqr":
-        # end of string is a number of electrons in the orbital, not a principal quantum number, so remove it
+        # the end of the string is a number of electrons in the orbital, not a principal quantum number: remove it
         if not part[-1].isdigit():
             return None
         part = part.rstrip(string.digits)
 
     # the digits before the valence orbital letter. A Kurucz label writes the electron count of
-    # the shell before them without a space: "s25p" is 5s2 5p, "f36s" is 4f3 6s and "f125d" is
+    # the shell before them without a space. "s25p" is 5s2 5p, "f36s" is 4f3 6s and "f125d" is
     # 4f12 5d. So a run of digits that follows an orbital letter starts with that count. A
     # two-digit run that ends in 0 is a two-digit n ("s10d" is 5s 10d), because no shell has
     # n = 0. A lower-case letter is an orbital letter here: the term letters are upper case.
@@ -375,8 +376,8 @@ def get_level_valence_n(levelname: str) -> int | None:
         if len(digits) == 2 and digits[1] != "0":
             digits = digits[1:]
         elif len(digits) == 3:
-            # a two-digit count and a one-digit n ("f125d"), unless that n would be 0: then a
-            # one-digit count and a two-digit n ("s210d" is 5s2 10d)
+            # a two-digit count and a one-digit n ("f125d"), unless that n would be 0. Then it
+            # is a one-digit count and a two-digit n ("s210d" is 5s2 10d).
             digits = digits[2:] if digits[2] != "0" else digits[1:]
         elif len(digits) > 3:
             return None

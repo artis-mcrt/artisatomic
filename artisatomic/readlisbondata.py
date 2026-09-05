@@ -20,8 +20,8 @@ from artisatomic.base import Transition
 class LisbonReader:
     """Extract levels and lines from the Lisbon Atomic Group data.
 
-    Copied from Andreas Floers' code in git.gsi.de:nucastro/opacities.git, and mimics the
-    GFALLReader class.
+    This class is a copy of Andreas Floers' code in git.gsi.de:nucastro/opacities.git. It mimics
+    the GFALLReader class.
 
     Attributes
     ----------
@@ -35,8 +35,8 @@ class LisbonReader:
         Parameters
         ----------
         data : dict
-            Dictionary containing one dictionary per species with
-            keys `levels` and `lines`.
+            Dictionary that holds one dictionary per species with
+            the keys `levels` and `lines`.
         """
         self._get_levels_lines(data)
 
@@ -46,14 +46,14 @@ class LisbonReader:
         Parameters
         ----------
         data : dict
-            Dictionary containing one dictionary per species with
-            keys `atomic_number`, `ion_charge`, `levels` and `lines`.
+            Dictionary that holds one dictionary per species with
+            the keys `atomic_number`, `ion_charge`, `levels` and `lines`.
         """
         lvl_list = []
         lns_list = []
         # the caller passes the element and the charge directly. The alternative was to format
-        # them into the key and to parse them back with carsus.util.parse_selected_species(),
-        # which made an undeclared optional dependency a hard requirement of this reader.
+        # them into the key and to parse them back with carsus.util.parse_selected_species().
+        # That made an undeclared optional dependency a hard requirement of this reader.
         for parser in data.values():
             atomic_number = parser["atomic_number"]
             ion_charge = parser["ion_charge"]
@@ -90,7 +90,7 @@ class LisbonReader:
 def get_levelname(row, fileindex: int):
     """Name a Lisbon level from its label, J and file index.
 
-    The label alone is not unique, and neither is the label with J: in Nd II most levels share
+    The label alone is not unique, and neither is the label with J. In Nd II, most levels share
     their relativistic configuration and J with another level. The file index makes the name
     unique, as the FAC, Floers+25 and MONS readers do with theirs.
     """
@@ -101,19 +101,20 @@ def read_levels_data(dflevels):
     """Convert the Lisbon level table to level tuples, sorted by energy.
 
     Also returns the map from the file's level index to the zero-based level id, which
-    read_lines_data() needs because sorting by energy reorders the levels.
+    read_lines_data() needs because the sort by energy reorders the levels.
 
-    The lines name their levels POSITIONALLY: LisbonReader reads their energies with
+    The lines name their levels by POSITION. LisbonReader reads their energies with
     levels.iloc[lines["level_index_lower"]], which is a position in the file-ordered frame, not an
-    index label. So the map is keyed by that position, which reset_index() below makes explicit
-    rather than relying on the levels CSV happening to be numbered from zero.
+    index label. So the key of the map is that position. The reset_index() below makes this
+    explicit. Without it, the map would depend on a levels CSV whose numbers happen to start at
+    zero.
 
     This data set supplies no parities, so every level's parity is null and the Laporte rule
-    never fires. It does supply J, which its level names are keyed on, so the delta J rule is
-    what decides forbidden-ness here.
+    never fires. It does supply J, which is part of each level name, so the delta J rule alone
+    decides whether a transition is forbidden here.
     """
-    # sort first, so that the ids handed out below are the ones the levels keep. The index is
-    # reset to the row position beforehand, so sorting leaves each level carrying its file position
+    # sort first, so that the ids handed out below are the ones the levels keep. The reset of the
+    # index to the row position comes first, so each level carries its file position through the sort
     dflevels = dflevels.reset_index(drop=True).sort_values(by="energy", kind="stable")
 
     energy_levels = [
@@ -134,13 +135,14 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
     The lines name their levels by position in the levels file, and read_levels_data() sorted the
-    levels by energy, so every one is mapped through levelid_of_fileindex rather than used
-    directly. A line naming a level that does not exist is an error, not something to skip.
+    levels by energy. So the reader maps every position through levelid_of_fileindex and does not
+    use it directly. A line that names a level that does not exist is an error, not something to
+    skip.
 
     A = gf / (gf_to_a_coefficient * g_upper * wavelength^2) with the wavelength in Angstrom, as
-    in readkuruczdata and readmonsdata. g_upper is the g of the level that ends up as the upper
-    level after the ids are resolved, not of the level the file labels "Upper": the file can
-    list a pair the other way round, and the swap must not leave A with the wrong g.
+    in readkuruczdata and readmonsdata. g_upper is the g of the level that is the upper level
+    after the reader resolves the ids. It is not the g of the level that the file labels "Upper".
+    The file can list a pair in the reverse order, and the swap must not leave A with the wrong g.
     """
     transitions = []
 
@@ -162,14 +164,14 @@ class EnergyLevelTuple(t.NamedTuple):
     energyabovegsinpercm: float
     g: float
     parity: int | None  # None where the data set gives no parity
-    j: float  # the level's J, which its name is keyed on and its g derived from
+    j: float  # the level's J, which is part of its name and the source of its g
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the Lisbon data set.
 
-    The CSV files are not bundled with artisatomic; ARTISATOMIC_LISBON_PATH overrides where they
-    are looked for.
+    The CSV files are not part of artisatomic. ARTISATOMIC_LISBON_PATH overrides the directory
+    that the reader searches.
     """
     ion_charge = ion_stage - 1
     elsym = elsymbols[atomic_number]
@@ -180,8 +182,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     print(f"Reading Lisbon data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman})")
 
-    # the Lisbon CSVs are not part of this repository, so the location is configurable and
-    # checked up front: pandas would otherwise report only the missing file, not what to set
+    # the Lisbon CSVs are not part of this repository, so the location is configurable. This check
+    # comes first: pandas would otherwise report only the missing file, not what to set
     lisbonpath = Path(os.environ.get("ARTISATOMIC_LISBON_PATH", PYDIR / ".." / "atomic-data-lisbon")).resolve()
     if not lisbonpath.is_dir():
         msg = (

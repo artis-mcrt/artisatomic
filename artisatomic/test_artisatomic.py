@@ -53,22 +53,22 @@ def phixs_args(**overrides: t.Any) -> argparse.Namespace:
 
 
 def test_interpret_term():
-    """LS terms are read from level names, reporting unknown rather than raising on unreadable ones."""
+    """get_term_as_tuple() reads the LS term from a level name, and reports unknown for an unreadable name."""
     assert readhillierdata.get_term_as_tuple("3d5(6S)4s(7S)4d6De") == (6, 2, 0)
     assert readhillierdata.get_term_as_tuple("3d6_3P2e") == (3, 1, 0)
 
-    # names with no L character must report "unknown" rather than raising UnboundLocalError
+    # a name with no L character must report "unknown", not raise UnboundLocalError
     for unreadable in ("e2x", "o12", "3d5", "12"):
         assert readhillierdata.get_term_as_tuple(unreadable) == (-1, -1, -1)
 
-    # The only L character can belong to a parenthesised parent term. Reporting '(4D)' would
-    # describe the parent rather than this level, so the term is unreadable -- but the trailing
-    # 'o' still gives the parity.
+    # The only L character can belong to a parenthesised parent term. A report of '(4D)' would
+    # describe the parent and not this level, so the term is unreadable. The trailing 'o' still
+    # gives the parity.
     assert readhillierdata.get_term_as_tuple("3d5(4D)4po[3]") == (-1, -1, 1)
     assert readhillierdata.get_term_as_tuple("3d4(3P2)4po[1/2]") == (-1, -1, 1)
 
-    # an L character at index 0 leaves no room for the multiplicity, and config[-1] would wrap
-    # round to the end of the name and read some unrelated character as it
+    # an L character at index 0 leaves no room for the multiplicity. config[-1] would then wrap
+    # round to the end of the name and read some unrelated character as the multiplicity
     assert readhillierdata.get_term_as_tuple("S2") == (-1, -1, -1)
     assert readhillierdata.get_term_as_tuple("P2") == (-1, -1, -1)
 
@@ -83,7 +83,7 @@ def test_get_level_parity():
     assert get_level_parity("3d5(6S)4s(7S)4d6De") == 0
 
     # intermediate-coupling names, where the only term letter belongs to the parent term in
-    # parentheses. Reading the term instead of the suffix leaves these with no parity at all,
+    # parentheses. A read of the term instead of the suffix leaves these with no parity at all,
     # and then any two of them wrongly compare equal.
     assert get_level_parity("3d5(4D)4po[3]") == 1
     assert get_level_parity("3d4(3P2)4po[1/2]") == 1
@@ -96,9 +96,9 @@ def test_get_level_parity():
     # ...and where there is no suffix and no readable orbital either, there is no parity
     assert get_level_parity("Eqv st (0S ) 0s  a4P") < 0
 
-    # Levels that merge sub-levels of both parities have no parity to read, and must not be given
-    # one: '1___' and '13___' hold every l of that n (g = 2n^2), '8SNG'/'8TRP' are He I's merged
-    # singlets and triplets, and 'w'/'z' are merge markers for the high-l orbitals of a shell.
+    # Levels that merge sub-levels of both parities have no parity to read, and must not get one.
+    # '1___' and '13___' hold every l of that n (g = 2n^2). '8SNG' and '8TRP' are He I's merged
+    # singlets and triplets. 'w' and 'z' are merge markers for the high-l orbitals of a shell.
     for merged in ("1___", "2___", "13___", "8SNG", "8TRP", "2s2_29w_2W", "10z_2Z", "2s2_2p3(4So)5z_5Z"):
         assert get_level_parity(merged) < 0
 
@@ -113,9 +113,9 @@ def test_has_merged_orbital():
     assert not has_merged_orbital("2p_2Po")
     assert not has_merged_orbital("3d7(4F)6d_5Pbe")
 
-    # A token with no principal quantum number cannot be judged: n would default to 0 and then
-    # l >= n holds for every orbital letter, which would call the whole configuration merged and
-    # throw away the parity these names state outright with their 'o'.
+    # has_merged_orbital() cannot judge a token with no principal quantum number. n would default
+    # to 0, and then l >= n holds for every orbital letter. That would call the whole configuration
+    # merged and discard the parity that these names state with their 'o'.
     for hasnon in ("3d8(2H)sp_2Go", "3d2(2D)sp_4Fo", "3d7(a2D)4sep_4Fo", "SEJ_s6p_7Fo", "3s2_3p_nd_a3Po"):
         assert not has_merged_orbital(hasnon)
         assert readhillierdata.get_level_parity(hasnon) == 1
@@ -127,25 +127,25 @@ def test_has_merged_orbital():
 
 
 def test_get_parity_from_multi_orbital_token():
-    """A digit-letter-letter run is one token holding two orbitals that share a principal number."""
-    # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, matching the 'o'.
-    # Reading only the first letter and calling the rest an occupation raises on int('p').
+    """A digit-letter-letter run is one token that holds two orbitals that share a principal number."""
+    # '4sp(3P)_7Po' splits to the token '4sp', i.e. 4s and 4p: l = 0 + 1 is odd, which matches the 'o'.
+    # A read of only the first letter, with the rest as an occupation, raises on int('p').
     assert get_config_parity("4sp(3P)_7Po") == 1
     assert readhillierdata.get_level_parity("4sp(3P)_7Po[2]") == 1
 
 
 def test_get_config_parity():
-    """Parity is the sum of l over the occupied orbitals, skipping parent terms and merge markers."""
+    """Parity is the sum of l over the occupied orbitals, and the sum skips parent terms and merge markers."""
     # sum of l over the occupied orbitals, mod 2
     assert get_config_parity("3d64s2") == 0  # 2 * 6 = 12
     assert get_config_parity("5s2.5p5") == 1  # 0 * 2 + 1 * 5 = 5
 
-    # parent terms in parentheses are not occupied orbitals and must be skipped, not parsed
+    # parent terms in parentheses are not occupied orbitals, so the parser must skip them, not parse them
     assert get_config_parity("3s23p63d7(4F)") == 0  # 0*2 + 1*6 + 2*7 = 20
     assert get_config_parity("3d6(5D)4s_6De") == 0  # 2 * 6 = 12
 
-    # closed shells with two-digit occupations: a truncated '4f1' reading would give the
-    # wrong (odd) parity here, since 3*14 is even but 3*1 is odd
+    # closed shells with two-digit occupations: a truncated read of '4f1' would give the
+    # wrong (odd) parity here. 3*14 is even, but 3*1 is odd
     assert get_config_parity("4f145d96s2") == 0  # 3*14 + 2*9 + 0 = 60
 
     # CMFGEN packs a shell's high-l levels into one level whose orbital letter is a merge marker
@@ -154,10 +154,11 @@ def test_get_config_parity():
     assert get_config_parity("2s2_2p3(4So)5z_5Z") == 1  # 2s2 + 2p3 = 3, the 5z contributes none
     assert get_config_parity("2s2_13w_2W") == 0  # 2s2 = 0, the 13w contributes none
 
-    # A bare configuration read as a name-with-a-term is mistaken for a term, so no orbitals come
-    # back. The sum is then empty, and 0 is a real parity that would be the wrong answer: right
-    # for '3d7' (2 * 7 = 14) only by coincidence, and wrong for '5p3' (1 * 3 = 3, odd). None says
-    # so instead. Callers holding a bare configuration pass hasterm=False, below.
+    # When the parser reads a bare configuration as a name with a term, it takes the configuration
+    # for the term, and no orbitals come back. The sum is then empty, and 0 is a real parity that
+    # would be the wrong answer. It is right for '3d7' (2 * 7 = 14) only by coincidence, and wrong
+    # for '5p3' (1 * 3 = 3, odd). None says so instead. Callers with a bare configuration pass
+    # hasterm=False, below.
     assert interpret_configuration("3d7")[0] == []
     assert get_config_parity("3d7") is None
     assert get_config_parity("5p3") is None
@@ -165,15 +166,15 @@ def test_get_config_parity():
 
 def test_parity_of_a_bare_configuration():
     """A name with no term is all configuration, and adf04 writes its orbitals in upper case."""
-    # the whole string is orbitals, so nothing is lost off the end and odd really reads as odd
+    # the whole string is orbitals, so the parser loses nothing off the end and odd reads as odd
     assert get_config_parity("3d7", hasterm=False) == 0  # 2 * 7 = 14
     assert get_config_parity("5s2", hasterm=False) == 0  # 0 * 2
     assert get_config_parity("5p3", hasterm=False) == 1  # 1 * 3
     assert get_config_parity("2p", hasterm=False) == 1  # a lone orbital with no occupation
 
     # ADAS adf04 configurations: upper case, space separated, with the level's own index in
-    # brackets at the end. Stripping a term took the last orbital with it, so '4P1' was lost and
-    # every level of FeIII.adf04 came out even; 3s2 3p6 3d5 4p1 is 0 + 6 + 10 + 1 = 17, odd.
+    # brackets at the end. The strip of a term also removed the last orbital, '4P1', so every level
+    # of FeIII.adf04 came out even. 3s2 3p6 3d5 4p1 is 0 + 6 + 10 + 1 = 17, odd.
     assert get_config_parity("3S2 3P6 3D5 4P1   (1)", hasterm=False) == 1
     assert get_config_parity("3S2 3P6 3D6   (5)", hasterm=False) == 0  # 0 + 6 + 12 = 18
     assert interpret_configuration("3S2 3P6 3D5 4P1   (1)", hasterm=False)[0] == [
@@ -185,8 +186,8 @@ def test_parity_of_a_bare_configuration():
     ]
 
     # ...but upper case is only an orbital where there is no term to confuse it with. With a term
-    # the case still matters: '8SNG' is He I's merged singlets, not an 8s orbital, and the parent
-    # term left over from '3d4(3H)s44p_x3Io' is not a merge marker.
+    # the case still matters. '8SNG' is He I's merged singlets, not an 8s orbital. The parent term
+    # left over from '3d4(3H)s44p_x3Io' is not a merge marker.
     assert get_config_parity("8SNG") is None
     assert readhillierdata.get_level_parity("8SNG") < 0
     assert readhillierdata.get_level_parity("3d4(3H)s44p_x3Io[6]") == 1
@@ -202,8 +203,8 @@ def test_interpret_configuration():
     assert interpret_configuration("3d7b2Fe") == (["3d7"], 2, 3, 0, 2)
     assert interpret_configuration("3d6_3P2e") == (["3d6"], 3, 1, 0, -1)
 
-    # a two-digit principal quantum number is read as such when the orbital has no occupation
-    # number, where there is nothing else the digits could belong to
+    # the parser reads a two-digit principal quantum number as such when the orbital has no
+    # occupation number, because then nothing else can own the digits
     assert interpret_configuration("3d6(5D)10d_5Pe") == (["3d6", "(5D)", "10d"], 5, 1, 0, -1)
 
     # ...and also with an occupation number, when the digits cannot belong to a preceding
@@ -211,16 +212,16 @@ def test_interpret_configuration():
     assert interpret_configuration("10d1_2De") == (["10d1"], 2, 2, 0, -1)
     assert interpret_configuration("3d6(5D)10d1_5Pe") == (["3d6", "(5D)", "10d1"], 5, 1, 0, -1)
 
-    # a digit followed by two letters keeps the digit with the letters ('4sp' is treated as an
-    # orbital-plus-occupation, matching the historical handling of this malformed Hillier name)
+    # a digit followed by two letters keeps the digit with the letters. The parser treats '4sp' as
+    # an orbital plus an occupation, which is how the code handled this malformed Hillier name before
     assert interpret_configuration("4sp(3P)_7Po[2]") == (["4sp", "(3P)"], 7, 1, 1, -1)
 
-    # an orbital with a SINGLE-digit occupation is always read with a single-digit n, because
-    # '3d14s2' is genuinely ambiguous and the occupation-1 reading is the common one
+    # the parser always reads an orbital with a SINGLE-digit occupation with a single-digit n.
+    # '3d14s2' is really ambiguous, and the occupation-1 read is the common one
     assert interpret_configuration("3d14s2_2De") == (["3d1", "4s2"], 2, 2, 0, -1)
 
-    # ...but trailing digits after the orbital letter are the occupation, so closed d and f
-    # shells with TWO-digit occupations are unambiguous and must keep both digits
+    # ...but trailing digits after the orbital letter are the occupation. Closed d and f shells
+    # with TWO-digit occupations are unambiguous and must keep both digits
     assert interpret_configuration("3d104s_3De") == (["3d10", "4s"], 3, 2, 0, -1)
     assert interpret_configuration("3d104s2_1Se") == (["3d10", "4s2"], 1, 0, 0, -1)
     assert interpret_configuration("4d105s1_2Se") == (["4d10", "5s1"], 2, 0, 0, -1)
@@ -325,10 +326,10 @@ def test_hydrogenic_nl_phixs_offset_type8():
         expected /= zion**2 * (l_end - l_start + 1) * (l_end + l_start + 1)
         assert np.isclose(phixstable[index, 1], expected, rtol=1e-10)
 
-    # the energy grid must be untouched by the offset: it still starts at the true threshold
+    # the offset must not change the energy grid: it still starts at the true threshold
     assert np.isclose(phixstable[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
 
-    # nu_o=None (type 2) must be unaffected and must not require zion
+    # nu_o=None (type 2) must not see the offset and must not require zion
     type2 = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
     assert type2[0, 1] > 0.0
     assert np.isclose(type2[0, 0], threshold_ev / ryd_to_ev, rtol=1e-10)
@@ -353,7 +354,7 @@ def test_hydrogenic_phixs_effective_charge_scaling():
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
             # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
-            # depends only on n, so comparing at the same n leaves a ratio of exactly n / Z**2
+            # depends only on n. A comparison at the same n therefore leaves a ratio of exactly n / Z**2
             same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 
@@ -366,9 +367,9 @@ def test_hydrogenic_phixs_effective_charge_scaling():
 def test_match_hydrogenic_phixs_is_not_double_scaled():
     """match_hydrogenic_phixs() must not rescale the table returned by get_hydrogenic_n_phixstable().
 
-    get_hydrogenic_n_phixstable() already contains the effective-charge scaling, so applying
-    a second factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a
-    typical E_th = 11 eV, n = 5 valence level).
+    get_hydrogenic_n_phixstable() already contains the effective-charge scaling. A second
+    factor of Z_eff**2 would suppress every cross section (a factor of ~20 for a typical
+    E_th = 11 eV, n = 5 valence level).
     """
     rhd.read_hyd_phixsdata()
 
@@ -404,7 +405,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     # the downsampled first point is a bin average, so allow a few percent
     assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
 
-    # levels above the ionisation energy must be skipped rather than dividing by a negative threshold
+    # match_hydrogenic_phixs() must skip a level above the ionisation energy, not divide by a negative threshold
     dflevels_unbound = pl.DataFrame(
         {
             "levelid": [0],
@@ -436,7 +437,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     dflevels = pl.DataFrame(
         {
             "levelid": list(range(nlevels)),
-            # ascending, and all well below the ionisation energy so none is skipped as unbound
+            # ascending, and all well below the ionisation energy, so the estimate skips none as unbound
             "energyabovegsinpercm": [i * 1000.0 for i in range(nlevels)],
             "g": [2.0] * nlevels,
             "levelname": ["s1s  1S,enpercm=0.0,j=0.5"] * nlevels,
@@ -457,8 +458,8 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
         assert sum(bool(targets) for targets in targetfractions) == n_expected
         assert np.count_nonzero(~np.isnan(thresholds)) == n_expected
 
-    # the lowest levels are the lowest by energy, not the first rows: with two unbound levels in
-    # rows 1 and 2, asking for 3 gives the three bound levels in rows 0, 3 and 4
+    # the lowest levels are the lowest by energy, not the first rows. With two unbound levels in
+    # rows 1 and 2, a request for 3 gives the three bound levels in rows 0, 3 and 4
     unbound_percm = 2 * ionization_energy_ev / hc_in_ev_cm
     dflevels_partly_unbound = dflevels.with_columns(
         energyabovegsinpercm=pl.Series([0.0, unbound_percm, unbound_percm, 1000.0, 2000.0])
@@ -475,8 +476,9 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     )
     assert [bool(targets) for targets in targetfractions] == [True, False, False, True, True]
 
-    # the limit bounds the levels considered, not the tables produced: an unbound level among the
-    # lowest by energy is skipped but still counts, so asking for 4 here gives the same three
+    # the limit bounds the levels considered, not the tables produced. The estimate skips an unbound
+    # level among the lowest by energy, but that level still counts. A request for 4 here therefore
+    # gives the same three
     args = phixs_args(nlevels_hydrogenic_for_unknown_phixs=4)
     _, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=2,
@@ -582,7 +584,7 @@ def test_resolve_photoion_targetfractions():
     resolve_photoion_targetfractions([lower, upper])
 
     assert lower.photoionization_targetfractions == [[(0, 1.0)]]
-    # the top ion has no upper ion to photoionise to, so it is left exactly as it was read
+    # the top ion has no upper ion to photoionise to, so the resolver leaves it as the reader gave it
     assert upper.photoionization_targetfractions == []
 
 
@@ -610,26 +612,26 @@ def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
 
 
 def test_resolve_photoion_targetfractions_rejects_misordered_ions():
-    """A list that is not one element's ions in ascending order is rejected rather than resolved.
+    """The resolver rejects a list that is not one element's ions in ascending order.
 
-    Each ion is resolved against the next entry as its upper ion, so a top ion anywhere but last
-    means the levels being matched belong to the wrong ion.
+    The resolver matches each ion against the next entry as its upper ion. A top ion anywhere but
+    last therefore means that the matched levels belong to the wrong ion.
     """
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     with pytest.raises(ValueError, match="ascending ion stage order"):
         resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
 
-    # a list whose last ion is not the top ion is missing the upper ion the last entry needs
+    # a list whose last ion is not the top ion lacks the upper ion that the last entry needs
     with pytest.raises(ValueError, match="ascending ion stage order"):
         resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
 
 
 def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
-    """Writing an ion that still needs resolving must fail loudly, not drop its cross sections.
+    """The writer must reject an ion that still needs the resolver, not drop its cross sections.
 
-    write_output_files() no longer resolves target fractions itself, so an ion with cross sections
-    but no targets would have every one of its tables silently skipped by write_phixs_data().
+    write_output_files() no longer resolves target fractions itself. For an ion with cross sections
+    but no targets, write_phixs_data() would silently skip every one of its tables.
     """
     import argparse
 
@@ -655,16 +657,16 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     """A level with a cross section table in more than one phot file keeps the largest, rescaled.
 
     Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
-    state of the upper ion, and a level is normally present in all of them: O I's phot_nosm_A and
-    phot_nosm_B share all 107 of their configuration names. Treating the second table as an error
-    made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV) unreadable, and none of
-    them was in the tests/ matrix, which was Fe/Co/Ni only.
+    state of the upper ion. A level is normally present in all of them: O I's phot_nosm_A and
+    phot_nosm_B share all 107 of their configuration names. The reader used to treat the second
+    table as an error. That made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV)
+    unreadable. None of them was in the tests/ matrix, which was Fe/Co/Ni only.
 
-    Only one table can be written per level, so the one with the largest threshold cross section
-    wins. write_phixs_data() writes it as the level's TOTAL and splits it over the targets, so it
-    must first be divided by the kept target's own fraction, which is what this pins: reading each
-    phot file alone gives that target's raw table, and the combined read must reproduce the winner
-    divided by its fraction.
+    The writer can write only one table per level, so the one with the largest threshold cross
+    section wins. write_phixs_data() writes it as the level's TOTAL and splits it over the targets.
+    The reader must therefore first divide the table by the kept target's own fraction. This test
+    checks that: a read of each phot file alone gives that target's raw table, and the combined
+    read must reproduce the winner divided by its fraction.
     """
     import contextlib
 
@@ -676,7 +678,7 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     args = phixs_args()
 
     def read_phixs(photfilenames):
-        """Read O I's cross sections using only the named phot files."""
+        """Read O I's cross sections with only the named phot files."""
         monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=photfilenames))
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
@@ -691,13 +693,13 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     crosssections_b, targets_b, _ = read_phixs((file_b,))
     crosssections, targetconfigs, log = read_phixs((file_a, file_b))
 
-    # the duplicates are reported rather than raised
+    # the reader reports the duplicates and does not raise
     assert "has a cross section table in more than one photoionisation file" in log
 
-    # every level that was read has a table, not just the ones from the first file
+    # every level that the reader read has a table, not only the ones from the first file
     assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
 
-    # a level in both files ends up with both targets recorded
+    # the read records both targets for a level in both files
     levelids_in_both = [
         levelid
         for levelid, targets in enumerate(targetconfigs)
@@ -706,7 +708,7 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     assert levelids_in_both, "expected O I levels with a cross section table in both phot files"
 
     for levelid in levelids_in_both:
-        # each single-file read has one target holding 100% of the level, so its table is unrescaled
+        # each single-file read has one target that holds 100% of the level, so the reader does not rescale its table
         targetlist_a, targetlist_b, targetlist = targets_a[levelid], targets_b[levelid], targetconfigs[levelid]
         assert targetlist_a is not None
         assert targetlist_b is not None
@@ -726,7 +728,7 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
 
 
 def test_read_coldata_term_to_j_redistribution():
-    """A term-resolved effective collision strength must be shared over the J levels of BOTH terms.
+    """The reader must share a term-resolved effective collision strength over the J levels of BOTH terms.
 
     ARTIS forms the collisional excitation rate coefficient as proportional to upsilon_ij / g_i,
     so the invariant that makes the total term-to-term rate correct is
@@ -734,8 +736,8 @@ def test_read_coldata_term_to_j_redistribution():
         sum_i sum_j upsilon_ij == upsilon_term,   upsilon_ij = upsilon_term * g_i/g_L * g_j/g_U
 
     O III has term-resolved collision data (col_data_oiii_butler_2012.dat) and a J-split level
-    list, so it exercises the redistribution; Fe II names its collision transitions with J
-    values, so its values must pass through untouched.
+    list, so it exercises the redistribution. Fe II names its collision transitions with J
+    values, so its values must pass through unchanged.
     """
     import argparse
     import contextlib
@@ -767,11 +769,11 @@ def test_read_coldata_term_to_j_redistribution():
     upsilon_term = 5.791
     assert abs(sum(sums_from_lower) - upsilon_term) < 1e-3
 
-    # and it is split over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
+    # and the reader splits it over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
     for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
         assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
 
-    # Fe II collision data is already J-resolved, so every value passes through unscaled: the
+    # Fe II collision data is already J-resolved, so every value passes through unscaled. The
     # first row of col_data, a6De[9/2] -> a6De[7/2], gives 3.230 in the T = 0.5e4 K column
     _, upsilondict_fe2, _ = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
@@ -807,14 +809,14 @@ def test_add_level_ids_forbidden_parity():
     )
     forbidden = add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list()
 
-    # even -> odd permitted; a real parity never matches an absent one; two absent ones do not
-    # match each other either, which is the whole reason absence is spelled null; two real
-    # even ones do match
+    # even -> odd is permitted. A real parity never matches an absent one. Two absent ones do not
+    # match each other either, which is the reason that null spells absence. Two real even ones
+    # do match
     assert forbidden == [False, False, False, False, True]
 
 
 def test_get_level_j():
-    """J is read from the brackets a J-resolved CMFGEN level name ends with."""
+    """get_level_j() reads J from the brackets at the end of a J-resolved CMFGEN level name."""
     get_level_j = readhillierdata.get_level_j
 
     assert get_level_j("3d6_a5De[4]") == 4.0
@@ -826,14 +828,14 @@ def test_get_level_j():
     assert get_level_j("2s2_2p(2P<1/2>)4f_2{5/2}e") == 2.5
     assert get_level_j("2p5(2P*<1/2>)3d_2{3/2}o[1]") == 1.0
 
-    # Not every trailing bracket is a J: Si X and S X number their levels there instead. g tells
-    # them apart, because J is only J where g == 2J + 1. A 3P term has no J = 3.
+    # Not every trailing bracket is a J. Si X and S X number their levels there instead. g separates
+    # the two cases, because J is only J where g == 2J + 1. A 3P term has no J = 3.
     assert get_level_j("2p3p3Pe[3]", g=5.0) is None
     assert get_level_j("2s2_2p3_4So[2]", g=4.0) is None
     assert get_level_j("3d6_a5De[4]", g=9.0) == 4.0
 
-    # A term-resolved level has no J of its own -- its g counts every J of the term -- and nor
-    # does a merged level. Neither may be given one.
+    # A term-resolved level has no J of its own, because its g counts every J of the term. A merged
+    # level has no J either. The parser must not give either of them one.
     for noj in ("1___", "8SNG", "10z_2Zo", "2s2_2p3(4So)5z_5Z", "3d6(5D)4s_6De"):
         assert get_level_j(noj) is None
 
@@ -871,8 +873,8 @@ def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
     """A source that gives the transition an f says it is E1, and that beats the J labels.
 
     Some data sets disagree with themselves. CMFGEN's provisional F III set splits a term by a
-    nominal 0.8 cm-1 and then shares the term's f over all the J pairs, so it lists dJ = 2 lines
-    with f as large as 0.116. To call those forbidden would give a strong line the forbidden
+    nominal 0.8 cm-1 and then shares the term's f over all the J pairs. It therefore lists dJ = 2
+    lines with f as large as 0.116. To call those forbidden would give a strong line the forbidden
     collision approximation.
     """
     dflevels = pl.DataFrame(
@@ -883,16 +885,16 @@ def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
 
     result = add_level_ids_forbidden(dflevels, dftransitions)
 
-    # dJ = 2, so the rule is broken and reported, but the f keeps the transition permitted
+    # dJ = 2 breaks the rule, which the column records, but the f keeps the transition permitted
     assert result["breaksdeltaj"].to_list() == [True]
     assert result["forbidden"].to_list() == [False]
 
-    # with no f and no A, the same pair is forbidden
+    # with no f and no A, the same pair comes out forbidden
     nof = dftransitions.with_columns(A=0.0).drop("f")
     assert add_level_ids_forbidden(dflevels, nof)["forbidden"].to_list() == [True]
 
     # A weak f is not evidence of an E1 line, so the J labels decide it. C IV lists
-    # 2p_2Po[1/2] -> 3d_2De[5/2] at f = 2.7e-10, and its 108 cm-1 fine structure means its J
+    # 2p_2Po[1/2] -> 3d_2De[5/2] at f = 2.7e-10. Its 108 cm-1 fine structure means that its J
     # labels are sound, so that line really is forbidden.
     weakf = dftransitions.with_columns(A=4.1, f=2.7e-10)
     assert add_level_ids_forbidden(dflevels, weakf)["forbidden"].to_list() == [True]
@@ -901,9 +903,9 @@ def test_add_level_ids_forbidden_delta_j_yields_to_an_oscillator_strength():
 def test_log_deltaj_contradictions_judges_f_and_a_separately():
     """Only a transition strong enough to be E1 contradicts its own J labels.
 
-    f has no units and an E1 line carries 1e-3 to 1. A is a rate in s-1 over many decades, where
-    a forbidden line still reaches ~1e2, so the same cut would report every forbidden line a
-    reader supplies A for as a contradiction.
+    f has no units and an E1 line carries 1e-3 to 1. A is a rate in s-1 over many decades, and a
+    forbidden line still reaches ~1e2. The same cut would therefore report every forbidden line
+    with a reader-supplied A as a contradiction.
     """
     from artisatomic.output import log_deltaj_contradictions
 
@@ -948,9 +950,9 @@ def test_add_level_ids_forbidden_delta_j_needs_both_levels():
 def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
     """Absence is null and only null, so a negative number is an ordinary parity that can match.
 
-    Three readers used to spell "no parity" as the negated level id, which made level 0 come out
-    as a real even parity while every other level was unmatchable. Nothing may depend on negative
-    numbers meaning absent any more, so two levels sharing one are forbidden like any other pair.
+    Three readers used to spell "no parity" as the negated level id. That made level 0 come out as
+    a real even parity, while no other level could match. Nothing may depend on negative numbers as
+    a mark of absence any more. Two levels that share one are forbidden, like any other pair.
     """
     dflevels = pl.DataFrame({"levelid": [0, 1], "parity": [-7, -7]}, schema={"levelid": pl.Int64, "parity": pl.Int64})
     dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0]})
@@ -980,9 +982,10 @@ def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):
 def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
     """H I is merged n-levels throughout, so nothing in it may come out forbidden.
 
-    Every H I level is named '<n>___' and holds every l of that n, giving it no definite parity.
-    Treating those as a matching parity made all 435 H I transitions forbidden, Lyman alpha
-    included -- the strongest permitted line there is, listed in hi_osc.dat with f = 0.4162.
+    Every H I level has the name '<n>___' and holds every l of that n, so it has no definite parity.
+    When the code treated those as a matching parity, all 435 H I transitions came out forbidden,
+    Lyman alpha included. That is the strongest permitted line there is, and hi_osc.dat lists it
+    with f = 0.4162.
     """
     _, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
 
@@ -1002,13 +1005,14 @@ def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
 def test_readboyledata_levels_have_no_parity(monkeypatch):
     """The AOIFE data set supplies no parities, so no transition may come out forbidden.
 
-    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity, so
-    giving every level the same parity made every transition of the ion forbidden — and helium has
-    plenty of permitted ones. A null parity cannot match another, which is how readlisbondata and
+    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity. The
+    same parity on every level therefore made every transition of the ion forbidden, and helium
+    has many permitted ones. A null parity cannot match another, which is how readlisbondata and
     readkuruczdata say the same thing.
 
-    The aoife.hdf5 in the repository is a placeholder (the real file is gitignored, fetched per
-    its README), so this builds the three tables the reader wants in memory.
+    The aoife.hdf5 in the repository is a placeholder. The real file is in .gitignore, and its README
+    says how to fetch it. This test therefore builds the three tables that the reader wants in
+    memory.
     """
     import h5py
 
@@ -1028,7 +1032,7 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
             (2, 0, 0, 0.0, 1.0, 0),
             (2, 0, 1, 159856.0, 3.0, 1),
             (2, 0, 2, 166278.0, 1.0, 0),
-            (2, 1, 0, 0.0, 2.0, 0),  # He II, must be filtered out
+            (2, 1, 0, 0.0, 2.0, 0),  # He II, which the reader must filter out
         ],
         dtype=levels_dtype,
     )
@@ -1048,7 +1052,7 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
         energy_levels = readboyledata.read_levels_data(2, 1)
         transitions = readboyledata.read_lines_data(2, 1)
 
-    # the other ion's level is filtered out
+    # the reader filters out the other ion's level
     assert len(energy_levels) == 3
 
     # no level has a parity, so no pair of them can compare equal
@@ -1078,12 +1082,12 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
 
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
-    """Lisbon lines name their levels by position in the levels file, which is re-sorted by energy.
+    """Lisbon lines name their levels by position in the levels file, which the reader re-sorts by energy.
 
-    Indexing the sorted list with the file's own position attaches every transition to the wrong
-    pair of levels whenever the source CSV is not already in energy order, which is what the map
-    returned by read_levels_data() (as in readfacdata) is for. The map is keyed by row position
-    rather than index label, matching the levels.iloc[...] lookup LisbonReader itself does.
+    An index into the sorted list with the file's own position attaches every transition to the
+    wrong pair of levels. That happens whenever the source CSV is not already in energy order. The
+    map that read_levels_data() returns (as in readfacdata) prevents it. Row position, not index
+    label, keys the map, which matches the levels.iloc[...] lookup that LisbonReader itself does.
     """
     import pandas as pd
 
@@ -1104,8 +1108,8 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     # ...and J is what the delta J rule has to go on, so it must reach the level tuple
     assert [level.j for level in energy_levels] == [0.0, 1.0, 2.0]
 
-    # one line from the file's level 2 (the ground state) to its level 0 (the top level), and the
-    # same line with the file's labels the other way round
+    # one line from the file's level 2 (the ground state) to its level 0 (the top level). The second
+    # row is the same line with the file's labels in the reverse order
     dflines = pd.DataFrame(
         {"gf": [1.0, 1.0], "wavelength": [2000.0, 2000.0]},
         index=pd.MultiIndex.from_tuples([(2, 0), (0, 2)], names=["level_index_lower", "level_index_upper"]),
@@ -1130,8 +1134,8 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
         "top, j=2.0, index=0",
     ]
 
-    # a line naming a level the table does not have means the two files disagree about the
-    # numbering. Skipping it would drop every transition and write a silently empty ion.
+    # a line that names a level the table does not have means that the two files disagree about
+    # the numbering. To skip it would drop every transition and write a silently empty ion.
     dflines_unknown = pd.DataFrame(
         {"gf": [1.0], "wavelength": [2000.0]},
         index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
@@ -1141,7 +1145,7 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
 
 
 def test_add_handler_if_not_set():
-    """Adding a handler returns a new list and never overrides an ion that is already present."""
+    """add_handler_if_not_set() returns a new list and never overrides an ion that is already present."""
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
     unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
@@ -1153,39 +1157,39 @@ def test_add_handler_if_not_set():
     result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
-    # an already-present ion stage keeps the handler it was given, whatever the new one says
+    # an ion stage that is already present keeps its handler, whatever the new one says
     result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
     assert result == unchanged
 
-    # the calls return a new list each time, so none of them touched the one they were given
+    # each call returns a new list, so none of them changed the input list
     assert ion_handlers == unchanged
 
-    # ion stages can be given as tuples or lists (e.g. straight from json.load())
+    # the caller can give the ion stages as tuples or as lists (e.g. directly from json.load())
     ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
     result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 
 
 def test_parse_ion_handlers():
-    """The JSON form becomes tuples, and an ion that names no handler is rejected."""
+    """The JSON form becomes tuples, and the parser rejects an ion that names no handler."""
     from artisatomic.ionhandlers import parse_ion_handlers
 
     # json.load() gives nested lists; every ion must come back as an (ion_stage, handler) tuple
     assert parse_ion_handlers([[26, [[1, "cmfgen"], [2, "cmfgen"]]]]) == [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
-    # a bare ion stage is a leftover from when the handler was optional. It must be named as such
-    # here, rather than failing later where neither the element nor the file would be mentioned.
+    # a bare ion stage is a leftover from when the handler was optional. The parser must name it as
+    # such here. A later failure would mention neither the element nor the file.
     with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
-    r"""Only a parent level that IS 0.0 may be renamed to 0, not one that merely contains it.
+    r"""Only a parent level that IS 0.0 may become 0, not one that only contains it.
 
-    polars' str.replace() takes a pattern and matches anywhere in the value, so a bare "0.0" also
-    rewrote "10.05" to "105" and "100.0" to "100", moving those levels into the wrong group_by
-    bucket in download_gammaspec_betaminus_alpha. literal=True does not help: "0.0" really is a
-    substring of "10.05". Anchoring with ^...$ is what confines it to the whole value.
+    polars' str.replace() takes a pattern and matches anywhere in the value. A bare "0.0" therefore
+    also rewrote "10.05" to "105" and "100.0" to "100", which moved those levels into the wrong
+    group_by bucket in download_gammaspec_betaminus_alpha. literal=True does not help: "0.0" really
+    is a substring of "10.05". The anchors ^...$ confine the match to the whole value.
     """
     parent_elevels = ["0.0", "0", "10.05", "100.0", "1234.5", "0.05"]
     normalised = (
@@ -1194,29 +1198,29 @@ def test_parent_elevel_zero_normalisation_is_anchored():
         .to_list()
     )
 
-    # the ground state, however it is spelled, collapses to one group; nothing else moves
+    # the ground state, in either spelling, collapses to one group; nothing else moves
     assert normalised == ["0", "0", "10.05", "100.0", "1234.5", "0.05"]
     assert all(float(before) == float(after) for before, after in zip(parent_elevels, normalised, strict=True))
 
 
 def test_parallel_map_rejects_iterables_of_different_lengths():
-    """A short iterable is refused, whichever path the call would otherwise have taken."""
+    """parallel_map() refuses a short iterable, whichever path the call would otherwise have taken."""
     from artisatomic.base import parallel_map
 
-    # Executor.map() and thread_map() stop at the shortest iterable while the serial shortcut's
-    # zip(strict=True) raises, so the check has to happen before the path is chosen. 4 items takes
-    # the shortcut and 40 the pool, and neither may quietly do less work than it was asked for.
+    # Executor.map() and thread_map() stop at the shortest iterable, while the serial shortcut's
+    # zip(strict=True) raises. The check therefore has to happen before the choice of the path. 4 items
+    # take the shortcut and 40 the pool, and neither may silently do less work than the caller asked for.
     for nitems in (4, 40):
         with pytest.raises(ValueError, match=r"different lengths"):
             parallel_map(operator.sub, range(nitems), range(nitems - 1))
 
 
 def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
-    """Both paths apply fn to one item of each iterable, in the order they were given."""
+    """Both paths apply fn to one item of each iterable, in the input order."""
     from artisatomic.base import parallel_map
 
     # 4 items takes the serial shortcut, 40 goes to the pool. Subtraction does not commute, so
-    # the results also pin which iterable reaches which parameter.
+    # the results also show which iterable reaches which parameter.
     for nitems in (4, 40):
         minuends = list(range(nitems))
         subtrahends = list(range(100, 100 + nitems))
@@ -1224,7 +1228,7 @@ def test_parallel_map_matches_serial_results_on_both_sides_of_the_cutoff():
 
         assert parallel_map(operator.sub, minuends, subtrahends) == expected
 
-    # a generator is consumed once and has no length, so it must survive being materialised
+    # a generator yields only once and has no length, so it must survive the conversion to a list
     assert parallel_map(operator.sub, (i for i in range(4)), [1] * 4) == [-1, 0, 1, 2]
 
 
@@ -1237,8 +1241,8 @@ def test_split_element_ionstage_str():
     assert split_element_ionstage_str("SiI") == (14, 1)
     assert split_element_ionstage_str("HI") == (1, 1)
 
-    # rstrip("IVX") would leave nothing behind for the elements whose symbols are made of
-    # those letters, so these are the cases that used to raise ValueError
+    # rstrip("IVX") would leave nothing for the elements whose symbols consist of those letters,
+    # so these are the cases that used to raise ValueError
     assert split_element_ionstage_str("VI") == (23, 1)  # vanadium I, not "V" as a numeral
     assert split_element_ionstage_str("VIII") == (23, 3)  # vanadium III
     assert split_element_ionstage_str("IV") == (53, 5)  # iodine V
@@ -1254,7 +1258,7 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
 
     The ion stages come from ranges, so a wrong bound drops an ion without a syntax error.
     extend_ion_list() then never offers that ion, and the checksum tests do not find the
-    mistake: the two CMFGEN sets read 31 of the 199 ions. This test pins the full list.
+    mistake. The two CMFGEN sets read 31 of the 199 ions. This test checks the full list.
     """
     expected_ion_stages = {
         1: [1, 2],  # H
@@ -1328,7 +1332,7 @@ def test_hillier_extend_ion_list():
 
 
 def test_reduce_phixs_tables_worker():
-    """Downsampling a cross-section table preserves the recombination rate it was weighted for."""
+    """The downsample of a cross section table keeps the recombination rate at the optimisation temperature."""
     nphixspoints = 100
     phixsnuincrement = 0.03
     temperature = 6000.0
@@ -1343,12 +1347,12 @@ def test_reduce_phixs_tables_worker():
     assert abs(reduced[0] / sigma_0 - 1) < 0.05  # first point close to the threshold cross section
     assert np.all(np.diff(reduced) < 0)  # monotonically decreasing
 
-    # a constant cross section must be preserved exactly
+    # a constant cross section must stay exact
     tablein_const = np.column_stack([energyryd, np.full_like(energyryd, 2.5)])
     reduced_const = reduce_phixs_tables_worker(temperature, nphixspoints, phixsnuincrement, tablein_const)
     assert np.allclose(reduced_const, 2.5, rtol=1e-6)
 
-    # the downsampling must preserve the recombination-rate integral
+    # the downsample must keep the recombination rate integral
     # sigma(nu) * nu**2 * exp(-h*nu / (k_B * T)) at the optimisation temperature
     ryd_to_hz = 3289841960250880.5
     h_over_kb_in_k_sec = 4.799243073366221e-11
@@ -1445,7 +1449,7 @@ def test_extend_ion_list_finds_a_compressed_adf04():
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
-    """A file written before a handler was renamed still names the old handler, so map it."""
+    """A file from before a handler rename still names the old handler, so the parser must map it."""
     from artisatomic.iondata import handlers
     from artisatomic.ionhandlers import parse_ion_handlers
     from artisatomic.ionhandlers import renamed_handlers
@@ -1475,8 +1479,8 @@ def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 
     artistools reads the comment as `line.split(maxsplit=4)[4].strip("'")`, which strips quotes but
-    not whitespace, so any padding written here ends up inside the level name it reports. The
-    name is written as the reader gave it.
+    not whitespace, so the reported level name would contain any padding written here. The
+    writer puts the name as the reader gave it.
     """
     dfhillier = leveltuples_to_pldataframe(
         pl.DataFrame(
@@ -1496,7 +1500,7 @@ def test_write_adata_level_comment():
     assert hillier_line.endswith(" someion_gs")
     assert hillier_line.split(maxsplit=4)[4] == "someion_gs"
 
-    # a level name containing spaces is written unchanged, and reads back as everything after
+    # the writer puts a level name with spaces unchanged, and it reads back as everything after
     # the fourth field
     spacedlevelname = "3Pe index 1 '2s22p2'"
     dfspaced = leveltuples_to_pldataframe(
@@ -1532,7 +1536,7 @@ def test_scan_file_lines_reads_each_compressed_form(tmp_path):
 
 
 def test_rewrite_file_as_utf8_converts_an_iso_8859_1_file(tmp_path):
-    """A file that CMFGEN wrote in iso-8859-1 is rewritten as utf-8, and a utf-8 file is left."""
+    """rewrite_file_as_utf8() converts a CMFGEN iso-8859-1 file to utf-8, and leaves a utf-8 file unchanged."""
     text = "Reference: Galav\u00eds M.E. 1998\nsecond line\n"
     filepath = tmp_path / "osc_data"
     filepath.write_bytes(text.encode("iso-8859-1"))
@@ -1547,7 +1551,7 @@ def test_rewrite_file_as_utf8_converts_an_iso_8859_1_file(tmp_path):
 
 
 def test_parse_transition_lines_reads_both_layouts():
-    """A CMFGEN oscillator table is read whether or not it carries the last two columns."""
+    """parse_transition_lines() reads a CMFGEN oscillator table with or without the last two columns."""
     withbars = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090D-03   2.599E+05     1-   2   |    |    |"
     withid = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090E-03   2.599E+05     1-   2       7"
     dftransitions = rhd.parse_transition_lines(pl.LazyFrame({"line": [withbars, withid]}), Path("test_osc"))
@@ -1559,13 +1563,13 @@ def test_parse_transition_lines_reads_both_layouts():
     assert dftransitions["A"].to_list() == [2.090e-3, 2.090e-3]
     assert dftransitions["i"].to_list() == [1, 1]
     assert dftransitions["j"].to_list() == [2, 2]
-    # the row with no id column is numbered by its position, and the other keeps the file's id
+    # the row with no id column gets its position as its id, and the other keeps the file's id
     assert dftransitions["hilliertransitionid"].to_list() == [1, 7]
     assert dftransitions.schema == rhd.hillier_transition_schema
 
 
 def test_parse_transition_lines_stops_at_a_second_table():
-    """Only the first table is read, and a table with no line at all gives an empty frame."""
+    """The parser reads only the first table, and a table with no line at all gives an empty frame."""
     transition = "a-b   1.0E-01   2.0E-01   3.0E+03     1-   2       1"
     lines = [transition, "   Oscillator strengths for Fe2", transition]
 
@@ -1576,19 +1580,19 @@ def test_parse_transition_lines_stops_at_a_second_table():
 
 
 def test_parse_gfall_collapses_label_whitespace(monkeypatch):
-    r"""Kurucz labels are fixed-width padded, so their whitespace runs must be collapsed.
+    r"""Kurucz labels have fixed-width padding, so the parser must collapse their whitespace runs.
 
-    Expr.replace() swaps whole values equal to a literal, so `.replace(r"\s+", " ")` on a label
-    column matched nothing and every run survived into the level names written to adata.txt.
+    Expr.replace() swaps whole values that equal a literal. `.replace(r"\s+", " ")` on a label
+    column therefore matched nothing, and every run survived into the level names in adata.txt.
     Only `.str.replace_all()` treats the argument as a pattern.
     """
-    # the sample, so the answer does not depend on which corpus is unpacked or on ARTISATOMIC_TESTMODE
+    # the sample, so the answer does not depend on the unpacked corpus or on ARTISATOMIC_TESTMODE
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
     gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(38, 0))).collect()
 
     labels = pl.concat([gfall["label_lower"], gfall["label_upper"]]).unique().to_list()
     assert labels, "expected some labels for Sr I"
-    # no run of two or more spaces survives, and none is left padded at either end
+    # no run of two or more spaces survives, and no label keeps padding at either end
     assert not [label for label in labels if "  " in label]
     assert all(label == label.strip() for label in labels)
     # the collapse must join the parts rather than delete the separator ('s4d  1D' -> 's4d 1D')
@@ -1620,7 +1624,7 @@ def test_get_level_valence_n():
     assert readfacdata.get_level_valence_n("4f9 6s1") == 6
     assert readfacdata.get_level_valence_n("4f10") == 4
 
-    # the floers25 and fac level names carry a uniquifying suffix, which must be ignored
+    # the floers25 and fac level names carry a suffix that makes the name unique, which the parser must ignore
     assert readfloers25data.get_level_valence_n("4f10 J=8 index=0") == 4
     assert readfloers25data.get_level_valence_n("4f9.6s J=15/2 index=137") == 6
     assert readfloers25data.get_level_valence_n("5s2.5p5 J=3/2 index=2") == 5
@@ -1642,8 +1646,8 @@ def test_get_level_valence_n():
     assert readkuruczdata.get_level_valence_n("s10d 2D,enpercm=1.0,j=1.5") == 10
     assert readkuruczdata.get_level_valence_n("d5p' 3P,enpercm=37292.106,j=0.0") == 5
 
-    # a name with no readable n gives None, never a guessed n: match_hydrogenic_phixs() then
-    # skips the level and logs it, where a guess would give a cross section of the wrong size
+    # a name with no readable n gives None, never a guessed n. match_hydrogenic_phixs() then
+    # skips the level and logs it. A guess would give a cross section of the wrong size
     assert readkuruczdata.get_level_valence_n(",enpercm=12345.0,j=2.5") is None
     assert readkuruczdata.get_level_valence_n("N(1S)2H 1,enpercm=76765.9,j=4.5") is None
     assert readqubdata.get_level_valence_n("_id=1") is None
@@ -1724,17 +1728,17 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
 def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
     """Gfall repeats some lines, and separately lists distinct lines that share a level pair.
 
-    A repeat has the same labels at both ends, and is one line given twice, once at its observed
+    A repeat has the same labels at both ends. It is one line given twice, once at its observed
     wavelength and once at the Ritz one. ARTIS adds the A values of two rows that share a level
-    pair (input.cc), so keeping both would double the line.
+    pair (input.cc), so both rows together would double the line.
 
     Rows that share a level pair with DIFFERENT labels are separate transitions whose levels the
-    (energy, J) key merged into one. Sr I has 785 of those, two of them strong, and dropping them
-    would delete real lines. They are left for ARTIS to combine.
+    (energy, J) key merged into one. Sr I has 785 of those, two of them strong, and a drop would
+    delete real lines. The reader leaves them for ARTIS to combine.
     """
     from artisatomic import readkuruczdata
 
-    # pin the committed sample, so the answer does not depend on which corpus is unpacked
+    # use the committed sample, so the answer does not depend on the unpacked corpus
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
 
     gfall = readkuruczdata.parse_gfall(str(readkuruczdata.find_gfall(39, 1))).collect()
@@ -1747,13 +1751,13 @@ def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
 
     _, dflevels, transitions = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
 
-    # the repeat is gone, and no level pair is left with two rows for ARTIS to add up
+    # the repeat is gone, and no level pair keeps two rows for ARTIS to add up
     assert transitions.height == gfall.height - 1
     assert transitions.group_by(["lowerlevel", "upperlevel"]).len().filter(pl.col("len") > 1).is_empty()
 
-    # Sr II in the zztar layout has five groups that match on the levels AND both labels but
-    # whose loggf differs, by as much as -2.848 against -1.547. Those are separate lines, and
-    # keeping the first would discard the stronger of the two, so the strength is part of the key.
+    # Sr II in the zztar layout has five groups that match on the levels AND both labels. Their
+    # loggf differs, by as much as -2.848 against -1.547. Those are separate lines. To keep only the
+    # first would discard the stronger of the two, so the strength is part of the key.
     srii = readkuruczdata.parse_gfall(
         str(PYDIR / ".." / "atomic-data-kurucz" / "test_sample" / "zztar" / "gf3801.all.zst")
     ).collect()
@@ -1783,11 +1787,11 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
     write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
     written = out.getvalue()
 
-    # one header line per level: both get a table, where level 2 used to be discarded outright
+    # one header line per level: both get a table, where the writer used to discard level 2
     headers = [line for line in written.splitlines() if line.split()[0] == "8"]
     assert len(headers) == 2
     assert headers[0].split()[-2:] == ["1", "1.360000E+01"]
-    # the unknown threshold is written as zero, not as a NaN the reader would choke on
+    # the writer puts the unknown threshold as zero, not as a NaN that the reader cannot parse
     assert headers[1].split()[-2:] == ["2", "0.000000E+00"]
     assert "nan" not in written.lower()
 
@@ -1894,7 +1898,7 @@ def test_get_photoiontargetfractions_keeps_the_ground_state_for_a_different_term
 
 
 def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
-    """Two upper ion names that differ in their separators alone give no target that can be shared."""
+    """Two upper ion names that differ only in their separators give no target that the resolver can share."""
     from artisatomic import readhillierdata
 
     dfenergy_levels = pl.DataFrame({"levelid": [0], "levelname": ["3d7_a4Fe[9/2]"], "g": [10.0]})
@@ -1991,7 +1995,7 @@ def test_log_degenerate_transitions():
         log_degenerate_transitions(flog, dflevels, dftransitions)
         return flog.getvalue()
 
-    # levels 1 and 2 share an energy, so that pair is reported and the other is not
+    # levels 1 and 2 share an energy, so the log reports that pair and not the other
     degenerate = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0], "coll_str": [-2.0]})
     assert "1 transitions connect two levels of the same energy" in warnings_for(degenerate)
     assert "(0 of them with a collision strength)" in warnings_for(degenerate)
@@ -1999,20 +2003,20 @@ def test_log_degenerate_transitions():
     ok = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1.0], "coll_str": [-1.0]})
     assert not warnings_for(ok)
 
-    # a tabulated upsilon on such a pair is real data that ARTIS will not use, so it is counted
+    # a tabulated upsilon on such a pair is real data that ARTIS will not use, so the log counts it
     withupsilon = degenerate.with_columns(coll_str=pl.lit(0.5))
     assert "(1 of them with a collision strength)" in warnings_for(withupsilon)
 
-    # a transitions frame with no coll_str column still reports the pair, counting none
+    # a transitions frame with no coll_str column still reports the pair, and counts none
     nocollstr = pl.DataFrame({"lowerlevel": [1], "upperlevel": [2], "A": [0.0]})
     assert "(0 of them with a collision strength)" in warnings_for(nocollstr)
 
-    # a pair whose lower id has the higher energy is reported on its own line, not as degenerate
+    # the log reports a pair whose lower id has the higher energy on its own line, not as degenerate
     inverted = pl.DataFrame({"lowerlevel": [1], "upperlevel": [0], "A": [1.0]})
     assert "1 transitions have a lower level id whose energy is above" in warnings_for(inverted)
     assert "same energy" not in warnings_for(inverted)
 
-    # a level frame with no energy column cannot be checked, and must stay silent rather than raise
+    # the function cannot check a level frame with no energy column, and must stay silent, not raise
     flog = io.StringIO()
     log_degenerate_transitions(flog, dflevels.drop("energyabovegsinpercm"), degenerate)
     assert not flog.getvalue()
@@ -2022,7 +2026,7 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
     """An ion with no QUB cross sections must give the empty arrays, not zero-filled ones.
 
     iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
-    estimate, so the ion would be written with no cross sections at all.
+    estimate. The output would then hold the ion with no cross sections at all.
     """
     args = phixs_args()
     phixs = readqubdata.read_qub_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
@@ -2034,7 +2038,7 @@ def test_read_qub_photoionizations_without_data_gives_empty_arrays():
 
 
 def test_fill_missing_phixs_thresholds():
-    """A threshold the reader could not give is worked out the way ARTIS derives it."""
+    """fill_missing_phixs_thresholds() computes a threshold that the reader could not give the way ARTIS derives it."""
     from artisatomic.iondata import IonData
     from artisatomic.output import fill_missing_phixs_thresholds
 
@@ -2064,7 +2068,7 @@ def test_fill_missing_phixs_thresholds():
     assert filled[0] == pytest.approx(10.0 + 0.0 - 0.0)
     assert filled[1] == pytest.approx(10.0 + 1.0 - 2.0)
 
-    # a threshold the reader did give is left alone, and so is one with no upper ion to look in
+    # a threshold that the reader did give stays as it is, and so does one with no upper ion to look in
     given = makeion(1, 10.0, [0.0], [[(0, 1.0)]], [7.5])
     assert fill_missing_phixs_thresholds(given, upperion, io.StringIO())[0] == pytest.approx(7.5)
     assert np.isnan(fill_missing_phixs_thresholds(ion, None, io.StringIO())[0])
@@ -2075,10 +2079,10 @@ def test_fill_missing_phixs_thresholds():
 
 
 def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
-    """A reader's negative upsilon says "forbidden, no value", and must not be read as permitted.
+    """A reader's negative upsilon says "forbidden, no value", and resolve_coll_str() must not read it as permitted.
 
-    readhillierdata writes -2 for the J pairs within a term. Those pairs carry no A, so a
-    permitted flag would send them to van Regemorter with an oscillator strength of zero, which is
+    readhillierdata writes -2 for the J pairs within a term. Those pairs carry no A. A permitted
+    flag would therefore send them to van Regemorter with an oscillator strength of zero, which is
     no collisional coupling at all. The -2 asks for Axelrod's approximation instead.
     """
     from artisatomic.output import resolve_coll_str
@@ -2121,10 +2125,9 @@ def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
 def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     """A reader marks a threshold it does not have in two ways, and both have to count.
 
-    The arrays start as NaN, and readqubdata writes -1.0 to say that the threshold comes from the
-    level energies rather than from its cross section table. Only NaN counted at first, which left
-    every QUB level with its -1 and made the calculation dead code for the one reader that asks
-    for it.
+    The arrays start as NaN. readqubdata writes -1.0 to say that the threshold comes from the level
+    energies and not from its cross section table. Only NaN counted at first. That left every QUB
+    level with its -1 and made the calculation dead code for the one reader that asks for it.
     """
     from artisatomic.iondata import IonData
     from artisatomic.output import fill_missing_phixs_thresholds
@@ -2145,12 +2148,12 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
         )
 
     upperion = makeion(2, 25.0, [0.0], [], [])
-    # the two ways of saying "no value": NaN and readqubdata's -1
+    # the two marks for "no value": NaN and readqubdata's -1
     ion = makeion(1, 17.084, [0.0, 0.0], [[(0, 1.0)], [(0, 1.0)]], [np.nan, -1.0])
 
     filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
 
-    # a ground state ionizing to the upper ion's ground state has the ionisation energy itself
+    # a ground state that ionises to the upper ion's ground state has the ionisation energy itself
     assert filled[0] == pytest.approx(17.084)
     assert filled[1] == pytest.approx(17.084)
 
@@ -2212,9 +2215,9 @@ def test_readmonsdata_reads_the_sample(monkeypatch):
     assert dflevels["j"][1] == 1.0
     assert dflevels["parity"].is_null().all()
 
-    # first line of the transition file: 269.5076 Angstrom from the ground state with gf=2.588659e-03,
-    # so the upper level is the highest level of the sample (371047.04 cm^-1, g=3). A = gf / (1.49919e-16
-    # g_upper lambda^2), which the third column of the file gives as gf and not as f.
+    # first line of the transition file: 269.5076 Angstrom from the ground state with gf=2.588659e-03.
+    # The upper level is therefore the highest level of the sample (371047.04 cm^-1, g=3).
+    # A = gf / (1.49919e-16 g_upper lambda^2), where the third column of the file gives gf and not f.
     first = dftransitions.row(0, named=True)
     assert first["lowerlevel"] == 0
     assert first["upperlevel"] == 449
@@ -2257,7 +2260,7 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
     # the row to level 9 references a level that the levels file does not list: discard it
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n")
-    # the E2 row is reversed on purpose: it must swap and then merge with the M1 row
+    # the E2 row is in reverse order on purpose: it must swap and then merge with the M1 row
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 E2\n")
 
     from artisatomic import readfloers25data
@@ -2291,7 +2294,7 @@ def test_readfloers25data_ragged_rows(monkeypatch, tmp_path):
     wider than its cell moves the rest of the line. A column is not at a fixed character position,
     and the reader splits each line on whitespace. The level tables leave the LS2 cell of a high-l
     level empty, which gives a row of nine tokens against a header of ten. The reader takes no
-    column after LS2, so such a row is read. A row with an extra token moves every value into the
+    column after LS2, so it reads such a row. A row with an extra token moves every value into the
     column on its left, so the reader rejects it.
     """
     from artisatomic import readfloers25data
@@ -2371,11 +2374,11 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
 def test_iondata_handlers_registry():
     """Each handler must keep its own level-name parser and its own return shape.
 
-    The parsers used to be a second table in phixs.py, and the return shape used to be read
-    from the length of the reader's result. Both are registry fields now, so nothing else
-    checks them: a parser registered against the wrong handler would give an ion the
-    hydrogenic cross sections of another data source, and a wrong returns_upsilondict would
-    fail the unpacking on the first run.
+    The parsers used to be a second table in phixs.py, and the length of the reader's result
+    used to give the return shape. Both are registry fields now, so nothing else checks them. A
+    parser registered against the wrong handler would give an ion the hydrogenic cross sections
+    of another data source. A wrong returns_upsilondict would make the unpack fail on the first
+    run.
     """
     from artisatomic import groundstatesonlynist
     from artisatomic import readdreamdata
@@ -2397,8 +2400,8 @@ def test_iondata_handlers_registry():
         name: handler.get_level_valence_n for name, handler in handlers.items() if handler.get_level_valence_n
     } == expected_parsers
 
-    # no parser is registered for these handlers, so their ions get no hydrogenic estimate
-    # and match_hydrogenic_phixs() writes a warning. Registering one is what changes that.
+    # these handlers have no parser in the registry, so their ions get no hydrogenic estimate
+    # and match_hydrogenic_phixs() writes a warning. A registered parser is what changes that.
     assert {name for name, handler in handlers.items() if handler.get_level_valence_n is None} == {
         "boyle",
         "dream",
@@ -2407,8 +2410,8 @@ def test_iondata_handlers_registry():
         "gsnist",
     }
 
-    # only the QUB readers return collision strengths beside the levels and the transitions, and
-    # only they take args, for the temperature that picks the tabulated collision strengths
+    # only the QUB readers return collision strengths beside the levels and the transitions. Only
+    # they take args, for the temperature that selects the tabulated collision strengths
     assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"qub", "qub_cobalt"}
     assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"qub", "qub_cobalt"}
 
@@ -2493,8 +2496,8 @@ def test_console_script_entry_points_resolve():
 def test_lchars_orbital_letters_skip_j_p_and_s():
     """The orbital letter sequence gives every letter its own l, so q, r and the letters after t parse correctly.
 
-    The sequence skips J, and it skips P and S at l = 12 and l = 14 because those letters are
-    already l = 1 and l = 0. A table that repeated them read a 13q orbital as l = 13, which
+    The sequence skips J. It also skips P and S at l = 12 and l = 14, because those letters are
+    already l = 1 and l = 0. A table that repeated them read a 13q orbital as l = 13. That
     inverted its parity and made the l >= n merge test fire on a real orbital.
     """
     orbitals, twosplusone, term_l, parity, _ = interpret_configuration("13q_2Q")
@@ -2502,8 +2505,8 @@ def test_lchars_orbital_letters_skip_j_p_and_s():
     assert get_config_parity("13q_2Q") == 0
     assert not has_merged_orbital("13q_2Q")
     assert get_config_parity("14r_2R") == 1
-    # w and z are CMFGEN's merge markers at any n: 18w is the whole n = 18 shell (g = 2 x 18^2),
-    # so l = 17 < 18 must not make it a single orbital with a parity
+    # w and z are CMFGEN's merge markers at any n. 18w is the whole n = 18 shell (g = 2 x 18^2).
+    # l = 17 < 18 must therefore not make it a single orbital with a parity
     assert has_merged_orbital("4z_2Z")
     assert has_merged_orbital("2s2_13w_2W")
     assert has_merged_orbital("2s2_2p3(4So)18w_5W")
@@ -2520,7 +2523,7 @@ def test_interpret_configuration_empty_name():
 
 
 def test_parse_ion_handlers_rejects_unknown_handlers_and_bad_entries():
-    """A misspelt handler or a malformed entry fails at parse time, before any output file is written."""
+    """A misspelt handler or a malformed entry fails at parse time, before any output file exists."""
     from artisatomic.ionhandlers import parse_ion_handlers
 
     # the renamed handler is still accepted under its old name
@@ -2602,8 +2605,8 @@ def test_get_level_valence_n_glued_digit_runs():
 
     A two-digit run that ends in 0 is a two-digit n. A three-digit run is a two-digit count and
     a one-digit n, unless that n would be 0. The QUB parser took the first digit alone as the
-    count, so 4f145d gave n = 45, and the Kurucz parser always split a three-digit run as 2 + 1,
-    so s210d gave n = 0.
+    count, so 4f145d gave n = 45. The Kurucz parser always split a three-digit run as 2 + 1, so
+    s210d gave n = 0.
     """
     assert readqubdata.get_level_valence_n("4f145d_2De[3/2]_id=1") == 5
     assert readqubdata.get_level_valence_n("4f146s_2Se[1/2]_id=2") == 6
@@ -2620,7 +2623,7 @@ def test_get_level_valence_n_glued_digit_runs():
 
 
 def test_readdreamdata_rejects_an_unknown_level_type():
-    """A level type other than (o) or (e) fails instead of becoming even parity."""
+    """A level type other than (o) or (e) fails, and does not become even parity."""
     from artisatomic import readdreamdata
 
     row = {"Lower_Level": 0, "Lower_Type": "(o)", "Lower_g": 1}
@@ -2690,7 +2693,7 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     assert "B declares 3 cross-section rows but the block ends after 2" in flog.getvalue()
     assert reader.phixstables[0]["C"].shape == (2, 2)
     assert reader.phixstables[0]["C"][:, 1].tolist() == [4.0, 3.0]
-    # the D exponent of the screened nuclear charge is read, and 2 matches the ion stage
+    # the reader accepts the D exponent of the screened nuclear charge, and 2 matches the ion stage
     assert "screened nuclear charge" not in flog.getvalue()
 
 
@@ -2708,7 +2711,7 @@ def test_readhillierdata_get_level_valence_n():
 
 
 def test_adf04_level_layout():
-    """The adf04 column layout is read from the line, not from the element."""
+    """adf04_level_layout() reads the column layout from the line, not from the element."""
     tyndall_co = "    1   3s23p63d7(4F)   (4)3( 4.5)               0.0000"
     tyndall_fe = "    1 3S2 3P6 3D6       (5)2( 4.0)               0.0000"
     standard_sr = "    1          4p65s2(1S)   (1)0( 0.0)            0.0000"
@@ -2722,8 +2725,8 @@ def test_adf04_level_layout():
 def test_cmfgen_fit_functions():
     """Each analytic fit gives its formula's value at the threshold and at one point above it.
 
-    The grid is 1 + 20 x^2 times the threshold for x from 0 to 1 in steps of 0.001, so index 500
-    is 6 times the threshold.
+    The grid is 1 + 20 x^2 times the threshold for x from 0 to 1 in steps of 0.001. Index 500 is
+    therefore 6 times the threshold.
     """
     lambda_angstrom = 911.753  # the H I edge
     threshold_ev = hc_in_ev_angstrom / lambda_angstrom
@@ -2772,9 +2775,9 @@ def test_cmfgen_fit_functions():
 def test_read_adf04_selects_the_nearest_temperature():
     """The collision strengths come from the tabulated temperature nearest to -electrontemperature.
 
-    The Co III grid runs from 3150 K to 7590 K in steps of about 5 percent, so 6000 K picks the
-    6030 K column and a low temperature picks the first column. A hard-coded string per element
-    chose 5010 K before, whatever the command line said.
+    The Co III grid runs from 3150 K to 7590 K in steps of about 5 percent. 6000 K therefore
+    selects the 6030 K column, and a low temperature selects the first column. A hard-coded string
+    per element chose 5010 K before, whatever the command line said.
     """
     flog = io.StringIO()
     _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=6000.0)
@@ -2795,8 +2798,8 @@ def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypa
     """The ground level's Lam(A) must give the header's ionisation energy to four significant figures.
 
     The header value is the one adata.txt gets. A difference above that precision means the header
-    and the level table disagree, which the ion log must say. The H I file is copied with its
-    header value raised by one percent; the unchanged file gives no warning.
+    and the level table disagree, which the ion log must say. The test copies the H I file with
+    its header value raised by one percent; the unchanged file gives no warning.
     """
     import contextlib
 

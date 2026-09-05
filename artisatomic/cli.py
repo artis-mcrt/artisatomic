@@ -73,8 +73,8 @@ def main() -> None:
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
-    # 0 is the way to switch the estimate off, so a negative value is a typo rather than a
-    # quieter way of saying the same thing
+    # 0 switches the estimate off. A negative value is therefore a typo and not a second way to
+    # switch it off.
     if args.nlevels_hydrogenic_for_unknown_phixs < 0:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
@@ -82,8 +82,8 @@ def main() -> None:
     ion_handlers = get_ion_handlers()
 
     if not ion_handlers:
-        # not an assert: an empty selection writes an empty database rather than failing, and
-        # get_ion_handlers() reads a file, so this validates input and must survive python -O
+        # Not an assert: an empty selection writes an empty database and does not fail. The function
+        # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
         msg = "No ions selected. artisatomicionhandlers.json is empty, or no reader found any data."
         raise ValueError(msg)
 
@@ -98,7 +98,7 @@ def main() -> None:
     else:
         Path(log_folder).mkdir(exist_ok=True, parents=True)
 
-    # a record of what this run used, written beside the logs. It is NOT the file
+    # A record of what this run used, beside the logs. It is NOT the file
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
     # directory. Copy this one there to repeat a run exactly, as the CI workflow does.
     with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
@@ -111,9 +111,9 @@ def main() -> None:
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Read every configured ion and append it to the output files, one element at a time.
 
-    Ion stages are processed in ascending order so that each ion's photoionisation targets, which
-    are levels of the next ion up, are already known, and so the top ion can be identified and
-    given no cross sections.
+    The loop processes the ion stages from the lowest to the highest. Each ion's photoionisation
+    targets are levels of the next ion up, so the loop knows them already. The order also
+    identifies the top ion, which gets no cross sections.
     """
     for atomic_number, listions in ion_handlers:
         if not listions:

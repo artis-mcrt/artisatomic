@@ -1,4 +1,4 @@
-"""Downsample photoionization cross-section tables and estimate hydrogenic ones where none exist."""
+"""Downsample photoionisation cross section tables and estimate hydrogenic ones where none exist."""
 
 from collections.abc import Callable
 from functools import partial
@@ -29,25 +29,28 @@ def match_hydrogenic_phixs(
 ) -> tuple[npt.NDArray[np.float64], list[list[tuple[int, float]]], npt.NDArray[np.float64]]:
     """Estimate photoionisation cross sections for a data set that supplies none.
 
-    Applies to any handler, not just one source: a hydrogenic cross section is assigned to each of
-    the -nlevels_hydrogenic_for_unknown_phixs lowest levels by energy, scaled to that level's own
-    ionisation threshold, with the upper ion's ground state as the only target. That option
-    defaults to 100, so this is on unless it is set to 0. It bounds the levels considered rather
-    than the tables produced: a level at or above the ionisation energy is skipped but still counts
-    towards it. The levels are sorted by energy here, because a reader can keep its file's order.
+    This applies to any handler, not to one source only. The function assigns a hydrogenic cross
+    section to each of the -nlevels_hydrogenic_for_unknown_phixs lowest levels by energy. It
+    scales the cross section to that level's own ionisation threshold, with the upper ion's ground
+    state as the only target.
 
-    The caller only reaches this for an ion whose handler returned no cross sections at all, so
-    real data is never replaced or extended by an estimate. The granularity is the whole ion: an
-    ion whose handler covered even one level keeps exactly the levels that handler covered, and
-    the rest are left without photoionisation rather than filled in hydrogenically.
+    That option defaults to 100, so the estimate is on unless the user sets it to 0. The option
+    bounds the levels considered and not the tables produced. A level at or above the ionisation
+    energy gets no table but still counts towards the limit. The function sorts the levels by
+    energy here, because a reader can keep its file's order.
+
+    The caller reaches this function only for an ion whose handler returned no cross sections at
+    all. An estimate therefore never replaces or extends real data. The granularity is the whole
+    ion. An ion whose handler covered even one level keeps exactly the levels that the handler
+    covered. The other levels get no photoionisation and no hydrogenic estimate.
 
     get_level_valence_n is the handler's own level-name parser. The handler registry in
     iondata.py holds it. None means that the handler has no parser. The ion then gets no
     estimate, and this function writes a warning.
 
     The parser returns None for a name it cannot read. Such a level gets no estimate, and the
-    ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only, so a level
-    outside that range is skipped in the same way rather than read past the table.
+    ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only. A level
+    outside that range also gets no estimate, and the function does not read past the table.
     """
     # stdout only, as before: the tested log files must not change for an ion that gets the
     # same estimate as before. A skipped level below is new information, so that goes to the log.
@@ -59,16 +62,16 @@ def match_hydrogenic_phixs(
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
     print(f"using hydrogenic photoionization cross sections for Z={atomic_number} {elsymbols[atomic_number]}")
-    # loads the tables on the first call: the range test below reads max_hyd_gaunt_n, which is
-    # -1 before the load, and every level would then be skipped as out of range
+    # This loads the tables on the first call. The range test below reads max_hyd_gaunt_n, which
+    # is -1 before the load, and the loop would then skip every level as out of range.
     readhillierdata.read_hyd_phixsdata()
 
     photoionization_crosssections = np.zeros((energy_levels.height, args.nphixspoints))
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(energy_levels.height)]
     photoionization_thresholds_ev = np.full(energy_levels.height, np.nan)
     phixstables = {}
-    # the lowest levels by energy, whatever order the reader kept them in. The stable sort keeps
-    # levels of one energy in id order, and every array here is indexed by level id.
+    # The lowest levels by energy, whatever order the reader kept them in. The stable sort keeps
+    # levels of one energy in id order, and the code indexes every array here by level id.
     lowest_levels = (
         leveltuples_to_pldataframe(energy_levels)
         .sort("energyabovegsinpercm", maintain_order=True)
@@ -146,9 +149,8 @@ def reduce_phixs_tables[KeyType](
     )
 
 
-# this method downsamples the photoionisation cross section table to a
-# regular grid while keeping the recombination rate integral constant
-# (assuming that the temperature matches)
+# This function downsamples the photoionisation cross section table to a regular grid. It keeps
+# the recombination rate integral constant if the temperature matches.
 def reduce_phixs_tables_worker(
     optimaltemperature: float,
     nphixspoints: int,
@@ -157,22 +159,23 @@ def reduce_phixs_tables_worker(
 ) -> np.ndarray:
     """Downsample one cross section table onto the output's nu/nu_edge grid.
 
-    Each output point is the average of the input over that point's frequency bin, weighted by
-    nu^2 exp(-h nu / k T) so that the recombination rate at optimaltemperature is preserved
-    rather than the cross section itself.
+    Each output point is the average of the input over that point's frequency bin, with the
+    weight nu^2 exp(-h nu / k T). The weight preserves the recombination rate at
+    optimaltemperature, and not the cross section itself.
     """
     minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
 
     xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
 
-    # an empty table has no threshold to scale the grid by, and a zero threshold would divide by
-    # zero, so both mean "no cross section" rather than an index error on tablein[0]
+    # An empty table has no threshold to scale the grid, and a zero threshold would divide by
+    # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
     if len(tablein) == 0 or tablein[0][0] == 0.0:
         return np.zeros(nphixspoints)
 
     threshold_old_ryd = tablein[0][0]
-    # tablein is an array of pairs (energy, phixs cross section). Split once: the loop below reads
-    # both columns per output point, and a strided view of a 2D array is re-sliced every time.
+    # tablein is an array of pairs (energy, phixs cross section). Split it once. The loop below
+    # reads both columns for each output point, and numpy re-slices a strided view of a 2D array
+    # every time.
     tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
     tablein_sigma = np.ascontiguousarray(tablein[:, 1])
     table_energy_last = tablein_energyryd[-1]
@@ -184,8 +187,9 @@ def reduce_phixs_tables_worker(
     # the interval edges depend only on the grid, so compute all of them at once
     arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
     arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
-    # the table is sorted by energy (interp1d was called with assume_sorted), so each interval's
-    # slice can be bisected rather than rebuilding a boolean mask over the whole column per point
+    # The table is in energy order (the old code called interp1d with assume_sorted). A bisection
+    # therefore finds each interval's slice, and the loop does not rebuild a boolean mask over the
+    # whole column for each point.
     arr_startindex = np.searchsorted(tablein_energyryd, arr_enlow, side="left")
     arr_endindex = np.searchsorted(tablein_energyryd, arr_enhigh, side="right")
 

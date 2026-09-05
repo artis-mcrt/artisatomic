@@ -135,7 +135,7 @@ KF96_ION = {
     (6, 0): (1.00e-5, 0.00, 0.00, 0.00, 0.0),
     (7, 0): (4.55e-3, -0.29, -0.92, -8.38, 1.086),
     (8, 0): (7.40e-2, 0.47, 24.37, -0.74, 0.023),
-    (12, 0): (9.76e-3, 3.14, 55.54, -1.12, 0.0),  # ruff: ignore[math-constant]  # 3.14 is the published fit value, not pi
+    (12, 0): (9.76e-3, 3.14, 55.54, -1.12, 0.0),  # ruff: ignore[math-constant]  # 3.14 is the published value, not pi
     (12, 1): (7.60e-5, 0.00, -1.97, -4.32, 1.670),
     (14, 1): (4.10e-1, 0.24, 3.17, 4.18e-3, 3.178),
     (16, 0): (1.00e-5, 0.00, 0.00, 0.00, 0.0),
@@ -290,7 +290,7 @@ def isclose_published(x: float, y: float) -> bool:
     """Report whether a Cloudy value matches a paper value to the printed precision.
 
     The tolerance is the half-ulp of a three-digit value near 1.0. A two-digit paper value can fail
-    it when Cloudy holds more digits than the paper printed; the current files hold no such row.
+    it when Cloudy holds more digits than the paper printed. The current files hold no such row.
     """
     return math.isclose(x, y, rel_tol=5e-3)
 
@@ -452,15 +452,15 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve.
 
     The usable points lie in the fit window and above SS11_USABLE_MIN. Charge transfer competes
-    with the other processes only in the nebular low-temperature regime. Also, the fit form cannot
-    span the floor-then-steep-rise shape of some reactions over the full tabulated range. tmin and
-    tmax hold the span of the usable points.
+    with the other processes only in the nebular low-temperature regime. Also, some reactions
+    have a floor and then a steep rise. The fit form cannot span that shape over the full
+    tabulated range. tmin and tmax hold the span of the usable points.
 
     Below tmin, the reader clamps t4 and the Boltzmann factor keeps the true temperature. A fit
-    with eexp > 0 therefore keeps falling, like the tabulated values; a fit with eexp = 0 holds
-    its value at tmin. A curve with fewer than SS11_MIN_POINTS usable points gets the flat value
-    of its SS11_FLAT_TEMP entry, with tmin = tmax = SS11_FLAT_TEMP. The result includes the error
-    of that value over the usable points.
+    with eexp > 0 therefore continues to decrease, like the tabulated values. A fit with eexp = 0
+    holds its value at tmin. A curve with fewer than SS11_MIN_POINTS usable points gets the flat
+    value of its SS11_FLAT_TEMP entry, with tmin = tmax = SS11_FLAT_TEMP. The result includes the
+    error of that value over the usable points.
     """
     pts = [
         (temp, k)
@@ -477,7 +477,7 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     design = np.column_stack([np.ones_like(temps), np.log(temps / 1e4), -1.0 / temps])
     lna, b, eexp = map(float, np.linalg.lstsq(design, logk, rcond=None)[0])
     if eexp < 0.0:
-        # a negative Boltzmann temperature would grow without limit towards low T, so drop the term
+        # a negative Boltzmann temperature would grow without limit towards low T, so the code drops the term
         lna, b = map(float, np.linalg.lstsq(design[:, :2], logk, rcond=None)[0])
         eexp = 0.0
     a = math.exp(lna)

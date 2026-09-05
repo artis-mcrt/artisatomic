@@ -1,4 +1,4 @@
-"""Read a single ion's levels, transitions, and photoionisation data from its source dataset."""
+"""Read a single ion's levels, transitions, and photoionisation data from its source data set."""
 
 import argparse
 import contextlib
@@ -38,19 +38,19 @@ class IonData:
     """Levels, transitions, and photoionisation data for a single ion, read from one of the source data sets.
 
     A dataclass rather than a NamedTuple because resolve_photoion_targetfractions() fills in the
-    target fractions after the whole element has been read.
+    target fractions after the run reads the whole element.
     """
 
     ion_stage: int
     handler: str
-    # the top ion has no upper ion, so it gets neither cross sections nor a phixs block. Recorded
-    # here at read time so the reading, resolving and writing passes cannot disagree about it.
+    # The top ion has no upper ion, so it gets neither cross sections nor a phixs block. The read
+    # pass records it here, so the read, resolve and write passes cannot disagree about it.
     is_top_ion: bool
     ionization_energy_ev: float
     dfenergylevels: pl.DataFrame
     dftransitions: pl.DataFrame
     upsilondict: dict[tuple[int, int], float]
-    # None where a level has no photoionisation data (and None entirely if none was read).
+    # None where a level has no photoionisation data (and None entirely if the reader read none).
     # readhillierdata.get_photoiontargetfractions() matches these names to the upper ion's
     # levels. It follows the CMFGEN conventions for a name. That reader therefore resolves
     # this field for every handler, and returns an empty result when the field is None.
@@ -119,8 +119,8 @@ handlers: dict[str, Handler] = {
         readtanakajpltdata.get_level_valence_n,
     ),
     "gsnist": Handler(groundstatesonlynist.read_ground_levels),  # ground states taken from NIST
-    # the adf04 collision strengths are tabulated at several temperatures, and -electrontemperature
-    # picks one, so the reader takes args
+    # The adf04 files tabulate the collision strengths at several temperatures, and
+    # -electrontemperature picks one, so the reader takes args.
     "qub": Handler(
         readqubdata.read_qub_levels_and_transitions,
         readqubdata.get_level_valence_n,
@@ -134,10 +134,10 @@ handlers: dict[str, Handler] = {
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
     ),
-    # the QUB Co III and Co IV level lists and the QUB Co II and Co III cross sections, with the
-    # CMFGEN files for every other stage of the ion
-    # the parser is the CMFGEN one: a stage with QUB levels takes the QUB cross sections, so the
-    # hydrogenic estimate never parses a QUB level name here
+    # The QUB Co III and Co IV level lists and the QUB Co II and Co III cross sections. The CMFGEN
+    # files supply every other stage of the ion.
+    # The parser is the CMFGEN one. A stage with QUB levels takes the QUB cross sections, so the
+    # hydrogenic estimate never parses a QUB level name here.
     "qub_cobalt": Handler(
         readqubdata.read_cobalt_levels_and_transitions,
         readhillierdata.get_level_valence_n,
@@ -167,7 +167,7 @@ def read_ion_data(
 
     upsilondict: dict[tuple[int, int], float] = {}
     photoion_targetconfigs: list[list[tuple[str, float]] | None] | None = None
-    # empty until a handler below reads photoionisation data (and left empty for the top ion)
+    # empty until a handler below reads photoionisation data (and empty for the top ion)
     photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
@@ -202,9 +202,9 @@ def read_ion_data(
             photoion_targetconfigs = phixs.targetconfigs
             photoionization_targetfractions = phixs.targetfractions or []
 
-        # the len() == 0 test is what limits the estimate to ions the handler gave nothing for: an
-        # ion with even one cross section table is left alone, so measured data is never replaced.
-        # The top ion is excluded because there is no upper ion for it to photoionise to.
+        # The len() == 0 test limits the estimate to the ions for which the handler gave nothing.
+        # An ion with even one cross section table keeps its data, so the estimate never replaces
+        # measured data. The top ion gets no estimate because it has no upper ion to photoionise to.
         if (
             not is_top_ion
             and not args.nophixs
@@ -242,15 +242,16 @@ def resolve_photoion_targetfractions(
 ) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
-    An ion's targets are levels of the next ion up, so the fractions can only be resolved once the
-    whole element has been read. The top ion is left alone (it has no upper ion to photoionise
-    to), as is any ion whose reader already gave per-level fractions.
+    An ion's targets are levels of the next ion up. This function can therefore resolve the
+    fractions only after the run has read the whole element. It does not change the top ion (it
+    has no upper ion to photoionise to), or an ion whose reader already gave per-level fractions.
 
-    Call this before write_output_files() unless cross sections are switched off entirely; the
-    writer needs the fractions and does not resolve them itself. Give atomic_number and log_folder
-    to append the resolve messages to each ion's log file.
+    Call this before write_output_files() unless the user switched cross sections off entirely.
+    The writer needs the fractions and does not resolve them itself. Give atomic_number and
+    log_folder to append the resolve messages to each ion's log file.
     """
-    # a half-given pair is always a caller bug, so fail loudly rather than skip the log silently
+    # A half-given pair is always a caller bug, so the function raises an error and does not skip
+    # the log without a message.
     if (atomic_number is None) != (log_folder is None):
         msg = "give both atomic_number and log_folder, or neither"
         raise ValueError(msg)
@@ -258,9 +259,9 @@ def resolve_photoion_targetfractions(
     if not iondatalist:
         return
 
-    # the ions must be one element's, in ascending stage order: each is resolved against the next
-    # entry as its upper ion. A top ion anywhere but last means the list is not that, and the
-    # levels being read as targets would belong to the wrong ion.
+    # The ions must be one element's, in stage order from lowest to highest. The loop resolves each ion against
+    # the next entry as its upper ion. A top ion anywhere but last means the list breaks that
+    # rule, and the target levels would belong to the wrong ion.
     if not iondatalist[-1].is_top_ion or any(iondata.is_top_ion for iondata in iondatalist[:-1]):
         msg = (
             "iondatalist must be one element's ions in ascending ion stage order, with only the last being the top ion"
@@ -269,7 +270,7 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # The reading pass closed the per-ion log. Reopen it in append mode.
+            # The read pass closed the per-ion log. Reopen it in append mode.
             logcontext = (
                 ion_log_path(log_folder, atomic_number, iondata.ion_stage).open("a", encoding="utf-8")
                 if log_folder is not None and atomic_number is not None

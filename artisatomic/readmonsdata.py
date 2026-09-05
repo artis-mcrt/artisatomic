@@ -159,9 +159,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV (NIST)")
 
-    # the third column of the transition file is gf, not f: single lines reach gf = 25, and the
-    # sum of gf / g_lower over the lines of one level reaches the electron count, while the sum of
-    # gf does not.
+    # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
+    # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
+    # not.
     A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
 
     # level ids are zero-based in memory
