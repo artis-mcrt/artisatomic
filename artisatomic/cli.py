@@ -29,25 +29,25 @@ def build_parser() -> argparse.ArgumentParser:
         "-phixsnuincrement",
         type=float,
         default=0.03,
-        help="Fraction of nu_edge incremented for each cross section point",
+        help="Step between two cross section points, as a fraction of nu_edge",
     )
     parser.add_argument(
         "-optimaltemperature",
         type=int,
         default=6000,
         help=(
-            "(Electron and excitation) temperature at which recombination rate "
-            "should be constant when downsampling cross sections"
+            "(Electron and excitation) temperature in K. When artisatomic downsamples the cross sections,"
+            " it keeps the recombination rate constant at this temperature."
         ),
     )
     parser.add_argument(
         "-electrontemperature",
         type=int,
         default=6000,
-        help="Temperature for choosing effective collision strengths",
+        help="Temperature in K at which artisatomic selects the effective collision strengths",
     )
     parser.add_argument(
-        "--nophixs", action="store_true", help="Don't generate cross sections and write to phixsdata_v2.txt file"
+        "--nophixs", action="store_true", help="Do not generate cross sections. Do not write phixsdata_v2.txt."
     )
 
     parser.add_argument(
@@ -55,13 +55,13 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help=(
-            "Consider this many of the lowest levels by energy of any ion whose handler supplied no"
-            " cross sections at all, and estimate a hydrogenic one for each, or 0 to disable."
-            " Negative values are rejected. Fewer tables than this can result, because a level"
-            " at or above the ionization energy is skipped but still counts towards the limit."
-            " An ion with even one cross section from its data source is left untouched, so"
-            " this never replaces or extends measured data. Excludes the top ion, which has no"
-            " upper ion to photoionise to."
+            "Estimate a hydrogenic cross section for this many of the lowest levels (by energy) of an ion"
+            " whose handler supplied no cross sections. Give 0 to disable the estimate. The program"
+            " rejects a negative value. The result can have fewer tables than this number. A level at or"
+            " above the ionisation energy gets no table but still counts towards the limit."
+            " An ion with one or more cross sections from its data source keeps them unchanged, so"
+            " the estimate never replaces or extends measured data. The option does not apply to the"
+            " top ion, which has no upper ion to photoionise to."
         ),
     )
     return parser
@@ -73,8 +73,8 @@ def main() -> None:
     argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
-    # 0 is the way to switch the estimate off, so a negative value is a typo rather than a
-    # quieter way of saying the same thing
+    # 0 switches the estimate off. A negative value is therefore a typo and not a second way to
+    # switch it off.
     if args.nlevels_hydrogenic_for_unknown_phixs < 0:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
@@ -82,8 +82,8 @@ def main() -> None:
     ion_handlers = get_ion_handlers()
 
     if not ion_handlers:
-        # not an assert: an empty selection writes an empty database rather than failing, and
-        # get_ion_handlers() reads a file, so this validates input and must survive python -O
+        # Not an assert: an empty selection writes an empty database and does not fail. The function
+        # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
         msg = "No ions selected. artisatomicionhandlers.json is empty, or no reader found any data."
         raise ValueError(msg)
 
@@ -98,7 +98,7 @@ def main() -> None:
     else:
         Path(log_folder).mkdir(exist_ok=True, parents=True)
 
-    # a record of what this run used, written beside the logs. It is NOT the file
+    # A record of what this run used, beside the logs. It is NOT the file
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
     # directory. Copy this one there to repeat a run exactly, as the CI workflow does.
     with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
@@ -111,9 +111,9 @@ def main() -> None:
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Read every configured ion and append it to the output files, one element at a time.
 
-    Ion stages are processed in ascending order so that each ion's photoionisation targets, which
-    are levels of the next ion up, are already known, and so the top ion can be identified and
-    given no cross sections.
+    The loop processes the ion stages from the lowest to the highest. Each ion's photoionisation
+    targets are levels of the next ion up, so the loop knows them already. The order also
+    identifies the top ion, which gets no cross sections.
     """
     for atomic_number, listions in ion_handlers:
         if not listions:

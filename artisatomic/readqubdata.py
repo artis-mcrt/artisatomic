@@ -34,8 +34,8 @@ tyndall_co3_path = (qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyn
 class QUBTransitionRow(t.NamedTuple):
     """One QUB bound-bound transition.
 
-    nameto is the UPPER level's name and namefrom the LOWER level's, matching the columns
-    add_level_ids_forbidden() joins on to recover upperlevel and lowerlevel.
+    nameto is the UPPER level's name and namefrom is the LOWER level's name.
+    add_level_ids_forbidden() joins on these columns to recover upperlevel and lowerlevel.
     """
 
     lowerlevel: int
@@ -96,8 +96,9 @@ def adf04_field(index: int) -> pl.Expr:
 def adf04_float(index: int) -> pl.Expr:
     """Return an expression for the field at index as a float.
 
-    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The "E" goes in only after a
-    digit or a point, so a leading sign and a field that already has an "E" stay as they are.
+    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The replacement puts the "E"
+    only after a digit or a point. A leading sign and a field that already has an "E" stay as
+    they are.
     """
     return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
@@ -130,11 +131,15 @@ def read_adf04(
     The collision strengths come from the tabulated temperature nearest to electrontemperature,
     as readhillierdata.read_coldata() picks them for the CMFGEN files.
 
-    Returns the ionization energy in eV, the levels, a dict of upsilon values keyed by a
-    (lower, upper) pair of zero-based level ids, and the parsed collision rows. The caller takes
-    the A-values from that frame, which saves a second read and a second parse of the file. The
-    file numbers levels from one, and the rest of the code looks up id n at list index n - 1, so
-    the level ids are validated as contiguous and 1-based.
+    Returns four values:
+    - the ionisation energy in eV;
+    - the levels;
+    - a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids;
+    - the parsed collision rows.
+
+    The caller takes the A-values from that frame, which saves a second read and a second parse
+    of the file. The file numbers levels from one, and the rest of the code looks up id n at
+    list index n - 1. The reader therefore checks that the level ids are contiguous and 1-based.
     """
     energylevels: list[QUBEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
@@ -145,8 +150,8 @@ def read_adf04(
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
         # The calculation-details section at the end of each file has no standard format. The
-        # reader skips it when it follows the data blocks. A note at any other position is not
-        # handled.
+        # reader skips it when it follows the data blocks. The reader does not handle a note at
+        # any other position.
         atomic_group_note = False
         layout = ""  # the layout of the file, from its first level line
         while True:
@@ -189,16 +194,16 @@ def read_adf04(
                     0,
                 )
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
-            # L in their own columns (read just above). Stripping a term off the end would lose
-            # the last orbital of '3S2 3P6 3D5 4P1', and would read the bare '5s2' as a term
-            # rather than an orbital, which is how every level of some files came out even.
+            # L in their own columns (read just above). A cut of a term off the end would lose
+            # the last orbital of '3S2 3P6 3D5 4P1'. It would also read the bare '5s2' as a term
+            # and not as an orbital. That is how every level of some files came out even.
             parity = get_config_parity(config, hasterm=False)
 
             levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
                 energylevel.twosplusone,
                 lchars[energylevel.l],
-                # the name keeps the old even/odd letter where the parity is unknown, so that
-                # adata.txt does not depend on a distinction the parity column now makes
+                # the name keeps the old even/odd letter where the parity is unknown. So
+                # adata.txt does not depend on a distinction that the parity column now makes.
                 ["e", "o"][parity if parity is not None else 0],
                 int(2 * energylevel.j),
                 energylevel.qub_id,
@@ -209,7 +214,7 @@ def read_adf04(
             energylevels.append(energylevel)
 
             # the transition and upsilon tables use these 1-based ids and the rest of the code
-            # looks up id n at index n - 1, so a non-contiguous file would misattach every
+            # looks up id n at index n - 1. A non-contiguous file would therefore misattach every
             # transition. Not an assert: input validation must survive python -O.
             if energylevel.qub_id != len(energylevels):
                 msg = (
@@ -222,8 +227,8 @@ def read_adf04(
         temperatures = upsilonheader[2:]
 
         # ADAS writes auxiliary rows with a process code in the first field: R for recombination,
-        # S and I for ionization, P for proton impact. Only a row that starts with a level id is
-        # a collision strength. A blank line is not a bad row, so it is not counted.
+        # S and I for ionisation, P for proton impact. Only a row that starts with a level id is
+        # a collision strength. A blank line is not a bad row, so the counter skips it.
         collision_lines: list[str] = []
         skipped_rows = 0
         for line in fleveltrans:
@@ -251,9 +256,14 @@ def read_adf04(
             f" {', '.join(temperatures)}",
         )
 
-        # each collision row is upper, lower, A-value, one upsilon for each temperature, then
-        # the infinite-energy (Born) limit. Cutting out the wanted fields costs about a third of
-        # the memory of splitting every line into all of its columns.
+        # each collision row holds these fields in order:
+        #  - upper,
+        #  - lower,
+        #  - A-value,
+        #  - one upsilon for each temperature,
+        #  - the infinite-energy (Born) limit.
+        # A cut of only the wanted fields needs about a third of the memory of a split of every
+        # line into all of its columns.
         upsilonindex = 3 + nearest_index
         collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
             adf04_field(0).cast(pl.Int64, strict=False).alias("upper"),
@@ -278,15 +288,15 @@ def read_adf04(
                 raise ValueError(msg)
 
             # the file numbers levels from one; level ids are zero-based in memory. The log
-            # messages keep the file's numbering, since they are about the file's contents.
+            # messages keep the file's ids, because they are about the file's contents.
             levelidpair = (lower - 1, upper - 1)
             if levelidpair not in upsilondict:
                 upsilondict[levelidpair] = upsilon
             else:
                 log_and_print(
                     flog,
-                    f"Duplicate upsilon value for transition {lower:d} to {upper:d} keeping"
-                    f" {upsilondict[levelidpair]:5.2e} instead of using {upsilon:5.2e}",
+                    f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
+                    f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
 
     log_and_print(flog, f"Read {len(energylevels):d} levels")
@@ -294,7 +304,7 @@ def read_adf04(
     if skipped_rows:
         log_and_print(flog, f"Skipped rows without a numeric level id: {skipped_rows:d}")
     if unreadable_rows:
-        log_and_print(flog, f"Skipped collision rows that could not be read: {unreadable_rows:d}")
+        log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
@@ -305,8 +315,8 @@ def append_qub_transition(qub_energylevels, qub_transitions, id_lower, id_upper,
     The ids are the file's 1-based level ids.
     """
     # a raise rather than an assert: this validates an input file. A non-positive
-    # id would wrap to the wrong level via negative indexing, and one past the end
-    # would raise a bare IndexError naming neither the file nor the transition.
+    # id would wrap to the wrong level through a negative index. An id one past the
+    # end would raise a bare IndexError that names neither the file nor the transition.
     if not 1 <= id_lower <= len(qub_energylevels) or not 1 <= id_upper <= len(qub_energylevels):
         msg = (
             f"transition level ids {id_lower}, {id_upper} in {filepath} are outside"
@@ -363,7 +373,7 @@ def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
 def read_cobalt_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
     """Read the cross sections of a "qub_cobalt" ion: from the QUB data where it has them, else from CMFGEN.
 
-    A stage with QUB levels stays on the QUB path even without QUB cross sections: its levels
+    A stage with QUB levels stays on the QUB path even without QUB cross sections. Its levels
     carry no threshold wavelengths, so the CMFGEN phot files cannot apply to them.
     """
     if ion_stage in qub_cobalt_stages or (atomic_number, ion_stage) in qub_phixs_ions:
@@ -380,10 +390,10 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
     Covers both the newer per-ion adf04 calculations and the older Co II/III/IV data sets, which
     have their own file layouts. Also returns the effective collision strengths, so this reader
-    supplies an upsilondict where most others leave it to be filled in elsewhere.
+    supplies an upsilondict. Most other readers leave another module to fill it.
     """
-    # the plain name, not the found path: read_adf04() logs the name it is given, and the
-    # tested log files carry the plain name whether or not the file on disk is compressed
+    # the plain name, not the found path: read_adf04() logs the name that it receives. The
+    # tested log files carry the plain name for a plain file and for a compressed file.
     atom_filepath = qubpath / f"{atomic_number}_{ion_stage}.adf04"
 
     if (atomic_number == 27) and (ion_stage == 3):
@@ -418,19 +428,19 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
         ionization_energy_ev = 54.9000015
 
     elif find_file_check_extension(atom_filepath) is not None:
-        # the same test that extend_ion_list() makes when it discovers these ions by globbing
-        # qubpath, so an adf04 file that discovery registers is one that this reader accepts
+        # the same test that extend_ion_list() makes when it discovers these ions with a glob of
+        # qubpath. So an adf04 file that discovery registers is one that this reader accepts.
         ionization_energy_ev, qub_energylevels, upsilondict, collisiondf = read_adf04(
             atom_filepath, flog, args.electrontemperature
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
 
-        # W II file has the first two columns swapped around from the standard order
+        # the W II file has the first two columns in the opposite order to the standard one
         uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
-        # a radiative transition is a collision row with both level ids and an A-value. The
-        # rows were selected by the width of the line before, which dropped a row that was one
-        # character shorter than the widest without a count.
+        # a radiative transition is a collision row with both level ids and an A-value. Before,
+        # the reader selected the rows by the width of the line. That test dropped a row that
+        # was one character shorter than the widest, and did not count it.
         transitiondf = collisiondf.filter(
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
@@ -455,31 +465,31 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
 
 def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
-    """Read QUB photoionization cross sections for one ion, downsampled onto the output grid.
+    """Read QUB photoionisation cross sections for one ion, downsampled onto the output grid.
 
     Returns the cross sections, the threshold energies and the upper-ion target fractions per
     level, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
 
     An ion that this function has no data for gets the empty arrays, not zero-filled ones. The
-    caller reads an empty cross-section array as "no data", and then applies the hydrogenic
+    caller reads an empty cross section array as "no data", and then applies the hydrogenic
     estimate. A zero-filled array would pass as data and leave the ion with no cross sections.
     """
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
-    # levels stay empty (write_phixs_data() skips them) unless real data is assigned below
+    # levels stay empty (write_phixs_data() skips them) unless the code below assigns real data
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
     photoionization_thresholds_ev = np.full(levelcount, np.nan)
 
     if atomic_number == 27 and ion_stage == 2:
         for lowerlevelid in range(8):
-            # the cross-section files are named after the level's number in the source data,
-            # which counts from one
+            # the name of a cross section file is the level's number in the source data, which
+            # counts from one
             filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
             log_and_print(flog, f"Reading {path_for_log(filename)}")
             ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
-            # One space separates the columns, and every field is a number, so a null means the
-            # columns are not where the read expects them. Reading the first five columns of the
-            # 41 costs a third of the time that cutting every line into its parts does.
+            # One space separates the columns, and every field is a number. So a null means that
+            # the columns are not where the read expects them. A read of the first five columns
+            # of the 41 costs a third of the time of a cut of every line into its parts.
             columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
             photdata = (
                 pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
@@ -487,7 +497,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 .collect()
             )
             if photdata.null_count().sum_horizontal().item() > 0:
-                msg = f"Columns of {filename} are not where they are expected: a value is missing."
+                msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
                 raise ValueError(msg)
             phixstables = {}
 
@@ -496,13 +506,13 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 targetname = f"target{targetcolumn}"
                 phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
                 if len(phixstable) == 0:
-                    # nothing positive in this column, so there is no table to downsample. Skipping
+                    # nothing positive in this column, so there is no table to downsample. A skip
                     # here leaves the target out of the fractions below, which is what a zero cross
-                    # section means anyway; reduce_phixs_tables() would index off an empty array.
+                    # section means. reduce_phixs_tables() would index an empty array and fail.
                     log_and_print(
                         flog,
                         f"WARNING: level {lowerlevelid} has no positive cross section to target"
-                        f" {targetcolumn - 1}, so that target is dropped",
+                        f" {targetcolumn - 1}, so the reader drops that target",
                     )
                     continue
                 phixstables[targetcolumn] = phixstable
@@ -523,7 +533,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
 
             scalefactorsum = sum(target_scalefactors)
             if scalefactorsum <= 0.0:
-                # nothing was assigned for this level, so write_phixs_data() will skip it
+                # the code assigned nothing for this level, so write_phixs_data() will skip it
                 log_and_print(
                     flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
                 )
@@ -532,7 +542,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
             scalefactorsum = sum(target_scalefactors)
 
             # NaN, the arrays' initial value, says: the threshold energy comes from the level
-            # energies, not from the first energy point of the cross-section table
+            # energies, not from the first energy point of the cross section table
             photoionization_thresholds_ev[lowerlevelid] = np.nan
             for upperlevelid, target_scalefactor in enumerate(target_scalefactors):
                 target_fraction = target_scalefactor / scalefactorsum
@@ -653,15 +663,16 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
         if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
             phixsvalues = np.array(phixsvalues_const)
         else:
-            # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9; a stop
-            # of 10.9 produced 99 and the strict flag then dropped the table's last point
+            # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9. A stop
+            # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
             dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
             phixsvalues = reduce_phixs_tables(
                 dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
             )["gs"]
 
-        # unlike the Co II branch above, every level deliberately gets a phixs entry: the ground
-        # quartet gets the tabulated cross section and higher levels an explicit all-zero table
+        # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
+        # quartet gets the tabulated cross section, and the higher levels get an explicit
+        # all-zero table.
         for levelid in range(levelcount):
             photoionization_thresholds_ev[levelid] = np.nan
             photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
@@ -669,7 +680,7 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 photoionization_crosssections[levelid] = phixsvalues
 
     else:
-        log_and_print(flog, f"WARNING: no QUB photoionization data for Z={atomic_number} ion_stage {ion_stage}")
+        log_and_print(flog, f"WARNING: no QUB photoionisation data for Z={atomic_number} ion_stage {ion_stage}")
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
 
     return PhixsData(
@@ -680,18 +691,18 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a QUB level name.
 
-    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    Kept separate from the other readers' versions: each data source names its levels
-    differently, so a shared parser would have to guess which convention it is looking at.
+    Kept separate from the other readers' versions. Each data source names its levels
+    differently, so a shared parser would have to guess the convention of each name.
     """
     namesplit = levelname.split("_")
     # lower(): adf04 writes some orbitals in upper case ('3S2 3P6 3D5 4P1'), and the orbital
     # tests below compare against the lower-case orbital letters only
     part = namesplit[0].strip().lower()
-    # `part` is empty for a name that starts with '_', and stripping a leading parent term below
-    # can empty it too, so re-test it before every part[-1] rather than raising IndexError
+    # `part` is empty for a name that starts with '_'. The removal of a parent term at the end of
+    # the name below can empty it too. So test it again before every part[-1], which prevents an IndexError.
     if len(namesplit) < 2 or not part:
         return None
 
@@ -716,10 +727,10 @@ def get_level_valence_n(levelname: str) -> int | None:
             continue
         else:
             # a lower-case orbital letter before the number means that the number is an
-            # electron count of the previous orbital followed by n, e.g. the '24' in '3d24s'
-            # is two electrons and n=4. The same rule as readkuruczdata: a two-digit run that
-            # ends in 0 is a two-digit n ('5s10d'), and a three-digit run is a two-digit count
-            # and a one-digit n ('4f145d') unless that n would be 0 ('5s210d').
+            # electron count of the previous orbital, then n. For example, the '24' in '3d24s'
+            # is two electrons and n=4. The same rule as readkuruczdata applies. A two-digit run
+            # that ends in 0 is a two-digit n ('5s10d'). A three-digit run is a two-digit count
+            # and a one-digit n ('4f145d'), unless that n would be 0 ('5s210d').
             if i > 0 and part[i - 1] in lchars.lower():
                 digits = part[i:]
                 if len(digits) == 2 and digits[1] != "0":

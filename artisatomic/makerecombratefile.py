@@ -16,7 +16,7 @@ from artisatomic.base import PYDIR
 class RecombRow(t.NamedTuple):
     """One row of a Nahar .rrc total recombination rate table."""
 
-    logT: float  # ruff: ignore[mixed-case-variable-in-class-scope]  # the field name is the DataFrame column read back below
+    logT: float  # ruff: ignore[mixed-case-variable-in-class-scope]  # main() reads back this DataFrame column name
     RRC_low_n: float
     RRC_total: float
 
@@ -39,7 +39,7 @@ def read_nahar_rrcfile(filename, noprint=False):
                 break
 
         if not header_row:
-            msg = "no header found"
+            msg = "the file has no header row"
             raise ValueError(msg)
 
         index_logt = header_row.index("log(T)")
@@ -50,7 +50,7 @@ def read_nahar_rrcfile(filename, noprint=False):
         for line in filein:
             if row := line.split():
                 if len(row) != len(header_row):
-                    msg = f"Row contains wrong number of items for header:\n{header_row}\n{row}"
+                    msg = f"The row does not have the number of items of the header:\n{header_row}\n{row}"
                     raise ValueError(msg)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
@@ -71,9 +71,9 @@ def main():
                 upperionstage = lowerionstage + 1
                 print(f"Z={atomic_number} {elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
 
-                # the glob is anchored to the repository, so the entry point finds the Nahar
-                # files from any working directory; sorted() makes the choice deterministic
-                # when more than one file matches
+                # the glob starts at the repository, so the entry point finds the Nahar files
+                # from any working directory. sorted() makes the choice deterministic when
+                # more than one file matches.
                 rrcfiles = sorted(
                     (PYDIR.parent / "atomic-data-nahar").glob(
                         f"{elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"
@@ -87,7 +87,7 @@ def main():
                         f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n" for _, row in dfrecombrates.iterrows()
                     )
                 else:  # use Chianti with ChiantiPy
-                    print("  using Chianti")
+                    print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                     arr_temperature = 10**arr_logT_e
@@ -96,8 +96,8 @@ def main():
                     arr_rrc = ion.RrRate["rate"]
                     ion.drRate()
                     arr_drc = ion.DrRate["rate"]
-                    # the third column is the total recombination rate, matching RRC(total) used
-                    # for the Nahar files above, so dielectronic recombination must be included
+                    # the third column is the total recombination rate, the same as RRC(total) of
+                    # the Nahar files above, so the sum must include dielectronic recombination
                     frecombrates.writelines(
                         f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
                     )

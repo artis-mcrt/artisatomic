@@ -30,10 +30,11 @@ def extend_ion_list(ion_handlers, maxionstage=None):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the Tanaka et al. Japan-Lithuania database.
 
-    Levels and transitions are returned as DataFrames. The file numbers levels from one and
-    quotes g_u * A rather than A, so ids are shifted to the zero-based convention used in
-    memory and the rate is divided by the upper level's statistical weight. Self-transitions
-    (equal upper and lower level) appear in some files and are dropped with a warning.
+    The function returns the levels and the transitions as DataFrames. The file numbers levels
+    from one and quotes g_u * A rather than A. So the reader shifts the ids to the zero-based
+    convention in memory. It also divides the rate by the statistical weight of the upper level.
+    Self-transitions (equal upper and lower level) appear in some files. The reader drops them
+    with a warning.
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
     print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
@@ -61,8 +62,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     log_and_print(flog, f"transitions: {transitioncount}")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
-    require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionization energy")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
     require(
@@ -85,8 +86,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dflevels = (
         dflines.slice(0, levelcount)
         # a line with no text holds no level: an empty line reads as a null and a line of spaces
-        # as "", and neither has a character left. The count test below rejects
-        # the file if such a line falls inside the section rather than after it.
+        # as "". Neither has a character left. The count test below rejects the file if such a
+        # line falls inside the section rather than after it.
         .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
         .select(
             levelid=pl.col("line").str.slice(0, 7).str.strip_chars(),
@@ -97,22 +98,24 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         )
         .select(
             energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,
-            # odd -> 1, even -> 0, and anything else stays null, which the check below rejects:
+            # odd -> 1, even -> 0, and anything else stays null. The check below rejects a null:
             # a silent 0 would give the Laporte rule a parity the file did not state
             parity=pl.when(pl.col("parity") == "odd").then(1).when(pl.col("parity") == "even").then(0),
             g=pl.col("g").cast(pl.Float64),
-            # Every expression in one select() reads the INPUT frame, so both columns below
-            # are the file's own values, not the ones being computed alongside them: the name
+            # Every expression in one select() reads the INPUT frame. So both columns below hold
+            # the file's own values, not the values that the same select() computes. The name
             # gets the file's 1-based number rather than the zero-based levelid, and the
-            # 'even'/'odd' text rather than the 0/1 parity. Both are wanted here — the name is
-            # a human-readable comment in adata.txt.
+            # 'even'/'odd' text rather than the 0/1 parity. Both are the desired values here: the
+            # name is a human-readable comment in adata.txt.
             levelname=pl.format("{},{},{}", pl.col("levelid"), pl.col("parity"), pl.col("configuration")),
             levelid=pl.col("levelid").cast(pl.Int64) - 1,
         )
         .collect()
     )
 
-    require(dflevels.height == levelcount, f"the header declares {levelcount} levels but {dflevels.height} were read")
+    require(
+        dflevels.height == levelcount, f"the header declares {levelcount} levels but the file has {dflevels.height}"
+    )
     require(dflevels["parity"].null_count() == 0, "a level has a parity that is not 'odd' or 'even'")
 
     dftransitions = (
@@ -130,7 +133,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     require(
         dftransitions.height == transitioncount,
-        f"the header declares {transitioncount} transitions but {dftransitions.height} were read",
+        f"the header declares {transitioncount} transitions but the file has {dftransitions.height}",
     )
 
     # a level number outside the level section would vanish in the inner joins of
@@ -154,8 +157,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             maintain_order="left",
         )
         .with_columns(A=pl.col("g_u_times_A") / pl.col("g_u"))
-        # the file names the upper level first, but transitiondata.txt is written with the
-        # lower id first, so a pair that the file lists the other way round is swapped here
+        # the file names the upper level first, but transitiondata.txt has the lower id first. So
+        # this select swaps a pair that the file lists in the reverse order
         .select(
             lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
             upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
@@ -173,16 +176,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a JPLT level name.
 
-    Returns None when the name cannot be parsed. The caller, match_hydrogenic_phixs(), then
+    Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the ion log.
 
-    Kept separate from the other readers' versions: each data source names its levels
-    differently, so a shared parser would have to guess which convention it is looking at.
+    Kept separate from the other readers' versions. Each data source names its levels
+    differently, so a shared parser would have to guess the convention of each name.
 
-    data_v2.1 mixes two conventions: the original relativistic one, "{  4s+ 2  4p- 1 }",
-    where the valence orbital heads the last double-space-separated token, and the
-    LS-coupled one of the 2024 Ge-sequence files, "3s(2).3p(6).3d(10).4s.4p(3)2D_3D",
-    where it is the last dot-separated shell before the term label.
+    data_v2.1 mixes two conventions. In the original relativistic one, "{  4s+ 2  4p- 1 }",
+    the valence orbital heads the last double-space-separated token. In the LS-coupled one of
+    the 2024 Ge-sequence files, "3s(2).3p(6).3d(10).4s.4p(3)2D_3D", it is the last
+    dot-separated shell before the term label.
     """
     if "{" in levelname:
         lastshell = levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0]

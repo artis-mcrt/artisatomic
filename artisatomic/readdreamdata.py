@@ -40,8 +40,9 @@ def extend_ion_list(ion_handlers):
 def energytuplefromrow(row, prefix):
     """Build the lower or upper level of one DREAM line, selected by prefix ("Lower"/"Upper").
 
-    DREAM levels have no spectroscopic names, so each is named after the energy, parity and
-    statistical weight that identify it, which is what read_levels_data() deduplicates on.
+    DREAM levels have no spectroscopic names, so the name of each level holds the energy, parity
+    and statistical weight that identify it. read_levels_data() deduplicates on the same three
+    values.
     """
     energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
 
@@ -65,7 +66,7 @@ def read_levels_data(dflines):
     levels over all lines, sorted by energy.
     """
     # a set for the membership test, not `not in energy_levels`: that was a linear scan of the
-    # list per candidate, so building the level list cost O(levels^2)
+    # list per candidate. The build of the level list then cost O(levels^2)
     seen: set[EnergyLevel] = set()
     energy_levels = []
 
@@ -86,8 +87,8 @@ def read_lines_data(dfiondata):
     transitions = []
 
     # numpy columns, not iterrows(): that built a Series for each of the 10^5 lines of an ion.
-    # The levels were sorted by energy, and transitiondata.txt is written with the lower id
-    # first, so a pair that the file lists the other way round is swapped here.
+    # read_levels_data() sorted the levels by energy, and transitiondata.txt has the lower id
+    # first. So this code swaps a pair that the file lists in the reverse order.
     lowerindices = np.minimum(dfiondata["Lower_index"].to_numpy(), dfiondata["Upper_index"].to_numpy())
     upperindices = np.maximum(dfiondata["Lower_index"].to_numpy(), dfiondata["Upper_index"].to_numpy())
     # g_upper is the g of the level the file calls upper, because gA is that level's product
@@ -105,14 +106,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     assert dreamdata is not None
     charge = ion_stage - 1
     # a list of one key, not .loc[atomic_number, charge]: that gives a Series for an ion with a
-    # single line, and the frame methods below then fail
+    # single line. The frame methods below then fail
     dfiondata = dreamdata.loc[[(atomic_number, charge)]].reset_index(drop=True)  # ty:ignore[possibly-missing-attribute]
     print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
 
     energy_levels = read_levels_data(dfiondata)
 
     # a dict, not energy_levels.index(): that scanned the level list once per level of every
-    # line, so resolving the ids cost O(lines x levels) for a database of Z >= 57 lanthanides
+    # line. The id resolution then cost O(lines x levels) for a database of Z >= 57 lanthanides
     levelid_of_leveltuple = {leveltuple: levelid for levelid, leveltuple in enumerate(energy_levels)}
 
     def get_level_index(row, prefix):
@@ -120,23 +121,23 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         leveltuple = energytuplefromrow(row, prefix)
         levelid = levelid_of_leveltuple.get(leveltuple)
         if levelid is None:
-            # not an assert: every line's levels come from the same frame the level list was
-            # built from, so a miss means they disagree and must not be silently mapped
+            # not an assert: read_levels_data() built the level list from the same frame as the
+            # lines. A miss means they disagree, so the code must not map it silently
             msg = f"DREAM line names a {prefix} level that is not in the level list: {leveltuple}"
             raise ValueError(msg)
         return levelid
 
-    # a list over the row records, not DataFrame.apply(axis=1): apply builds a Series per row,
-    # which cost tens of microseconds for each of the 10^5 lines of a lanthanide ion
+    # a list over the row records, not DataFrame.apply(axis=1): apply builds a Series per row.
+    # That cost tens of microseconds for each of the 10^5 lines of a lanthanide ion
     rows = dfiondata.to_dict("records")
     dfiondata.insert(2, "Lower_index", [get_level_index(row, prefix="Lower") for row in rows], allow_duplicates=True)
     dfiondata.insert(2, "Upper_index", [get_level_index(row, prefix="Upper") for row in rows], allow_duplicates=True)
 
     transitions = read_lines_data(dfiondata)
 
-    # DREAM has no ionization energies, so take them from NIST as the other handlers do
+    # DREAM has no ionisation energies, so take them from NIST as the other handlers do
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 

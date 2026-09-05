@@ -20,7 +20,7 @@ from artisatomic.iondata import IonData
 
 
 def clear_files(args: argparse.Namespace) -> None:
-    """Truncate the output files and write the phixs header, which the ions are appended to."""
+    """Truncate the output files and write the phixs header. The writer appends the ions after it."""
     outdir = Path(args.output_folder)
     with (
         (outdir / "adata.txt").open("w", encoding="utf-8"),
@@ -32,17 +32,18 @@ def clear_files(args: argparse.Namespace) -> None:
 
 
 # A transition this strong is an electric dipole line, whatever the level names say. Below these
-# values, one that breaks the delta J rule is taken to be a forbidden line that the source listed
-# with its own small strength, which agrees with the label instead of contradicting it.
+# values, the code reads a line that breaks the delta J rule as a forbidden line that the source
+# listed with its own small strength, which agrees with the label.
 #
-# The two need their own values because they are not the same quantity. f has no units; A is a
-# rate in s-1 that spans many decades. Neither cut is a law of physics: a weak E1 line can sit
-# well below either (an intercombination line, or one between high levels), and a strong M1 or E2
-# line in a highly charged ion can sit above the A cut. They are where the two populations part in
-# this corpus -- forbidden lines end near f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1),
-# and the lines that contradict their own J labels start at f = 7.8e-4 (F III's smallest), only
-# eight times above the cut. A mislabelled line weaker than that falls on the wrong side, and
-# that is the accepted cost.
+# The two need their own values because they are not the same quantity. f has no units. A is a
+# rate in s-1 that spans many decades. Neither cut is a law of physics. A weak E1 line can lie
+# well below either cut (an intercombination line, or one between high levels). A strong M1 or E2
+# line in a highly charged ion can lie above the A cut.
+#
+# The cuts lie where the two populations separate in these data sets. Forbidden lines end near
+# f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1). The lines that contradict their own J
+# labels start at f = 7.8e-4 (F III's smallest), only eight times above the cut. A mislabelled
+# line weaker than that falls on the wrong side, and that is the accepted cost.
 min_f_asserts_e1 = 1e-4
 min_a_asserts_e1 = 1e5
 
@@ -50,9 +51,9 @@ min_a_asserts_e1 = 1e5
 def strength_asserts_e1(dftransitions_ion: pl.DataFrame) -> pl.Expr:
     """Whether the source's own numbers claim the transition is an electric dipole line.
 
-    f where the reader gives one, else the Einstein A. Both need a size, not merely a value: a
-    forbidden line has an A, and a reader that tabulates f gives one to its forbidden lines too,
-    so "greater than zero" says nothing about which kind of transition this is.
+    The test uses f where the reader gives one, else the Einstein A. Both need a size, not only a
+    value. A forbidden line has an A, and a reader that tabulates f gives one to its forbidden
+    lines too. "Greater than zero" therefore says nothing about the kind of transition.
     """
     if "f" in dftransitions_ion.columns:
         return pl.col("f").fill_null(0.0).abs() > min_f_asserts_e1
@@ -63,41 +64,45 @@ def strength_asserts_e1(dftransitions_ion: pl.DataFrame) -> pl.Expr:
 def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     """Fill in whichever of lowerlevel, upperlevel and forbidden a reader did not supply.
 
-    Readers that key their transitions by level name (namefrom/nameto) get the level ids joined
-    on here; readers that already supply ids keep them.
+    For readers that key their transitions by level name (namefrom/nameto), this function joins
+    the level ids on. Readers that already supply ids keep them.
 
-    Forbidden here means "not an electric dipole transition", and two of the E1 selection rules
-    are checked, each on whichever levels carry what it needs:
+    Forbidden here means "not an electric dipole transition". The function checks two of the E1
+    selection rules, each on the levels that carry the quantum number it needs:
 
     - Laporte: E1 changes the parity, so two levels of the same parity cannot be E1.
     - Delta J: E1 has |J_upper - J_lower| <= 1, and J = 0 -> J = 0 is forbidden outright.
 
-    Either rule is sufficient on its own, so the two are OR-ed. Neither rule can fire on a level
-    that does not carry the quantum number it needs. A data set that gives no J thus keeps the
-    behaviour it had before this code read J at all.
+    Either rule is sufficient on its own, so the function ORs the two. Neither rule can fire on a
+    level that does not carry the quantum number it needs. A data set that gives no J thus keeps
+    the behaviour it had before this code read J at all.
 
     The delta J rule yields to a transition the source made strong enough to be E1, as
-    strength_asserts_e1() judges it. Some files disagree with their own J labels: CMFGEN's
+    strength_asserts_e1() judges it. Some files disagree with their own J labels. CMFGEN's
     provisional F III set splits a term by a nominal 0.8 cm-1 and then shares the term's f over
-    all the J pairs, so it lists delta J = 2 lines with f as large as 0.116, and O II reaches
-    0.695. To call such a line forbidden would give a strong line the forbidden collision
-    approximation, which is worse than the label it corrects. write_output_files() logs those
-    instead. A weak line is not evidence of anything, so the J labels decide it.
+    all the J pairs. It therefore lists delta J = 2 lines with f as large as 0.116, and O II
+    reaches 0.695.
 
-    A null parity means the level has no definite parity, either because it merges sub-levels of
-    both parities (CMFGEN's '1___' and '2s2_13w_2W') or because the reader could not read one
-    from the level name. Null is the whole of that convention: polars resolves null == anything
-    to null rather than to true, so an absent parity cannot match another absent one, and no
-    sentinel number is needed for readers to spell it. A null J means the same, and both are
-    resolved the same way: anything a reader could not give a number for -- a NaN, a string
-    pandas inferred from a blank column -- casts to null and disables only its own rule.
+    To call such a line forbidden would give a strong line the forbidden collision approximation,
+    which is worse than the label it corrects. Instead, write_output_files() logs those. A weak
+    line proves nothing, so the J labels decide it.
+
+    A null parity means the level has no definite parity. Either the level merges sub-levels of
+    both parities (CMFGEN's '1___' and '2s2_13w_2W'), or the reader could not read one from the
+    level name. Null is the whole of that convention. polars resolves null == anything to null
+    and not to true, so an absent parity cannot match another absent one. Readers need no
+    sentinel number to spell it.
+
+    A null J means the same, and the casts below resolve both in the same way. Anything a reader
+    could not give a number for casts to null and disables only its own rule. Examples are a NaN
+    and a string that pandas inferred from a blank column.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
 
     # the name-keyed joins keep the reader's row order (maintain_order) and fail on a height
     # change, as the id-keyed joins below do. An inner join drops a transition whose name matches
-    # no level without a word, and a level name that two levels share multiplies its rows. Both
+    # no level, and gives no message. A level name that two levels share multiplies its rows. Both
     # mean the reader's level list and transition list disagree. Not an assert: this guards
     # written output.
     for idcolumn, namecolumn in (("upperlevel", "nameto"), ("lowerlevel", "namefrom")):
@@ -117,8 +122,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             raise ValueError(msg)
 
     if "forbidden" not in dftransitions_ion.columns:
-        # null for anything that is not a number, so a NaN cannot compare equal to itself and a
-        # string column cannot raise against the numbers it is compared with
+        # The cast gives null for every value that is not a number. A NaN therefore cannot compare
+        # equal to itself, and a string column cannot raise in a comparison with numbers.
         knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
@@ -143,9 +148,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             on="upperlevel",
             maintain_order="left",
         )
-        # an inner join drops a transition whose id names no level without a word, and adata.txt
-        # counts the transition anyway. An id-keyed reader that emits such an id has a bug, so
-        # this fails rather than warns. Not an assert: this guards written output.
+        # An inner join drops a transition whose id names no level, and gives no message.
+        # adata.txt counts the transition anyway. An id-keyed reader that emits such an id has a
+        # bug, so this fails rather than warns. Not an assert: this guards written output.
         if dftransitions_ion.height != height_before:
             msg = (
                 f"{height_before - dftransitions_ion.height:d} transitions name a level id that is not one of the"
@@ -155,8 +160,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
         dftransitions_ion = (
             dftransitions_ion
-            # The delta J rule is kept as its own column, because write_output_files() reports
-            # the transitions that break it while the source still gives them an f.
+            # The delta J rule gets its own column, because write_output_files() reports the
+            # transitions that break it while the source still gives them an f.
             .with_columns(
                 breaksdeltaj=(
                     ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
@@ -164,8 +169,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
                 ).fill_null(False)
             )
             # Each rule gets fill_null(False) on its own, before the or. A null would otherwise
-            # spread and make forbidden itself null, which "{forbidden:d}" cannot format, and a
-            # level with no J would undo what the two parities had already settled.
+            # spread and make forbidden itself null, which "{forbidden:d}" cannot format. A level
+            # with no J would also undo what the two parities had already settled.
             .with_columns(
                 forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False)
                 | (pl.col("breaksdeltaj") & ~assertse1)
@@ -179,12 +184,12 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
     """Report the transitions whose J labels and oscillator strength contradict each other.
 
     A transition with |delta J| > 1, or with J = 0 at both ends, is not an electric dipole
-    transition. A large oscillator strength says that it is. add_level_ids_forbidden() lets the
-    oscillator strength win, so the transition stays permitted, and this reports how often a data
-    set needed that.
+    transition. A large oscillator strength says that it is. The function add_level_ids_forbidden()
+    lets the oscillator strength win, so the transition stays permitted. This function reports how
+    often a data set needed that.
 
-    CMFGEN's provisional F III set is the known example: it splits a term by a nominal 0.8 cm-1
-    and shares the term's f over all the J pairs, so a delta J = 2 line can carry f = 0.116.
+    CMFGEN's provisional F III set is the known example. It splits a term by a nominal 0.8 cm-1
+    and shares the term's f over all the J pairs. A delta J = 2 line can then carry f = 0.116.
     """
     if "breaksdeltaj" not in dftransitions_ion.columns:
         return
@@ -202,8 +207,8 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
         flog,
         f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
         f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
-        f" {strengthcol} values of this data set disagree. The {strengthcol} values are used, so"
-        f" these stay permitted.",
+        f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
+        f" these transitions stay permitted.",
     )
 
 
@@ -211,11 +216,12 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     """Turn the joined upsilon column into coll_str, and let a negative one set the forbidden flag.
 
     A negative upsilon is not a collision strength. It is the reader's mark for "this pair is
-    forbidden and I have no value", and readhillierdata writes -2 for the J pairs within a term.
-    So it sets the flag rather than the parities alone. A merged term has no parity, and the pair
-    would then come out permitted. Those pairs carry no A, so van Regemorter would get an
-    oscillator strength of zero, which is no collisional coupling at all. The -2 asks instead for
-    Axelrod's approximation.
+    forbidden and I have no value". readhillierdata writes -2 for the J pairs within a term. The
+    mark therefore sets the flag, and not the parities alone: a merged term has no parity, so the
+    parities alone would leave the pair permitted.
+
+    Those pairs carry no A, so van Regemorter would give an oscillator strength of zero, which is
+    no collisional coupling at all. The -2 asks instead for Axelrod's approximation.
 
     coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
     reaches the -1, because a negative one has already made the flag true.
@@ -236,15 +242,16 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
-    Every non-top ion's photoionization_targetfractions must already be filled in by
-    resolve_photoion_targetfractions() (in iondata), which this does not call itself. Writing an
-    ion that still needs resolving would silently drop its cross sections, so that is rejected.
+    resolve_photoion_targetfractions() (in iondata) must already have filled in every non-top
+    ion's photoionization_targetfractions. This function does not call it. An ion that still
+    needs the resolve pass would lose its cross sections without a message, so this function
+    rejects it.
     """
     outdir = Path(args.output_folder)
     log_folder = outdir / args.output_folder_logs
 
-    # a level's photoionisation threshold reaches into the ion above it, so keep the whole
-    # element to hand rather than only the ion being written
+    # A level's photoionisation threshold reaches into the ion above it, so keep the whole
+    # element available and not only the current ion.
     iondata_of_ion_stage = {iondata.ion_stage: iondata for iondata in iondatalist}
 
     for iondata in iondatalist:
@@ -258,8 +265,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             dfenergylevels_ion = iondata.dfenergylevels
             dftransitions_ion = iondata.dftransitions
 
-            # one frame of the upsilon pairs for the whole ion: the anti join below finds the
-            # pairs with no transition, and the left join after it attaches the values
+            # One frame of the upsilon pairs for the whole ion. The anti join below finds the
+            # pairs with no transition, and the left join after it attaches the values.
             dfupsilon = pl.DataFrame(
                 [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
                 schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
@@ -268,8 +275,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
             if dftransitions_ion.is_empty():
                 # a reader with no transitions gives a frame with no columns, which the joins in
-                # add_level_ids_forbidden() cannot take. Every upsilon pair is unused then, so the
-                # upsilon-only mechanism below still writes the ion's collision strengths.
+                # add_level_ids_forbidden() cannot take. No transition uses an upsilon pair then,
+                # so the upsilon-only mechanism below still writes the ion's collision strengths.
                 dfupsilon_only_transitions = dfupsilon.select("lowerlevel", "upperlevel")
             else:
                 dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion).with_columns(
@@ -284,7 +291,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
             log_and_print(
                 flog,
-                f"Adding in {dfupsilon_only_transitions.height:d} extra transitions with only upsilon values",
+                f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values",
             )
 
             if not dfupsilon_only_transitions.is_empty():
@@ -293,11 +300,11 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
             if not dftransitions_ion.is_empty():
-                # a left join rather than a per-row map_elements(): this runs over every
-                # transition of the ion (2.6M of them for the cmfgen set), where a Python callback
-                # per row costs more than the whole rest of the write. upsilondict's keys are
-                # unique, so the join cannot duplicate rows, and maintain_order keeps the frame in
-                # the order the reader produced it.
+                # A left join and not a per-row map_elements(). This runs over every transition
+                # of the ion (2.6M of them for the cmfgen set). A Python callback for each row
+                # would cost more than the whole rest of the write. The keys of upsilondict are
+                # unique, so the join cannot duplicate rows. maintain_order keeps the frame in the
+                # order the reader produced it.
                 dftransitions_ion = dftransitions_ion.join(
                     dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
                 ).pipe(resolve_coll_str)
@@ -317,9 +324,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 )
 
             # maintain_order: a reader can give one level pair several rows with different A
-            # values (readkuruczdata keeps the distinct lines that share a pair), and the
-            # default sort places tied rows in an unspecified order that can change with the
-            # polars version. The checksum tests compare the whole file.
+            # values (readkuruczdata keeps the distinct lines that share a pair). The default
+            # sort places tied rows in an unspecified order that can change with the polars
+            # version. The checksum tests compare the whole file.
             dftransitions_ion = (
                 dftransitions_ion
                 if dftransitions_ion.is_empty()
@@ -336,12 +343,12 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 )
 
             if not iondata.is_top_ion and not args.nophixs:
-                # an ion with cross sections but no targets has not been through
-                # resolve_photoion_targetfractions(), and every one of its tables would be
-                # dropped without a word by write_phixs_data()
+                # An ion with cross sections but no targets has not passed through
+                # resolve_photoion_targetfractions(). write_phixs_data() would drop every one of
+                # its tables without a message.
                 if len(iondata.photoionization_crosssections) > 0 and not iondata.photoionization_targetfractions:
                     msg = (
-                        f"Z={atomic_number} ion_stage={ion_stage} has photoionization cross sections but no target"
+                        f"Z={atomic_number} ion_stage={ion_stage} has photoionisation cross sections but no target"
                         " fractions: call resolve_photoion_targetfractions() before write_output_files()"
                     )
                     raise ValueError(msg)
@@ -370,9 +377,10 @@ def write_adata(
 ) -> None:
     """Append one ion's level list to adata.txt.
 
-    Level ids are zero-based in memory but numbered from one in the output. transition_counts is
-    indexed by level id. Each level line ends with the level's name as a free-text comment;
-    artistools reads it back as everything after the fourth field, so it must not be padded.
+    Level ids are zero-based in memory but numbered from one in the output. transition_counts has
+    one entry for each level id, in id order. Each level line ends with the level's name as a
+    free-text comment. The artistools package reads it back as everything after the fourth field,
+    so the writer must not pad it.
     """
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
@@ -381,8 +389,8 @@ def write_adata(
     dfout = (
         dfenergylevels if "levelname" in dfenergylevels.columns else dfenergylevels.with_columns(levelname=pl.lit(""))
     )
-    # level ids are zero-based in memory, but the output format numbers them from one.
-    # writelines() with a generator, as in write_transition_data(): a write() call per level
+    # Level ids are zero-based in memory. The output format numbers them from one.
+    # writelines() with a generator, as in write_transition_data(). A write() call for each level
     # costs more than the formatting.
     fatommodels.writelines(
         f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm):19.16f} {float(g):8.3f} {transition_counts[levelid]:4d} {levelname:}\n"
@@ -403,7 +411,7 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
     a line of zero frequency has no place in the radiation field. This function reports it.
 
     A level list that is not in energy order gives the same loss for a pair whose lower id has
-    the higher energy, so that case is reported too, on its own line.
+    the higher energy. The function reports that case too, on its own line.
     """
     if dftransitions_ion.is_empty() or "energyabovegsinpercm" not in dfenergylevels_ion.columns:
         return
@@ -429,9 +437,9 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
         log_and_print(
             flog,
             f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
-            f" ({withcollstr:d} of them with a collision strength). ARTIS gives every transition a"
-            " frequency from the level energies and drops the ones that come out at zero, so these"
-            " are written but not used.",
+            f" ({withcollstr:d} of them with a collision strength). ARTIS computes the frequency of"
+            " each transition from the level energies and drops a transition with a frequency of zero."
+            " The output file has these transitions, but ARTIS does not use them.",
         )
 
     inverted = notabove.height - degenerate.height
@@ -440,7 +448,7 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
             flog,
             f"WARNING: {inverted:d} transitions have a lower level id whose energy is above the upper"
             " level's. The level list is not in energy order. ARTIS drops a transition with a"
-            " negative frequency, so these are written but not used.",
+            " negative frequency. The output file has these transitions, but ARTIS does not use them.",
         )
 
 
@@ -453,30 +461,30 @@ def write_transition_data(
 ) -> None:
     """Append one ion's transitions to transitiondata.txt.
 
-    Level ids are zero-based in memory but numbered from one in the output, and every transition
-    is written with the lower id first.
+    Level ids are zero-based in memory but numbered from one in the output. The writer lists the
+    lower id of every transition first.
     """
     log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
     # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
-    # transition. Checked over the whole frame before the header goes out, so a bad row fails
-    # before anything is written rather than leaving a block whose count overstates its rows.
-    # Not an assert: this guards written output and must survive python -O.
+    # transition. The check runs over the whole frame before the header goes out. A bad row
+    # therefore fails before the writer writes any row, and no block has a count that overstates
+    # its rows. Not an assert: this guards written output and must survive python -O.
     if not dftransitions_ion.is_empty():
         misordered = dftransitions_ion.filter(pl.col("lowerlevel") >= pl.col("upperlevel"))
         if not misordered.is_empty():
             levelid_lower, levelid_upper = misordered.select("lowerlevel", "upperlevel").row(0)
             msg = (
-                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that are not"
-                f" ordered with the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
+                f"Z={atomic_number} ion_stage={ion_stage} has {misordered.height} transitions that do not"
+                f" name the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
             )
             raise ValueError(msg)
 
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        # one %-format over the column lists, not an f-string per row from iter_rows(): this runs
-        # 2.6M times for the cmfgen set and was the largest single cost of the build. The two
+        # One %-format over the column lists, not an f-string for each row from iter_rows(). This
+        # runs 2.6M times for the cmfgen set and was the largest single cost of the build. The two
         # forms give the same bytes for every value. Level ids are zero-based in memory, but the
         # output format numbers them from one.
         columns = [
@@ -519,19 +527,19 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
 
     Returns the ion's threshold array with its unreadable entries replaced, and the rest as they
     were. This is the same quantity ARTIS derives in get_phixs_threshold(), where a level's
-    epsilon carries the ionization energies of every stage below it:
+    epsilon carries the ionisation energies of every stage below it:
 
-        threshold = ionization energy of this ion + E(target level) - E(this level)
+        threshold = ionisation energy of this ion + E(target level) - E(this level)
 
     with both level energies above their own ion's ground state. The target is the first one, as
     ARTIS uses phixstargetindex 0 for a level's continuum edge (input.cc).
 
-    A reader marks a threshold it does not have as NaN, which is what the arrays start as. A
-    non-positive value also counts as missing here, so a mis-computed threshold is filled rather
-    than written to the output.
+    A reader marks a threshold it does not have as NaN, which is the initial value of the arrays.
+    A non-positive value also counts as missing here, so the function fills a mis-computed
+    threshold and does not write it to the output.
 
-    A threshold that does not come out positive is left alone: the level is then at or above the
-    continuum, which is not something a photoionisation edge can describe.
+    The function does not change a threshold that does not come out positive. The level is then
+    at or above the continuum, which a photoionisation edge cannot describe.
     """
     thresholds = iondata.photoionization_thresholds_ev.copy()
     missing = [levelid for levelid, threshold in enumerate(thresholds) if not threshold_is_known(threshold)]
@@ -542,8 +550,8 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     if "energyabovegsinpercm" not in upperiondata.dfenergylevels.columns:
         return thresholds
 
-    # to_numpy() rather than a Python loop over the Series: the ion can have 10^5 levels, and
-    # only the missing ones are read below
+    # to_numpy() and not a Python loop over the Series. The ion can have 10^5 levels, and the
+    # loop below reads only the missing ones.
     energy_ev = hc_in_ev_cm * iondata.dfenergylevels["energyabovegsinpercm"].to_numpy()
     upper_energy_ev = hc_in_ev_cm * upperiondata.dfenergylevels["energyabovegsinpercm"].to_numpy()
 
@@ -566,8 +574,8 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     if filled:
         log_and_print(
             flog,
-            f"Worked out a photoionization threshold for {filled} levels whose reader gave none,"
-            " from the ionization energy and the two level energies, as ARTIS does",
+            f"Computed a photoionisation threshold for {filled} levels whose reader gave none."
+            " The threshold comes from the ionisation energy and the two level energies, as in ARTIS.",
         )
     return thresholds
 
@@ -582,20 +590,20 @@ def write_phixs_data(
     args,
     flog,
 ) -> None:
-    """Append one ion's photoionization cross sections to phixsdata_v2.txt.
+    """Append one ion's photoionisation cross sections to phixsdata_v2.txt.
 
-    Every level with targets is written. Level ids, of this ion and of the upper ion's targets,
-    are zero-based in memory but numbered from one in the output.
+    The writer writes every level with targets. Level ids, of this ion and of the upper ion's
+    targets, are zero-based in memory but numbered from one in the output.
 
-    The threshold energy is written for information only. ARTIS reads the column into a variable
-    it does not use (input.cc) and always takes the threshold from the difference of the level
-    energies instead, in get_phixs_threshold(). A level whose threshold could not be determined
-    therefore has a perfectly usable cross section table, and dropping it would discard real data
-    over a number the consumer ignores; such a level is written with a threshold of zero.
+    The threshold energy is for information only. ARTIS reads the column into a variable it does
+    not use (input.cc). It always takes the threshold from the difference of the level energies
+    instead, in get_phixs_threshold(). A level with an unknown threshold therefore has a usable
+    cross section table. To drop it would discard real data because of a number that the consumer
+    ignores. The writer writes such a level with a threshold of zero.
     """
-    # the target fractions are filled in per level by the caller, but a reader that found no
-    # photoionization data at all returns the cross-section and threshold arrays still empty, so
-    # bound the ids by what those arrays actually hold rather than indexing off the end
+    # The caller fills in the target fractions for each level. A reader that found no
+    # photoionisation data at all returns empty cross section and threshold arrays. Bound the ids
+    # by the length of those arrays, so the loop does not index past the end.
     levelids_to_write = [
         levelid
         for levelid, targetlist in enumerate(photoionization_targetfractions)
@@ -610,20 +618,20 @@ def write_phixs_data(
     if nothreshold:
         log_and_print(
             flog,
-            f"{nothreshold} of them have no threshold energy, and are written with a threshold of"
-            " zero. ARTIS takes the threshold from the level energies, so their cross sections are"
-            " used in full.",
+            f"{nothreshold} of them have no threshold energy, so the output gives them a threshold of"
+            " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
+            " in full.",
         )
     flog.write(
-        f"Downsampling cross sections assuming T={args.optimaltemperature} Kelvin, "
+        f"Downsample of the cross sections with T={args.optimaltemperature} Kelvin, "
         f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
-    # only for a ground state that is actually being written: a level with no targets is
-    # deliberately skipped (match_hydrogenic_phixs does this for a ground state at or above the
-    # ionization energy), and that is not an error
+    # Only for a ground state that the writer writes. The writer skips a level with no targets on
+    # purpose, and that is not an error. An example is match_hydrogenic_phixs, which does this
+    # for a ground state at or above the ionisation energy.
     if 0 in levelids_to_write and photoionization_crosssections[0][0] == 0.0:
-        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionization cross section"
+        msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionisation cross section"
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)
 
@@ -679,13 +687,13 @@ def write_phixs_data(
                 for upperionlevelid, targetprobability in targetlist
             )
 
-        # one write() per table with a %-format over the points, not a generator per point:
-        # nphixspoints lines per level, 1.5M of them for the cmfgen set
+        # One write() for each table with a %-format over the points, not a generator for each
+        # point. There are nphixspoints lines for each level, 1.5M of them for the cmfgen set.
         fphixs.write("".join(map("%16.8E\n".__mod__, photoionization_crosssections[lowerlevelid].tolist())))
 
 
 def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
-    """Write compositiondata.txt, listing each element's contiguous range of ion stages."""
+    """Write compositiondata.txt, which lists each element's contiguous range of ion stages."""
     print("Writing compositiondata.txt")
     with (Path(args.output_folder) / "compositiondata.txt").open("w", encoding="utf-8") as fcomp:
         fcomp.write(f"{len(ion_handlers):d}\n")
@@ -698,8 +706,9 @@ def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]],
             if listions_nohandlers:
                 ion_stage_min = min(listions_nohandlers)
                 ion_stage_max = max(listions_nohandlers)
-                # the file gives only the range, so a gap in it would silently claim ions that were
-                # never written. Not an assert: this guards written output and must survive -O.
+                # The file gives only the range, so a gap in it would claim ions that the run never
+                # wrote, without a message. Not an assert: this guards written output and must
+                # survive -O.
                 missing = [
                     ion_stage
                     for ion_stage in range(ion_stage_min, ion_stage_max + 1)

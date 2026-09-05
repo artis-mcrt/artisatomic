@@ -12,10 +12,10 @@ datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
 def get_aoife_dataset():
     """Open the AOIFE HDF5 file, once, on first use.
 
-    Opened here rather than at import: `import artisatomic` pulls this module in, so opening at
-    import held a file handle for the whole of every run, whichever handlers were selected.
-    Returns None when the file (or h5py) is absent, which is how the readers below report that
-    this data set is unavailable.
+    The open happens here and not at import. `import artisatomic` pulls this module in. So an
+    open at import held a file handle for the whole of every run, whichever handlers the user
+    selected. Returns None when the file (or h5py) is absent. The readers below use that to
+    report that this data set is unavailable.
     """
     try:
         import h5py
@@ -54,12 +54,12 @@ class TransitionTuple(t.NamedTuple):
 
 
 def read_ionization_data(atomic_number, ion_stage):
-    """Ionization energy in eV of one ion, from the AOIFE HDF5 file.
+    """Ionisation energy in eV of one ion, from the AOIFE HDF5 file.
 
-    He III is a bare nucleus, so the file has no entry for it and a sentinel is used instead.
+    He III is a bare nucleus, so the file has no entry for it. The function uses a sentinel instead.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     ionization_data = aoife_dataset["/ionization_data"]
 
     ionization_dict = {}
@@ -77,11 +77,11 @@ def read_ionization_data(atomic_number, ion_stage):
 def read_levels_data(atomic_number, ion_stage):
     """Read one ion's energy levels from the AOIFE HDF5 file.
 
-    The file numbers ion stages from zero, so ion_stage is matched against ion_number + 1.
-    Levels have no spectroscopic names, so each is named after its zero-based level number.
+    The file numbers ion stages from zero, so the reader matches ion_stage against ion_number + 1.
+    Levels have no spectroscopic names, so the name of each level holds its zero-based level number.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     levels_data = aoife_dataset["/levels_data"]
 
     energy_levels: list[EnergyLevelRow] = []
@@ -92,9 +92,9 @@ def read_levels_data(atomic_number, ion_stage):
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
 
-        # named rather than *rowtuple plus three positional extras, which no type checker could
-        # count through (it needed three suppressions) and which is how a bare 0 came to be the
-        # parity of every level
+        # named fields, not *rowtuple plus three positional extras. No type checker could count
+        # through those (they needed three suppressions), and they let a bare 0 become the parity
+        # of every level
         energy_levels.append(
             EnergyLevelRow(
                 atomic_number=atomic_num,
@@ -103,11 +103,11 @@ def read_levels_data(atomic_number, ion_stage):
                 g=g,
                 metastable=metastable,
                 energyabovegsinpercm=energyabovegsinpercm,
-                # No parity: this data set supplies none, and add_level_ids_forbidden() marks a
-                # transition forbidden when its two levels share one, so a fixed 0 made every
-                # transition of the ion forbidden (coll_str -2) when helium has plenty of
-                # permitted ones. A null parity never matches another, here as in the other
-                # readers whose data set has no parities.
+                # No parity: this data set supplies none. add_level_ids_forbidden() marks a
+                # transition forbidden when its two levels share one parity. So a fixed 0 made every
+                # transition of the ion forbidden (coll_str -2). Helium has many permitted ones. A
+                # null parity never matches another, here as in the other readers whose data set has
+                # no parities.
                 parity=None,
                 # int() as read_lines_data() does, so the two agree on the name whatever dtype the
                 # file stores the level number in
@@ -116,7 +116,7 @@ def read_levels_data(atomic_number, ion_stage):
         )
 
     # not an assert: read_lines_data() takes the file's level numbers as the zero-based level ids
-    # that leveltuples_to_pldataframe() assigns by row, so the two numberings must agree
+    # that leveltuples_to_pldataframe() assigns by row. The two numberings must agree
     level_numbers = [int(level.level_number) for level in energy_levels]
     if level_numbers != list(range(len(energy_levels))):
         msg = (
@@ -131,11 +131,11 @@ def read_levels_data(atomic_number, ion_stage):
 def read_lines_data(atomic_number, ion_stage):
     """Read one ion's bound-bound transitions from the AOIFE HDF5 file.
 
-    The file's level numbers are already zero-based, matching the level ids used in memory. The
+    The file's level numbers are already zero-based, the same as the level ids in memory. The
     file gives no collision strengths.
     """
     aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the AOIFE HDF5 file is required for the boyle handler"
+    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
     lines_data = aoife_dataset["/lines_data"]
 
     transitions = []
@@ -158,9 +158,9 @@ def read_lines_data(atomic_number, ion_stage):
 
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
-        # the file's level numbers are already zero-based, matching the level ids used in memory.
-        # transitiondata.txt is written with the lower id first, so a pair that the file lists
-        # the other way round is swapped here.
+        # the file's level numbers are already zero-based, the same as the level ids in memory.
+        # transitiondata.txt has the lower id first, so this code swaps a pair that the file lists
+        # in the reverse order.
         levelid_lower = min(int(level_number_lower), int(level_number_upper))
         levelid_upper = max(int(level_number_lower), int(level_number_upper))
         transitions.append(TransitionTuple(atomic_num, ion_number, levelid_lower, levelid_upper, A_ul, wavelength))

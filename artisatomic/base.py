@@ -21,8 +21,8 @@ import polars as pl
 
 PYDIR = Path(__file__).parent.resolve()
 
-# read once at import: every reader that has a test data sample keys its data path on this flag,
-# so a change to the variable after the import must not redirect only some of the readers
+# Read once at import. Every reader that has a test data sample keys its data path on this flag.
+# A change to the variable after the import must not redirect only some of the readers.
 TESTMODE = os.environ.get("ARTISATOMIC_TESTMODE") == "1"
 
 
@@ -84,8 +84,8 @@ gf_to_a_coefficient = 1.49919e-16
 def split_element_ionstage_str(ionstr: str) -> tuple[int, int]:
     """Split a string like 'FeII' into (atomic_number, ion_stage).
 
-    Splitting on `ionstr.rstrip("IVX")` destroys the symbols of the elements whose symbols are
-    made only of those letters: V (vanadium) and I (iodine). Instead find the split point where
+    A split on `ionstr.rstrip("IVX")` destroys the symbols of the elements whose symbols contain
+    only those letters: V (vanadium) and I (iodine). Instead find the split point where
     the prefix is an element symbol and the suffix is a Roman numeral. Element symbols have a
     lowercase second letter and Roman numerals are uppercase, so the match is unambiguous.
     """
@@ -129,11 +129,12 @@ class Transition(t.NamedTuple):
 class PhixsData(t.NamedTuple):
     """The photoionisation cross sections of one ion, indexed by zero-based level id.
 
-    A data source with no cross sections for the ion gives empty arrays, not zero-filled ones:
-    iondata.read_ion_data() reads an empty cross-section array as "no data" and applies the
+    A data source with no cross sections for the ion gives empty arrays, not zero-filled ones. The
+    function iondata.read_ion_data() reads an empty cross section array as "no data" and applies the
     hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
     the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
-    names once the upper ion is read. QUB gives the upper ion's level ids with their fractions.
+    names after the run reads the upper ion. QUB gives the upper ion's level ids with their
+    fractions.
     """
 
     crosssections: npt.NDArray[np.float64]  # (levelcount, nphixspoints), in Mb
@@ -164,16 +165,16 @@ def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> l
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
 
-    Level ids are zero-based everywhere in memory; the 1-based numbering of the output files is
-    applied by the write_*() functions.
+    Level ids are zero-based everywhere in memory. The write_*() functions apply the 1-based
+    numbering of the output files.
     """
     if isinstance(energy_levels, pl.DataFrame):
         dflevels = energy_levels
     elif energy_levels:
         dflevels = pl.DataFrame(energy_levels)
     else:
-        # an empty list carries no column names, and write_adata() selects the level columns
-        # by name, so an ion with no levels gets the columns that every reader supplies
+        # An empty list carries no column names, and write_adata() selects the level columns
+        # by name. An ion with no levels therefore gets the columns that every reader supplies.
         dflevels = pl.DataFrame(schema=empty_levels_schema)
 
     if "levelid" not in dflevels.columns:
@@ -181,7 +182,7 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
 
     dflevels = dflevels.with_columns(pl.col("levelid").cast(pl.Int64))
 
-    # the frame is indexed by level id elsewhere, so a reader-supplied levelid must be contiguous
+    # Other code indexes the frame by level id, so a reader-supplied levelid must be contiguous
     # and zero-based. Not an assert: input validation must survive python -O.
     if not dflevels["levelid"].equals(pl.int_range(dflevels.height, dtype=pl.Int64, eager=True)):
         msg = "level ids must be contiguous and start at zero"
@@ -193,12 +194,13 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
 def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> dict[int, int]:
     """Map each level's index in its source file to its zero-based level id.
 
-    Readers whose level list is re-sorted by energy need this, because their transitions still
+    Readers that re-sort their level list by energy need this, because their transitions still
     name their levels by the file's numbering. Pass the file indices in the sorted level order,
     i.e. fileindices[n] is the file index of the level that ended up at level id n.
 
-    A duplicated file index would overwrite its entry and misroute every transition referencing
-    it, so that is rejected here rather than surfacing as a transition on the wrong level.
+    A duplicated file index would overwrite its entry and misroute every transition that
+    references it. This function rejects the duplicate, so it cannot appear later as a transition
+    on the wrong level.
     """
     fileindices = list(fileindices)
     levelid_of_fileindex = {int(fileindex): levelid for levelid, fileindex in enumerate(fileindices)}
@@ -206,7 +208,7 @@ def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> d
     # not an assert: input validation must survive python -O
     if len(levelid_of_fileindex) != len(fileindices):
         msg = (
-            f"Duplicate level indices in {sourcename}: {len(fileindices)} levels but only"
+            f"Duplicate file indices in {sourcename}: {len(fileindices)} levels but only"
             f" {len(levelid_of_fileindex)} unique indices"
         )
         raise ValueError(msg)
@@ -219,28 +221,28 @@ def resolve_transition_levelids(
 ) -> tuple[int, int]:
     """Resolve one transition's file-numbered levels to zero-based level ids, lower id first.
 
-    Raises rather than skipping an index that names no level: a reader whose transition and level
-    files disagree about the numbering (0- vs 1-based, say) would otherwise drop every transition
-    and write a silently empty ion instead of failing.
+    The function raises on an index that names no level. A reader whose
+    transition and level files disagree about the numbering (0- or 1-based, for example) would
+    otherwise drop every transition. It would then write an empty ion without an error.
     """
     try:
         lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
         upperlevel = levelid_of_fileindex[int(fileindex_upper)]
     except KeyError as exc:
         msg = (
-            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names level index {exc.args[0]},"
-            f" which is not one of the {len(levelid_of_fileindex)} levels read. The transition and level files"
-            " may disagree about the level numbering."
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names file index {exc.args[0]}."
+            f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
+            " The transition file and the level file can disagree about the file indices."
         )
         raise ValueError(msg) from exc
 
-    # the levels were re-sorted by energy, so a transition can name them either way round.
-    # transitiondata.txt is written with the lower id first.
+    # The reader re-sorted the levels by energy, so a transition can name them in either order.
+    # transitiondata.txt lists the lower id first.
     return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
 
 
 def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:
-    """Path of the per-ion log file, written by the reading pass and appended to by the writing pass."""
+    """Path of the per-ion log file. The read pass writes it, and the write pass appends to it."""
     return Path(log_folder, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
 
 
@@ -253,8 +255,8 @@ def log_and_print(flog, strout):
 def path_for_log(filepath: str | Path) -> str:
     """Render an input data path relative to the repository root where possible.
 
-    The log files must not depend on where the repository is checked out, so an absolute path
-    would be wrong there. Paths outside the repository (some readers load data from elsewhere)
+    The log files must not depend on the location of the repository checkout, so an absolute
+    path would be wrong there. Paths outside the repository (some readers load data from elsewhere)
     come back unchanged.
     """
     try:
@@ -269,11 +271,11 @@ def fortran_float(text: str) -> float:
 
 
 def isfloat(value: t.Any) -> bool:
-    """Whether a string parses as a float, accepting Fortran's D exponent (1.5D-3).
+    """Whether a string parses as a float, with Fortran's D exponent (1.5D-3) permitted.
 
-    Called once per field of every line of the CMFGEN oscillator files (5.3M times for the cmfgen
-    test set), so the replace() is done only when there is a D to replace rather than allocating
-    a copy of every field.
+    The CMFGEN oscillator reader calls this once for each field of every line (5.3M times for the
+    cmfgen test set). The function therefore calls replace() only when the field contains a D.
+    This avoids a copy of every field.
     """
     try:
         float(value.replace("D", "E") if "D" in value else value)
@@ -289,8 +291,8 @@ compression_extensions = ("", ".zst", ".gz", ".xz")
 def find_file_check_extension(filename: str | Path) -> Path | None:
     """Find a data file by its plain name, accepting any of the compressed variants of that name.
 
-    Returns None if neither the plain name nor any compressed form exists, so that callers which
-    treat a missing file as "no data for this ion" can say so without opening it.
+    Returns None if neither the plain name nor any compressed form exists. A caller that treats
+    a missing file as "no data for this ion" can then say so and does not open the file.
     """
     return next((path for ext in compression_extensions if (path := Path(f"{filename}{ext}")).is_file()), None)
 
@@ -307,10 +309,11 @@ def find_file_check_extension_or_raise(filename: str | Path) -> Path:
 
 
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
-    """Open a data file, trying the compressed variants of the name if it does not exist.
+    """Open a data file, or a compressed variant of the name if the plain file does not exist.
 
-    The data sets ship some files compressed and some not, and which ones varies between
-    downloads, so callers name the plain file and this finds whichever form is present.
+    The data sets ship some files compressed and some not, and the set of compressed files varies
+    between downloads. Callers name the plain file, and this function finds the form that is
+    present.
     """
     from xopen import xopen
 
@@ -318,7 +321,7 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
 
 
 def rewrite_file_as_utf8(filename: str | Path) -> bool:
-    """Rewrite a data file as utf-8 if it is not utf-8, and say whether it was rewritten.
+    """Rewrite a data file as utf-8 if it is not utf-8, and return True if it did so.
 
     CMFGEN writes an author's name with an accent, which leaves a few of its files in
     iso-8859-1. Neither Python nor polars reads such a file, so a reader that meets one
@@ -337,7 +340,7 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     else:
         return False
 
-    print(f"{filepath} is not utf-8. Rewriting it as utf-8, from iso-8859-1.")
+    print(f"{filepath} is not utf-8. artisatomic rewrites the file as utf-8 from iso-8859-1.")
     # every byte is a character in iso-8859-1, so this decode cannot fail
     text = filebytes.decode("iso-8859-1")
     try:
@@ -346,7 +349,7 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     except OSError as exc:
         msg = (
             f"Could not rewrite {filepath} as utf-8: {exc}\n"
-            f"Convert the file by hand, then run this again:\n"
+            f"Convert the file by hand. Then run this again:\n"
             f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
         )
         raise RuntimeError(msg) from exc
@@ -390,7 +393,7 @@ NIST_IONIZATION_PATH = PYDIR / "nist_ionization.txt.zst"
 
 
 def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, int], float]]:
-    """Parse the tab-separated NIST table of ionization energies.
+    """Parse the tab-separated NIST table of ionisation energies.
 
     The result holds the provenance lines at the top of the table (the lines that start with "#")
     and the energies, keyed by (atomic_number, ion_stage). The footnotes of the table follow the
@@ -451,12 +454,12 @@ _process_pool: ProcessPoolExecutor | None = None
 
 
 def get_process_pool() -> ProcessPoolExecutor:
-    """Get the one process pool for the whole run, creating it on first use.
+    """Get the one process pool for the whole run, and create it on the first use.
 
-    Building a pool costs about 0.6 s however small the batch, because "spawn" makes every worker
-    re-import this package and its numpy/polars/pandas dependencies. A build asks for one pool per
-    ion per photoionisation file, so a pool per call spent most of its time starting up. Peak
-    memory is unchanged (the same workers, alive for longer).
+    A new pool costs about 0.6 s however small the batch, because "spawn" makes every worker
+    re-import this package and its numpy/polars/pandas dependencies. A build asks for one pool
+    for each ion and each photoionisation file. A pool for each call therefore spent most of its
+    time in startup. The peak memory does not change (the same workers, alive for longer).
     """
     global _process_pool
     if _process_pool is None:
@@ -473,43 +476,44 @@ def parallel_map[ResultType](
     *iterables: Iterable[t.Any],
     chunksize: int | None = None,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar using either multithreading (for free-threading python) or multiprocessing.
+    """Execute a parallel map with a progress bar, with threads on a free-threading python and processes otherwise.
 
-    Every iterable must be the same length. Executor.map() and thread_map() stop at the shortest,
-    as zip() does, so an accidentally short one would silently drop the tail of the work instead
-    of failing, and the three paths below would not even drop the same items.
+    Every iterable must have the same length. Executor.map() and thread_map() stop at the
+    shortest iterable, as zip() does. A short iterable would therefore drop the tail of the work
+    without an error, and the three paths below would not drop the same items.
 
-    The keywords above are all there are. thread_map() absorbs a dozen more that shape the pool
-    it builds (max_workers, timeout, mp_context, ...), none of which the run-wide pool from
-    get_process_pool() can honour, and which tqdm() on the other path rejects: forwarding them
-    would apply the caller's intent on a free-threading build and raise on a stock one.
+    The signature accepts no other keywords. thread_map() accepts a dozen more that shape the
+    pool it builds (max_workers, timeout, mp_context, ...). The run-wide pool from
+    get_process_pool() cannot honour them, and tqdm() on the other path rejects them. A forwarded
+    keyword would apply the caller's intent on a free-threading build and raise on a stock one.
     """
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
 
-    # materialise so the work can be sized: the chunk size and the serial cutoff below both need
-    # a length, and the callers pass views and generators
+    # Materialise the iterables to measure the work. The chunk size and the serial cutoff below
+    # both need a length, and the callers pass views and generators.
     lists = [list(iterable) for iterable in iterables]
     lengths = [len(x) for x in lists]
-    # not an assert: this decides how much of the work is done, so it must survive python -O
+    # not an assert: this check decides how much of the work runs, so it must survive python -O
     if len(set(lengths)) > 1:
-        msg = f"parallel_map() was given iterables of different lengths: {lengths}"
+        msg = f"parallel_map() received iterables of different lengths: {lengths}"
         raise ValueError(msg)
     nitems = lengths[0] if lengths else 0
 
-    # even with the pool already up, handing a handful of items to it costs more in IPC than doing
-    # them here (readqubdata reduces four cross-section tables at a time)
+    # Even with the pool already up, a handful of items costs more in IPC than the work itself.
+    # This path does them here (readqubdata reduces four cross section tables at a time).
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 
     if chunksize is None:
-        # without a chunk size, items go to the workers one at a time and the IPC per item costs
-        # more than the work; tqdm warns about it above 1000 items
+        # Without a chunk size, items go to the workers one at a time, and the IPC for each item
+        # costs more than the work. Above 1000 items, tqdm warns about it.
         chunksize = max(1, nitems // (mp.cpu_count() * 4))
 
-    # disable=None means "disable on non-TTY": the bar is for someone watching a build, and it
-    # redraws by carriage return, so a redirected run or a CI capture got a line of half-drawn
-    # bars interleaved with the real output for every call. thread_map() forwards this to tqdm.
+    # disable=None means "disable on non-TTY". The bar is for a person who watches a build, and
+    # it redraws by carriage return. A redirected run or a CI capture therefore got a line of
+    # partial bars mixed with the real output for every call. The thread_map() path forwards this
+    # to tqdm.
     if use_multiprocessing:
         from tqdm import tqdm
 
@@ -535,13 +539,15 @@ def sort_ion_handlers(
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Sort by atomic number, and each element's ions by ion stage.
 
-    process_files() relies on ascending ion stages to identify the top ion and to find each ion's
-    photoionisation target, so normalise the order here, before the handler list is written to
-    artisatomicionhandlers.json and passed to write_compositionfile().
+    process_files() relies on the ion stages in order from lowest to highest to identify the top
+    ion and to find each ion's photoionisation target. This function normalises the order before
+    main() writes the handler list to artisatomicionhandlers.json and passes it to
+    write_compositionfile().
 
-    A duplicated element or ion stage is rejected here, because the code downstream trusts the
-    list: write_compositionfile() counts an element's ions as max - min + 1 and cannot see a
-    duplicate, so a duplicate would make compositiondata.txt disagree with the other output files.
+    This function rejects a duplicated element or ion stage, because the code downstream trusts
+    the list. The ion count of write_compositionfile() is max - min + 1, so it cannot see a
+    duplicate. A duplicate would therefore make compositiondata.txt disagree with the other output
+    files.
     """
     atomic_numbers = [atomic_number for atomic_number, _listions in ion_handlers]
     if len(set(atomic_numbers)) != len(atomic_numbers):
@@ -569,10 +575,10 @@ def add_handler_if_not_set(
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
 
-    The input list is not modified, so the return value must be used.
+    The function does not modify the input list, so the caller must use the return value.
     """
-    # readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
-    # numpy integers, so normalise here rather than in each caller
+    # Readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
+    # numpy integers. Normalise them here and not in each caller.
     atomic_number = int(atomic_number)
     ion_stage = int(ion_stage)
 

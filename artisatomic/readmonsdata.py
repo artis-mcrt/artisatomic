@@ -102,7 +102,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     strength of each E1 transition. The reader finds the levels of a transition by their energy:
     the upper level energy is the lower level energy plus the photon energy. Each level name is
     the energy plus the zero-based level id, so two levels with one energy keep separate names.
-    NIST supplies the ionization energy.
+    NIST supplies the ionisation energy.
     """
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
@@ -140,7 +140,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
         msg = (
             f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
-            f" from its closest level, above the tolerance of {MATCH_TOLERANCE_PERCM} cm^-1."
+            f" from its closest level. The tolerance is {MATCH_TOLERANCE_PERCM} cm^-1."
             " The level file and the transition file do not match."
         )
         raise ValueError(msg)
@@ -157,11 +157,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         log_and_print(flog, f"WARNING: {ambiguouscount} level matches have a second level equally close")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionization energy: {ionization_energy_in_ev} eV (NIST)")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
 
-    # the third column of the transition file is gf, not f: single lines reach gf = 25, and the
-    # sum of gf / g_lower over the lines of one level reaches the electron count, while the sum of
-    # gf does not.
+    # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
+    # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
+    # not.
     A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
 
     # level ids are zero-based in memory

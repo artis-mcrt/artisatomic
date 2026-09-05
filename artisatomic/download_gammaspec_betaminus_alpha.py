@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download ENDF decay data and write the gamma spectra used by ARTIS."""
+"""Download ENDF decay data and write the gamma spectra that ARTIS uses."""
 
 import io
 import math
@@ -26,7 +26,7 @@ colreplacements = {
 def main():
     """Fetch a NuDat3 decay table for every nuclide in betaminusdecays.txt and alphadecays.txt.
 
-    Each nuclide's gamma lines are written to artis_files/data/gamma_<nuclide>.txt.
+    The script writes the gamma lines of each nuclide to artis_files/data/gamma_<nuclide>.txt.
     """
     outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
@@ -69,10 +69,10 @@ def main():
     )
     assert dfalpha.height == dfalpha.unique(("Z", "A")).height
 
-    # a set: a nuclide in both lists is downloaded once
+    # a set: the script downloads a nuclide in both lists once
     nuclist = sorted(set(dfbetaminus.select(["Z", "A"]).iter_rows()) | set(dfalpha.select(["Z", "A"]).iter_rows()))
-    # one session for the whole run, and a retry on a transient failure, so one 5xx or a
-    # dropped connection does not end the run after N nuclides
+    # one session for the whole run, and a retry on a transient failure. Then one 5xx or a
+    # dropped connection does not end the run after N nuclides.
     nuclides_without_table: list[str] = []
     with requests.Session() as session:
         session.mount(
@@ -88,13 +88,13 @@ def main():
             headers = {
                 "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
             }
-            # a timeout, so a stalled connection stops the run instead of holding it forever, and a
-            # status check, so an error page is not parsed as a table
+            # a timeout, so a stalled connection stops the run and does not hold it forever. A status
+            # check, so the script does not parse an error page as a table.
             with session.get(url, headers=headers, timeout=120) as response:
                 response.raise_for_status()
                 textdata = response.text
                 if "<pre>" not in textdata:
-                    print(f"  no table data returned from {url}")
+                    print(f"  NuDat returned no table data from {url}")
                     nuclides_without_table.append(strnuclide)
                     continue
 
@@ -126,9 +126,9 @@ def main():
                     newcols.append(colname)
                 dfnuclide.columns = newcols
                 dfnuclide = dfnuclide.with_columns(pl.col(pl.Utf8).str.strip_chars()).with_columns(
-                    # every spelling of a zero level ("0", "0.0", "0.00") becomes one value, so the
-                    # ground level's lines form one group below and not two that each rewrite the
-                    # file. A blank or non-numeric level stays as it is.
+                    # every spelling of a zero level ("0", "0.0", "0.00") becomes one value. Then the
+                    # lines of the ground level form one group below, and not two groups that each
+                    # rewrite the file. A blank or non-numeric level stays as it is.
                     pl.when(pl.col("parent_elevel").cast(pl.Float64, strict=False) == 0.0)
                     .then(pl.lit("0"))
                     .otherwise(pl.col("parent_elevel"))
@@ -204,8 +204,8 @@ def main():
                         }
                     ).sort("energy_mev")
                     if len(dfout) > 0:
-                        # write to a temporary name and then rename: a run that stops part way
-                        # through leaves the previous file complete rather than truncated
+                        # write to a temporary name and then rename. A run that stops part way
+                        # through then leaves the previous file complete and not truncated.
                         tmpoutfilepath = nucoutfilepath.with_suffix(".tmp")
                         with tmpoutfilepath.open("w", encoding="utf-8") as fout:
                             fout.write(f"{len(dfout)}\n")
@@ -216,7 +216,7 @@ def main():
                     else:
                         print("empty DataFrame")
                 if not found_groundlevel:
-                    print("  ERROR! did not find ground level")
+                    print("  ERROR! the table has no ground level")
 
     # a run that skipped a nuclide must not end with an exit code of 0 and a missing file
     if nuclides_without_table:
