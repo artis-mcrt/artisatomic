@@ -1827,6 +1827,33 @@ def test_path_for_log_renders_a_path_relative_to_a_directory():
     assert path_for_log("/nonexistent/elsewhere/osc_data") == "/nonexistent/elsewhere/osc_data"
 
 
+def test_path_for_log_keeps_a_symlinked_data_folder_short(tmp_path):
+    """A data folder is often a symbolic link to another disk, and the log path must stay short.
+
+    The CMFGEN data is hundreds of megabytes, so a checkout often links it to another disk. A
+    comparison that follows the link puts the target outside every base, and the log then holds
+    the absolute path of that disk.
+    """
+    from artisatomic.base import path_for_log
+
+    datadir = tmp_path / "repo" / "atomic-data-hillier"
+    external = tmp_path / "external" / "atomic_21jun23"
+    (external / "COB" / "II").mkdir(parents=True)
+    (external / "COB" / "II" / "osc_data").touch()
+    datadir.mkdir(parents=True)
+    (datadir / "atomic_21jun23").symlink_to(external)
+
+    oscfile = datadir / "atomic_21jun23" / "COB" / "II" / "osc_data"
+    assert oscfile.is_file()  # the link resolves, so the reader can open it
+
+    assert path_for_log(oscfile, relative_to=datadir) == "atomic_21jun23/COB/II/osc_data"
+
+    # the same holds when the data folder itself is the link
+    linkeddatadir = tmp_path / "repo" / "linked-data"
+    linkeddatadir.symlink_to(tmp_path / "external")
+    assert path_for_log(linkeddatadir / "atomic_21jun23" / "COB", relative_to=linkeddatadir) == "atomic_21jun23/COB"
+
+
 def test_scan_file_lines_reads_each_compressed_form(tmp_path):
     """Every compression form of a file gives the same lines, and skip_lines drops the header."""
     from xopen import xopen

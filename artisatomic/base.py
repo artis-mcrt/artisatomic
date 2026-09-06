@@ -259,16 +259,29 @@ def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     path would be wrong there. The default directory is the repository root. A reader whose files
     all sit under one data folder passes that folder, which keeps the logged path short.
 
+    The function compares the two paths lexically first, and with every symbolic link followed
+    second. A data folder is often a symbolic link to another disk, and only the lexical form
+    keeps such a path short. The two forms of a path are the same where no link is involved.
+
     The function falls back to the repository root, and then to the path itself. Some readers load
     data from outside the repository, and such a path comes back unchanged.
     """
-    resolved = Path(filepath).resolve()
+
+    def lexical(path: str | Path) -> Path:
+        # abspath removes a ".." without a look at the disk. Path.resolve(), which the ruff rule
+        # asks for, follows every symbolic link, and this function must not do that here
+        return Path(os.path.abspath(path))  # ruff: ignore[os-path-abspath]
+
+    def followlinks(path: str | Path) -> Path:
+        return Path(path).resolve()
+
     bases = [PYDIR.parent] if relative_to is None else [relative_to, PYDIR.parent]
-    for base in bases:
-        try:
-            return str(resolved.relative_to(base))
-        except ValueError:
-            continue
+    for normalise in (lexical, followlinks):
+        for base in bases:
+            try:
+                return str(normalise(filepath).relative_to(normalise(base)))
+            except ValueError:
+                continue
 
     return str(filepath)
 
