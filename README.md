@@ -25,3 +25,9 @@ python3 -m pip install --group dev -e .
 
 ## Usage
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. This code is not user friendly and requires manual editing of the Python scripts to change ions and data sources.
+
+The package installs three more commands:
+
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files.
+- `makeartischargetransferfile` writes the charge transfer rate files.
+- `makeartisgammaspecfiles` downloads the ENDF decay data and writes a gamma spectrum for each nuclide.

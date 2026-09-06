@@ -220,7 +220,7 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
     after a deliberate change of the output. tests/README.md gives the commands.
     """
-    monkeypatch.setattr(sys, "argv", ["makechargetransferfile", "-output_folder", str(tmp_path)])
+    monkeypatch.setattr(sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path)])
     makechargetransferfile.main()
 
     checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"

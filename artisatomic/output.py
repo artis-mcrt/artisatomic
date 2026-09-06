@@ -95,7 +95,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
     A null J means the same, and the casts below resolve both in the same way. Anything a reader
     could not give a number for casts to null and disables only its own rule. Examples are a NaN
-    and a string that pandas inferred from a blank column.
+    and a text value that a reader could not parse as a number.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion

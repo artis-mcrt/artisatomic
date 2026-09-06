@@ -28,12 +28,11 @@ dependencies = [
     "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
-    "pandas[compression]>=3.0.5",
     "polars>=1.43.2",
-    "pyarrow>=18.1.0",
     "requests>=2.34.0",
-    "scipy>=1.15.3",
     "tqdm>=4.70.0",
+    # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
+    "urllib3>=2.2.0",
     "xopen>=2.1.0",
 ]
 
@@ -43,15 +42,11 @@ dependencies = [
 coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
-    "matplotlib>=3.11.1",
-    "pandas-stubs>=3.0.5.260730",
-    "pip>=25.2",
     "prek>=0.4.14",
     "pyrefly>=1.2.0",
     "pytest>=8.3.3",
     "ruff>=0.16.4",
     "ty>=0.0.74",
-    "types-pytz>=2025.2.0.20250809",
     "types-requests>=2.32.0.20241016",
     "types-tqdm>=4.70.0.20260731",
 ]
@@ -62,8 +57,9 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic.cli:main"
-makechargetransferfile = "artisatomic.makechargetransferfile:main"
-makerecombratefile = "artisatomic.makerecombratefile:main"
+makeartischargetransferfile = "artisatomic.makechargetransferfile:main"
+makeartisrecombratefile = "artisatomic.makerecombratefile:main"
+makeartisgammaspecfiles = "artisatomic.download_gammaspec_betaminus_alpha:main"
 
 [tool.pyrefly]
 preset = "strict"
@@ -76,7 +72,6 @@ project-excludes = [
     'target',
     '**/_version.py',
     '**/.venv',
-    '**/rd_cmfgen.py',
 ]
 python-interpreter-path = ".venv/bin/python3"
 

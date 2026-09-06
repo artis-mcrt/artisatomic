@@ -25,7 +25,7 @@ Use these terms and spellings in the prose. Identifiers, output-file formats and
 
 artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design. To change ions or data sources, edit the Python code or supply an ion handlers JSON file.
 
-The command-line scripts (`makeartisatomicfiles`, `makerecombratefile`, and `makechargetransferfile`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
+The command-line scripts (`makeartisatomicfiles`, `makeartisrecombratefile`, `makeartischargetransferfile`, and `makeartisgammaspecfiles`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
 
 ## Setup
 
@@ -68,7 +68,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionisation cross sections.
 - `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
-- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makerecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makechargetransferfile` entry point.
+- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
 - `tests/` contains test configurations and reference checksums for each data source. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
 
 ## Code style

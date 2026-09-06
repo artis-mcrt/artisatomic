@@ -29,8 +29,8 @@ TESTMODE = os.environ.get("ARTISATOMIC_TESTMODE") == "1"
 def _read_atomic_properties() -> tuple[list[str], list[float]]:
     """Read the element symbols and masses from atomic_properties.txt, in atomic number order.
 
-    A plain split of each line reads the file, not pandas. Every spawned worker imports this
-    module, and nothing else on that import path uses pandas.
+    A plain split of each line reads the file. Every spawned worker imports this module, so
+    this function adds no import to that path.
     """
     with (PYDIR / "atomic_properties.txt").open(encoding="utf-8") as fproperties:
         rows = [line.split() for line in fproperties if line.strip() and not line.startswith("#")]
@@ -252,17 +252,38 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
-def path_for_log(filepath: str | Path) -> str:
-    """Render an input data path relative to the repository root where possible.
+def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
+    """Render an input data path for a log file, relative to a directory.
 
     The log files must not depend on the location of the repository checkout, so an absolute
-    path would be wrong there. Paths outside the repository (some readers load data from elsewhere)
-    come back unchanged.
+    path would be wrong there. The default directory is the repository root. A reader whose files
+    all sit under one data folder passes that folder, which keeps the logged path short.
+
+    The function compares the two paths lexically first, and with every symbolic link followed
+    second. A data folder is often a symbolic link to another disk, and only the lexical form
+    keeps such a path short. The two forms of a path are the same where no link is involved.
+
+    The function falls back to the repository root, and then to the path itself. Some readers load
+    data from outside the repository, and such a path comes back unchanged.
     """
-    try:
-        return str(Path(filepath).resolve().relative_to(PYDIR.parent))
-    except ValueError:
-        return str(filepath)
+
+    def lexical(path: str | Path) -> Path:
+        # abspath removes a ".." without a look at the disk. Path.resolve(), which the ruff rule
+        # asks for, follows every symbolic link, and this function must not do that here
+        return Path(os.path.abspath(path))  # ruff: ignore[os-path-abspath]
+
+    def followlinks(path: str | Path) -> Path:
+        return Path(path).resolve()
+
+    bases = [PYDIR.parent] if relative_to is None else [relative_to, PYDIR.parent]
+    for normalise in (lexical, followlinks):
+        for base in bases:
+            try:
+                return str(normalise(filepath).relative_to(normalise(base)))
+            except ValueError:
+                continue
+
+    return str(filepath)
 
 
 def fortran_float(text: str) -> float:
@@ -361,8 +382,7 @@ def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     """Read a text file into a lazy frame that holds one line in each row of a "line" column.
 
     polars cuts the columns out of every line at once, with str.slice() or str.extract_all().
-    That is much faster than pandas read_fwf(), or read_csv() with a regular expression
-    separator. Neither of those has a C parser, so each reads one line at a time in Python.
+    That is much faster than a fixed-width parser that reads one line at a time in Python.
 
     The caller names the plain file, as for xopen_check_extension(). polars reads a plain, a
     gzip, or a zstd file itself. It cannot read the xz form, which xopen decompresses into
@@ -457,7 +477,7 @@ def get_process_pool() -> ProcessPoolExecutor:
     """Get the one process pool for the whole run, and create it on the first use.
 
     A new pool costs about 0.6 s however small the batch, because "spawn" makes every worker
-    re-import this package and its numpy/polars/pandas dependencies. A build asks for one pool
+    re-import this package and its numpy and polars dependencies. A build asks for one pool
     for each ion and each photoionisation file. A pool for each call therefore spent most of its
     time in startup. The peak memory does not change (the same workers, alive for longer).
     """
@@ -577,8 +597,8 @@ def add_handler_if_not_set(
 
     The function does not modify the input list, so the caller must use the return value.
     """
-    # Readers derive these from pandas/numpy data, and json.dump() in main() cannot serialise
-    # numpy integers. Normalise them here and not in each caller.
+    # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+    # integers. Normalise them here and not in each caller.
     atomic_number = int(atomic_number)
     ion_stage = int(ion_stage)
 

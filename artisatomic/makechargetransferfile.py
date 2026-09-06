@@ -203,7 +203,7 @@ def format_header(source_counts: Counter[str]) -> str:
     """Build the comment block of the output file: the format, the sources, and the parameters."""
     lines = [
         "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
-        "The artisatomic script makechargetransferfile generates this file. Do not edit it by hand.",
+        "The artisatomic script makeartischargetransferfile generates this file. Do not edit it by hand.",
         "ARTIS makes its own estimates for the reactions that this file does not cover.",
         "",
         "FORMAT",

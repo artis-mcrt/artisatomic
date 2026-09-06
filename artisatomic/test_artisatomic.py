@@ -5,6 +5,7 @@ import argparse
 import functools
 import io
 import operator
+import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import typing as t
 from pathlib import Path
 
@@ -965,7 +966,7 @@ def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
     [
         ([None, None], pl.Int64),  # the canonical spelling of an absent parity
         ([float("nan"), float("nan")], pl.Float64),  # NaN compares equal to itself, so it must cast away
-        (["1", "1"], pl.String),  # pandas infers text from a blank column, e.g. FAC's P
+        (["1", "1"], pl.String),  # a reader that gives text where a whole number belongs
     ],
 )
 def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):
@@ -1081,22 +1082,162 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
     assert transition_count_of_level(dftransitions, len(energy_levels))[2] == 2
 
 
+def write_pandas_hdfstore(path, columns, indexlevels):
+    """Write a pandas HDFStore of the "fixed" format, as DataFrame.to_hdf() writes one.
+
+    The test writes the file itself, because the DREAM line list is not part of this repository
+    and pandas is not a dependency. columns maps each column name to its values, and indexlevels
+    maps each index level name to its values.
+    """
+    import h5py
+
+    with h5py.File(path, "w") as h5file:
+        group = h5file.create_group("atomic_data")
+        group.attrs["pandas_type"] = b"frame"
+        group.attrs["axis1_nlevels"] = len(indexlevels)
+        group.attrs["nblocks"] = 2
+
+        def write_pickle(name, obj):
+            # pytables holds a pickled object as a variable-length array of bytes
+            dataset = group.create_dataset(name, (1,), dtype=h5py.vlen_dtype(np.uint8))
+            dataset[0] = np.frombuffer(pickle.dumps(obj), dtype=np.uint8)
+            return dataset
+
+        for level, (name, values) in enumerate(indexlevels.items()):
+            uniquevalues = list(dict.fromkeys(values))
+            dataset = write_pickle(f"axis1_level{level}", np.array(uniquevalues, dtype=object))
+            dataset.attrs["name"] = name.encode()
+            group.create_dataset(
+                f"axis1_label{level}", data=np.array([uniquevalues.index(v) for v in values], dtype=np.int8)
+            )
+
+        # block 0 holds the float columns, block 1 the columns of Python objects
+        names = list(columns)
+        nrows = len(next(iter(columns.values())))
+        floatnames = [name for name in names if all(isinstance(v, float) for v in columns[name])]
+        objectnames = [name for name in names if name not in floatnames]
+        group.create_dataset("block0_items", data=np.array([n.encode() for n in floatnames]))
+        group.create_dataset(
+            "block0_values", data=np.array([[columns[n][row] for n in floatnames] for row in range(nrows)])
+        )
+        group.create_dataset("block1_items", data=np.array([n.encode() for n in objectnames]))
+        write_pickle(
+            "block1_values",
+            np.array([[columns[n][row] for n in objectnames] for row in range(nrows)], dtype=object),
+        )
+        group.create_dataset("axis0", data=np.array([n.encode() for n in names]))
+
+
+def test_read_pandas_hdfstore_rebuilds_the_frame(tmp_path):
+    """The DREAM reader rebuilds a pandas HDFStore with h5py, and needs no pandas to do it.
+
+    The index levels come first, then the columns in the order of the frame. The reader matches
+    the values to the columns by name, so the two blocks may hold them in any order.
+    """
+    from artisatomic.readdreamdata import read_pandas_hdfstore
+
+    path = tmp_path / "store.h5"
+    write_pandas_hdfstore(
+        path,
+        columns={
+            "Wavelength": [3175.982, 3215.81],
+            "Lower_Level": [0, 1053],
+            "Lower_Type": ["(e)", "(o)"],
+            "Lower_J": [1.5, 2.5],
+            # one column of two types keeps the Object type, as CF does in the DREAM line list
+            "CF": [0.047, "n"],
+        },
+        indexlevels={"Z": [57, 57], "C": [0, 1]},
+    )
+
+    df = read_pandas_hdfstore(path)
+    assert df.columns == ["Z", "C", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J", "CF"]
+    # a column of Python integers becomes Int64, so the polars expressions can read it
+    assert df.schema["Z"] == pl.Int64
+    assert df.schema["Lower_Level"] == pl.Int64
+    assert df.schema["CF"] == pl.Object
+    assert df.select("Z", "C", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J").rows() == [
+        (57, 0, 3175.982, 0, "(e)", 1.5),
+        (57, 1, 3215.81, 1053, "(o)", 2.5),
+    ]
+    assert df["CF"].to_list() == [0.047, "n"]
+
+
+def test_read_pandas_hdfstore_rejects_another_format(tmp_path):
+    """A file that is not a frame of the "fixed" format names the format that the reader needs."""
+    import h5py
+
+    from artisatomic.readdreamdata import read_pandas_hdfstore
+
+    path = tmp_path / "table.h5"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_group("atomic_data").attrs["pandas_type"] = b"frame_table"
+    with pytest.raises(ValueError, match="format='fixed'"):
+        read_pandas_hdfstore(path)
+
+    path = tmp_path / "twoframes.h5"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_group("first")
+        h5file.create_group("second")
+    with pytest.raises(ValueError, match="expects exactly one frame"):
+        read_pandas_hdfstore(path)
+
+
+def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
+    """LisbonReader reads the two CSV files of one ion, past the eight lines of provenance.
+
+    The reader derives J from g, and keeps the wavelength in Angstrom for the gf-to-A constant.
+    """
+    from artisatomic import readlisbondata
+
+    provenance = "\n".join(f"# line {i}" for i in range(8))
+    (tmp_path / "levels.csv").write_text(
+        provenance + "\n,Energy[cm^-1],g,RelConfig\n0,0.0,1,4f(2)0\n1,1000.0,5,4f(2)4\n"
+    )
+    (tmp_path / "lines.csv").write_text(provenance + "\n,Lower,Upper,gf,Wavelength[Ang]\n0,0,1,0.25,10000.0\n")
+
+    reader = readlisbondata.LisbonReader(
+        {
+            "Nd 1": {
+                "atomic_number": 60,
+                "ion_charge": 1,
+                "levels": str(tmp_path / "levels.csv"),
+                "lines": str(tmp_path / "lines.csv"),
+            }
+        }
+    )
+
+    assert reader.levels.select("energy", "j", "label", "atomic_number", "ion_charge").rows() == [
+        (0.0, 0.0, "4f(2)0", 60, 1),
+        (1000.0, 2.0, "4f(2)4", 60, 1),
+    ]
+    assert reader.lines.select(
+        "level_index_lower", "level_index_upper", "gf", "wavelength", "atomic_number", "ion_charge"
+    ).rows() == [(0, 1, 0.25, 10000.0, 60, 1)]
+
+    # the levels are already in energy order here, so every level keeps its file position
+    energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(reader.levels)
+    assert levelid_of_fileindex == {0: 0, 1: 1}
+    assert [level.levelname for level in energy_levels] == ["4f(2)0, j=0.0, index=0", "4f(2)4, j=2.0, index=1"]
+    assert [level.g for level in energy_levels] == [1.0, 5.0]
+
+    transitions = readlisbondata.read_lines_data(energy_levels, reader.lines, levelid_of_fileindex)
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
+    assert pytest.approx(0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)) == transitions[0].A
+
+
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     """Lisbon lines name their levels by position in the levels file, which the reader re-sorts by energy.
 
     An index into the sorted list with the file's own position attaches every transition to the
     wrong pair of levels. That happens whenever the source CSV is not already in energy order. The
-    map that read_levels_data() returns (as in readfacdata) prevents it. Row position, not index
-    label, keys the map, which matches the levels.iloc[...] lookup that LisbonReader itself does.
+    map that read_levels_data() returns (as in readfacdata) prevents it. Row position keys the
+    map, which matches the way the transitions file names its levels.
     """
-    import pandas as pd
-
     from artisatomic import readlisbondata
 
-    # deliberately not in energy order: file index 0 is the HIGHEST level, 2 the ground state
-    dflevels = pd.DataFrame(
-        {"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]}, index=[0, 1, 2]
-    )
+    # deliberately not in energy order: file position 0 is the HIGHEST level, 2 the ground state
+    dflevels = pl.DataFrame({"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]})
 
     energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(dflevels)
 
@@ -1110,9 +1251,13 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
 
     # one line from the file's level 2 (the ground state) to its level 0 (the top level). The second
     # row is the same line with the file's labels in the reverse order
-    dflines = pd.DataFrame(
-        {"gf": [1.0, 1.0], "wavelength": [2000.0, 2000.0]},
-        index=pd.MultiIndex.from_tuples([(2, 0), (0, 2)], names=["level_index_lower", "level_index_upper"]),
+    dflines = pl.DataFrame(
+        {
+            "level_index_lower": [2, 0],
+            "level_index_upper": [0, 2],
+            "gf": [1.0, 1.0],
+            "wavelength": [2000.0, 2000.0],
+        }
     )
     transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
@@ -1136,9 +1281,8 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
 
     # a line that names a level the table does not have means that the two files disagree about
     # the numbering. To skip it would drop every transition and write a silently empty ion.
-    dflines_unknown = pd.DataFrame(
-        {"gf": [1.0], "wavelength": [2000.0]},
-        index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
+    dflines_unknown = pl.DataFrame(
+        {"level_index_lower": [2], "level_index_upper": [99], "gf": [1.0], "wavelength": [2000.0]}
     )
     with pytest.raises(ValueError, match="names file index 99"):
         readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
@@ -1511,6 +1655,203 @@ def test_write_adata_level_comment():
     spaced_line = buf.getvalue().splitlines()[1]
     assert spaced_line.endswith(" " + spacedlevelname)
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
+
+
+def write_fac_fixture(tmp_path):
+    """Write one FAC and one cFAC pair of ascii files, in the fixed-width layout of each code.
+
+    Every field sits at the character positions that the reader cuts. The header holds a blank
+    line, as a real FAC file does. The tables carry these cases:
+
+    - an occupation of 1, and an occupation of 10 or more;
+    - two levels of one energy;
+    - a negative Monopole whose "-" reaches into the A column;
+    - a negative A.
+    """
+
+    def row(width: int, fields: list[tuple[str, int, int]]) -> str:
+        chars = [" "] * width
+        for text, start, end in fields:
+            chars[start:end] = list(f"{text:>{end - start}}")
+        return "".join(chars).rstrip()
+
+    def header(code: str, count: int) -> list[str]:
+        # FAC writes a blank line in the header, before NELE and NLEV. The reader must not count
+        # it, so the count of lines that hold text stays the same as the file's own header
+        return [f"{code} 1.1.5", *[f"headerline{i}" for i in range(1, count - 1)], "", "headerline"]
+
+    # FAC levels: Ilev (0,7) Energy_ev (14,30) P (30,31) 2J (38,43) Configs (76,125)
+    faclevels = header("FAC", 11)
+    faclevels += [
+        row(125, [("0", 0, 7), ("0.0000000000E+00", 14, 30), ("0", 30, 31), ("0", 38, 43), ("4f1.6s1", 76, 84)]),
+        row(125, [("1", 0, 7), ("5.0000000000E+00", 14, 30), ("1", 30, 31), ("4", 38, 43), ("4f14.6s2", 76, 85)]),
+        # the same energy as the level before it, so the stable sort must keep the file's order
+        row(125, [("2", 0, 7), ("5.0000000000E+00", 14, 30), ("0", 30, 31), ("2", 38, 43), ("5d1.6s1", 76, 84)]),
+        "",  # FAC writes a blank line after the table
+    ]
+    (tmp_path / "fac.lev.asc").write_text("\n".join(faclevels) + "\n")
+
+    # FAC transitions: Upper (0,7) Lower (11,17) A (49,63) Monopole (63,77)
+    factrans = header("FAC", 12)
+    factrans += [
+        row(77, [("1", 0, 7), ("0", 11, 17), ("3.1400000E+07", 49, 63), ("1.0E-03", 63, 77)]),
+        # a wide negative Monopole starts one column early, so its "-" lands in the A field
+        row(77, [("1.00000E+06", 49, 62), ("-", 62, 63), ("2", 0, 7), ("0", 11, 17), ("2.0E-03", 63, 77)]),
+        row(77, [("2", 0, 7), ("1", 11, 17), ("-7.7700000E+04", 49, 63), ("1.0E-05", 63, 77)]),
+        "",
+    ]
+    (tmp_path / "fac.tr.asc").write_text("\n".join(factrans) + "\n")
+
+    # cFAC levels: the configuration and a second field share the column at (43,150)
+    cfaclevels = header("cFAC", 11)
+    cfaclevels += [
+        row(
+            150,
+            [("0", 0, 7), ("0.0000000000E+00", 14, 30), ("0", 30, 31), ("0", 38, 43), ("4f1 6s1   4f+1(3)3", 45, 63)],
+        ),
+        row(
+            150,
+            [("1", 0, 7), ("5.0000000000E+00", 14, 30), ("1", 30, 31), ("4", 38, 43), ("4f14 6s2   4f+14(0)0", 45, 65)],
+        ),
+        "",
+    ]
+    (tmp_path / "cfac.lev.asc").write_text("\n".join(cfaclevels) + "\n")
+
+    # cFAC transitions: Upper (0,6) Lower (10,16) A (61,75)
+    cfactrans = header("cFAC", 12)
+    cfactrans += [
+        row(89, [("1", 0, 6), ("0", 10, 16), ("3.1400000E+07", 61, 75), ("1.0E-03", 75, 89)]),
+        "",
+    ]
+    (tmp_path / "cfac.tr.asc").write_text("\n".join(cfactrans) + "\n")
+
+
+def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
+    """The reader cuts the same values out of the FAC and the cFAC fixed-width layouts.
+
+    Both layouts give the same level table here, because the two files describe the same ion.
+    The transition table shows the two cases that the A column carries: a value that borrowed the
+    "-" of a negative Monopole, and a value that is itself negative.
+    """
+    write_fac_fixture(tmp_path)
+
+    # "6s1" loses its occupation of 1, "4f14" and "6s2" keep theirs, and a dot becomes a space
+    expected_levels = {
+        "fac": [(0, "4f 6s", 0, 1, 0.0), (1, "4f14 6s2", 1, 5, 5.0), (2, "5d 6s", 0, 3, 5.0)],
+        "cfac": [(0, "4f 6s", 0, 1, 0.0), (1, "4f14 6s2", 1, 5, 5.0)],
+    }
+    for name, expected in expected_levels.items():
+        dflevels = readfacdata.GetLevels(tmp_path / f"{name}.lev.asc")
+        # the whole table, so a parse that drops or adds a level fails here
+        assert list(dflevels.select("Ilev", "Config", "P", "g", "Energy_ev").iter_rows()) == expected, name
+        assert dflevels["energypercm"].to_list() == [energy / hc_in_ev_cm for _, _, _, _, energy in expected], name
+
+    dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
+    assert list(dflines.select("Upper", "Lower", "A").iter_rows()) == [
+        (1, 0, 3.14e7),
+        (2, 0, 1.0e6),  # the borrowed "-" goes, and the value stays positive
+        (2, 1, -7.77e4),  # a negative A keeps its sign
+    ]
+
+    assert list(readfacdata.GetLines(tmp_path / "cfac.tr.asc").select("Upper", "Lower", "A").iter_rows()) == [
+        (1, 0, 3.14e7)
+    ]
+
+    # a file that neither code wrote must not parse as either of them
+    (tmp_path / "other.lev.asc").write_text("SOMETHINGELSE 1.0\n" + "\n".join(f"h{i}" for i in range(1, 12)) + "\n")
+    with pytest.raises(ValueError, match="No FAC-like code"):
+        readfacdata.GetLevels(tmp_path / "other.lev.asc")
+
+
+def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
+    """The FAC levels sort by energy, and the transitions still name their levels by the file's Ilev.
+
+    The map that read_levels_data() returns carries the transitions onto the sorted ids. The sort
+    is stable, so two levels of one energy keep the order of the file.
+    """
+    write_fac_fixture(tmp_path)
+    dflevels = readfacdata.GetLevels(tmp_path / "fac.lev.asc")
+
+    energy_levels, levelid_of_fileindex = readfacdata.read_levels_data(dflevels)
+
+    assert [level.levelname for level in energy_levels] == [
+        "4f 6s Ilev=0",
+        "4f14 6s2 Ilev=1",
+        "5d 6s Ilev=2",
+    ]
+    assert levelid_of_fileindex == {0: 0, 1: 1, 2: 2}
+
+    dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
+    transitions = readfacdata.read_lines_data(dflines, levelid_of_fileindex, set(), io.StringIO())
+    assert [(tr.lowerlevel, tr.upperlevel, tr.A) for tr in transitions] == [
+        (0, 1, 3.14e7),
+        (0, 2, 1.0e6),
+        (1, 2, -7.77e4),
+    ]
+
+    # a level above the ionisation energy leaves the level list, so its transitions go too
+    flog = io.StringIO()
+    transitions = readfacdata.read_lines_data(dflines, levelid_of_fileindex, {2}, flog)
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
+    assert "skipped 2 transitions" in flog.getvalue()
+
+    # a transition that names an Ilev the levels file does not have means the two files disagree
+    with pytest.raises(ValueError, match="names file index 99"):
+        readfacdata.read_lines_data(
+            dflines.with_columns(pl.col("Upper").replace(1, 99)), levelid_of_fileindex, set(), io.StringIO()
+        )
+
+
+def test_path_for_log_renders_a_path_relative_to_a_directory():
+    """A log file must name a data file the same way on every machine, so no path is absolute.
+
+    The default directory is the repository root. A reader that passes its own data folder gets a
+    shorter path, and a path outside that folder still falls back to the repository root.
+    """
+    from artisatomic.base import path_for_log
+    from artisatomic.readhillierdata import hillier_datadir
+
+    oscfile = hillier_datadir / "atomic_21jun23" / "COB" / "II" / "19apr23" / "osc_data"
+
+    # the CMFGEN reader names its files relative to its own data folder
+    assert path_for_log(oscfile, relative_to=hillier_datadir) == "atomic_21jun23/COB/II/19apr23/osc_data"
+
+    # with no folder given, the same file is relative to the repository root
+    assert path_for_log(oscfile) == "atomic-data-hillier/atomic_21jun23/COB/II/19apr23/osc_data"
+
+    # a file outside the given folder falls back to the repository root
+    kuruczfile = PYDIR / ".." / "atomic-data-kurucz" / "gfall.dat"
+    assert path_for_log(kuruczfile, relative_to=hillier_datadir) == "atomic-data-kurucz/gfall.dat"
+
+    # a path outside the repository comes back unchanged, because no base fits it
+    assert path_for_log("/nonexistent/elsewhere/osc_data") == "/nonexistent/elsewhere/osc_data"
+
+
+def test_path_for_log_keeps_a_symlinked_data_folder_short(tmp_path):
+    """A data folder is often a symbolic link to another disk, and the log path must stay short.
+
+    The CMFGEN data is hundreds of megabytes, so a checkout often links it to another disk. A
+    comparison that follows the link puts the target outside every base, and the log then holds
+    the absolute path of that disk.
+    """
+    from artisatomic.base import path_for_log
+
+    datadir = tmp_path / "repo" / "atomic-data-hillier"
+    external = tmp_path / "external" / "atomic_21jun23"
+    (external / "COB" / "II").mkdir(parents=True)
+    (external / "COB" / "II" / "osc_data").touch()
+    datadir.mkdir(parents=True)
+    (datadir / "atomic_21jun23").symlink_to(external)
+
+    oscfile = datadir / "atomic_21jun23" / "COB" / "II" / "osc_data"
+    assert oscfile.is_file()  # the link resolves, so the reader can open it
+
+    assert path_for_log(oscfile, relative_to=datadir) == "atomic_21jun23/COB/II/osc_data"
+
+    # the same holds when the data folder itself is the link
+    linkeddatadir = tmp_path / "repo" / "linked-data"
+    linkeddatadir.symlink_to(tmp_path / "external")
+    assert path_for_log(linkeddatadir / "atomic_21jun23" / "COB", relative_to=linkeddatadir) == "atomic_21jun23/COB"
 
 
 def test_scan_file_lines_reads_each_compressed_form(tmp_path):
@@ -2484,7 +2825,12 @@ def test_console_script_entry_points_resolve():
     from importlib.metadata import entry_points
 
     declared = {ep.name: ep for ep in entry_points(group="console_scripts") if ep.module.startswith("artisatomic")}
-    assert set(declared) == {"makeartisatomicfiles", "makechargetransferfile", "makerecombratefile"}
+    assert set(declared) == {
+        "makeartisatomicfiles",
+        "makeartischargetransferfile",
+        "makeartisgammaspecfiles",
+        "makeartisrecombratefile",
+    }
 
     # the module that defines main(), not the package root: the root re-exports nothing
     assert declared["makeartisatomicfiles"].value == "artisatomic.cli:main"
