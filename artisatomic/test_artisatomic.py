@@ -1081,22 +1081,61 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
     assert transition_count_of_level(dftransitions, len(energy_levels))[2] == 2
 
 
+def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
+    """LisbonReader reads the two CSV files of one ion, past the eight lines of provenance.
+
+    The reader derives J from g, and keeps the wavelength in Angstrom for the gf-to-A constant.
+    """
+    from artisatomic import readlisbondata
+
+    provenance = "\n".join(f"# line {i}" for i in range(8))
+    (tmp_path / "levels.csv").write_text(
+        provenance + "\n,Energy[cm^-1],g,RelConfig\n0,0.0,1,4f(2)0\n1,1000.0,5,4f(2)4\n"
+    )
+    (tmp_path / "lines.csv").write_text(provenance + "\n,Lower,Upper,gf,Wavelength[Ang]\n0,0,1,0.25,10000.0\n")
+
+    reader = readlisbondata.LisbonReader(
+        {
+            "Nd 1": {
+                "atomic_number": 60,
+                "ion_charge": 1,
+                "levels": str(tmp_path / "levels.csv"),
+                "lines": str(tmp_path / "lines.csv"),
+            }
+        }
+    )
+
+    assert reader.levels.select("energy", "j", "label", "atomic_number", "ion_charge").rows() == [
+        (0.0, 0.0, "4f(2)0", 60, 1),
+        (1000.0, 2.0, "4f(2)4", 60, 1),
+    ]
+    assert reader.lines.select(
+        "level_index_lower", "level_index_upper", "gf", "wavelength", "atomic_number", "ion_charge"
+    ).rows() == [(0, 1, 0.25, 10000.0, 60, 1)]
+
+    # the levels are already in energy order here, so every level keeps its file position
+    energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(reader.levels)
+    assert levelid_of_fileindex == {0: 0, 1: 1}
+    assert [level.levelname for level in energy_levels] == ["4f(2)0, j=0.0, index=0", "4f(2)4, j=2.0, index=1"]
+    assert [level.g for level in energy_levels] == [1.0, 5.0]
+
+    transitions = readlisbondata.read_lines_data(energy_levels, reader.lines, levelid_of_fileindex)
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
+    assert pytest.approx(0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)) == transitions[0].A
+
+
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     """Lisbon lines name their levels by position in the levels file, which the reader re-sorts by energy.
 
     An index into the sorted list with the file's own position attaches every transition to the
     wrong pair of levels. That happens whenever the source CSV is not already in energy order. The
-    map that read_levels_data() returns (as in readfacdata) prevents it. Row position, not index
-    label, keys the map, which matches the levels.iloc[...] lookup that LisbonReader itself does.
+    map that read_levels_data() returns (as in readfacdata) prevents it. Row position keys the
+    map, which matches the way the transitions file names its levels.
     """
-    import pandas as pd
-
     from artisatomic import readlisbondata
 
-    # deliberately not in energy order: file index 0 is the HIGHEST level, 2 the ground state
-    dflevels = pd.DataFrame(
-        {"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]}, index=[0, 1, 2]
-    )
+    # deliberately not in energy order: file position 0 is the HIGHEST level, 2 the ground state
+    dflevels = pl.DataFrame({"energy": [5000.0, 1000.0, 0.0], "j": [2.0, 1.0, 0.0], "label": ["top", "mid", "gs"]})
 
     energy_levels, levelid_of_fileindex = readlisbondata.read_levels_data(dflevels)
 
@@ -1110,9 +1149,13 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
 
     # one line from the file's level 2 (the ground state) to its level 0 (the top level). The second
     # row is the same line with the file's labels in the reverse order
-    dflines = pd.DataFrame(
-        {"gf": [1.0, 1.0], "wavelength": [2000.0, 2000.0]},
-        index=pd.MultiIndex.from_tuples([(2, 0), (0, 2)], names=["level_index_lower", "level_index_upper"]),
+    dflines = pl.DataFrame(
+        {
+            "level_index_lower": [2, 0],
+            "level_index_upper": [0, 2],
+            "gf": [1.0, 1.0],
+            "wavelength": [2000.0, 2000.0],
+        }
     )
     transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
@@ -1136,9 +1179,8 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
 
     # a line that names a level the table does not have means that the two files disagree about
     # the numbering. To skip it would drop every transition and write a silently empty ion.
-    dflines_unknown = pd.DataFrame(
-        {"gf": [1.0], "wavelength": [2000.0]},
-        index=pd.MultiIndex.from_tuples([(2, 99)], names=["level_index_lower", "level_index_upper"]),
+    dflines_unknown = pl.DataFrame(
+        {"level_index_lower": [2], "level_index_upper": [99], "gf": [1.0], "wavelength": [2000.0]}
     )
     with pytest.raises(ValueError, match="names file index 99"):
         readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)

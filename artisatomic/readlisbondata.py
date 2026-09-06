@@ -4,7 +4,7 @@ import os
 import typing as t
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 
 from artisatomic.base import elsymbols
 from artisatomic.base import get_nist_ionization_energies_ev
@@ -57,34 +57,34 @@ class LisbonReader:
         for parser in data.values():
             atomic_number = parser["atomic_number"]
             ion_charge = parser["ion_charge"]
-            levels_data = pd.read_csv(parser["levels"], skiprows=8, index_col=0)
-            levels = pd.DataFrame()
-            levels["energy"] = levels_data["Energy[cm^-1]"]
-            levels["j"] = 0.5 * (levels_data["g"] - 1)
-            levels["label"] = levels_data["RelConfig"]
-            levels["atomic_number"] = atomic_number
-            levels["ion_charge"] = ion_charge
-            levels["level_index"] = levels.index
-            levels = levels.set_index(["atomic_number", "ion_charge", "level_index"])
-            lvl_list.append(levels)
+            # the first column of the CSV numbers the levels. The lines name their levels by
+            # position, so the reader keeps the file order and does not use that column as a key
+            levels_data = pl.read_csv(parser["levels"], skip_rows=8)
+            lvl_list.append(
+                levels_data.select(
+                    energy=pl.col("Energy[cm^-1]"),
+                    j=0.5 * (pl.col("g") - 1),
+                    label=pl.col("RelConfig"),
+                    atomic_number=pl.lit(atomic_number, dtype=pl.Int64),
+                    ion_charge=pl.lit(ion_charge, dtype=pl.Int64),
+                )
+            )
 
-            lines_data = pd.read_csv(parser["lines"], skiprows=8)  # index_col=0
-            lines = pd.DataFrame()
-            lines["level_index_lower"] = lines_data["Lower"]
-            lines["level_index_upper"] = lines_data["Upper"]
-            lines["atomic_number"] = atomic_number
-            lines["ion_charge"] = ion_charge
-            lines["gf"] = lines_data["gf"]
-            # keep the wavelength in Angstrom: the gf-to-A constant in read_lines_data()
-            # expects Angstrom
-            lines["wavelength"] = lines_data["Wavelength[Ang]"]
-            lines = lines.set_index(["atomic_number", "ion_charge", "level_index_lower", "level_index_upper"])
-            lns_list.append(lines)
-        levels = pd.concat(lvl_list)
-        # pd.concat() of the untyped list above narrows to Never, so a type checker reads this as dead
-        lines = pd.concat(lns_list)
-        self.levels = levels
-        self.lines = lines
+            lines_data = pl.read_csv(parser["lines"], skip_rows=8)
+            lns_list.append(
+                lines_data.select(
+                    level_index_lower=pl.col("Lower"),
+                    level_index_upper=pl.col("Upper"),
+                    atomic_number=pl.lit(atomic_number, dtype=pl.Int64),
+                    ion_charge=pl.lit(ion_charge, dtype=pl.Int64),
+                    gf=pl.col("gf"),
+                    # keep the wavelength in Angstrom: the gf-to-A constant in read_lines_data()
+                    # expects Angstrom
+                    wavelength=pl.col("Wavelength[Ang]"),
+                )
+            )
+        self.levels = pl.concat(lvl_list)
+        self.lines = pl.concat(lns_list)
 
 
 def get_levelname(row, fileindex: int):
@@ -94,7 +94,7 @@ def get_levelname(row, fileindex: int):
     their relativistic configuration and J with another level. The file index makes the name
     unique, as the FAC, Floers+25 and MONS readers do with theirs.
     """
-    return f"{row.label}, j={row.j}, index={fileindex}"
+    return f"{row['label']}, j={row['j']}, index={fileindex}"
 
 
 def read_levels_data(dflevels):
@@ -103,32 +103,30 @@ def read_levels_data(dflevels):
     Also returns the map from the file index to the zero-based level id, which
     read_lines_data() needs because the sort by energy reorders the levels.
 
-    The lines name their levels by POSITION. LisbonReader reads their energies with
-    levels.iloc[lines["level_index_lower"]], which is a position in the file-ordered frame, not an
-    index label. So the key of the map is that position. The reset_index() below makes this
-    explicit. Without it, the map would depend on a levels CSV whose numbers happen to start at
-    zero.
+    The lines name their levels by POSITION in the levels file. So the key of the map is that
+    position, which with_row_index() writes into a column before the sort. Without it, the map
+    would depend on a levels CSV whose numbers happen to start at zero.
 
     This data set supplies no parities, so every level's parity is null and the Laporte rule
     never fires. It does supply J, which is part of each level name, so the delta J rule alone
     decides whether a transition is forbidden here.
     """
-    # sort first, so that the ids handed out below are the ones the levels keep. The reset of the
-    # index to the row position comes first, so each level carries its file position through the sort
-    dflevels = dflevels.reset_index(drop=True).sort_values(by="energy", kind="stable")
+    # each level carries its file position through the sort. The sort is stable, so levels of one
+    # energy keep the order of the file
+    dflevels = dflevels.with_row_index("fileposition").sort("energy", maintain_order=True)
 
     energy_levels = [
         EnergyLevelTuple(
-            levelname=get_levelname(row, fileposition),
+            levelname=get_levelname(row, row["fileposition"]),
             parity=None,  # no parity in this data set, so the Laporte rule cannot fire
-            j=float(row.j),
-            g=2 * row.j + 1,
-            energyabovegsinpercm=float(row.energy),
+            j=float(row["j"]),
+            g=2 * row["j"] + 1,
+            energyabovegsinpercm=float(row["energy"]),
         )
-        for fileposition, row in dflevels.iterrows()
+        for row in dflevels.iter_rows(named=True)
     ]
 
-    return energy_levels, levelid_of_fileindex_map(dflevels.index, "the Lisbon levels file")
+    return energy_levels, levelid_of_fileindex_map(dflevels["fileposition"], "the Lisbon levels file")
 
 
 def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
@@ -146,12 +144,12 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """
     transitions = []
 
-    for (fileindex_lower, fileindex_upper), row in dflines.iterrows():
+    for row in dflines.iter_rows(named=True):
         lowerlevel, upperlevel = resolve_transition_levelids(
-            fileindex_lower, fileindex_upper, levelid_of_fileindex, "the Lisbon transitions file"
+            row["level_index_lower"], row["level_index_upper"], levelid_of_fileindex, "the Lisbon transitions file"
         )
 
-        A = row.gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * row.wavelength**2)
+        A = row["gf"] / (gf_to_a_coefficient * energy_levels[upperlevel].g * row["wavelength"] ** 2)
         transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
 
     return transitions
@@ -183,7 +181,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     print(f"Reading Lisbon data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman})")
 
     # the Lisbon CSVs are not part of this repository, so the location is configurable. This check
-    # comes first: pandas would otherwise report only the missing file, not what to set
+    # comes first: polars would otherwise report only the missing file, not what to set
     lisbonpath = Path(os.environ.get("ARTISATOMIC_LISBON_PATH", PYDIR / ".." / "atomic-data-lisbon")).resolve()
     if not lisbonpath.is_dir():
         msg = (
@@ -204,11 +202,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     lisbon_reader = LisbonReader(lisbon_data)
 
-    dflevels = lisbon_reader.levels.loc[atomic_number, ion_charge]
+    this_ion = (pl.col("atomic_number") == atomic_number) & (pl.col("ion_charge") == ion_charge)
+    dflevels = lisbon_reader.levels.filter(this_ion)
     # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
-    dflines = lisbon_reader.lines.loc[atomic_number, ion_charge]
+    dflines = lisbon_reader.lines.filter(this_ion)
 
     transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
