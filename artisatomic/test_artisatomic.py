@@ -5,6 +5,7 @@ import argparse
 import functools
 import io
 import operator
+import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import typing as t
 from pathlib import Path
 
@@ -1079,6 +1080,106 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
 
     # the file's level numbers are the level ids, so the writer's count lands on the right level
     assert transition_count_of_level(dftransitions, len(energy_levels))[2] == 2
+
+
+def write_pandas_hdfstore(path, columns, indexlevels):
+    """Write a pandas HDFStore of the "fixed" format, as DataFrame.to_hdf() writes one.
+
+    The test writes the file itself, because the DREAM line list is not part of this repository
+    and pandas is not a dependency. columns maps each column name to its values, and indexlevels
+    maps each index level name to its values.
+    """
+    import h5py
+
+    with h5py.File(path, "w") as h5file:
+        group = h5file.create_group("atomic_data")
+        group.attrs["pandas_type"] = b"frame"
+        group.attrs["axis1_nlevels"] = len(indexlevels)
+        group.attrs["nblocks"] = 2
+
+        def write_pickle(name, obj):
+            # pytables holds a pickled object as a variable-length array of bytes
+            dataset = group.create_dataset(name, (1,), dtype=h5py.vlen_dtype(np.uint8))
+            dataset[0] = np.frombuffer(pickle.dumps(obj), dtype=np.uint8)
+            return dataset
+
+        for level, (name, values) in enumerate(indexlevels.items()):
+            uniquevalues = list(dict.fromkeys(values))
+            dataset = write_pickle(f"axis1_level{level}", np.array(uniquevalues, dtype=object))
+            dataset.attrs["name"] = name.encode()
+            group.create_dataset(
+                f"axis1_label{level}", data=np.array([uniquevalues.index(v) for v in values], dtype=np.int8)
+            )
+
+        # block 0 holds the float columns, block 1 the columns of Python objects
+        names = list(columns)
+        floatnames = [name for name in names if all(isinstance(v, float) for v in columns[name])]
+        objectnames = [name for name in names if name not in floatnames]
+        group.create_dataset("block0_items", data=np.array([n.encode() for n in floatnames]))
+        group.create_dataset(
+            "block0_values", data=np.array([[columns[n][row] for n in floatnames] for row in range(len(values))])
+        )
+        group.create_dataset("block1_items", data=np.array([n.encode() for n in objectnames]))
+        write_pickle(
+            "block1_values",
+            np.array([[columns[n][row] for n in objectnames] for row in range(len(values))], dtype=object),
+        )
+        group.create_dataset("axis0", data=np.array([n.encode() for n in names]))
+
+
+def test_read_pandas_hdfstore_rebuilds_the_frame(tmp_path):
+    """The DREAM reader rebuilds a pandas HDFStore with h5py, and needs no pandas to do it.
+
+    The index levels come first, then the columns in the order of the frame. The reader matches
+    the values to the columns by name, so the two blocks may hold them in any order.
+    """
+    from artisatomic.readdreamdata import read_pandas_hdfstore
+
+    path = tmp_path / "store.h5"
+    write_pandas_hdfstore(
+        path,
+        columns={
+            "Wavelength": [3175.982, 3215.81],
+            "Lower_Level": [0, 1053],
+            "Lower_Type": ["(e)", "(o)"],
+            "Lower_J": [1.5, 2.5],
+            # one column of two types keeps the Object type, as CF does in the DREAM line list
+            "CF": [0.047, "n"],
+        },
+        indexlevels={"Z": [57, 57], "C": [0, 1]},
+    )
+
+    df = read_pandas_hdfstore(path)
+    assert df.columns == ["Z", "C", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J", "CF"]
+    # a column of Python integers becomes Int64, so the polars expressions can read it
+    assert df.schema["Z"] == pl.Int64
+    assert df.schema["Lower_Level"] == pl.Int64
+    assert df.schema["CF"] == pl.Object
+    assert df.select("Z", "C", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J").rows() == [
+        (57, 0, 3175.982, 0, "(e)", 1.5),
+        (57, 1, 3215.81, 1053, "(o)", 2.5),
+    ]
+    assert df["CF"].to_list() == [0.047, "n"]
+
+
+def test_read_pandas_hdfstore_rejects_another_format(tmp_path):
+    """A file that is not a frame of the "fixed" format names the format that the reader needs."""
+    import h5py
+
+    from artisatomic.readdreamdata import read_pandas_hdfstore
+
+    path = tmp_path / "table.h5"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_group("atomic_data").attrs["pandas_type"] = b"frame_table"
+    with pytest.raises(ValueError, match="format='fixed'"):
+        read_pandas_hdfstore(path)
+
+    path = tmp_path / "twoframes.h5"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_group("first")
+        h5file.create_group("second")
+    with pytest.raises(ValueError, match="expects exactly one frame"):
+        read_pandas_hdfstore(path)
 
 
 def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
