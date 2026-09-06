@@ -32,6 +32,7 @@ dependencies = [
     { name = "requests" },
     { name = "scipy" },
     { name = "tqdm" },
+    { name = "urllib3" },
     { name = "xopen" },
 ]
 
@@ -41,14 +42,11 @@ coverage = [
 ]
 dev = [
     { name = "coverage" },
-    { name = "matplotlib" },
-    { name = "pip" },
     { name = "prek" },
     { name = "pyrefly" },
     { name = "pytest" },
     { name = "ruff" },
     { name = "ty" },
-    { name = "types-pytz" },
     { name = "types-requests" },
     { name = "types-tqdm" },
 ]
@@ -64,6 +62,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.0" },
     { name = "scipy", specifier = ">=1.15.3" },
     { name = "tqdm", specifier = ">=4.70.0" },
+    { name = "urllib3", specifier = ">=2.2.0" },
     { name = "xopen", specifier = ">=2.1.0" },
 ]
 
@@ -71,14 +70,11 @@ requires-dist = [
 coverage = [{ name = "coverage", specifier = ">=7.15.3" }]
 dev = [
     { name = "coverage", specifier = ">=7.15.3" },
-    { name = "matplotlib", specifier = ">=3.11.1" },
-    { name = "pip", specifier = ">=25.2" },
     { name = "prek", specifier = ">=0.4.14" },
     { name = "pyrefly", specifier = ">=1.2.0" },
     { name = "pytest", specifier = ">=8.3.3" },
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "ty", specifier = ">=0.0.74" },
-    { name = "types-pytz", specifier = ">=2025.2.0.20250809" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },
     { name = "types-tqdm", specifier = ">=4.70.0.20260731" },
 ]
@@ -861,15 +857,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pip"
-version = "26.2.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ae/15/4500e320e6b101ec3b719ae85b697d9940b6cda672bc555bd6016fc60c6f/pip-26.2.1.tar.gz", hash = "sha256:f6ad667e89a1fe78046c8f13232b247200f5258d7828f3f7883d660878e0813f", size = 1848877, upload-time = "2026-08-04T22:51:14.148Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/6e/1736e5b4ae2b778ef2f81c47d797de9f891d4d8acb047a24ca37a60294dd/pip-26.2.1-py3-none-any.whl", hash = "sha256:71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e", size = 1816632, upload-time = "2026-08-04T22:51:12.472Z" },
-]
-
-[[package]]
 name = "pluggy"
 version = "1.6.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1189,15 +1176,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/53/53/d514b3456346aa2d87a5e332a2a7087ee4815cf51671fff8d12f57716457/ty-0.0.76-py3-none-win32.whl", hash = "sha256:12a5567e8278afb398b16251df142b2926809c7365aa7c395f3f9c72782ad052", size = 12540940, upload-time = "2026-08-31T15:56:12.328Z" },
     { url = "https://files.pythonhosted.org/packages/9f/c9/e7877257c8b3ebcd30346c4df0b19466551128fe38ac27f594b6d99af17b/ty-0.0.76-py3-none-win_amd64.whl", hash = "sha256:4ac9762bff39bee64679dba416151e88d4067a873eff737cd9c902ae7a325cc9", size = 13145276, upload-time = "2026-08-31T15:56:14.658Z" },
     { url = "https://files.pythonhosted.org/packages/fe/e6/e86d0609c6046f1dd808c0ceee718b562306bc019106037e32fde465d447/ty-0.0.76-py3-none-win_arm64.whl", hash = "sha256:4f546fb03f4c1e2506e894560a5d37729eca81560fcdfd0f860e5314f427ac9a", size = 12968214, upload-time = "2026-08-31T15:56:16.815Z" },
-]
-
-[[package]]
-name = "types-pytz"
-version = "2026.3.1.20260727"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/b1/cf/eae96172a036b942e0ad0ec49512108b4ef4b97cd6c2aed5677540a597e7/types_pytz-2026.3.1.20260727.tar.gz", hash = "sha256:4364075b6867dd15b210bb8c1d29727d609917129b45600defe1d4b3eda5ecb9", size = 10914, upload-time = "2026-07-27T05:36:32.389Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9c/24/a654176875944981c75516857cd8750600eeb9ff7fc07a2b82573619a57c/types_pytz-2026.3.1.20260727-py3-none-any.whl", hash = "sha256:42ac44e83645bfceb46597342c8fb8ec028a1407e2feae9c5c539986eab6b57a", size = 10132, upload-time = "2026-07-27T05:36:31.52Z" },
 ]
 
 [[package]]

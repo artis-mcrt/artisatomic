@@ -4,7 +4,6 @@
 import typing as t
 from pathlib import Path
 
-import ChiantiPy.core as ch
 import numpy as np
 from artistools import get_composition_data
 
@@ -84,6 +83,10 @@ def main():
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
                     frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
                 else:  # use Chianti with ChiantiPy
+                    # imported here, not at the top: ChiantiPy takes 0.6 s to import and writes
+                    # four warning lines. A run that has every Nahar file never reaches this
+                    import ChiantiPy.core as ch
+
                     print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
                     frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
