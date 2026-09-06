@@ -30,10 +30,6 @@ dependencies = [
     "numpy>=2.2.6",
     "polars>=1.43.2",
     "requests>=2.34.0",
-    # chiantipy declares no dependencies of its own, but imports scipy and matplotlib. scipy has
-    # no other source in this set, so makerecombratefile stops without it. matplotlib comes with
-    # artistools. No module of this package imports scipy.
-    "scipy>=1.15.3",
     "tqdm>=4.70.0",
     # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
     "urllib3>=2.2.0",

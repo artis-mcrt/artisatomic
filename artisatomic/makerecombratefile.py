@@ -85,7 +85,18 @@ def main():
                 else:  # use Chianti with ChiantiPy
                     # imported here, not at the top: ChiantiPy takes 0.6 s to import and writes
                     # four warning lines. A run that has every Nahar file never reaches this
-                    import ChiantiPy.core as ch
+                    try:
+                        import ChiantiPy.core as ch
+                    except ModuleNotFoundError as exc:
+                        # chiantipy imports scipy and matplotlib but declares no dependency on
+                        # either, so the name in the error belongs to no dependency of this
+                        # package. Say which package needs it
+                        msg = (
+                            f"The Chianti source needs the {exc.name} module, which chiantipy imports but does not"
+                            f" declare. Install {exc.name}, or give a Nahar .rrc file for"
+                            f" Z={atomic_number} ion_stage {lowerionstage}."
+                        )
+                        raise ModuleNotFoundError(msg) from exc
 
                     print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)
