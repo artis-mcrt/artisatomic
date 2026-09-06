@@ -231,17 +231,14 @@ hyd_gaunt_factor: dict[int, list[float]] = {}
 max_hyd_l_n, max_hyd_gaunt_n = -1, -1
 
 
+# the root of the CMFGEN data. The log files name each file relative to this folder
+hillier_datadir = (PYDIR / ".." / "atomic-data-hillier").resolve()
+
+
 def hillier_ion_folder(atomic_number, ion_stage):
     """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
-        (
-            PYDIR
-            / ".."
-            / "atomic-data-hillier"
-            / "atomic_21jun23"
-            / atomic_number_to_hillier_code[atomic_number]
-            / roman_numerals[ion_stage]
-        ).resolve()
+        hillier_datadir / "atomic_21jun23" / atomic_number_to_hillier_code[atomic_number] / roman_numerals[ion_stage]
     )
 
 
@@ -516,7 +513,7 @@ def read_levels_and_transitions_from_file(
 
     filename = hillier_osc_filename(atomic_number, ion_stage)
 
-    log_and_print(flog, f"Reading {path_for_log(filename)}")
+    log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
@@ -1209,7 +1206,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
-        log_and_print(flog, f"Reading {path_for_log(filename)}")
+        log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
         reader.read_file(filenum, filename, photfilename)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
@@ -1644,7 +1641,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         / ions_data[atomic_number, ion_stage].folder
         / coldatafilename
     )
-    log_and_print(flog, f"Reading {path_for_log(filename)}")
+    log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
     coll_lines_in = 0
     number_expected_transitions = -1
     # the within-term pair loops below insert all of a name's pairs at its first mention, so

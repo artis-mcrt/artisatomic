@@ -1802,6 +1802,31 @@ def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
         )
 
 
+def test_path_for_log_renders_a_path_relative_to_a_directory():
+    """A log file must name a data file the same way on every machine, so no path is absolute.
+
+    The default directory is the repository root. A reader that passes its own data folder gets a
+    shorter path, and a path outside that folder still falls back to the repository root.
+    """
+    from artisatomic.base import path_for_log
+    from artisatomic.readhillierdata import hillier_datadir
+
+    oscfile = hillier_datadir / "atomic_21jun23" / "COB" / "II" / "19apr23" / "osc_data"
+
+    # the CMFGEN reader names its files relative to its own data folder
+    assert path_for_log(oscfile, relative_to=hillier_datadir) == "atomic_21jun23/COB/II/19apr23/osc_data"
+
+    # with no folder given, the same file is relative to the repository root
+    assert path_for_log(oscfile) == "atomic-data-hillier/atomic_21jun23/COB/II/19apr23/osc_data"
+
+    # a file outside the given folder falls back to the repository root
+    kuruczfile = PYDIR / ".." / "atomic-data-kurucz" / "gfall.dat"
+    assert path_for_log(kuruczfile, relative_to=hillier_datadir) == "atomic-data-kurucz/gfall.dat"
+
+    # a path outside the repository comes back unchanged, because no base fits it
+    assert path_for_log("/nonexistent/elsewhere/osc_data") == "/nonexistent/elsewhere/osc_data"
+
+
 def test_scan_file_lines_reads_each_compressed_form(tmp_path):
     """Every compression form of a file gives the same lines, and skip_lines drops the header."""
     from xopen import xopen

@@ -252,17 +252,25 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
-def path_for_log(filepath: str | Path) -> str:
-    """Render an input data path relative to the repository root where possible.
+def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
+    """Render an input data path for a log file, relative to a directory.
 
     The log files must not depend on the location of the repository checkout, so an absolute
-    path would be wrong there. Paths outside the repository (some readers load data from elsewhere)
-    come back unchanged.
+    path would be wrong there. The default directory is the repository root. A reader whose files
+    all sit under one data folder passes that folder, which keeps the logged path short.
+
+    The function falls back to the repository root, and then to the path itself. Some readers load
+    data from outside the repository, and such a path comes back unchanged.
     """
-    try:
-        return str(Path(filepath).resolve().relative_to(PYDIR.parent))
-    except ValueError:
-        return str(filepath)
+    resolved = Path(filepath).resolve()
+    bases = [PYDIR.parent] if relative_to is None else [relative_to, PYDIR.parent]
+    for base in bases:
+        try:
+            return str(resolved.relative_to(base))
+        except ValueError:
+            continue
+
+    return str(filepath)
 
 
 def fortran_float(text: str) -> float:
