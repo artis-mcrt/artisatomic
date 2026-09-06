@@ -966,7 +966,7 @@ def test_add_level_ids_forbidden_treats_negative_parity_as_a_real_one():
     [
         ([None, None], pl.Int64),  # the canonical spelling of an absent parity
         ([float("nan"), float("nan")], pl.Float64),  # NaN compares equal to itself, so it must cast away
-        (["1", "1"], pl.String),  # pandas infers text from a blank column, e.g. FAC's P
+        (["1", "1"], pl.String),  # a reader that gives text where a whole number belongs
     ],
 )
 def test_add_level_ids_forbidden_unreadable_parity(parity, dtype):

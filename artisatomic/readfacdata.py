@@ -47,8 +47,7 @@ def parse_fixed_width(
     Each entry of columns names the column, its first character, its last character (exclusive),
     and its type. The table starts at line skip_lines of the file.
 
-    polars cuts every line at once. The pandas read_fwf() that this replaced read one line at a
-    time in Python. See scan_file_lines() for why this repository parses fixed-width files so.
+    See scan_file_lines() for why this repository cuts fixed-width columns this way.
     """
     return (
         scan_file_lines(filename, skip_lines=skip_lines)
@@ -98,8 +97,8 @@ def GetLevels_cFAC(filename: Path | str) -> pl.DataFrame:
 def finish_levels(levels: pl.DataFrame) -> pl.DataFrame:
     """Derive the columns that read_levels_data() takes, the same way for the FAC and cFAC layouts."""
     # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits.
-    # The regex engine of polars supports no lookaround, so this runs in Python, as it did with
-    # pandas apply(). A level table holds a few thousand rows, so the cost is small
+    # The regex engine of polars supports no lookaround, so this runs in Python. A level table
+    # holds a few thousand rows, so the cost is small
     lone_occupation_1 = re.compile(r"(?<=[spdfg])1(?![0-9])")
     return levels.select(
         pl.col("Ilev"),
@@ -138,10 +137,8 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
 def GetLines_FAC(filename: Path | str) -> pl.DataFrame:
     """Parse the transition table of an FAC ascii output file."""
     # the A column takes the leading "-" of a negative Monopole in the last column, which the
-    # cast cannot read. strip_chars_end() removes it. It strips the right only, so it keeps the
-    # sign of a negative A. The pandas reader that this replaced tested the column type first,
-    # because read_fwf() gave a float column when no row carried that "-" and a string column
-    # when one did. An explicit cast needs no such test
+    # cast cannot read. strip_chars_end() removes it. It strips the right only, so a negative A
+    # keeps its sign
     columns: list[tuple[str, int, int, t.Any]] = [
         ("Upper", 0, 7, pl.Int64),
         ("Lower", 11, 17, pl.Int64),
