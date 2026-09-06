@@ -1513,6 +1513,146 @@ def test_write_adata_level_comment():
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
+def write_fac_fixture(tmp_path):
+    """Write one FAC and one cFAC pair of ascii files, in the fixed-width layout of each code.
+
+    Every field sits at the character positions that the reader cuts. The tables carry the cases
+    that the parser must handle: an occupation of 1 and an occupation of 10 or more, two levels
+    of one energy, a negative Monopole whose "-" reaches into the A column, and a negative A.
+    """
+
+    def row(width: int, fields: list[tuple[str, int, int]]) -> str:
+        chars = [" "] * width
+        for text, start, end in fields:
+            chars[start:end] = list(f"{text:>{end - start}}")
+        return "".join(chars).rstrip()
+
+    def header(code: str, count: int) -> list[str]:
+        return [f"{code} 1.1.5", *[f"headerline{i}" for i in range(1, count)]]
+
+    # FAC levels: Ilev (0,7) Energy_ev (14,30) P (30,31) 2J (38,43) Configs (76,125)
+    faclevels = header("FAC", 11)
+    faclevels += [
+        row(125, [("0", 0, 7), ("0.0000000000E+00", 14, 30), ("0", 30, 31), ("0", 38, 43), ("4f1.6s1", 76, 84)]),
+        row(125, [("1", 0, 7), ("5.0000000000E+00", 14, 30), ("1", 30, 31), ("4", 38, 43), ("4f14.6s2", 76, 85)]),
+        # the same energy as the level before it, so the stable sort must keep the file's order
+        row(125, [("2", 0, 7), ("5.0000000000E+00", 14, 30), ("0", 30, 31), ("2", 38, 43), ("5d1.6s1", 76, 84)]),
+        "",  # FAC writes a blank line after the table
+    ]
+    (tmp_path / "fac.lev.asc").write_text("\n".join(faclevels) + "\n")
+
+    # FAC transitions: Upper (0,7) Lower (11,17) A (49,63) Monopole (63,77)
+    factrans = header("FAC", 12)
+    factrans += [
+        row(77, [("1", 0, 7), ("0", 11, 17), ("3.1400000E+07", 49, 63), ("1.0E-03", 63, 77)]),
+        # a wide negative Monopole starts one column early, so its "-" lands in the A field
+        row(77, [("1.00000E+06", 49, 62), ("-", 62, 63), ("2", 0, 7), ("0", 11, 17), ("2.0E-03", 63, 77)]),
+        row(77, [("2", 0, 7), ("1", 11, 17), ("-7.7700000E+04", 49, 63), ("1.0E-05", 63, 77)]),
+        "",
+    ]
+    (tmp_path / "fac.tr.asc").write_text("\n".join(factrans) + "\n")
+
+    # cFAC levels: the configuration and a second field share the column at (43,150)
+    cfaclevels = header("cFAC", 11)
+    cfaclevels += [
+        row(
+            150,
+            [("0", 0, 7), ("0.0000000000E+00", 14, 30), ("0", 30, 31), ("0", 38, 43), ("4f1 6s1   4f+1(3)3", 45, 63)],
+        ),
+        row(
+            150,
+            [("1", 0, 7), ("5.0000000000E+00", 14, 30), ("1", 30, 31), ("4", 38, 43), ("4f14 6s2   4f+14(0)0", 45, 65)],
+        ),
+        "",
+    ]
+    (tmp_path / "cfac.lev.asc").write_text("\n".join(cfaclevels) + "\n")
+
+    # cFAC transitions: Upper (0,6) Lower (10,16) A (61,75)
+    cfactrans = header("cFAC", 12)
+    cfactrans += [
+        row(89, [("1", 0, 6), ("0", 10, 16), ("3.1400000E+07", 61, 75), ("1.0E-03", 75, 89)]),
+        "",
+    ]
+    (tmp_path / "cfac.tr.asc").write_text("\n".join(cfactrans) + "\n")
+
+
+def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
+    """The reader cuts the same values out of the FAC and the cFAC fixed-width layouts.
+
+    Both layouts give the same level table here, because the two files describe the same ion.
+    The transition table shows the two cases that the A column carries: a value that borrowed the
+    "-" of a negative Monopole, and a value that is itself negative.
+    """
+    write_fac_fixture(tmp_path)
+
+    expected_levels = [
+        # "6s1" loses its occupation of 1, "4f14" and "6s2" keep theirs, and a dot becomes a space
+        (0, "4f 6s", 0, 1, 0.0),
+        (1, "4f14 6s2", 1, 5, 5.0),
+        (2, "5d 6s", 0, 3, 5.0),
+    ]
+    for name in ("fac", "cfac"):
+        dflevels = readfacdata.GetLevels(tmp_path / f"{name}.lev.asc")
+        rows = list(dflevels.select("Ilev", "Config", "P", "g", "Energy_ev").iter_rows())
+        assert rows == expected_levels[: len(rows)], name
+        assert dflevels["energypercm"].to_list() == [energy / hc_in_ev_cm for _, _, _, _, energy in rows]
+
+    dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
+    assert list(dflines.select("Upper", "Lower", "A").iter_rows()) == [
+        (1, 0, 3.14e7),
+        (2, 0, 1.0e6),  # the borrowed "-" goes, and the value stays positive
+        (2, 1, -7.77e4),  # a negative A keeps its sign
+    ]
+
+    assert list(readfacdata.GetLines(tmp_path / "cfac.tr.asc").select("Upper", "Lower", "A").iter_rows()) == [
+        (1, 0, 3.14e7)
+    ]
+
+    # a file that neither code wrote must not parse as either of them
+    (tmp_path / "other.lev.asc").write_text("SOMETHINGELSE 1.0\n" + "\n".join(f"h{i}" for i in range(1, 12)) + "\n")
+    with pytest.raises(ValueError, match="No FAC-like code"):
+        readfacdata.GetLevels(tmp_path / "other.lev.asc")
+
+
+def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
+    """The FAC levels sort by energy, and the transitions still name their levels by the file's Ilev.
+
+    The map that read_levels_data() returns carries the transitions onto the sorted ids. The sort
+    is stable, so two levels of one energy keep the order of the file.
+    """
+    write_fac_fixture(tmp_path)
+    dflevels = readfacdata.GetLevels(tmp_path / "fac.lev.asc")
+
+    energy_levels, levelid_of_fileindex = readfacdata.read_levels_data(dflevels)
+
+    assert [level.levelname for level in energy_levels] == [
+        "4f 6s Ilev=0",
+        "4f14 6s2 Ilev=1",
+        "5d 6s Ilev=2",
+    ]
+    assert levelid_of_fileindex == {0: 0, 1: 1, 2: 2}
+
+    dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
+    transitions = readfacdata.read_lines_data(dflines, levelid_of_fileindex, set(), io.StringIO())
+    assert [(tr.lowerlevel, tr.upperlevel, tr.A) for tr in transitions] == [
+        (0, 1, 3.14e7),
+        (0, 2, 1.0e6),
+        (1, 2, -7.77e4),
+    ]
+
+    # a level above the ionisation energy leaves the level list, so its transitions go too
+    flog = io.StringIO()
+    transitions = readfacdata.read_lines_data(dflines, levelid_of_fileindex, {2}, flog)
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
+    assert "skipped 2 transitions" in flog.getvalue()
+
+    # a transition that names an Ilev the levels file does not have means the two files disagree
+    with pytest.raises(ValueError, match="names file index 99"):
+        readfacdata.read_lines_data(
+            dflines.with_columns(pl.col("Upper").replace(1, 99)), levelid_of_fileindex, set(), io.StringIO()
+        )
+
+
 def test_scan_file_lines_reads_each_compressed_form(tmp_path):
     """Every compression form of a file gives the same lines, and skip_lines drops the header."""
     from xopen import xopen

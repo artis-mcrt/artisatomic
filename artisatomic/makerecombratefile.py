@@ -6,7 +6,6 @@ from pathlib import Path
 
 import ChiantiPy.core as ch
 import numpy as np
-import pandas as pd
 from artistools import get_composition_data
 
 from artisatomic.base import elsymbols
@@ -16,12 +15,12 @@ from artisatomic.base import PYDIR
 class RecombRow(t.NamedTuple):
     """One row of a Nahar .rrc total recombination rate table."""
 
-    logT: float  # ruff: ignore[mixed-case-variable-in-class-scope]  # main() reads back this DataFrame column name
+    logT: float  # ruff: ignore[mixed-case-variable-in-class-scope]  # the name matches the Nahar header
     RRC_low_n: float
     RRC_total: float
 
 
-def read_nahar_rrcfile(filename, noprint=False):
+def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
     """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
     if not noprint:
         print(f"  reading {filename}")
@@ -54,7 +53,7 @@ def read_nahar_rrcfile(filename, noprint=False):
                     raise ValueError(msg)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
-    return pd.DataFrame(records)
+    return records
 
 
 def main():
@@ -81,11 +80,9 @@ def main():
                 )
                 if rrcfiles:  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
-                    dfrecombrates = read_nahar_rrcfile(naharfilename)
-                    frecombrates.write(f"{atomic_number} {upperionstage} {len(dfrecombrates)}\n")
-                    frecombrates.writelines(
-                        f"{row['logT']} {row['RRC_low_n']} {row['RRC_total']}\n" for _, row in dfrecombrates.iterrows()
-                    )
+                    recombrates = read_nahar_rrcfile(naharfilename)
+                    frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
+                    frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
                 else:  # use Chianti with ChiantiPy
                     print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)

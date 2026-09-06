@@ -3,9 +3,10 @@
 import os
 import re
 import string
+import typing as t
 from pathlib import Path
 
-import pandas as pd
+import polars as pl
 
 from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import elsymbols
@@ -17,6 +18,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
+from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
@@ -37,41 +39,79 @@ def get_basepath() -> Path:
     return Path(os.environ.get("ARTISATOMIC_FAC_PATH", default)) / f"OptimizedFAC_lanthanides{calibstr}"
 
 
-def GetLevels_FAC(filename: Path | str) -> pd.DataFrame:
+def parse_fixed_width(
+    filename: Path | str, skip_lines: int, columns: list[tuple[str, int, int, pl.DataType]]
+) -> pl.DataFrame:
+    """Cut fixed-width columns out of an FAC or cFAC ascii table.
+
+    Each entry of columns names the column, its first character, its last character (exclusive),
+    and its type. The table starts at line skip_lines of the file.
+
+    polars cuts every line at once. The pandas read_fwf() that this replaced read one line at a
+    time in Python. See scan_file_lines() for why this repository parses fixed-width files so.
+    """
+    return (
+        scan_file_lines(filename, skip_lines=skip_lines)
+        # FAC writes a blank line at the end of a table. Such a line holds no columns
+        .filter(pl.col("line").is_not_null())
+        .select(
+            # a blank field, and a line too short to reach the field, both give a null
+            pl.col("line").str.slice(start, end - start).str.strip_chars().replace("", None).cast(dtype).alias(name)
+            for name, start, end, dtype in columns
+        )
+        .collect()
+    )
+
+
+def GetLevels_FAC(filename: Path | str) -> pl.DataFrame:
     """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
-    widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (44, 76), (76, 125), (127, 200)]
-    names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs_no", "Configs", "Config rel"]
+    columns: list[tuple[str, int, int, t.Any]] = [
+        ("Ilev", 0, 7, pl.Int64),
+        ("Energy_ev", 14, 30, pl.Float64),
+        ("P", 30, 31, pl.Int64),
+        ("2J", 38, 43, pl.Int64),
+        ("Configs", 76, 125, pl.String),
+    ]
+    levels_FAC = parse_fixed_width(filename, skip_lines=11, columns=columns)
 
-    levels_FAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
+    # the FAC layout separates the parts of a configuration with a full stop
+    return finish_levels(
+        levels_FAC.with_columns(Config=pl.col("Configs").fill_null("").str.replace_all(".", " ", literal=True))
+    )
 
-    levels_FAC["Config"] = levels_FAC["Configs"].apply(lambda x: " ".join(x.split(".")))
-    return finish_levels(levels_FAC)
 
-
-def GetLevels_cFAC(filename: Path | str) -> pd.DataFrame:
+def GetLevels_cFAC(filename: Path | str) -> pl.DataFrame:
     """Parse the level table of a cFAC ascii output file, whose columns differ from FAC's."""
-    widths = [(0, 7), (7, 14), (14, 30), (30, 31), (32, 38), (38, 43), (43, 150)]
-    names = ["Ilev", "Ibase", "Energy_ev", "P", "VNL", "2J", "Configs"]
+    columns: list[tuple[str, int, int, t.Any]] = [
+        ("Ilev", 0, 7, pl.Int64),
+        ("Energy_ev", 14, 30, pl.Float64),
+        ("P", 30, 31, pl.Int64),
+        ("2J", 38, 43, pl.Int64),
+        ("Configs", 43, 150, pl.String),
+    ]
+    levels_cFAC = parse_fixed_width(filename, skip_lines=11, columns=columns)
 
-    levels_cFAC = pd.read_fwf(filename, header=10, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-
-    levels_cFAC["Config"] = levels_cFAC["Configs"].apply(lambda x: re.split(r"\s{2,}", x)[0])
-    return finish_levels(levels_cFAC)
+    # the cFAC layout puts a second field after the configuration, with two or more spaces between
+    return finish_levels(levels_cFAC.with_columns(Config=pl.col("Configs").fill_null("").str.replace(r"\s{2,}.*$", "")))
 
 
-def finish_levels(levels: pd.DataFrame) -> pd.DataFrame:
+def finish_levels(levels: pl.DataFrame) -> pl.DataFrame:
     """Derive the columns that read_levels_data() takes, the same way for the FAC and cFAC layouts."""
-    levels["g"] = levels["2J"] + 1
-    # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits
-    levels["Config"] = levels["Config"].apply(lambda s: re.sub(r"(?<=[spdfg])1(?![0-9])", "", s))
-    levels["energypercm"] = levels["Energy_ev"] / hc_in_ev_cm
+    # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits.
+    # The regex engine of polars supports no lookaround, so this runs in Python, as it did with
+    # pandas apply(). A level table holds a few thousand rows, so the cost is small
+    lone_occupation_1 = re.compile(r"(?<=[spdfg])1(?![0-9])")
+    return levels.select(
+        pl.col("Ilev"),
+        pl.col("Config").map_elements(lambda s: lone_occupation_1.sub("", s), return_dtype=pl.String),
+        pl.col("P"),
+        (pl.col("2J") + 1).alias("g"),
+        pl.col("Energy_ev"),
+        (pl.col("Energy_ev") / hc_in_ev_cm).alias("energypercm"),
+    )
 
-    levels = levels[["Ilev", "Config", "P", "g", "Energy_ev", "energypercm"]]
-    assert isinstance(levels, pd.DataFrame)
-    return levels
 
-
-def GetLevels(filename: Path | str) -> pd.DataFrame:
+def GetLevels(filename: Path | str) -> pl.DataFrame:
     """Get a dataframe of every energy level in the ascii level output of FAC or cFAC.
 
     The caller drops the levels above the ionisation energy and keeps their Ilev values. The
@@ -95,34 +135,34 @@ def GetLevels(filename: Path | str) -> pd.DataFrame:
     return levels
 
 
-def GetLines_FAC(filename: Path | str) -> pd.DataFrame:
+def GetLines_FAC(filename: Path | str) -> pl.DataFrame:
     """Parse the transition table of an FAC ascii output file."""
-    names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "gf", "A", "Monopole"]
+    # the A column takes the leading "-" of a negative Monopole in the last column, which the
+    # cast cannot read. strip_chars_end() removes it. It strips the right only, so it keeps the
+    # sign of a negative A. The pandas reader that this replaced tested the column type first,
+    # because read_fwf() gave a float column when no row carried that "-" and a string column
+    # when one did. An explicit cast needs no such test
+    columns: list[tuple[str, int, int, t.Any]] = [
+        ("Upper", 0, 7, pl.Int64),
+        ("Lower", 11, 17, pl.Int64),
+        ("A", 49, 63, pl.String),
+    ]
+    return parse_fixed_width(filename, skip_lines=12, columns=columns).with_columns(
+        pl.col("A").str.strip_chars_end(" -").cast(pl.Float64)
+    )
 
-    widths = [(0, 7), (7, 11), (11, 17), (17, 21), (21, 35), (35, 49), (49, 63), (63, 77)]
-    trans_FAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    # read_fwf() infers the A column as float64 when no row carries the leading "-" of a
-    # negative Monopole in the last column. It infers str when one row does. Only the str form
-    # needs the "-" removed.
-    if not pd.api.types.is_numeric_dtype(trans_FAC["A"]):
-        trans_FAC["A"] = pd.to_numeric(trans_FAC["A"].str.rstrip(" -"))
-    trans_FAC = trans_FAC[["Upper", "Lower", "A"]]
-    assert isinstance(trans_FAC, pd.DataFrame)
-    return trans_FAC
 
-
-def GetLines_cFAC(filename: Path | str) -> pd.DataFrame:
+def GetLines_cFAC(filename: Path | str) -> pl.DataFrame:
     """Parse the transition table of a cFAC ascii output file."""
-    names = ["Upper", "2J1", "Lower", "2J2", "DeltaE[eV]", "UTAdiff", "gf", "A", "Monopole"]
+    columns: list[tuple[str, int, int, t.Any]] = [
+        ("Upper", 0, 6, pl.Int64),
+        ("Lower", 10, 16, pl.Int64),
+        ("A", 61, 75, pl.Float64),
+    ]
+    return parse_fixed_width(filename, skip_lines=12, columns=columns)
 
-    widths = [(0, 6), (6, 10), (10, 16), (16, 21), (21, 35), (35, 47), (47, 61), (61, 75), (75, 89)]
-    trans_cFAC = pd.read_fwf(filename, header=11, index_col=False, colspecs=widths, names=names, engine="pyarrow")
-    trans_cFAC = trans_cFAC[["Upper", "Lower", "A"]]
-    assert isinstance(trans_cFAC, pd.DataFrame)
-    return trans_cFAC.astype({"Upper": "int64", "Lower": "int64"})
 
-
-def GetLines(filename: Path | str) -> pd.DataFrame:
+def GetLines(filename: Path | str) -> pl.DataFrame:
     """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
 
     Parameters
@@ -174,11 +214,9 @@ def read_levels_data(dflevels):
     Also returns the map from the file's Ilev to the zero-based level id, which read_lines_data()
     needs because the sort by energy reorders the levels.
     """
-    # astype(float) first: the level order is now the frame's order alone. A column that arrived
-    # as strings (pd.read_fwf can yield those) would sort lexicographically. The sort is stable, so
-    # levels of one energy keep the file's order. Their ids then do not depend on the sort
-    # algorithm.
-    dflevels = dflevels.astype({"energypercm": float}).sort_values(by="energypercm", kind="stable", ignore_index=True)
+    # sort by energy, so the level order is now the frame's order alone. The sort is stable, so
+    # levels of one energy keep the file's order. Their ids then do not depend on the sort algorithm
+    dflevels = dflevels.sort("energypercm", maintain_order=True)
 
     energy_levels = [
         # Config is not unique (levels of one configuration differ in J), so append the FAC level
@@ -189,7 +227,7 @@ def read_levels_data(dflevels):
             g=row["g"],
             energyabovegsinpercm=float(row["energypercm"]),
         )
-        for _index, row in dflevels.iterrows()
+        for row in dflevels.iter_rows(named=True)
     ]
 
     return energy_levels, levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
@@ -206,7 +244,7 @@ def read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization: set[
     transitions = []
     skipped_count = 0
 
-    for _, row in dflines.iterrows():
+    for row in dflines.iter_rows(named=True):
         if int(row["Lower"]) in ilevs_above_ionization or int(row["Upper"]) in ilevs_above_ionization:
             skipped_count += 1
             continue
@@ -259,9 +297,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them,
     # read_lines_data() knows whether a transition names a dropped level or an unknown level
-    above_ionization = dfalllevels["energypercm"] > (ionization_energy_in_ev / hc_in_ev_cm)
-    ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.loc[above_ionization, "Ilev"]}
-    dflevels = dfalllevels.loc[~above_ionization]
+    above_ionization = pl.col("energypercm") > (ionization_energy_in_ev / hc_in_ev_cm)
+    ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.filter(above_ionization)["Ilev"]}
+    dflevels = dfalllevels.filter(~above_ionization)
 
     # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
