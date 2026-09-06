@@ -1113,16 +1113,17 @@ def write_pandas_hdfstore(path, columns, indexlevels):
 
         # block 0 holds the float columns, block 1 the columns of Python objects
         names = list(columns)
+        nrows = len(next(iter(columns.values())))
         floatnames = [name for name in names if all(isinstance(v, float) for v in columns[name])]
         objectnames = [name for name in names if name not in floatnames]
         group.create_dataset("block0_items", data=np.array([n.encode() for n in floatnames]))
         group.create_dataset(
-            "block0_values", data=np.array([[columns[n][row] for n in floatnames] for row in range(len(values))])
+            "block0_values", data=np.array([[columns[n][row] for n in floatnames] for row in range(nrows)])
         )
         group.create_dataset("block1_items", data=np.array([n.encode() for n in objectnames]))
         write_pickle(
             "block1_values",
-            np.array([[columns[n][row] for n in objectnames] for row in range(len(values))], dtype=object),
+            np.array([[columns[n][row] for n in objectnames] for row in range(nrows)], dtype=object),
         )
         group.create_dataset("axis0", data=np.array([n.encode() for n in names]))
 
@@ -1659,9 +1660,13 @@ def test_write_adata_level_comment():
 def write_fac_fixture(tmp_path):
     """Write one FAC and one cFAC pair of ascii files, in the fixed-width layout of each code.
 
-    Every field sits at the character positions that the reader cuts. The tables carry the cases
-    that the parser must handle: an occupation of 1 and an occupation of 10 or more, two levels
-    of one energy, a negative Monopole whose "-" reaches into the A column, and a negative A.
+    Every field sits at the character positions that the reader cuts. The header holds a blank
+    line, as a real FAC file does. The tables carry these cases:
+
+    - an occupation of 1, and an occupation of 10 or more;
+    - two levels of one energy;
+    - a negative Monopole whose "-" reaches into the A column;
+    - a negative A.
     """
 
     def row(width: int, fields: list[tuple[str, int, int]]) -> str:
@@ -1671,7 +1676,9 @@ def write_fac_fixture(tmp_path):
         return "".join(chars).rstrip()
 
     def header(code: str, count: int) -> list[str]:
-        return [f"{code} 1.1.5", *[f"headerline{i}" for i in range(1, count)]]
+        # FAC writes a blank line in the header, before NELE and NLEV. The reader must not count
+        # it, so the count of lines that hold text stays the same as the file's own header
+        return [f"{code} 1.1.5", *[f"headerline{i}" for i in range(1, count - 1)], "", "headerline"]
 
     # FAC levels: Ilev (0,7) Energy_ev (14,30) P (30,31) 2J (38,43) Configs (76,125)
     faclevels = header("FAC", 11)
@@ -1728,17 +1735,16 @@ def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
     """
     write_fac_fixture(tmp_path)
 
-    expected_levels = [
-        # "6s1" loses its occupation of 1, "4f14" and "6s2" keep theirs, and a dot becomes a space
-        (0, "4f 6s", 0, 1, 0.0),
-        (1, "4f14 6s2", 1, 5, 5.0),
-        (2, "5d 6s", 0, 3, 5.0),
-    ]
-    for name in ("fac", "cfac"):
+    # "6s1" loses its occupation of 1, "4f14" and "6s2" keep theirs, and a dot becomes a space
+    expected_levels = {
+        "fac": [(0, "4f 6s", 0, 1, 0.0), (1, "4f14 6s2", 1, 5, 5.0), (2, "5d 6s", 0, 3, 5.0)],
+        "cfac": [(0, "4f 6s", 0, 1, 0.0), (1, "4f14 6s2", 1, 5, 5.0)],
+    }
+    for name, expected in expected_levels.items():
         dflevels = readfacdata.GetLevels(tmp_path / f"{name}.lev.asc")
-        rows = list(dflevels.select("Ilev", "Config", "P", "g", "Energy_ev").iter_rows())
-        assert rows == expected_levels[: len(rows)], name
-        assert dflevels["energypercm"].to_list() == [energy / hc_in_ev_cm for _, _, _, _, energy in rows]
+        # the whole table, so a parse that drops or adds a level fails here
+        assert list(dflevels.select("Ilev", "Config", "P", "g", "Energy_ev").iter_rows()) == expected, name
+        assert dflevels["energypercm"].to_list() == [energy / hc_in_ev_cm for _, _, _, _, energy in expected], name
 
     dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
     assert list(dflines.select("Upper", "Lower", "A").iter_rows()) == [

@@ -57,9 +57,12 @@ class LisbonReader:
         for parser in data.values():
             atomic_number = parser["atomic_number"]
             ion_charge = parser["ion_charge"]
-            # the first column of the CSV numbers the levels. The lines name their levels by
+            # skip_lines, not skip_rows: skip_rows reads CSV rows, so a quote character in the
+            # provenance text would swallow the header. infer_schema_length=None reads the whole
+            # column, as pandas did. A sample of the first rows can give Int64 to a float column.
+            # The first column of the CSV numbers the levels. The lines name their levels by
             # position, so the reader keeps the file order and does not use that column as a key
-            levels_data = pl.read_csv(parser["levels"], skip_rows=8)
+            levels_data = pl.read_csv(parser["levels"], skip_lines=8, infer_schema_length=None)
             lvl_list.append(
                 levels_data.select(
                     energy=pl.col("Energy[cm^-1]"),
@@ -70,7 +73,7 @@ class LisbonReader:
                 )
             )
 
-            lines_data = pl.read_csv(parser["lines"], skip_rows=8)
+            lines_data = pl.read_csv(parser["lines"], skip_lines=8, infer_schema_length=None)
             lns_list.append(
                 lines_data.select(
                     level_index_lower=pl.col("Lower"),
@@ -83,8 +86,9 @@ class LisbonReader:
                     wavelength=pl.col("Wavelength[Ang]"),
                 )
             )
-        self.levels = pl.concat(lvl_list)
-        self.lines = pl.concat(lns_list)
+        # vertical_relaxed: two ions can give one column two types, which pandas upcast
+        self.levels = pl.concat(lvl_list, how="vertical_relaxed")
+        self.lines = pl.concat(lns_list, how="vertical_relaxed")
 
 
 def get_levelname(row, fileindex: int):
@@ -111,6 +115,12 @@ def read_levels_data(dflevels):
     never fires. It does supply J, which is part of each level name, so the delta J rule alone
     decides whether a transition is forbidden here.
     """
+    # not an assert: a blank energy sorts before every number in polars, so it would take level
+    # id 0 and shift every other id. float() on it then reports neither the file nor the row
+    if dflevels["energy"].null_count() > 0:
+        msg = "The Lisbon levels file has a level with no energy"
+        raise ValueError(msg)
+
     # each level carries its file position through the sort. The sort is stable, so levels of one
     # energy keep the order of the file
     dflevels = dflevels.with_row_index("fileposition").sort("energy", maintain_order=True)
@@ -204,6 +214,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     this_ion = (pl.col("atomic_number") == atomic_number) & (pl.col("ion_charge") == ion_charge)
     dflevels = lisbon_reader.levels.filter(this_ion)
+    # not an assert: an empty frame would write an ion with no levels. The pandas reader that this
+    # replaced raised a KeyError here, as the DREAM reader's guard does
+    if dflevels.is_empty():
+        msg = f"The Lisbon data has no levels for Z={atomic_number} ion_stage {ion_stage}"
+        raise ValueError(msg)
     # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 

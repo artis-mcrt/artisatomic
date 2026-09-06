@@ -3,7 +3,6 @@
 import os
 import re
 import string
-import typing as t
 from pathlib import Path
 
 import polars as pl
@@ -40,19 +39,25 @@ def get_basepath() -> Path:
 
 
 def parse_fixed_width(
-    filename: Path | str, skip_lines: int, columns: list[tuple[str, int, int, pl.DataType]]
+    filename: Path | str, skip_lines: int, columns: list[tuple[str, int, int, type[pl.DataType]]]
 ) -> pl.DataFrame:
     """Cut fixed-width columns out of an FAC or cFAC ascii table.
 
     Each entry of columns names the column, its first character, its last character (exclusive),
-    and its type. The table starts at line skip_lines of the file.
+    and its type. The table starts after skip_lines lines that hold text.
+
+    The count of skip_lines does not include a blank line. FAC writes one in the header of every
+    file, and another after the last row of a table. A line of spaces counts as blank, because
+    the columns of such a line are all empty.
 
     See scan_file_lines() for why this repository cuts fixed-width columns this way.
     """
     return (
-        scan_file_lines(filename, skip_lines=skip_lines)
-        # FAC writes a blank line at the end of a table. Such a line holds no columns
-        .filter(pl.col("line").is_not_null())
+        scan_file_lines(filename)
+        # keep a line that holds a character other than a space. A blank line gives null here,
+        # which the filter drops
+        .filter(pl.col("line").str.contains(r"\S"))
+        .slice(skip_lines)
         .select(
             # a blank field, and a line too short to reach the field, both give a null
             pl.col("line").str.slice(start, end - start).str.strip_chars().replace("", None).cast(dtype).alias(name)
@@ -62,9 +67,25 @@ def parse_fixed_width(
     )
 
 
+def check_no_nulls(table: pl.DataFrame, sourcename: str) -> pl.DataFrame:
+    """Stop the run if a column of a parsed FAC table holds a null.
+
+    A null means that a line stopped before the end of the column, or that the field was blank.
+    Every column that this reader cuts must have a value in every row. A null that passes here
+    reaches int() or the output writer, which report neither the file nor the column.
+    """
+    # not an assert: a truncated data file must stop the run, and must name the column
+    nullcounts = {name: count for name, count in table.null_count().row(0, named=True).items() if count > 0}
+    if nullcounts:
+        msg = f"{sourcename} has rows with no value: {nullcounts}. A line is shorter than its columns."
+        raise ValueError(msg)
+
+    return table
+
+
 def GetLevels_FAC(filename: Path | str) -> pl.DataFrame:
     """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
-    columns: list[tuple[str, int, int, t.Any]] = [
+    columns: list[tuple[str, int, int, type[pl.DataType]]] = [
         ("Ilev", 0, 7, pl.Int64),
         ("Energy_ev", 14, 30, pl.Float64),
         ("P", 30, 31, pl.Int64),
@@ -74,14 +95,12 @@ def GetLevels_FAC(filename: Path | str) -> pl.DataFrame:
     levels_FAC = parse_fixed_width(filename, skip_lines=11, columns=columns)
 
     # the FAC layout separates the parts of a configuration with a full stop
-    return finish_levels(
-        levels_FAC.with_columns(Config=pl.col("Configs").fill_null("").str.replace_all(".", " ", literal=True))
-    )
+    return finish_levels(levels_FAC.with_columns(Config=pl.col("Configs").str.replace_all(".", " ", literal=True)))
 
 
 def GetLevels_cFAC(filename: Path | str) -> pl.DataFrame:
     """Parse the level table of a cFAC ascii output file, whose columns differ from FAC's."""
-    columns: list[tuple[str, int, int, t.Any]] = [
+    columns: list[tuple[str, int, int, type[pl.DataType]]] = [
         ("Ilev", 0, 7, pl.Int64),
         ("Energy_ev", 14, 30, pl.Float64),
         ("P", 30, 31, pl.Int64),
@@ -91,11 +110,13 @@ def GetLevels_cFAC(filename: Path | str) -> pl.DataFrame:
     levels_cFAC = parse_fixed_width(filename, skip_lines=11, columns=columns)
 
     # the cFAC layout puts a second field after the configuration, with two or more spaces between
-    return finish_levels(levels_cFAC.with_columns(Config=pl.col("Configs").fill_null("").str.replace(r"\s{2,}.*$", "")))
+    return finish_levels(levels_cFAC.with_columns(Config=pl.col("Configs").str.replace(r"\s{2,}.*$", "")))
 
 
 def finish_levels(levels: pl.DataFrame) -> pl.DataFrame:
     """Derive the columns that read_levels_data() takes, the same way for the FAC and cFAC layouts."""
+    check_no_nulls(levels, "The FAC levels file")
+
     # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits.
     # The regex engine of polars supports no lookaround, so this runs in Python. A level table
     # holds a few thousand rows, so the cost is small
@@ -106,7 +127,9 @@ def finish_levels(levels: pl.DataFrame) -> pl.DataFrame:
         pl.col("P"),
         (pl.col("2J") + 1).alias("g"),
         pl.col("Energy_ev"),
-        (pl.col("Energy_ev") / hc_in_ev_cm).alias("energypercm"),
+        # numpy divides, not polars: polars multiplies by the reciprocal, which differs by one
+        # unit in the last place. write_adata() prints 16 decimals, so that difference shows
+        energypercm=pl.Series(levels["Energy_ev"].to_numpy() / hc_in_ev_cm),
     )
 
 
@@ -139,24 +162,25 @@ def GetLines_FAC(filename: Path | str) -> pl.DataFrame:
     # the A column takes the leading "-" of a negative Monopole in the last column, which the
     # cast cannot read. strip_chars_end() removes it. It strips the right only, so a negative A
     # keeps its sign
-    columns: list[tuple[str, int, int, t.Any]] = [
+    columns: list[tuple[str, int, int, type[pl.DataType]]] = [
         ("Upper", 0, 7, pl.Int64),
         ("Lower", 11, 17, pl.Int64),
         ("A", 49, 63, pl.String),
     ]
-    return parse_fixed_width(filename, skip_lines=12, columns=columns).with_columns(
-        pl.col("A").str.strip_chars_end(" -").cast(pl.Float64)
+    lines = parse_fixed_width(filename, skip_lines=12, columns=columns).with_columns(
+        pl.col("A").str.strip_chars_end(" -").replace("", None).cast(pl.Float64)
     )
+    return check_no_nulls(lines, "The FAC transitions file")
 
 
 def GetLines_cFAC(filename: Path | str) -> pl.DataFrame:
     """Parse the transition table of a cFAC ascii output file."""
-    columns: list[tuple[str, int, int, t.Any]] = [
+    columns: list[tuple[str, int, int, type[pl.DataType]]] = [
         ("Upper", 0, 6, pl.Int64),
         ("Lower", 10, 16, pl.Int64),
         ("A", 61, 75, pl.Float64),
     ]
-    return parse_fixed_width(filename, skip_lines=12, columns=columns)
+    return check_no_nulls(parse_fixed_width(filename, skip_lines=12, columns=columns), "The cFAC transitions file")
 
 
 def GetLines(filename: Path | str) -> pl.DataFrame:
@@ -294,7 +318,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them,
     # read_lines_data() knows whether a transition names a dropped level or an unknown level
-    above_ionization = pl.col("energypercm") > (ionization_energy_in_ev / hc_in_ev_cm)
+    # fill_null(False): a null energy compares as null, which would drop the level from the kept
+    # levels and from the set below. The level would then be in neither, and every transition that
+    # names it would stop the run with a message about the transitions file
+    above_ionization = (pl.col("energypercm") > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
     ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.filter(above_ionization)["Ilev"]}
     dflevels = dfalllevels.filter(~above_ionization)
 

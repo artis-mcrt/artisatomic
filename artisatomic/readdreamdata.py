@@ -66,9 +66,17 @@ def read_pandas_hdfstore(path: Path) -> pl.DataFrame:
 
         # the levels of the index come first, so the frame starts with Z and the ion charge
         for level in range(int(group.attrs["axis1_nlevels"])):
-            levelvalues = unpickle(group[f"axis1_level{level}"])
+            leveldata = group[f"axis1_level{level}"]
+            # pandas pickles a level of Python objects only. It writes a level of numbers plain,
+            # as it does a block of numbers
+            levelvalues = unpickle(leveldata) if leveldata.dtype == object else leveldata[:]
             codes = group[f"axis1_label{level}"][:]
-            columns[as_text(group[f"axis1_level{level}"].attrs["name"])] = levelvalues[codes]
+            # not an assert: pandas writes -1 for a row that the level does not hold, and numpy
+            # reads -1 as the last value. Such a row would join the wrong ion without a message
+            if codes.min() < 0:
+                msg = f"{path} index level {level} has a row with no value. pandas writes -1 for such a row."
+                raise ValueError(msg)
+            columns[as_text(leveldata.attrs["name"])] = levelvalues[codes]
 
         blockvalues: dict[str, np.ndarray] = {}
         for block in range(int(group.attrs["nblocks"])):
@@ -103,7 +111,9 @@ def series_from_array(values: np.ndarray) -> pl.Series:
         return pl.Series(values)
     try:
         return pl.Series(values.tolist())
-    except TypeError:
+    except (TypeError, pl.exceptions.PolarsError):
+        # polars raises TypeError for a mixed column today. The except covers its own error class
+        # too, so a later polars that raises SchemaError still reaches the Object fallback
         return pl.Series(values, dtype=pl.Object)
 
 
@@ -116,7 +126,7 @@ def init_dreamdata():
     # column that no polars expression can read
     dreamdata = (
         read_pandas_hdfstore(dreamdatapath)
-        .drop("CF")
+        .drop("CF", strict=False)
         .with_columns(Lower_g=2 * pl.col("Lower_J") + 1, Upper_g=2 * pl.col("Upper_J") + 1)
     )
 
@@ -167,7 +177,8 @@ def read_levels_data(dflines):
 
     for prefix in ["Lower", "Upper"]:
         subset = [prefix + "_Type", prefix + "_Level", prefix + "_g"]
-        for row in dflines.unique(subset=subset, maintain_order=True).iter_rows(named=True):
+        # keep="first" pins the order that decides the ids of two levels of one energy
+        for row in dflines.unique(subset=subset, keep="first", maintain_order=True).iter_rows(named=True):
             leveltuple = energytuplefromrow(row, prefix)
             if leveltuple not in seen:
                 seen.add(leveltuple)
