@@ -57,9 +57,9 @@ Source = "https://www.github.com/artis-mcrt/artisatomic"
 
 [project.scripts]
 makeartisatomicfiles = "artisatomic.cli:main"
-makechargetransferfile = "artisatomic.makechargetransferfile:main"
-makerecombratefile = "artisatomic.makerecombratefile:main"
-makegammaspecfiles = "artisatomic.download_gammaspec_betaminus_alpha:main"
+makeartischargetransferfile = "artisatomic.makechargetransferfile:main"
+makeartisrecombratefile = "artisatomic.makerecombratefile:main"
+makeartisgammaspecfiles = "artisatomic.download_gammaspec_betaminus_alpha:main"
 
 [tool.pyrefly]
 preset = "strict"

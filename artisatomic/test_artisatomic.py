@@ -2775,9 +2775,9 @@ def test_console_script_entry_points_resolve():
     declared = {ep.name: ep for ep in entry_points(group="console_scripts") if ep.module.startswith("artisatomic")}
     assert set(declared) == {
         "makeartisatomicfiles",
-        "makechargetransferfile",
-        "makegammaspecfiles",
-        "makerecombratefile",
+        "makeartischargetransferfile",
+        "makeartisgammaspecfiles",
+        "makeartisrecombratefile",
     }
 
     # the module that defines main(), not the package root: the root re-exports nothing

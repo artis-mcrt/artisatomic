@@ -1,6 +1,6 @@
 #!/usr/bin/env zsh
 
-# Download the source files of makechargetransferfile. The repository tracks the files, so the
+# Download the source files of makeartischargetransferfile. The repository tracks the files, so the
 # script is for an update. It skips a file that exists in plain or compressed form. To download
 # a file again, delete it first.
 

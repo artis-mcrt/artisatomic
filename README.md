@@ -28,6 +28,6 @@ Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiond
 
 The package installs three more commands:
 
-- `makerecombratefile` writes recombrates.txt from the Nahar recombination rate files.
-- `makechargetransferfile` writes the charge transfer rate files.
-- `makegammaspecfiles` downloads the ENDF decay data and writes a gamma spectrum for each nuclide.
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files.
+- `makeartischargetransferfile` writes the charge transfer rate files.
+- `makeartisgammaspecfiles` downloads the ENDF decay data and writes a gamma spectrum for each nuclide.

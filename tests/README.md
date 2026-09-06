@@ -60,6 +60,6 @@ nothing. The test `test_chargetransfer_output_matches_the_checksum` checks the s
 pytest. Regenerate the checksum with:
 
 ```bash
-PYTHONPATH="$PWD" uv run makechargetransferfile -output_folder tests/chargetransfer/output
+PYTHONPATH="$PWD" uv run makeartischargetransferfile -output_folder tests/chargetransfer/output
 (cd tests/chargetransfer/output && md5sum *.txt > ../checksums.txt)
 ```
