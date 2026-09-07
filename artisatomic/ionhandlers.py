@@ -57,8 +57,8 @@ def get_ion_handlers(
     # Include every ion that has data and that the limits keep.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
-    # this sequence to offer their ions too. Give a higher -maxionstage to a run that includes
-    # readmonsdata, because the MONS archive starts at ion stage 5.
+    # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
+    # whose files start above the default -maxionstage needs a higher value.
     ion_handlers = readqubdata.extend_ion_list(
         ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
     )
