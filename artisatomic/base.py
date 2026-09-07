@@ -611,6 +611,7 @@ def add_handler_if_not_set(
     atomic_number: int | str,
     ion_stage: int | str,
     handler: str,
+    *,
     minionstage: int | None = None,
     maxionstage: int | None = None,
     maxatomicnumber: int | None = None,

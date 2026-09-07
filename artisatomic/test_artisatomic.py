@@ -1357,7 +1357,7 @@ def test_extend_ion_list_forwards_the_limits():
     which ions a run writes, and no checksum set finds it, because each set reads an ion handlers
     file instead.
     """
-    result = readhillierdata.extend_ion_list([], 2, 3, 26)
+    result = readhillierdata.extend_ion_list([], minionstage=2, maxionstage=3, maxatomicnumber=26)
 
     assert result, "the CMFGEN corpus is missing"
     assert all(2 <= ion_stage <= 3 for _, listions in result for ion_stage, _ in listions)

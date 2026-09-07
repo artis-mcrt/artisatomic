@@ -132,7 +132,11 @@ def init_dreamdata():
 
 
 def extend_ion_list(
-    ion_handlers, minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
+    ion_handlers,
+    *,
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
 ):
     """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
     init_dreamdata()
@@ -140,7 +144,13 @@ def extend_ion_list(
     for atomic_number, charge in dreamdata.select("Z", "C").unique(maintain_order=True).iter_rows():
         ion_stage = charge + 1
         ion_handlers = add_handler_if_not_set(
-            ion_handlers, atomic_number, ion_stage, "dream", minionstage, maxionstage, maxatomicnumber
+            ion_handlers,
+            atomic_number,
+            ion_stage,
+            "dream",
+            minionstage=minionstage,
+            maxionstage=maxionstage,
+            maxatomicnumber=maxatomicnumber,
         )
 
     return ion_handlers

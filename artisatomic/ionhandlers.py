@@ -45,7 +45,13 @@ def get_ion_handlers(
     for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3))):
         for ion_stage in ion_stages:
             ion_handlers = add_handler_if_not_set(
-                ion_handlers, atomic_number, ion_stage, "kurucz", minionstage, maxionstage, maxatomicnumber
+                ion_handlers,
+                atomic_number,
+                ion_stage,
+                "kurucz",
+                minionstage=minionstage,
+                maxionstage=maxionstage,
+                maxatomicnumber=maxatomicnumber,
             )
 
     # Include every ion that has data and that the limits keep.
@@ -53,14 +59,26 @@ def get_ion_handlers(
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
     # this sequence to offer their ions too. Give a higher -maxionstage to a run that includes
     # readmonsdata, because the MONS archive starts at ion stage 5.
-    ion_handlers = readqubdata.extend_ion_list(ion_handlers, minionstage, maxionstage, maxatomicnumber)
+    ion_handlers = readqubdata.extend_ion_list(
+        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
     ion_handlers = readhillierdata.extend_ion_list(
-        ion_handlers, minionstage, maxionstage, maxatomicnumber, include_hydrogen=True
+        ion_handlers,
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+        include_hydrogen=True,
     )
     ion_handlers = readfloers25data.extend_ion_list(
-        ion_handlers, minionstage, maxionstage, maxatomicnumber, calibrated=True
+        ion_handlers,
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+        calibrated=True,
     )
-    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, minionstage, maxionstage, maxatomicnumber)
+    ion_handlers = readtanakajpltdata.extend_ion_list(
+        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
 
     return sort_ion_handlers(ion_handlers)
 

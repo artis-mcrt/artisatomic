@@ -2078,6 +2078,7 @@ def read_hyd_phixsdata(force: bool = False) -> None:
 
 def extend_ion_list(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    *,
     minionstage: int | None = None,
     maxionstage: int | None = None,
     maxatomicnumber: int | None = None,
@@ -2092,7 +2093,13 @@ def extend_ion_list(
         if not include_hydrogen and atomic_number == 1:
             continue  # skip
         ion_handlers = add_handler_if_not_set(
-            ion_handlers, atomic_number, ion_stage, "cmfgen", minionstage, maxionstage, maxatomicnumber
+            ion_handlers,
+            atomic_number,
+            ion_stage,
+            "cmfgen",
+            minionstage=minionstage,
+            maxionstage=maxionstage,
+            maxatomicnumber=maxatomicnumber,
         )
 
     return ion_handlers

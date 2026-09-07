@@ -36,6 +36,7 @@ def get_basepath(withforbidden: bool) -> Path:
 
 def extend_ion_list(
     ion_handlers,
+    *,
     minionstage: int | None = None,
     maxionstage: int | None = None,
     maxatomicnumber: int | None = None,
@@ -81,7 +82,13 @@ def extend_ion_list(
                 ionstr = s.name.lstrip(string.digits).split("_")[0]
                 atomic_number, ion_stage = split_element_ionstage_str(ionstr)
                 ion_handlers = add_handler_if_not_set(
-                    ion_handlers, atomic_number, ion_stage, handlername, minionstage, maxionstage, maxatomicnumber
+                    ion_handlers,
+                    atomic_number,
+                    ion_stage,
+                    handlername,
+                    minionstage=minionstage,
+                    maxionstage=maxionstage,
+                    maxatomicnumber=maxatomicnumber,
                 )
 
     return ion_handlers
