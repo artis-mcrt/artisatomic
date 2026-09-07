@@ -13,13 +13,17 @@ from artisatomic.base import scan_file_lines
 jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(
+    ion_handlers, minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
+):
     """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     tanakaions = sorted(
         [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
     )
     for atomic_number, ion_stage in tanakaions:
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "tanakajplt")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers, atomic_number, ion_stage, "tanakajplt", minionstage, maxionstage, maxatomicnumber
+        )
 
     return ion_handlers
 

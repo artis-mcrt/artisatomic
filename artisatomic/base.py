@@ -592,15 +592,26 @@ def add_handler_if_not_set(
     atomic_number: int | str,
     ion_stage: int | str,
     handler: str,
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
 
-    The function does not modify the input list, so the caller must use the return value.
+    Every reader adds an ion here, so this is where the limits apply. An ion outside a limit never
+    enters the list, and no later step removes it again. A limit of None includes every ion. The
+    function does not modify the input list, so the caller must use the return value.
     """
     # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
     # integers. Normalise them here and not in each caller.
     atomic_number = int(atomic_number)
     ion_stage = int(ion_stage)
+
+    minstage = 1 if minionstage is None else minionstage
+    maxstage = sys.maxsize if maxionstage is None else maxionstage
+    maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
+    if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
+        return ion_handlers
 
     ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
     found_element = False

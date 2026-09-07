@@ -2076,7 +2076,13 @@ def read_hyd_phixsdata(force: bool = False) -> None:
             hyd_gaunt_factor[n] = gaunt_values
 
 
-def extend_ion_list(ion_handlers: list[tuple[int, list[tuple[int, str]]]], include_hydrogen: bool | None = False):
+def extend_ion_list(
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
+    include_hydrogen: bool | None = False,
+):
     """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
 
     The default excludes hydrogen: its levels are also the source of the hydrogenic
@@ -2085,6 +2091,8 @@ def extend_ion_list(ion_handlers: list[tuple[int, list[tuple[int, str]]]], inclu
     for atomic_number, ion_stage in ions_data:
         if not include_hydrogen and atomic_number == 1:
             continue  # skip
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "cmfgen")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers, atomic_number, ion_stage, "cmfgen", minionstage, maxionstage, maxatomicnumber
+        )
 
     return ion_handlers

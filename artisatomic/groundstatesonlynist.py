@@ -51,12 +51,16 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     return ionization_energy_in_ev, energy_levels, transitions
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(
+    ion_handlers, minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
+):
     """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
     groundstatesdata = read_groundstates_table()
 
     for atomic_number, ion_stage in groundstatesdata.select("Z", "ion").iter_rows():
         # add_handler_if_not_set() returns a new list and does not change its argument
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "gsnist")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers, atomic_number, ion_stage, "gsnist", minionstage, maxionstage, maxatomicnumber
+        )
 
     return ion_handlers

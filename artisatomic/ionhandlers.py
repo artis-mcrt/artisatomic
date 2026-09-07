@@ -13,6 +13,7 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
+from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import sort_ion_handlers
 from artisatomic.iondata import known_handlers
 
@@ -31,57 +32,36 @@ def get_ion_handlers(
     applies to it. Otherwise the function builds the list from the hard-coded selection below plus
     every ion for which the readers' extend_ion_list() functions find data.
 
-    minionstage, maxionstage and maxatomicnumber limit that built-in selection. A value of None
-    applies no limit.
+    minionstage, maxionstage and maxatomicnumber limit that built-in selection. Every reader gets
+    the three limits, so no reader offers an ion that the limits exclude. A value of None applies
+    no limit.
     """
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
 
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [
-        (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-        (39, [(1, "kurucz"), (2, "kurucz")]),
-        (40, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-    ]
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
+    for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3))):
+        for ion_stage in ion_stages:
+            ion_handlers = add_handler_if_not_set(
+                ion_handlers, atomic_number, ion_stage, "kurucz", minionstage, maxionstage, maxatomicnumber
+            )
 
     # Include every ion that has data.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
     # this sequence to include every ion that they have data for.
-    ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, include_hydrogen=True)
-    ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
-    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
+    ion_handlers = readqubdata.extend_ion_list(ion_handlers, minionstage, maxionstage, maxatomicnumber)
+    ion_handlers = readhillierdata.extend_ion_list(
+        ion_handlers, minionstage, maxionstage, maxatomicnumber, include_hydrogen=True
+    )
+    ion_handlers = readfloers25data.extend_ion_list(
+        ion_handlers, minionstage, maxionstage, maxatomicnumber, calibrated=True
+    )
+    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, minionstage, maxionstage, maxatomicnumber)
 
-    # One place applies the limits, because no extend_ion_list() function takes them.
-    return sort_ion_handlers(limit_ion_handlers(ion_handlers, minionstage, maxionstage, maxatomicnumber))
-
-
-def limit_ion_handlers(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    minionstage: int | None,
-    maxionstage: int | None,
-    maxatomicnumber: int | None,
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Remove every ion outside the ion stage limits, and every element above maxatomicnumber.
-
-    A value of None means no limit. The function also removes an element that keeps no ion,
-    because process_files() and write_compositionfile() expect one or more ions for each element.
-    """
-    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
-    for atomic_number, listions in ion_handlers:
-        if maxatomicnumber is not None and atomic_number > maxatomicnumber:
-            continue
-        ions = [
-            (ion_stage, handler)
-            for ion_stage, handler in listions
-            if (minionstage is None or ion_stage >= minionstage) and (maxionstage is None or ion_stage <= maxionstage)
-        ]
-        if ions:
-            ion_handlers_out.append((atomic_number, ions))
-
-    return ion_handlers_out
+    return sort_ion_handlers(ion_handlers)
 
 
 # Old handler names and their new names. A file from before the rename still names the old one,

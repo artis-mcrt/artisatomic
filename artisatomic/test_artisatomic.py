@@ -1328,26 +1328,17 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
-def test_limit_ion_handlers():
-    """The limits remove the ions above them, and drop an element that keeps no ion."""
-    from artisatomic.ionhandlers import limit_ion_handlers
+def test_add_handler_if_not_set_applies_the_limits():
+    """An ion outside a limit never enters the list, so no element arrives with no ion."""
+    limits = {"minionstage": 2, "maxionstage": 3, "maxatomicnumber": 30}
 
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [
-        (8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")]),
-        (38, [(6, "kurucz")]),
-    ]
+    assert add_handler_if_not_set([], 26, 2, "cmfgen", **limits) == [(26, [(2, "cmfgen")])]
+    assert add_handler_if_not_set([], 26, 1, "cmfgen", **limits) == []
+    assert add_handler_if_not_set([], 26, 4, "cmfgen", **limits) == []
+    assert add_handler_if_not_set([], 38, 2, "kurucz", **limits) == []
 
-    # Z=38 keeps no ion at or below stage 5, so the element goes too. write_compositionfile()
-    # counts the ion stages of an element, so an empty element would write a wrong count.
-    assert limit_ion_handlers(ion_handlers, 1, 5, None) == [(8, [(1, "cmfgen"), (5, "cmfgen")])]
-
-    assert limit_ion_handlers(ion_handlers, None, None, 10) == [(8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")])]
-    assert limit_ion_handlers(ion_handlers, 1, 1, 10) == [(8, [(1, "cmfgen")])]
-    assert limit_ion_handlers(ion_handlers, 5, None, None) == [
-        (8, [(5, "cmfgen"), (6, "cmfgen")]),
-        (38, [(6, "kurucz")]),
-    ]
-    assert limit_ion_handlers(ion_handlers, None, None, None) == ion_handlers
+    # a limit of None includes every ion, which is what a direct call to a reader gets
+    assert add_handler_if_not_set([], 38, 9, "kurucz") == [(38, [(9, "kurucz")])]
 
 
 def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):

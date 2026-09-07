@@ -59,13 +59,17 @@ class QUBEnergyLevel(t.NamedTuple):
     parity: int | None  # None where the configuration determines no parity
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(
+    ion_handlers, minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
+):
     """Add every ion with a QUB adf04 file to ion_handlers under the "qub" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     qubfiles = [f for ext in compression_extensions for f in qubpath.glob(f"*_*.adf04{ext}")]
     qubions = sorted({tuple(int(x) for x in f.name.split(".")[0].split("_")) for f in qubfiles})
     for atomic_number, ion_stage in qubions:
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "qub")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers, atomic_number, ion_stage, "qub", minionstage, maxionstage, maxatomicnumber
+        )
 
     return ion_handlers
 
