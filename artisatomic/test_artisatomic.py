@@ -4,6 +4,7 @@
 import argparse
 import functools
 import io
+import json
 import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import typing as t
@@ -1325,6 +1326,40 @@ def test_parse_ion_handlers():
     # such here. A later failure would mention neither the element nor the file.
     with pytest.raises(TypeError, match=r"Z=26 ion stage 2 .* names no handler"):
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
+
+
+def test_limit_ion_handlers():
+    """The limits remove the ions above them, and drop an element that keeps no ion."""
+    from artisatomic.ionhandlers import limit_ion_handlers
+
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [
+        (8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")]),
+        (38, [(6, "kurucz")]),
+    ]
+
+    # Z=38 keeps no ion at or below stage 5, so the element goes too. write_compositionfile()
+    # counts the ion stages of an element, so an empty element would write a wrong count.
+    assert limit_ion_handlers(ion_handlers, 5, None) == [(8, [(1, "cmfgen"), (5, "cmfgen")])]
+
+    assert limit_ion_handlers(ion_handlers, None, 10) == [(8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")])]
+    assert limit_ion_handlers(ion_handlers, 1, 10) == [(8, [(1, "cmfgen")])]
+    assert limit_ion_handlers(ion_handlers, None, None) == ion_handlers
+
+
+def test_get_ion_handlers_rejects_a_limit_with_an_input_file(tmp_path, monkeypatch):
+    """An ion handlers file selects the ions, so a limit beside it is an error and not a filter."""
+    from artisatomic.ionhandlers import get_ion_handlers
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "artisatomicionhandlers.json").write_text(
+        json.dumps([[8, [[1, "cmfgen"], [6, "cmfgen"]]]]), encoding="utf-8"
+    )
+
+    assert get_ion_handlers() == [(8, [(1, "cmfgen"), (6, "cmfgen")])]
+
+    for limits in ({"maxionstage": 5}, {"maxatomicnumber": 30}):
+        with pytest.raises(ValueError, match=r"artisatomicionhandlers\.json exists"):
+            get_ion_handlers(**limits)
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():

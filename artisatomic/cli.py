@@ -10,6 +10,7 @@ import argcomplete
 
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
+from artisatomic.ionhandlers import default_maxionstage
 from artisatomic.ionhandlers import get_ion_handlers
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
@@ -51,6 +52,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "-maxionstage",
+        type=int,
+        default=None,
+        help=(
+            "Do not include an ion above this ion stage. Ion stage 1 is the neutral atom. The value"
+            f" None applies the built-in limit of {default_maxionstage}. Give this option only when"
+            " artisatomicionhandlers.json does not exist, because that file selects the ions itself."
+        ),
+    )
+    parser.add_argument(
+        "-maxatomicnumber",
+        type=int,
+        default=None,
+        help=(
+            "Do not include an element above this atomic number. The value None applies no limit."
+            " Give this option only when artisatomicionhandlers.json does not exist, because that"
+            " file selects the ions itself."
+        ),
+    )
+
+    parser.add_argument(
         "-nlevels_hydrogenic_for_unknown_phixs",
         type=int,
         default=100,
@@ -79,7 +101,15 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
-    ion_handlers = get_ion_handlers()
+    # Ion stage 1 is the neutral atom, and hydrogen is atomic number 1. A lower limit selects
+    # no ion at all, and is therefore a typo.
+    for optionname in ("maxionstage", "maxatomicnumber"):
+        limit = getattr(args, optionname)
+        if limit is not None and limit < 1:
+            msg = f"-{optionname} must be 1 or more, got {limit}"
+            raise ValueError(msg)
+
+    ion_handlers = get_ion_handlers(maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber)
 
     if not ion_handlers:
         # Not an assert: an empty selection writes an empty database and does not fail. The function
