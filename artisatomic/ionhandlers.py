@@ -16,12 +16,12 @@ from artisatomic import readtanakajpltdata
 from artisatomic.base import sort_ion_handlers
 from artisatomic.iondata import known_handlers
 
-# The limit on the ion stage that get_ion_handlers() applies when the command line gives none.
-default_maxionstage = 5
-
 
 def get_ion_handlers(
-    maxionstage: int | None = None, maxatomicnumber: int | None = None
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
+    ionlimits_given: t.Sequence[str] = (),
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Get the ions to process and the handler to read each one with.
 
@@ -29,28 +29,23 @@ def get_ion_handlers(
     a run exactly. Otherwise it builds the list from the hard-coded selection below plus every
     ion for which the readers' extend_ion_list() functions find data.
 
-    maxionstage and maxatomicnumber limit that built-in selection. A value of None applies
-    default_maxionstage for the ion stage, and no limit for the atomic number. The file
-    artisatomicionhandlers.json holds the full selection already, so the function rejects a limit
-    when that file exists.
+    minionstage, maxionstage and maxatomicnumber limit that built-in selection, and a value of
+    None applies no limit. The file artisatomicionhandlers.json holds the full selection already, so the function
+    rejects the limits that ionlimits_given names when that file exists. main() names there the
+    options that the command line gave, and not the options that hold a default value.
     """
     inputhandlersfile = Path("artisatomicionhandlers.json")
 
     if inputhandlersfile.exists():
-        if maxionstage is not None or maxatomicnumber is not None:
+        if ionlimits_given:
             # Not an assert: this validates the command line and must survive python -O. A silent
             # accept would hide that the file, and not the limit, selected the ions.
-            msg = (
-                f"{inputhandlersfile} exists, so that file selects the ions. Do not give"
-                " -maxionstage or -maxatomicnumber. Remove the file, or remove the options."
-            )
+            options = " and ".join(f"-{name}" for name in ionlimits_given)
+            msg = f"{inputhandlersfile} exists, so that file selects the ions. Remove the file, or remove {options}."
             raise ValueError(msg)
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
-
-    if maxionstage is None:
-        maxionstage = default_maxionstage
 
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [
         (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
@@ -67,14 +62,17 @@ def get_ion_handlers(
     ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
     ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=maxionstage)
 
-    # Some extend_ion_list() functions take no limit, so apply both limits to the full list here.
-    return sort_ion_handlers(limit_ion_handlers(ion_handlers, maxionstage, maxatomicnumber))
+    # Some extend_ion_list() functions take no limit, so apply every limit to the full list here.
+    return sort_ion_handlers(limit_ion_handlers(ion_handlers, minionstage, maxionstage, maxatomicnumber))
 
 
 def limit_ion_handlers(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]], maxionstage: int | None, maxatomicnumber: int | None
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    minionstage: int | None,
+    maxionstage: int | None,
+    maxatomicnumber: int | None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Remove every ion above maxionstage and every element above maxatomicnumber.
+    """Remove every ion outside the ion stage limits, and every element above maxatomicnumber.
 
     A value of None means no limit. The function also removes an element that keeps no ion,
     because process_files() and write_compositionfile() expect one or more ions for each element.
@@ -84,7 +82,9 @@ def limit_ion_handlers(
         if maxatomicnumber is not None and atomic_number > maxatomicnumber:
             continue
         ions = [
-            (ion_stage, handler) for ion_stage, handler in listions if maxionstage is None or ion_stage <= maxionstage
+            (ion_stage, handler)
+            for ion_stage, handler in listions
+            if (minionstage is None or ion_stage >= minionstage) and (maxionstage is None or ion_stage <= maxionstage)
         ]
         if ions:
             ion_handlers_out.append((atomic_number, ions))

@@ -1339,11 +1339,15 @@ def test_limit_ion_handlers():
 
     # Z=38 keeps no ion at or below stage 5, so the element goes too. write_compositionfile()
     # counts the ion stages of an element, so an empty element would write a wrong count.
-    assert limit_ion_handlers(ion_handlers, 5, None) == [(8, [(1, "cmfgen"), (5, "cmfgen")])]
+    assert limit_ion_handlers(ion_handlers, 1, 5, None) == [(8, [(1, "cmfgen"), (5, "cmfgen")])]
 
-    assert limit_ion_handlers(ion_handlers, None, 10) == [(8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")])]
-    assert limit_ion_handlers(ion_handlers, 1, 10) == [(8, [(1, "cmfgen")])]
-    assert limit_ion_handlers(ion_handlers, None, None) == ion_handlers
+    assert limit_ion_handlers(ion_handlers, None, None, 10) == [(8, [(1, "cmfgen"), (5, "cmfgen"), (6, "cmfgen")])]
+    assert limit_ion_handlers(ion_handlers, 1, 1, 10) == [(8, [(1, "cmfgen")])]
+    assert limit_ion_handlers(ion_handlers, 5, None, None) == [
+        (8, [(5, "cmfgen"), (6, "cmfgen")]),
+        (38, [(6, "kurucz")]),
+    ]
+    assert limit_ion_handlers(ion_handlers, None, None, None) == ion_handlers
 
 
 def test_get_ion_handlers_rejects_a_limit_with_an_input_file(tmp_path, monkeypatch):
@@ -1357,9 +1361,13 @@ def test_get_ion_handlers_rejects_a_limit_with_an_input_file(tmp_path, monkeypat
 
     assert get_ion_handlers() == [(8, [(1, "cmfgen"), (6, "cmfgen")])]
 
-    for limits in ({"maxionstage": 5}, {"maxatomicnumber": 30}):
-        with pytest.raises(ValueError, match=r"artisatomicionhandlers\.json exists"):
-            get_ion_handlers(**limits)
+    # main() names the options that the command line gave. A limit that holds its default value
+    # is absent from that list, and the file selects the ions.
+    with pytest.raises(ValueError, match=r"Remove the file, or remove -maxionstage\."):
+        get_ion_handlers(maxionstage=5, ionlimits_given=["maxionstage"])
+
+    with pytest.raises(ValueError, match=r"remove -minionstage and -maxatomicnumber\."):
+        get_ion_handlers(minionstage=2, maxatomicnumber=30, ionlimits_given=["minionstage", "maxatomicnumber"])
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
