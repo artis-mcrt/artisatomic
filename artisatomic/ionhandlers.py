@@ -16,33 +16,25 @@ from artisatomic import readtanakajpltdata
 from artisatomic.base import sort_ion_handlers
 from artisatomic.iondata import known_handlers
 
+# The file that holds a full ion selection, in the working directory. main() rejects an ion limit
+# that comes with this file, so both modules name it here.
+inputhandlersfile = Path("artisatomicionhandlers.json")
+
 
 def get_ion_handlers(
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
-    ionlimits_given: t.Sequence[str] = (),
+    minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Get the ions to process and the handler to read each one with.
 
     The function reads artisatomicionhandlers.json when that file exists, so the user can repeat
-    a run exactly. Otherwise it builds the list from the hard-coded selection below plus every
-    ion for which the readers' extend_ion_list() functions find data.
+    a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
+    applies to it. Otherwise the function builds the list from the hard-coded selection below plus
+    every ion for which the readers' extend_ion_list() functions find data.
 
-    minionstage, maxionstage and maxatomicnumber limit that built-in selection, and a value of
-    None applies no limit. The file artisatomicionhandlers.json holds the full selection already, so the function
-    rejects the limits that ionlimits_given names when that file exists. main() names there the
-    options that the command line gave, and not the options that hold a default value.
+    minionstage, maxionstage and maxatomicnumber limit that built-in selection. A value of None
+    applies no limit.
     """
-    inputhandlersfile = Path("artisatomicionhandlers.json")
-
     if inputhandlersfile.exists():
-        if ionlimits_given:
-            # Not an assert: this validates the command line and must survive python -O. A silent
-            # accept would hide that the file, and not the limit, selected the ions.
-            options = " and ".join(f"-{name}" for name in ionlimits_given)
-            msg = f"{inputhandlersfile} exists, so that file selects the ions. Remove the file, or remove {options}."
-            raise ValueError(msg)
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
@@ -58,11 +50,11 @@ def get_ion_handlers(
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
     # this sequence to include every ion that they have data for.
     ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=maxionstage, include_hydrogen=True)
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, include_hydrogen=True)
     ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
-    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=maxionstage)
+    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
 
-    # Some extend_ion_list() functions take no limit, so apply every limit to the full list here.
+    # One place applies the limits, because no extend_ion_list() function takes them.
     return sort_ion_handlers(limit_ion_handlers(ion_handlers, minionstage, maxionstage, maxatomicnumber))
 
 

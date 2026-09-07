@@ -11,6 +11,7 @@ import argcomplete
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.ionhandlers import get_ion_handlers
+from artisatomic.ionhandlers import inputhandlersfile
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
@@ -51,34 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
-        "-minionstage",
-        type=int,
-        default=1,
-        help=(
-            "Do not include an ion below this ion stage. Ion stage 1 is the neutral atom. Give this"
-            " option only when artisatomicionhandlers.json does not exist, because that file selects"
-            " the ions itself."
-        ),
+        "-minionstage", type=int, default=1, help="Do not include an ion below this ion stage. 1 is the neutral atom"
     )
+    parser.add_argument("-maxionstage", type=int, default=5, help="Do not include an ion above this ion stage")
     parser.add_argument(
-        "-maxionstage",
-        type=int,
-        default=5,
-        help=(
-            "Do not include an ion above this ion stage. Ion stage 1 is the neutral atom. Give this"
-            " option only when artisatomicionhandlers.json does not exist, because that file selects"
-            " the ions itself."
-        ),
-    )
-    parser.add_argument(
-        "-maxatomicnumber",
-        type=int,
-        default=None,
-        help=(
-            "Do not include an element above this atomic number. The default value None applies no"
-            " limit. Give this option only when artisatomicionhandlers.json does not exist, because"
-            " that file selects the ions itself."
-        ),
+        "-maxatomicnumber", type=int, default=None, help="Do not include an element above this atomic number"
     )
 
     parser.add_argument(
@@ -103,15 +81,20 @@ def main() -> None:
     parser = build_parser()
     argcomplete.autocomplete(parser)
 
-    # argparse keeps a value that the namespace holds already, so it applies no default to these
-    # two. An ion limit that the command line omits therefore stays None, and get_ion_handlers()
-    # can reject a given limit but accept a default one.
-    ionlimits = ("minionstage", "maxionstage", "maxatomicnumber")
-    args = parser.parse_args(namespace=argparse.Namespace(**dict.fromkeys(ionlimits)))
-    ionlimits_given = [name for name in ionlimits if getattr(args, name) is not None]
-    for name in ionlimits:
-        if getattr(args, name) is None:
-            setattr(args, name, parser.get_default(name))
+    args = parser.parse_args()
+
+    # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so an ion
+    # limit beside it does nothing. Not an assert: this validates the command line and must
+    # survive python -O.
+    ionlimits_given = [
+        name
+        for name in ("minionstage", "maxionstage", "maxatomicnumber")
+        if getattr(args, name) != parser.get_default(name)
+    ]
+    if ionlimits_given and inputhandlersfile.exists():
+        options = " and ".join(f"-{name}" for name in ionlimits_given)
+        msg = f"{inputhandlersfile} exists, so that file selects the ions. Remove the file, or remove {options}."
+        raise ValueError(msg)
 
     # 0 switches the estimate off. A negative value is therefore a typo and not a second way to
     # switch it off.
@@ -119,29 +102,17 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
-    # Ion stage 1 is the neutral atom, and hydrogen is atomic number 1. A lower limit selects
-    # no ion at all, and is therefore a typo.
-    for optionname in ionlimits:
-        limit = getattr(args, optionname)
-        if limit is not None and limit < 1:
-            msg = f"-{optionname} must be 1 or more, got {limit}"
-            raise ValueError(msg)
-
-    if args.minionstage > args.maxionstage:
-        msg = f"-minionstage {args.minionstage} is above -maxionstage {args.maxionstage}, so no ion remains"
-        raise ValueError(msg)
-
     ion_handlers = get_ion_handlers(
-        minionstage=args.minionstage,
-        maxionstage=args.maxionstage,
-        maxatomicnumber=args.maxatomicnumber,
-        ionlimits_given=ionlimits_given,
+        minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
     )
 
     if not ion_handlers:
         # Not an assert: an empty selection writes an empty database and does not fail. The function
         # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
-        msg = "No ions selected. artisatomicionhandlers.json is empty, or no reader found any data."
+        msg = (
+            "No ions selected. The ion limits removed every ion, artisatomicionhandlers.json is"
+            " empty, or no reader found any data."
+        )
         raise ValueError(msg)
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)

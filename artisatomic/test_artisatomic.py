@@ -1350,8 +1350,9 @@ def test_limit_ion_handlers():
     assert limit_ion_handlers(ion_handlers, None, None, None) == ion_handlers
 
 
-def test_get_ion_handlers_rejects_a_limit_with_an_input_file(tmp_path, monkeypatch):
+def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
     """An ion handlers file selects the ions, so a limit beside it is an error and not a filter."""
+    from artisatomic.cli import main
     from artisatomic.ionhandlers import get_ion_handlers
 
     monkeypatch.chdir(tmp_path)
@@ -1359,15 +1360,12 @@ def test_get_ion_handlers_rejects_a_limit_with_an_input_file(tmp_path, monkeypat
         json.dumps([[8, [[1, "cmfgen"], [6, "cmfgen"]]]]), encoding="utf-8"
     )
 
+    # the file keeps ion stage 6, which the default -maxionstage of 5 would remove
     assert get_ion_handlers() == [(8, [(1, "cmfgen"), (6, "cmfgen")])]
 
-    # main() names the options that the command line gave. A limit that holds its default value
-    # is absent from that list, and the file selects the ions.
-    with pytest.raises(ValueError, match=r"Remove the file, or remove -maxionstage\."):
-        get_ion_handlers(maxionstage=5, ionlimits_given=["maxionstage"])
-
-    with pytest.raises(ValueError, match=r"remove -minionstage and -maxatomicnumber\."):
-        get_ion_handlers(minionstage=2, maxatomicnumber=30, ionlimits_given=["minionstage", "maxatomicnumber"])
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "3", "-maxatomicnumber", "30"])
+    with pytest.raises(ValueError, match=r"remove -maxionstage and -maxatomicnumber\."):
+        main()
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
@@ -1510,12 +1508,13 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
 
 
 def test_hillier_extend_ion_list():
-    """The CMFGEN ion list honours the maximum ion stage and the hydrogen exclusion."""
-    result = readhillierdata.extend_ion_list([], maxionstage=1, include_hydrogen=False)
-    assert (2, [(1, "cmfgen")]) in result
-    assert (26, [(1, "cmfgen")]) in result
+    """The CMFGEN ion list names the cmfgen handler, and it excludes hydrogen by default."""
+    result = readhillierdata.extend_ion_list([])
     assert all(atomic_number != 1 for atomic_number, _ in result)
-    assert all(entry == (1, "cmfgen") for _, listions in result for entry in listions)
+    assert all(handler == "cmfgen" for _, listions in result for _, handler in listions)
+    assert {(2, 1), (26, 1)} <= {(atomic_number, ion_stage) for atomic_number, l in result for ion_stage, _ in l}
+
+    assert any(atomic_number == 1 for atomic_number, _ in readhillierdata.extend_ion_list([], include_hydrogen=True))
 
 
 def test_reduce_phixs_tables_worker():
