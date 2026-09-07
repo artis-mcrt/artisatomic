@@ -8,6 +8,7 @@ from pathlib import Path
 
 import argcomplete
 
+from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.ionhandlers import get_ion_handlers
@@ -81,19 +82,37 @@ def main() -> None:
     parser = build_parser()
     argcomplete.autocomplete(parser)
 
-    args = parser.parse_args()
+    # argparse applies no default to an attribute that the namespace holds already, so an ion
+    # limit that the command line omits stays None. main() finds the given limits from that, and
+    # then applies the default value of each other limit.
+    ionlimits = ("minionstage", "maxionstage", "maxatomicnumber")
+    args = parser.parse_args(namespace=argparse.Namespace(**dict.fromkeys(ionlimits)))
+    ionlimits_given = [name for name in ionlimits if getattr(args, name) is not None]
+    for name in ionlimits:
+        if getattr(args, name) is None:
+            setattr(args, name, parser.get_default(name))
 
-    # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so an ion
-    # limit beside it does nothing. Not an assert: this validates the command line and must
+    # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so that
+    # file selects the ions itself. Not an assert: this validates the command line and must
     # survive python -O.
-    ionlimits_given = [
-        name
-        for name in ("minionstage", "maxionstage", "maxatomicnumber")
-        if getattr(args, name) != parser.get_default(name)
-    ]
     if ionlimits_given and inputhandlersfile.exists():
-        options = " and ".join(f"-{name}" for name in ionlimits_given)
-        msg = f"{inputhandlersfile} exists, so that file selects the ions. Remove the file, or remove {options}."
+        options = ", ".join(f"-{name}" for name in ionlimits_given)
+        msg = (
+            f"{inputhandlersfile.resolve()} exists, so that file selects the ions."
+            f" Remove the file. As an alternative, remove {options}."
+        )
+        raise ValueError(msg)
+
+    # Ion stage 1 is the neutral atom, and hydrogen is atomic number 1. A smaller limit selects no
+    # ion at all, and is therefore a typo.
+    for name in ionlimits:
+        limit = getattr(args, name)
+        if limit is not None and limit < 1:
+            msg = f"-{name} must be 1 or more, got {limit}"
+            raise ValueError(msg)
+
+    if args.minionstage > args.maxionstage:
+        msg = f"-minionstage {args.minionstage} is above -maxionstage {args.maxionstage}, so no ion remains"
         raise ValueError(msg)
 
     # 0 switches the estimate off. A negative value is therefore a typo and not a second way to
@@ -110,10 +129,15 @@ def main() -> None:
         # Not an assert: an empty selection writes an empty database and does not fail. The function
         # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
         msg = (
-            "No ions selected. The ion limits removed every ion, artisatomicionhandlers.json is"
+            "No ions selected. The ion limits exclude every ion, artisatomicionhandlers.json is"
             " empty, or no reader found any data."
         )
         raise ValueError(msg)
+
+    # The readers can offer an element that has a gap in its ion stages. -maxionstage 6 gives
+    # Sr I-IV and Sr VI, because no data source here holds Sr V. write_compositionfile() rejects
+    # such a gap. This check runs first, because the code below deletes the logs of the last run.
+    check_ion_stages_contiguous(ion_handlers)
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 
@@ -128,7 +152,8 @@ def main() -> None:
 
     # A record of what this run used, beside the logs. It is NOT the file
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
-    # directory. Copy this one there to repeat a run exactly, as the CI workflow does.
+    # directory. Copy this one there to repeat a run exactly, as the CI workflow does. The copy
+    # holds the ions that the limits kept, so the repeat run must not give a limit again.
     with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)

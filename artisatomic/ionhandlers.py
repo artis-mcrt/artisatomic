@@ -23,18 +23,18 @@ inputhandlersfile = Path("artisatomicionhandlers.json")
 
 
 def get_ion_handlers(
-    minionstage: int | None = None, maxionstage: int | None = None, maxatomicnumber: int | None = None
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Get the ions to process and the handler to read each one with.
 
     The function reads artisatomicionhandlers.json when that file exists, so the user can repeat
     a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
-    applies to it. Otherwise the function builds the list from the hard-coded selection below plus
-    every ion for which the readers' extend_ion_list() functions find data.
+    applies to it. Otherwise the function builds the built-in selection: the ions below plus every
+    ion for which the readers' extend_ion_list() functions find data.
 
     minionstage, maxionstage and maxatomicnumber limit that built-in selection. Every reader gets
     the three limits, so no reader offers an ion that the limits exclude. A value of None applies
-    no limit.
+    no limit. The caller states all three, because build_parser() holds their default values.
     """
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
@@ -48,10 +48,11 @@ def get_ion_handlers(
                 ion_handlers, atomic_number, ion_stage, "kurucz", minionstage, maxionstage, maxatomicnumber
             )
 
-    # Include every ion that has data.
+    # Include every ion that has data and that the limits keep.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
-    # this sequence to include every ion that they have data for.
+    # this sequence to offer their ions too. Give a higher -maxionstage to a run that includes
+    # readmonsdata, because the MONS archive starts at ion stage 5.
     ion_handlers = readqubdata.extend_ion_list(ion_handlers, minionstage, maxionstage, maxatomicnumber)
     ion_handlers = readhillierdata.extend_ion_list(
         ion_handlers, minionstage, maxionstage, maxatomicnumber, include_hydrogen=True

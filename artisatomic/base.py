@@ -554,6 +554,25 @@ def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
     return [ion_stage for ion_stage, _handler in list_ions]
 
 
+def check_ion_stages_contiguous(ion_handlers: list[tuple[int, list[tuple[int, str]]]]) -> None:
+    """Reject an element that has a gap in its ion stages.
+
+    compositiondata.txt gives the lowest and the highest ion stage of an element, and no list. A
+    gap would therefore claim ions that the run never wrote. Not an assert: this guards written
+    output and must survive python -O.
+    """
+    for atomic_number, listions in ion_handlers:
+        ion_stages = drop_handlers(listions)
+        if not ion_stages:
+            continue
+        ion_stage_min = min(ion_stages)
+        ion_stage_max = max(ion_stages)
+        missing = [ion_stage for ion_stage in range(ion_stage_min, ion_stage_max + 1) if ion_stage not in ion_stages]
+        if missing:
+            msg = f"Missing ion stages {missing} for Z={atomic_number} between {ion_stage_min} and {ion_stage_max}"
+            raise ValueError(msg)
+
+
 def sort_ion_handlers(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
 ) -> list[tuple[int, list[tuple[int, str]]]]:
@@ -607,11 +626,12 @@ def add_handler_if_not_set(
     atomic_number = int(atomic_number)
     ion_stage = int(ion_stage)
 
-    minstage = 1 if minionstage is None else minionstage
+    minstage = -sys.maxsize if minionstage is None else minionstage
     maxstage = sys.maxsize if maxionstage is None else maxionstage
     maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
     if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-        return ion_handlers
+        # every path returns a new sorted list, so a caller can keep its own list unchanged
+        return sort_ion_handlers(ion_handlers)
 
     ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
     found_element = False
