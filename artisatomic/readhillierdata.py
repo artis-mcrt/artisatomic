@@ -2078,7 +2078,10 @@ def read_hyd_phixsdata(force: bool = False) -> None:
 
 def extend_ion_list(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    *,
+    minionstage: int | None = None,
     maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
     include_hydrogen: bool | None = False,
 ):
     """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
@@ -2087,10 +2090,16 @@ def extend_ion_list(
     photoionisation tables, which serve as a fallback for other elements.
     """
     for atomic_number, ion_stage in ions_data:
-        if maxionstage is not None and ion_stage > maxionstage:
-            continue  # skip
         if not include_hydrogen and atomic_number == 1:
             continue  # skip
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "cmfgen")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers,
+            atomic_number,
+            ion_stage,
+            "cmfgen",
+            minionstage=minionstage,
+            maxionstage=maxionstage,
+            maxatomicnumber=maxatomicnumber,
+        )
 
     return ion_handlers

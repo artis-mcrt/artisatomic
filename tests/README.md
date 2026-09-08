@@ -23,7 +23,8 @@ rm artisatomicionhandlers.json
 `test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
 `OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:
 `get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
-repository root silently overrides the built-in ion selection of every later local run.
+repository root silently overrides the built-in ion selection of every later local run. A later run that
+gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an error instead.
 
 **Every** set needs the CMFGEN corpus, not just the `cmfgen` ones, which is why the workflow's
 CMFGEN setup step is the one not gated on `matrix.testname` (the comment there says why). `jplt`

@@ -13,38 +13,72 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
+from artisatomic.base import add_handler_if_not_set
 from artisatomic.base import sort_ion_handlers
 from artisatomic.iondata import known_handlers
 
+# The file that holds a full ion selection, in the working directory. main() rejects an ion limit
+# that comes with this file, so both modules name it here.
+inputhandlersfile = Path("artisatomicionhandlers.json")
 
-def get_ion_handlers() -> list[tuple[int, list[tuple[int, str]]]]:
+
+def get_ion_handlers(
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+) -> list[tuple[int, list[tuple[int, str]]]]:
     """Get the ions to process and the handler to read each one with.
 
     The function reads artisatomicionhandlers.json when that file exists, so the user can repeat
-    a run exactly. Otherwise it builds the list from the hard-coded selection below plus every
+    a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
+    applies to it. Otherwise the function builds the built-in selection: the ions below plus every
     ion for which the readers' extend_ion_list() functions find data.
-    """
-    inputhandlersfile = Path("artisatomicionhandlers.json")
 
+    minionstage, maxionstage and maxatomicnumber limit that built-in selection. Every reader gets
+    the three limits, so no reader offers an ion that the limits exclude. A value of None applies
+    no limit. The caller states all three, because build_parser() holds their default values.
+    """
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
 
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [
-        (38, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-        (39, [(1, "kurucz"), (2, "kurucz")]),
-        (40, [(1, "kurucz"), (2, "kurucz"), (3, "kurucz")]),
-    ]
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
+    for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3))):
+        for ion_stage in ion_stages:
+            ion_handlers = add_handler_if_not_set(
+                ion_handlers,
+                atomic_number,
+                ion_stage,
+                "kurucz",
+                minionstage=minionstage,
+                maxionstage=maxionstage,
+                maxatomicnumber=maxatomicnumber,
+            )
 
-    # Include every ion that has data.
+    # Include every ion that has data and that the limits keep.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
-    # this sequence to include every ion that they have data for.
-    ion_handlers = readqubdata.extend_ion_list(ion_handlers)
-    ion_handlers = readhillierdata.extend_ion_list(ion_handlers, maxionstage=5, include_hydrogen=True)
-    ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
-    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers, maxionstage=5)
+    # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
+    # whose files start above the default -maxionstage needs a higher value.
+    ion_handlers = readqubdata.extend_ion_list(
+        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
+    ion_handlers = readhillierdata.extend_ion_list(
+        ion_handlers,
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+        include_hydrogen=True,
+    )
+    ion_handlers = readfloers25data.extend_ion_list(
+        ion_handlers,
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+        calibrated=True,
+    )
+    ion_handlers = readtanakajpltdata.extend_ion_list(
+        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
 
     return sort_ion_handlers(ion_handlers)
 

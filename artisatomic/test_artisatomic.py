@@ -4,6 +4,7 @@
 import argparse
 import functools
 import io
+import json
 import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import typing as t
@@ -1327,6 +1328,65 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
+def test_add_handler_if_not_set_applies_the_limits():
+    """A limit keeps an ion out of the list, and every element in the list keeps one ion or more."""
+    limits = {"minionstage": 2, "maxionstage": 3, "maxatomicnumber": 30}
+
+    assert add_handler_if_not_set([], 26, 2, "cmfgen", **limits) == [(26, [(2, "cmfgen")])]
+    assert add_handler_if_not_set([], 26, 1, "cmfgen", **limits) == []
+    assert add_handler_if_not_set([], 26, 4, "cmfgen", **limits) == []
+    assert add_handler_if_not_set([], 38, 2, "cmfgen", **limits) == []
+
+    # A limit of None includes every ion, which is what a direct call to a reader gets. Ion stage 0
+    # comes from a reader that counts the charge, so the lower limit must keep it.
+    assert add_handler_if_not_set([], 38, 9, "cmfgen") == [(38, [(9, "cmfgen")])]
+    assert add_handler_if_not_set([], 38, 0, "cmfgen") == [(38, [(0, "cmfgen")])]
+
+    # a rejected ion returns a new sorted list, as an accepted ion does
+    unsorted = [(38, [(2, "cmfgen")]), (26, [(1, "cmfgen")])]
+    assert add_handler_if_not_set(unsorted, 26, 9, "cmfgen", **limits) == [
+        (26, [(1, "cmfgen")]),
+        (38, [(2, "cmfgen")]),
+    ]
+
+
+def test_extend_ion_list_forwards_the_limits():
+    """A reader gives the three limits to add_handler_if_not_set(), which keeps its own ions out.
+
+    get_ion_handlers() gives the limits to each reader positionally. A transposition there changes
+    which ions a run writes, and no checksum set finds it, because each set reads an ion handlers
+    file instead.
+    """
+    result = readhillierdata.extend_ion_list([], minionstage=2, maxionstage=3, maxatomicnumber=26)
+
+    assert result, "the CMFGEN corpus is missing"
+    assert all(2 <= ion_stage <= 3 for _, listions in result for ion_stage, _ in listions)
+    assert all(atomic_number <= 26 for atomic_number, _ in result)
+
+
+def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
+    """An ion handlers file selects the ions, so a limit with that file is an error and not a filter."""
+    from artisatomic.cli import main
+    from artisatomic.ionhandlers import get_ion_handlers
+
+    monkeypatch.chdir(tmp_path)
+    # a contiguous selection, so a guard that stops working fails here and not in a later check
+    ions = [[ion_stage, "cmfgen"] for ion_stage in range(1, 7)]
+    (tmp_path / "artisatomicionhandlers.json").write_text(json.dumps([[8, ions]]), encoding="utf-8")
+
+    # the file keeps ion stage 6, which the -maxionstage of the call excludes
+    assert get_ion_handlers(1, 5, 8) == [(8, [(ion_stage, "cmfgen") for ion_stage in range(1, 7)])]
+
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "3", "-maxatomicnumber", "30"])
+    with pytest.raises(ValueError, match=r"remove -maxionstage, -maxatomicnumber\."):
+        main()
+
+    # a limit that holds the value of its default is still a limit that the command line gave
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "5"])
+    with pytest.raises(ValueError, match=r"remove -maxionstage\."):
+        main()
+
+
 def test_parent_elevel_zero_normalisation_is_anchored():
     r"""Only a parent level that IS 0.0 may become 0, not one that only contains it.
 
@@ -1467,12 +1527,13 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
 
 
 def test_hillier_extend_ion_list():
-    """The CMFGEN ion list honours the maximum ion stage and the hydrogen exclusion."""
-    result = readhillierdata.extend_ion_list([], maxionstage=1, include_hydrogen=False)
-    assert (2, [(1, "cmfgen")]) in result
-    assert (26, [(1, "cmfgen")]) in result
+    """The CMFGEN ion list names the cmfgen handler, and it excludes hydrogen by default."""
+    result = readhillierdata.extend_ion_list([])
     assert all(atomic_number != 1 for atomic_number, _ in result)
-    assert all(entry == (1, "cmfgen") for _, listions in result for entry in listions)
+    assert all(handler == "cmfgen" for _, listions in result for _, handler in listions)
+    assert {(2, 1), (26, 1)} <= {(atomic_number, ion_stage) for atomic_number, l in result for ion_stage, _ in l}
+
+    assert any(atomic_number == 1 for atomic_number, _ in readhillierdata.extend_ion_list([], include_hydrogen=True))
 
 
 def test_reduce_phixs_tables_worker():

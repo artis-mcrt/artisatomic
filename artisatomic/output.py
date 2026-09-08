@@ -9,6 +9,7 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import atomic_weights
+from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
@@ -695,6 +696,7 @@ def write_phixs_data(
 def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Write compositiondata.txt, which lists each element's contiguous range of ion stages."""
     print("Writing compositiondata.txt")
+    check_ion_stages_contiguous(ion_handlers)
     with (Path(args.output_folder) / "compositiondata.txt").open("w", encoding="utf-8") as fcomp:
         fcomp.write(f"{len(ion_handlers):d}\n")
         fcomp.write("0\n0\n")
@@ -706,20 +708,6 @@ def write_compositionfile(ion_handlers: list[tuple[int, list[tuple[int, str]]]],
             if listions_nohandlers:
                 ion_stage_min = min(listions_nohandlers)
                 ion_stage_max = max(listions_nohandlers)
-                # The file gives only the range, so a gap in it would claim ions that the run never
-                # wrote, without a message. Not an assert: this guards written output and must
-                # survive -O.
-                missing = [
-                    ion_stage
-                    for ion_stage in range(ion_stage_min, ion_stage_max + 1)
-                    if ion_stage not in listions_nohandlers
-                ]
-                if missing:
-                    msg = (
-                        f"Missing ion stages {missing} for Z={atomic_number} between {ion_stage_min}"
-                        f" and {ion_stage_max}"
-                    )
-                    raise ValueError(msg)
                 nions = ion_stage_max - ion_stage_min + 1
 
             fcomp.write(

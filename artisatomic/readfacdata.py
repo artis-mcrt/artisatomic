@@ -208,7 +208,13 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
     return lines
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(
+    ion_handlers,
+    *,
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
+):
     """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
     basepath = get_basepath()
     # not an assert: this reports a missing data directory and must survive python -O. It also
@@ -223,7 +229,15 @@ def extend_ion_list(ion_handlers):
     for s in basepath.glob("**/*.lev.asc"):
         ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
         atomic_number, ion_stage = split_element_ionstage_str(ionstr)
-        ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "fac")
+        ion_handlers = add_handler_if_not_set(
+            ion_handlers,
+            atomic_number,
+            ion_stage,
+            "fac",
+            minionstage=minionstage,
+            maxionstage=maxionstage,
+            maxatomicnumber=maxatomicnumber,
+        )
 
     # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return ion_handlers

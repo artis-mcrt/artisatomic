@@ -60,7 +60,13 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
     return [dfcolumns[name].to_numpy() for name in columnnames]
 
 
-def extend_ion_list(ion_handlers):
+def extend_ion_list(
+    ion_handlers,
+    *,
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
+):
     """Add every ion with a MONS level file to ion_handlers.
 
     The archive holds La-Lu (Z=57-71) in the ion stages V-VII. The list comes from the archive
@@ -72,7 +78,15 @@ def extend_ion_list(ion_handlers):
     for atomic_number in range(57, 72):
         for ion_stage in (5, 6, 7):
             if levels_member(atomic_number, ion_stage) in membernames:
-                ion_handlers = add_handler_if_not_set(ion_handlers, atomic_number, ion_stage, "mons")
+                ion_handlers = add_handler_if_not_set(
+                    ion_handlers,
+                    atomic_number,
+                    ion_stage,
+                    "mons",
+                    minionstage=minionstage,
+                    maxionstage=maxionstage,
+                    maxatomicnumber=maxatomicnumber,
+                )
 
     return ion_handlers
 

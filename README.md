@@ -24,7 +24,7 @@ python3 -m pip install --group dev -e .
 ```
 
 ## Usage
-Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. This code is not user friendly and requires manual editing of the Python scripts to change ions and data sources.
+Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. This code is not user friendly and requires manual editing of the Python scripts to change ions and data sources. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection.
 
 The package installs three more commands:
 
