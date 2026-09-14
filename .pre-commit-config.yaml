@@ -19,7 +19,6 @@ repos:
             args: [--fix=lf]
             # the downloaded source files must stay byte-identical to the published data
             exclude: ^atomic-data-chargetransfer/
-          - id: name-tests-test
           - id: trailing-whitespace
             # the downloaded source files must stay byte-identical to the published data
             exclude: ^atomic-data-chargetransfer/
@@ -41,12 +40,5 @@ repos:
           - id: uv-sync
             args: [--frozen, --all-extras, --no-install-project]
 
-    - repo: https://github.com/astral-sh/ty-pre-commit
-      rev: v0.0.78
-      hooks:
-          - id: ty
-            name: ty
-
 ci:
-    skip: [ty]
     autoupdate_schedule: quarterly

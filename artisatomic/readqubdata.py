@@ -17,6 +17,8 @@ from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_filename_pattern
+from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
 from artisatomic.base import PhixsData
@@ -30,6 +32,9 @@ from artisatomic.phixs import reduce_phixs_tables
 
 qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
 tyndall_co3_path = (qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
+
+# the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
+qub_filename_pattern = ion_filename_pattern(".adf04")
 
 
 class QUBTransitionRow(t.NamedTuple):
@@ -71,8 +76,7 @@ def extend_ion_list(
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     qubfiles = [f for ext in compression_extensions for f in qubpath.glob(f"*_*.adf04{ext}")]
     # each name holds the atomic number and the ion stage, e.g. 26_2.adf04
-    qubnameparts = [f.name.split(".")[0].split("_") for f in qubfiles]
-    qubions = sorted({(int(atomic_number), int(ion_stage)) for atomic_number, ion_stage in qubnameparts})
+    qubions = ions_from_filenames(qubfiles, qub_filename_pattern)
 
     return add_handlers_if_not_set(
         ion_handlers,
@@ -326,8 +330,11 @@ def read_adf04(
 def append_qub_transition(qub_energylevels, qub_transitions, id_lower, id_upper, A, filepath) -> None:
     """Validate one radiative transition row and append it to the transition list.
 
-    The ids are the file's 1-based level ids.
+    The ids are the file's 1-based level ids. The columns of a file do not always give the lower
+    level first, so the function sorts the pair. read_adf04() sorts each collision pair the same
+    way. A reversed pair would give a transition that the upsilon join misses.
     """
+    id_lower, id_upper = min(id_lower, id_upper), max(id_lower, id_upper)
     # a raise rather than an assert: this validates an input file. A non-positive
     # id would wrap to the wrong level through a negative index. An id one past the
     # end would raise a bare IndexError that names neither the file nor the transition.
@@ -450,8 +457,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
 
-        # the W II file has the first two columns in the opposite order to the standard one
-        uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
         # a radiative transition is a collision row with both level ids and an A-value. Before,
         # the reader selected the rows by the width of the line. That test dropped a row that
         # was one character shorter than the widest, and did not count it.
@@ -459,7 +464,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
-        for id_upper, id_lower, A in transitiondf.select(uppercolumn, lowercolumn, "avalue").iter_rows():
+        # append_qub_transition() sorts each pair of level ids, so a file that gives the two
+        # columns in the opposite order (the W II file does) needs no special case here.
+        for id_upper, id_lower, A in transitiondf.select("upper", "lower", "avalue").iter_rows():
             append_qub_transition(
                 qub_energylevels,
                 qub_transitions,

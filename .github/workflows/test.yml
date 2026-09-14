@@ -83,7 +83,7 @@ jobs:
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
-                  key: atomic-data-hillier/atomic_data_21jun23/files
+                  key: atomic-data-hillier-atomic_21jun23-${{ hashFiles('atomic-data-hillier/setup_cmfgen_data.sh') }}
 
             - name: Download/extract CMFGEN atomic data
               if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}
@@ -192,7 +192,7 @@ jobs:
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
-                  key: atomic-data-hillier/atomic_data_21jun23/files
+                  key: atomic-data-hillier-atomic_21jun23-${{ hashFiles('atomic-data-hillier/setup_cmfgen_data.sh') }}
 
             - name: Download/extract CMFGEN atomic data
               if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}

@@ -7,6 +7,7 @@ import math
 import multiprocessing as mp
 import operator
 import os
+import re
 import sys
 import typing as t
 from collections.abc import Callable
@@ -308,6 +309,33 @@ def isfloat(value: t.Any) -> bool:
 
 
 compression_extensions = ("", ".zst", ".gz", ".xz")
+
+
+def ion_filename_pattern(suffix: str) -> re.Pattern[str]:
+    """Build the pattern of a data file that a reader names "<atomic number>_<ion stage><suffix>".
+
+    The pattern also accepts every compressed form of the name, e.g. "26_2.txt.zst".
+    """
+    extensions = "|".join(re.escape(ext) for ext in compression_extensions)
+    return re.compile(rf"^(\d+)_(\d+){re.escape(suffix)}({extensions})$")
+
+
+def ions_from_filenames(filepaths: Iterable[Path], pattern: re.Pattern[str]) -> list[tuple[int, int]]:
+    """Return the atomic number and the ion stage of each file name that the pattern matches.
+
+    A glob also finds a file that a sync client copied, e.g. "26_1 2.txt". This function prints a
+    warning for such a name and skips the file. int() on the parts of that name stops the whole
+    ion selection instead, with a message that names no file.
+    """
+    ions = set()
+    for filepath in filepaths:
+        match = pattern.match(filepath.name)
+        if match is None:
+            print(f"WARNING: The file name {filepath.name} is not <atomic number>_<ion stage>. The reader skips it.")
+            continue
+        ions.add((int(match[1]), int(match[2])))
+
+    return sorted(ions)
 
 
 def find_file_check_extension(filename: str | Path) -> Path | None:

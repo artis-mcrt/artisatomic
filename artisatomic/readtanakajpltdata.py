@@ -6,11 +6,16 @@ import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_filename_pattern
+from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
 jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
+
+# the name of a data file, e.g. 26_2.txt or 26_2.txt.zst
+jplt_filename_pattern = ion_filename_pattern(".txt")
 
 
 def extend_ion_list(
@@ -22,8 +27,7 @@ def extend_ion_list(
 ):
     """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     # each name holds the atomic number and the ion stage, e.g. 26_2.txt
-    tanakanameparts = [f.name.split(".")[0].split("_") for f in jpltpath.glob("*_*.txt*")]
-    tanakaions = sorted((int(atomic_number), int(ion_stage)) for atomic_number, ion_stage in tanakanameparts)
+    tanakaions = ions_from_filenames(jpltpath.glob("*_*.txt*"), jplt_filename_pattern)
 
     return add_handlers_if_not_set(
         ion_handlers,

@@ -21,13 +21,22 @@ from artisatomic.iondata import IonData
 
 
 def clear_files(args: argparse.Namespace) -> None:
-    """Truncate the output files and write the phixs header. The writer appends the ions after it."""
+    """Truncate the output files and write the phixs header. The writer appends the ions after it.
+
+    The option --nophixs writes no cross sections. The run therefore keeps phixsdata_v2.txt of an
+    earlier run in the same folder, and does not replace it with a header and no ion.
+    """
     outdir = Path(args.output_folder)
     with (
         (outdir / "adata.txt").open("w", encoding="utf-8"),
         (outdir / "transitiondata.txt").open("w", encoding="utf-8"),
-        (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs,
     ):
+        pass
+
+    if args.nophixs:
+        return
+
+    with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 

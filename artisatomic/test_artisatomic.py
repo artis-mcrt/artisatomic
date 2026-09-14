@@ -1881,8 +1881,8 @@ def test_write_adata_level_comment():
     assert spaced_line.split(maxsplit=4)[4] == spacedlevelname
 
 
+# the format string that FAC writes one transition row with. The reader cuts its fields.
 FAC_TRANSITION_FORMAT = "%6d %2d %6d %2d %13.6E %13.6E %13.6E %13.6E"
-"""The format string that FAC writes one transition row with. The reader cuts its fields."""
 
 
 def fac_levels_header(code: str, nlev: int) -> list[str]:
@@ -3617,3 +3617,119 @@ def test_readhillierdata_rejects_a_file_with_no_ionization_energy(monkeypatch, t
     )
     with contextlib.redirect_stdout(io.StringIO()), pytest.raises(ValueError, match="no '!Ionization energy' line"):
         readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
+
+
+def test_clear_files_keeps_phixsdata_with_nophixs(tmp_path):
+    """--nophixs writes no cross sections, so clear_files() keeps phixsdata_v2.txt of an earlier run."""
+    from artisatomic.output import clear_files
+
+    phixspath = tmp_path / "phixsdata_v2.txt"
+    earlier_run = "100\n 3.0000000e-02\n26 2 0 1 10 1.0\n"
+    phixspath.write_text(earlier_run, encoding="utf-8")
+    (tmp_path / "adata.txt").write_text("an earlier run\n", encoding="utf-8")
+
+    clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
+
+    # the option promises no phixsdata_v2.txt, so the file of the earlier run stays complete
+    assert phixspath.read_text(encoding="utf-8") == earlier_run
+    # the other two files always start again
+    assert not (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    assert not (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+
+    # a run that writes cross sections truncates the file and writes the header for the ions
+    clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path)))
+    assert phixspath.read_text(encoding="utf-8").splitlines() == ["100", " 3.0000000e-02"]
+
+
+@pytest.mark.parametrize(
+    ("modulename", "pathname", "handler", "dataname", "strayname"),
+    [
+        ("readtanakajpltdata", "jpltpath", "tanakajplt", "26_1.txt.zst", "26_1 2.txt.zst"),
+        ("readqubdata", "qubpath", "qub", "38_1.adf04.zst", "38_1 2.adf04.zst"),
+    ],
+)
+def test_extend_ion_list_skips_a_file_name_that_names_no_ion(
+    modulename, pathname, handler, dataname, strayname, tmp_path, monkeypatch, capsys
+):
+    """A stray file that the glob matches gives a warning, and the ion selection continues.
+
+    A sync client leaves a conflict copy, e.g. "26_1 2.txt.zst", beside the data file. int() on
+    the parts of that name stopped every run that used the built-in ion selection, with a message
+    that named neither the reader nor the file.
+    """
+    module = importlib.import_module(f"artisatomic.{modulename}")
+    (tmp_path / dataname).touch()
+    (tmp_path / strayname).touch()
+    monkeypatch.setattr(module, pathname, tmp_path)
+
+    result = module.extend_ion_list([])
+
+    atomic_number = int(dataname.split("_")[0])
+    assert result == [(atomic_number, [(1, handler)])]
+    assert strayname in capsys.readouterr().out
+
+
+def test_read_qub_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypatch):
+    """A collision row that gives the lower level first still gives a transition with the lower id first.
+
+    read_adf04() sorts each collision pair, so a reversed transition pair matches no upsilon. The
+    join in write_output_files() then misses, and write_transition_data() raises after adata.txt
+    already holds the ion.
+    """
+    import contextlib
+
+    adf04 = (
+        "Xx+ 0        99         1     45932.2036(  )\n"
+        "    1          4p65s2(1S)   (1)0( 0.0)            0.0000\n"
+        "    2       4p65s15p1(3P)   (3)1( 0.0)        14317.5023\n"
+        "   -1\n"
+        "   -1  1.00+03  1.00+04\n"
+        "   1    2  1.00+08  5.00-01\n"
+        "  -1\n"
+    )
+    (tmp_path / "99_1.adf04").write_text(adf04, encoding="utf-8")
+    monkeypatch.setattr(readqubdata, "qubpath", tmp_path)
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, _, qub_transitions, upsilondict = readqubdata.read_qub_levels_and_transitions(
+            99, 1, io.StringIO(), phixs_args()
+        )
+
+    # the ids are zero-based in memory, and both the transition and the upsilon name the same pair
+    assert list(upsilondict) == [(0, 1)]
+    assert not isinstance(qub_transitions, pl.DataFrame)  # this reader returns a list of rows
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in qub_transitions] == [(0, 1)]
+
+
+def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
+    """A run with no ion handlers file selects ions that compositiondata.txt can hold.
+
+    Every tests/*/ set supplies an ion handlers file, so no checksum set takes this branch. The
+    test pins the properties of the selection and not the number of ions, which the available
+    data sets decide.
+    """
+    import contextlib
+
+    from artisatomic.base import check_ion_stages_contiguous
+    from artisatomic.base import sort_ion_handlers
+    from artisatomic.ionhandlers import get_ion_handlers
+
+    if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
+        pytest.skip("the CMFGEN data set is not available here")
+
+    # a directory with no artisatomicionhandlers.json, so the function builds the selection
+    monkeypatch.chdir(tmp_path)
+    with contextlib.redirect_stdout(io.StringIO()):
+        ion_handlers = get_ion_handlers(1, 5, None)
+        unlimited = get_ion_handlers(None, None, None)
+
+    assert ion_handlers
+    # compositiondata.txt gives the lowest and the highest ion stage of an element, and no list
+    check_ion_stages_contiguous(ion_handlers)
+    assert all(1 <= ion_stage <= 5 for _, listions in ion_handlers for ion_stage, _ in listions)
+    assert ion_handlers == sort_ion_handlers(ion_handlers)
+
+    # the limits remove ions. They never add one, and they never change the handler of an ion
+    ions = {(atomic_number, ion) for atomic_number, listions in ion_handlers for ion in listions}
+    ions_unlimited = {(atomic_number, ion) for atomic_number, listions in unlimited for ion in listions}
+    assert ions <= ions_unlimited
