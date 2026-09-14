@@ -77,10 +77,13 @@ def extend_ion_list(
     searches.append(("floers25uncalib", "uncalib", basepath_public))
 
     for handlername, calibstr, basepath in searches:
+        # a name that starts with a dot is a hidden file, for example the "._" copy that a macOS
+        # archive can hold beside each data file, and not a level file
         floersions = [
             split_element_ionstage_str(s.name.lstrip(string.digits).split("_")[0])
             for ext in compression_extensions
             for s in basepath.glob(f"*_levels_{calibstr}.txt{ext}")
+            if not s.name.startswith(".")
         ]
         ion_handlers = add_handlers_if_not_set(
             ion_handlers,

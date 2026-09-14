@@ -2769,6 +2769,17 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
     assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
 
 
+def test_readfloers25data_extend_ion_list_skips_hidden_files(tmp_path, monkeypatch):
+    """A "._" copy of a level file, as a macOS archive extracted on Linux leaves, names no ion."""
+    from artisatomic import readfloers25data
+
+    for name in ("70YbII_levels_calib.txt", "._70YbII_levels_calib.txt", "._57LaIII_levels_uncalib.txt"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda withforbidden: tmp_path)  # ruff: ignore[unused-lambda-argument]
+
+    assert readfloers25data.extend_ion_list([]) == [(70, [(2, "floers25calib")])]
+
+
 def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_path, monkeypatch):
     """A wavelength of 1e9 nm or more is one character wider than its field and moves g_u*A right.
 
