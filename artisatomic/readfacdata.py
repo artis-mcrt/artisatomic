@@ -7,7 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
@@ -83,6 +83,26 @@ def check_no_nulls(table: pl.DataFrame, sourcename: str) -> pl.DataFrame:
     return table
 
 
+def check_row_count(table: pl.DataFrame, headerlines: list[str], key: str, sourcename: str) -> pl.DataFrame:
+    """Stop the run if the table has fewer rows than the header of the file declares.
+
+    FAC writes "NLEV = N" in a level file and "NTRANS = N" in a transition file. A copy of a
+    shared-drive file can stop between two rows. The short file then parses without an error, and
+    the ion goes to the output with a part of its levels or its transitions.
+    """
+    # not an assert: a partial data file must stop the run, and the check must survive python -O
+    rowcounts = [int(match[1]) for line in headerlines if (match := re.match(rf"\s*{key}\s*=\s*(\d+)", line))]
+    if not rowcounts:
+        msg = f"{sourcename} has no {key} line in its header. The file is not a complete FAC or cFAC file."
+        raise ValueError(msg)
+
+    if table.height != rowcounts[0]:
+        msg = f"{sourcename} declares {key} = {rowcounts[0]} but holds {table.height} rows. The file is incomplete."
+        raise ValueError(msg)
+
+    return table
+
+
 def GetLevels_FAC(filename: Path | str) -> pl.DataFrame:
     """Parse the level table of an FAC ascii output file (fixed-width, FAC column layout)."""
     columns: list[tuple[str, int, int, type[pl.DataType]]] = [
@@ -141,9 +161,10 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
     """
     headerlines: list[str] = []
     with Path(filename).open(encoding="utf-8") as f:
-        headerlines.extend(f.readline() for _ in range(10))
+        headerlines.extend(f.readline() for _ in range(11))
 
-    # headerlines[7] holds the ground state and headerlines[5] the ion charge. This function needs neither.
+    # headerlines[7] holds the ground state and headerlines[5] the ion charge. This function needs
+    # neither. headerlines[10] holds the NLEV line, which check_row_count() reads.
     version_FAC = headerlines[0].split(" ")[0]
     print("FAC/cFAC: ", version_FAC)
     if version_FAC == "FAC":
@@ -154,23 +175,23 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
         msg = "No FAC-like code detected on output file"
         raise ValueError(msg)
 
-    return levels
+    return check_row_count(levels, headerlines, "NLEV", "The FAC levels file")
 
 
 def GetLines_FAC(filename: Path | str) -> pl.DataFrame:
-    """Parse the transition table of an FAC ascii output file."""
-    # the A column takes the leading "-" of a negative Monopole in the last column, which the
-    # cast cannot read. strip_chars_end() removes it. It strips the right only, so a negative A
-    # keeps its sign
+    """Parse the transition table of an FAC ascii output file.
+
+    FAC writes one row with "%6d %2d %6d %2d %13.6E %13.6E %13.6E %13.6E". The fields are the
+    upper level, its 2J, the lower level, its 2J, the transition energy, gf, A, and the monopole.
+    The format string gives the character windows below. Every field keeps its own window, so a
+    negative value never reaches the field on its left.
+    """
     columns: list[tuple[str, int, int, type[pl.DataType]]] = [
-        ("Upper", 0, 7, pl.Int64),
-        ("Lower", 11, 17, pl.Int64),
-        ("A", 49, 63, pl.String),
+        ("Upper", 0, 6, pl.Int64),
+        ("Lower", 10, 16, pl.Int64),
+        ("A", 48, 61, pl.Float64),
     ]
-    lines = parse_fixed_width(filename, skip_lines=12, columns=columns).with_columns(
-        pl.col("A").str.strip_chars_end(" -").replace("", None).cast(pl.Float64)
-    )
-    return check_no_nulls(lines, "The FAC transitions file")
+    return check_no_nulls(parse_fixed_width(filename, skip_lines=12, columns=columns), "The FAC transitions file")
 
 
 def GetLines_cFAC(filename: Path | str) -> pl.DataFrame:
@@ -194,7 +215,8 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
     headerlines: list[str] = []
     with Path(filename).open(encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
-    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge. This function needs none.
+    # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge. This function
+    # needs none. headerlines[9] holds the NTRANS line, which check_row_count() reads.
     version_FAC = headerlines[0].split(" ")[0]
 
     if version_FAC == "FAC":
@@ -205,7 +227,7 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
         msg = "No FAC-like code detected on output file"
         raise ValueError(msg)
 
-    return lines
+    return check_row_count(lines, headerlines, "NTRANS", f"The {version_FAC} transitions file")
 
 
 def extend_ion_list(
@@ -226,21 +248,20 @@ def extend_ion_list(
         )
         raise FileNotFoundError(msg)
 
-    for s in basepath.glob("**/*.lev.asc"):
-        ionstr = s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib")
-        atomic_number, ion_stage = split_element_ionstage_str(ionstr)
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "fac",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
+    facions = [
+        split_element_ionstage_str(s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib"))
+        for s in basepath.glob("**/*.lev.asc")
+    ]
 
-    # add_handler_if_not_set() keeps the list sorted by atomic number, matching the other readers
-    return ion_handlers
+    # add_handlers_if_not_set() keeps the list sorted by atomic number, matching the other readers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        facions,
+        "fac",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 def read_levels_data(dflevels):
@@ -350,6 +371,17 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dflines = GetLines(filename=lines_file)
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization, flog)
+
+    # not an assert: an ion with no transitions goes to the output as a silent gap in the line
+    # list, and the check must survive python -O. readlisbondata and readdreamdata guard an empty
+    # ion the same way
+    if not transitions and dflines.height > 0:
+        msg = (
+            f"Every one of the {dflines.height} transitions of Z={atomic_number} ion_stage {ion_stage} names a level"
+            f" above the ionisation energy of {ionization_energy_in_ev} eV."
+            " The ion would go to the output with no transitions."
+        )
+        raise ValueError(msg)
 
     log_and_print(flog, f"Read {len(transitions)} transitions")
 

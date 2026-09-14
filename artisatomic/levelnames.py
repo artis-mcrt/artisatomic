@@ -158,19 +158,27 @@ def interpret_configuration(
         term_twosplusone = int(instr[-1])
         instr = instr[:-1]
 
+    # '2s8z1Z' and '1s5z3Zo' end in a merge marker whose letter is the term letter, not in an
+    # index. An index letter never equals the term letter of its own name in CMFGEN.
+    ends_in_merge_marker = (
+        bool(instr) and instr[-1] in merged_orbital_letters and term_l == lchars.index(instr[-1].upper())
+    )
     if not instr:
         pass
     elif instr[-1] == "_":
         instr = instr[:-1]
-    elif instr[-1] in alphabets and (
-        (len(instr) < 2 or not str.isdigit(instr[-2])) or (len(instr) < 3 or instr[-3] in lchars.lower())
-    ):
+    elif instr[-1] in alphabets and not ends_in_merge_marker and _last_letter_is_index(instr):
         # This catches, for example, the occupation piece 6d of '3d6(5D)6d4Ge[9/2]', which is not an index d.
         # '3d7b2Fe' has the index b. The test keeps the index separate from the orbital occupation.
         indexinsymmetry = reversedalphabets.index(instr[-1]) + 1 if term_parity == 1 else alphabets.index(instr[-1]) + 1
         instr = instr[:-1]
 
     return _split_orbitals(instr), term_twosplusone, term_l, term_parity, indexinsymmetry
+
+
+def _last_letter_is_index(instr: str) -> bool:
+    """Whether the last letter of the configuration is an index in the symmetry, not an orbital."""
+    return (len(instr) < 2 or not str.isdigit(instr[-2])) or (len(instr) < 3 or instr[-3] in lchars.lower())
 
 
 def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator[tuple[int, int, bool]]:
@@ -262,3 +270,38 @@ def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | 
             readable = True
 
     return lsum % 2 if readable else None
+
+
+def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | None:
+    """Read the principal quantum number n from the digits between two orbital letters of a label.
+
+    previousorbital is the orbital letter before the digits, or "" when the digits start the
+    label. The digits then hold n only. Otherwise they start with the electron count of that
+    orbital. The function takes a count-plus-n reading only when it is physical: the count fits
+    the previous orbital, and the valence orbital has l < n. So "5s111s1" (adf04, 5s1 11s1) gives
+    11 and not 1. Returns None when no reading is physical or the run is too long.
+    """
+    if not previousorbital:
+        return int(digits)
+    lchars_lower = lchars.lower()
+    l_previous = lchars_lower.find(previousorbital)
+    l_valence = lchars_lower.find(orbital)
+
+    def physical(count: str, n: str) -> bool:
+        return (
+            n[0] != "0"
+            and (l_previous < 0 or int(count) <= 2 * (2 * l_previous + 1))
+            and (l_valence < 0 or l_valence < int(n))
+        )
+
+    if len(digits) == 1:
+        return int(digits)
+    if len(digits) == 2:
+        # a count and a one-digit n ("s25p"), else a two-digit n ("s10d", "s11p")
+        return int(digits[1:]) if physical(digits[:1], digits[1:]) else int(digits)
+    if len(digits) == 3:
+        # a two-digit count and a one-digit n ("f125d"), else a count and a two-digit n ("s210d")
+        if physical(digits[:2], digits[2:]):
+            return int(digits[2:])
+        return int(digits[1:]) if physical(digits[:1], digits[1:]) else None
+    return None

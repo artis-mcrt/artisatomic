@@ -46,29 +46,30 @@ _symbols, _masses = _read_atomic_properties()
 elsymbols = ["n", *_symbols]
 atomic_weights = ["n", *_masses]
 
-roman_numerals = (
-    "",
-    "I",
-    "II",
-    "III",
-    "IV",
-    "V",
-    "VI",
-    "VII",
-    "VIII",
-    "IX",
-    "X",
-    "XI",
-    "XII",
-    "XIII",
-    "XIV",
-    "XV",
-    "XVI",
-    "XVII",
-    "XVIII",
-    "XIX",
-    "XX",
-)
+
+def _roman_numeral(number: int) -> str:
+    """Roman numeral of a positive number."""
+    result = ""
+    for value, letters in (
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ):
+        while number >= value:
+            result += letters
+            number -= value
+    return result
+
+
+# index = ion stage; the empty entry keeps ion stage 1 at index 1. Stages up to 100 cover every
+# ion of every element that a data source here holds (the FAC file names go above XX).
+roman_numerals = ("", *(_roman_numeral(stage) for stage in range(1, 101)))
 
 # the single copy of each constant for the whole package
 ryd_to_ev = 13.605693122994232
@@ -428,12 +429,18 @@ def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, i
             datalines = datalines[:index]
             break
 
-    dfnist = pl.read_csv(
-        io.StringIO("\n".join(datalines)),
-        separator="\t",
-        columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-        infer_schema=False,
-    ).fill_null("")
+    # read_csv(columns=) keeps the file's column order, so select() puts them in the order
+    # that the loop below unpacks
+    dfnist = (
+        pl.read_csv(
+            io.StringIO("\n".join(datalines)),
+            separator="\t",
+            columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+            infer_schema=False,
+        )
+        .select("At. num", "Ion Charge", "Ionization Energy (a) (eV)")
+        .fill_null("")
+    )
     energies = {}
     for atomic_number, ion_charge, ioniz_ev in dfnist.iter_rows():
         if not ioniz_ev:
@@ -618,33 +625,59 @@ def add_handler_if_not_set(
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
 
-    Every reader adds an ion here, so this is where the limits apply. An ion outside a limit never
-    enters the list, and no later step removes it again. A limit of None includes every ion. The
-    function does not modify the input list, so the caller must use the return value.
+    Use add_handlers_if_not_set() for a reader that adds the ions of a whole data set.
     """
-    # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
-    # integers. Normalise them here and not in each caller.
-    atomic_number = int(atomic_number)
-    ion_stage = int(ion_stage)
+    return add_handlers_if_not_set(
+        ion_handlers,
+        [(atomic_number, ion_stage)],
+        handler,
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
+
+def add_handlers_if_not_set(
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    ions: Iterable[tuple[int | str, int | str]],
+    handler: str,
+    *,
+    minionstage: int | None = None,
+    maxionstage: int | None = None,
+    maxatomicnumber: int | None = None,
+) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Return a new sorted ion_handlers list with the handler added to each (atomic_number, ion_stage) of ions.
+
+    An ion that the list already holds keeps the handler that it has. Every reader adds its ions
+    here, so this is where the limits apply. An ion outside a limit never enters the list, and no
+    later step removes it again. A limit of None includes every ion. The function does not modify
+    the input list, so the caller must use the return value.
+    """
     minstage = -sys.maxsize if minionstage is None else minionstage
     maxstage = sys.maxsize if maxionstage is None else maxionstage
     maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
-    if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-        # every path returns a new sorted list, so a caller can keep its own list unchanged
-        return sort_ion_handlers(ion_handlers)
 
-    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
-    found_element = False
-    for tmp_atomic_number, list_ions_handlers in ion_handlers:
-        list_ions_handlers_out: list[tuple[int, str]] = list(list_ions_handlers)
-        if tmp_atomic_number == atomic_number:
-            found_element = True
-            if ion_stage not in drop_handlers(list_ions_handlers_out):
-                list_ions_handlers_out.append((ion_stage, handler))
-        ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
+    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = [
+        (atomic_number, list(list_ions_handlers)) for atomic_number, list_ions_handlers in ion_handlers
+    ]
+    # a duplicated element keeps only its last entry here, and sort_ion_handlers() rejects the list
+    list_ions_of_element = dict(ion_handlers_out)
 
-    if not found_element:
-        ion_handlers_out.append((atomic_number, [(ion_stage, handler)]))
+    for ion in ions:
+        # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+        # integers. Normalise them here and not in each caller.
+        atomic_number = int(ion[0])
+        ion_stage = int(ion[1])
+        if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
+            continue
+
+        list_ions_handlers_out = list_ions_of_element.get(atomic_number)
+        if list_ions_handlers_out is None:
+            list_ions_handlers_out = []
+            list_ions_of_element[atomic_number] = list_ions_handlers_out
+            ion_handlers_out.append((atomic_number, list_ions_handlers_out))
+
+        if ion_stage not in drop_handlers(list_ions_handlers_out):
+            list_ions_handlers_out.append((ion_stage, handler))
 
     return sort_ion_handlers(ion_handlers_out)

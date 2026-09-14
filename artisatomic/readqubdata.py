@@ -12,7 +12,7 @@ import polars as pl
 # the "qub_cobalt" handler reads the stages that the QUB data does not cover from the CMFGEN
 # files. readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
@@ -25,6 +25,7 @@ from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import split_count_and_n
 from artisatomic.phixs import reduce_phixs_tables
 
 qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
@@ -69,19 +70,18 @@ def extend_ion_list(
     """Add every ion with a QUB adf04 file to ion_handlers under the "qub" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     qubfiles = [f for ext in compression_extensions for f in qubpath.glob(f"*_*.adf04{ext}")]
-    qubions = sorted({tuple(int(x) for x in f.name.split(".")[0].split("_")) for f in qubfiles})
-    for atomic_number, ion_stage in qubions:
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "qub",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
+    # each name holds the atomic number and the ion stage, e.g. 26_2.adf04
+    qubnameparts = [f.name.split(".")[0].split("_") for f in qubfiles]
+    qubions = sorted({(int(atomic_number), int(ion_stage)) for atomic_number, ion_stage in qubnameparts})
 
-    return ion_handlers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        qubions,
+        "qub",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 adf04_section_end = "-1"
@@ -731,6 +731,9 @@ def get_level_valence_n(levelname: str) -> int | None:
         if not part[-1].isdigit():
             return None
         part = part.rstrip(string.digits)
+    if not part:
+        return None
+    valenceorbital = part[-1]
     part = part.strip(lchars.lower())
 
     # inefficient way to find the last number in a string
@@ -742,18 +745,10 @@ def get_level_valence_n(levelname: str) -> int | None:
         else:
             # a lower-case orbital letter before the number means that the number is an
             # electron count of the previous orbital, then n. For example, the '24' in '3d24s'
-            # is two electrons and n=4. The same rule as readkuruczdata applies. A two-digit run
-            # that ends in 0 is a two-digit n ('5s10d'). A three-digit run is a two-digit count
-            # and a one-digit n ('4f145d'), unless that n would be 0 ('5s210d').
+            # is two electrons and n=4. The same rule as readkuruczdata applies, and it also
+            # reads '5s111s1' (5s1 11s1) as n = 11.
             if i > 0 and part[i - 1] in lchars.lower():
-                digits = part[i:]
-                if len(digits) == 2 and digits[1] != "0":
-                    digits = digits[1:]
-                elif len(digits) == 3:
-                    digits = digits[2:] if digits[2] != "0" else digits[1:]
-                elif len(digits) > 3:
-                    return None
-                n = int(digits)
+                return split_count_and_n(part[i - 1], part[i:], valenceorbital)
             return n
 
     return None

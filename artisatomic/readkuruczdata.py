@@ -16,6 +16,7 @@ from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.levelnames import split_count_and_n
 
 kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
 if TESTMODE:
@@ -186,7 +187,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         "j_lower",
         "energyabovegsinpercm_upper",
         "j_upper",
-        "wavelength_nm",
         "loggf",
         # kept only for the duplicate-line test below, and dropped by the final select
         "label_lower",
@@ -273,6 +273,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             ),
             on=["energyabovegsinpercm_lower", "j_lower"],
             how="left",
+            # polars gives a join no defined row order without this. The unique() below keeps the
+            # first of two duplicates, and the writer keeps tied rows in this order.
+            maintain_order="left",
         )
         .join(
             dflevels.lazy().select(
@@ -282,11 +285,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             ),
             on=["energyabovegsinpercm_upper", "j_upper"],
             how="left",
+            maintain_order="left",
         )
         .with_columns(
-            # wavelengths are in nanometers, so multiply by 10 to get Angstroms
+            # The vacuum wavelength in Angstrom from the level energies, not the wavelength field.
+            # That field is an air wavelength above 200 nm, and gfall caps it at 999999.9999 nm.
+            # Sr I has 102 lines at the cap, with A too large by up to 1.6e6.
             A=pl.col("gf")
-            / (gf_to_a_coefficient * (2 * pl.col("j_upper") + 1) * (pl.col("wavelength_nm") * 10.0).pow(2))
+            / (
+                gf_to_a_coefficient
+                * (2 * pl.col("j_upper") + 1)
+                * (1e8 / (pl.col("energyabovegsinpercm_upper") - pl.col("energyabovegsinpercm_lower")).abs()).pow(2)
+            )
         )
         .collect()
     )
@@ -365,20 +375,13 @@ def get_level_valence_n(levelname: str) -> int | None:
 
     # the digits before the valence orbital letter. A Kurucz label writes the electron count of
     # the shell before them without a space. "s25p" is 5s2 5p, "f36s" is 4f3 6s and "f125d" is
-    # 4f12 5d. So a run of digits that follows an orbital letter starts with that count. A
-    # two-digit run that ends in 0 is a two-digit n ("s10d" is 5s 10d), because no shell has
-    # n = 0. A lower-case letter is an orbital letter here: the term letters are upper case.
-    nmatch = re.search(r"([a-z]?)(\d+)[a-z]$", part)
+    # 4f12 5d. So a run of digits that follows an orbital letter starts with that count. The
+    # extendedatoms labels write the first orbital with its n and no count: "5s14d" is 5s 14d.
+    # A lower-case letter is an orbital letter here: the term letters are upper case.
+    nmatch = re.search(r"(?:(\d)?([a-z]))?(\d+)([a-z])$", part)
     if nmatch is None:
         return None
-    digits = nmatch.group(2)
-    if nmatch.group(1):
-        if len(digits) == 2 and digits[1] != "0":
-            digits = digits[1:]
-        elif len(digits) == 3:
-            # a two-digit count and a one-digit n ("f125d"), unless that n would be 0. Then it
-            # is a one-digit count and a two-digit n ("s210d" is 5s2 10d).
-            digits = digits[2:] if digits[2] != "0" else digits[1:]
-        elif len(digits) > 3:
-            return None
-    return int(digits)
+    if nmatch.group(1) and nmatch.group(2) and len(nmatch.group(3)) <= 2:
+        # n is at most two digits, so a three-digit run holds a count too ("3d104s" is 3d10 4s)
+        return int(nmatch.group(3))
+    return split_count_and_n(nmatch.group(2) or "", nmatch.group(3), nmatch.group(4))

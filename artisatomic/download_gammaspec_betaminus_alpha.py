@@ -23,6 +23,21 @@ colreplacements = {
 }
 
 
+def normalise_parent_elevel() -> pl.Expr:
+    """Give every spelling of a zero parent level ("0", "0.0", "0.00") the one value "0".
+
+    Then the lines of the ground level form one group in main(), and not two groups that each
+    rewrite the file. A blank or non-numeric level stays as it is, and so does every other level:
+    "10.05" contains "0.0" but is not the ground level.
+    """
+    return (
+        pl.when(pl.col("parent_elevel").cast(pl.Float64, strict=False) == 0.0)
+        .then(pl.lit("0"))
+        .otherwise(pl.col("parent_elevel"))
+        .alias("parent_elevel")
+    )
+
+
 def main():
     """Fetch a NuDat3 decay table for every nuclide in betaminusdecays.txt and alphadecays.txt.
 
@@ -126,13 +141,7 @@ def main():
                     newcols.append(colname)
                 dfnuclide.columns = newcols
                 dfnuclide = dfnuclide.with_columns(pl.col(pl.Utf8).str.strip_chars()).with_columns(
-                    # every spelling of a zero level ("0", "0.0", "0.00") becomes one value. Then the
-                    # lines of the ground level form one group below, and not two groups that each
-                    # rewrite the file. A blank or non-numeric level stays as it is.
-                    pl.when(pl.col("parent_elevel").cast(pl.Float64, strict=False) == 0.0)
-                    .then(pl.lit("0"))
-                    .otherwise(pl.col("parent_elevel"))
-                    .alias("parent_elevel"),
+                    normalise_parent_elevel(),
                     pl.col("radiationenergy_kev").cast(pl.Float64),
                     pl.col("intensity").cast(pl.Float64),
                     pl.col("halflife_s").cast(pl.Float64),
@@ -140,12 +149,9 @@ def main():
 
                 found_groundlevel = False
                 for (parelevel,), dfdecay in dfnuclide.group_by("parent_elevel"):
-                    # a blank parent level reads as null, and a level that is not a number is not
-                    # the ground level either
-                    try:
-                        is_groundlevel = parelevel is not None and float(parelevel) == 0.0
-                    except ValueError:
-                        is_groundlevel = False
+                    # normalise_parent_elevel() gave every spelling of the ground level this one
+                    # value. A blank level (null) or a non-numeric one is not the ground level.
+                    is_groundlevel = parelevel == "0"
                     print(f"  parent_Elevel: {parelevel} is_groundlevel: {is_groundlevel}")
                     if not is_groundlevel:
                         continue

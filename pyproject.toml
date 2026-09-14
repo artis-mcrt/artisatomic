@@ -30,6 +30,9 @@ dependencies = [
     "numpy>=2.2.6",
     "polars>=1.43.2",
     "requests>=2.34.0",
+    # chiantipy declares no dependencies but imports matplotlib and scipy at module level
+    "matplotlib>=3.11.1",
+    "scipy>=1.15.3",
     "tqdm>=4.70.0",
     # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
     "urllib3>=2.2.0",

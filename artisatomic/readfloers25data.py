@@ -6,7 +6,7 @@ from pathlib import Path
 
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
@@ -65,7 +65,7 @@ def extend_ion_list(
     if not use_private and not TESTMODE:
         print(f"Floers+25: skipped the private directory {basepath_private} because it does not exist")
 
-    # the searches run in priority order, because add_handler_if_not_set() keeps the first
+    # the searches run in priority order, because add_handlers_if_not_set() keeps the first
     # handler that matches an ion
     searches: list[tuple[str, str, Path]] = []
     if calibrated and use_private:
@@ -77,19 +77,19 @@ def extend_ion_list(
     searches.append(("floers25uncalib", "uncalib", basepath_public))
 
     for handlername, calibstr, basepath in searches:
-        for ext in compression_extensions:
-            for s in basepath.glob(f"*_levels_{calibstr}.txt{ext}"):
-                ionstr = s.name.lstrip(string.digits).split("_")[0]
-                atomic_number, ion_stage = split_element_ionstage_str(ionstr)
-                ion_handlers = add_handler_if_not_set(
-                    ion_handlers,
-                    atomic_number,
-                    ion_stage,
-                    handlername,
-                    minionstage=minionstage,
-                    maxionstage=maxionstage,
-                    maxatomicnumber=maxatomicnumber,
-                )
+        floersions = [
+            split_element_ionstage_str(s.name.lstrip(string.digits).split("_")[0])
+            for ext in compression_extensions
+            for s in basepath.glob(f"*_levels_{calibstr}.txt{ext}")
+        ]
+        ion_handlers = add_handlers_if_not_set(
+            ion_handlers,
+            floersions,
+            handlername,
+            minionstage=minionstage,
+            maxionstage=maxionstage,
+            maxatomicnumber=maxatomicnumber,
+        )
 
     return ion_handlers
 

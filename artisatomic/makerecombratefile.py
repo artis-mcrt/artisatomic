@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Write recombrates.txt from the Nahar total recombination rate files."""
 
+import argparse
 import typing as t
 from pathlib import Path
 
@@ -57,7 +58,23 @@ def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
 
 def main():
     """Write recombrates.txt from the Nahar recombination rate files."""
-    artis_files_path = PYDIR.parent / "artis_files"
+    parser = argparse.ArgumentParser(description=__doc__)
+    # the same default as makeartisatomicfiles, relative to the working directory, so the two
+    # scripts read and write one folder
+    parser.add_argument(
+        "-output_folder", default="artis_files", type=Path, help="folder of compositiondata.txt and the output file"
+    )
+    args = parser.parse_args()
+    artis_files_path = Path(args.output_folder)
+
+    # the Nahar files are in no checkout of this repository. Without this line, an absent
+    # directory sends every ion to Chianti and the output gives no sign of it
+    naharpath = PYDIR.parent / "atomic-data-nahar"
+    if naharpath.is_dir():
+        print(f"Nahar data directory: {naharpath}")
+    else:
+        print(f"Nahar data directory {naharpath} not found. Every ion takes its rates from Chianti.")
+
     dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
     with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
@@ -72,11 +89,7 @@ def main():
                 # the glob starts at the repository, so the entry point finds the Nahar files
                 # from any working directory. sorted() makes the choice deterministic when
                 # more than one file matches.
-                rrcfiles = sorted(
-                    (PYDIR.parent / "atomic-data-nahar").glob(
-                        f"{elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"
-                    )
-                )
+                rrcfiles = sorted(naharpath.glob(f"{elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"))
                 if rrcfiles:  # use Nahar's values if available
                     naharfilename = rrcfiles[0]
                     recombrates = read_nahar_rrcfile(naharfilename)

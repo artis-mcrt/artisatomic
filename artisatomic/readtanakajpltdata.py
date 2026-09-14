@@ -4,7 +4,7 @@ import re
 
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
@@ -21,21 +21,18 @@ def extend_ion_list(
     maxatomicnumber: int | None = None,
 ):
     """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
-    tanakaions = sorted(
-        [tuple(int(x) for x in f.parts[-1].split(".")[0].split("_")) for f in jpltpath.glob("*_*.txt*")]
-    )
-    for atomic_number, ion_stage in tanakaions:
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "tanakajplt",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
+    # each name holds the atomic number and the ion stage, e.g. 26_2.txt
+    tanakanameparts = [f.name.split(".")[0].split("_") for f in jpltpath.glob("*_*.txt*")]
+    tanakaions = sorted((int(atomic_number), int(ion_stage)) for atomic_number, ion_stage in tanakanameparts)
 
-    return ion_handlers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        tanakaions,
+        "tanakajplt",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -133,11 +130,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dflines.slice(transitionsectionstart)
         # the file may end with a blank line, which holds no transition
         .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
+        # split on white space, not at fixed positions: a wavelength of 1e9 nm or more is one
+        # character wider than its field and moves g_u*A one place right (Fe II 455 -> 454)
+        .with_columns(fields=pl.col("line").str.extract_all(r"\S+"))
         .select(
             # the file numbers levels from one; level ids are zero-based in memory
-            lowerlevel=pl.col("line").str.slice(7, 8).str.strip_chars().cast(pl.Int64) - 1,
-            upperlevel=pl.col("line").str.slice(0, 7).str.strip_chars().cast(pl.Int64) - 1,
-            g_u_times_A=pl.col("line").str.slice(30, 13).str.strip_chars().cast(pl.Float64),
+            lowerlevel=pl.col("fields").list.get(1).cast(pl.Int64) - 1,
+            upperlevel=pl.col("fields").list.get(0).cast(pl.Int64) - 1,
+            g_u_times_A=pl.col("fields").list.get(3).cast(pl.Float64),
         )
         .collect()
     )
@@ -194,13 +194,22 @@ def get_level_valence_n(levelname: str) -> int | None:
     differently, so a shared parser would have to guess the convention of each name.
 
     data_v2.1 mixes two conventions. In the original relativistic one, "{  4s+ 2  4p- 1 }",
-    the valence orbital heads the last double-space-separated token. In the LS-coupled one of
-    the 2024 Ge-sequence files, "3s(2).3p(6).3d(10).4s.4p(3)2D_3D", it is the last
-    dot-separated shell before the term label.
+    the valence orbital heads the last shell token. In the LS-coupled one of the 2024 files,
+    "4s2_4p6_4f2 4s(2).4p(6).4d(10)1S0_1S.4f(2)3H1_3H.5s(2).5p(6)_3H", the configuration column
+    before the LS term gives it as the last underscore-separated orbital. The LS term is no
+    guide: the lanthanide files write the closed 5s(2).5p(6) shells after the open 4f shell.
     """
     if "{" in levelname:
-        lastshell = levelname.rsplit("  ", maxsplit=1)[-1].split(" ", maxsplit=1)[0]
-    else:
-        lastshell = levelname.rsplit(" ", maxsplit=1)[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0]
+        # a two-digit n has one leading space ("6p+ 4 10s+ 1"), so read every shell by pattern
+        shells = re.findall(r"(\d+)[a-z][+-]?\s+\d+", levelname)
+        return int(shells[-1]) if shells else None
+
+    configuration = levelname.split(",", maxsplit=2)[-1].split()
+    if len(configuration) > 1:
+        # the configuration column can glue two orbitals ("4p5s" is 4p 5s), so the last
+        # n-letter pair is the valence orbital, not the last underscore-separated token
+        shells = re.findall(r"(\d+)[a-z]", configuration[0])
+        return int(shells[-1]) if shells else None
+    lastshell = configuration[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0] if configuration else ""
     nmatch = re.match(r"\d+", lastshell)
     return int(nmatch.group()) if nmatch is not None else None
