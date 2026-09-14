@@ -98,7 +98,14 @@ def main():
                 else:  # use Chianti with ChiantiPy
                     # imported here, not at the top: ChiantiPy takes 0.6 s to import and writes
                     # four warning lines. A run that has every Nahar file never reaches this
-                    import ChiantiPy.core as ch
+                    try:
+                        import ChiantiPy.core as ch
+                    except ModuleNotFoundError as err:
+                        msg = (
+                            f"No Nahar file for Z={atomic_number} ion stage {lowerionstage}, and ChiantiPy is"
+                            " not installed. Install the chianti extra: uv sync --extra chianti"
+                        )
+                        raise ModuleNotFoundError(msg) from err
 
                     print("  source: Chianti")
                     arr_logT_e = np.arange(1.0, 9.1, 0.1)

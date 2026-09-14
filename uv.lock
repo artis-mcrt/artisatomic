@@ -17,16 +17,20 @@ source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
     { name = "artistools" },
-    { name = "chiantipy" },
     { name = "h5py" },
-    { name = "matplotlib" },
     { name = "numpy" },
     { name = "polars" },
     { name = "requests" },
-    { name = "scipy" },
     { name = "tqdm" },
     { name = "urllib3" },
     { name = "xopen" },
+]
+
+[package.optional-dependencies]
+chianti = [
+    { name = "chiantipy" },
+    { name = "matplotlib" },
+    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
@@ -48,17 +52,18 @@ dev = [
 requires-dist = [
     { name = "argcomplete", specifier = ">=3.5.1" },
     { name = "artistools", specifier = ">=2026.8.21" },
-    { name = "chiantipy", specifier = ">=0.15.1" },
+    { name = "chiantipy", marker = "extra == 'chianti'", specifier = ">=0.15.1" },
     { name = "h5py", specifier = ">=3.10.0" },
-    { name = "matplotlib", specifier = ">=3.11.1" },
+    { name = "matplotlib", marker = "extra == 'chianti'", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "polars", specifier = ">=1.43.2" },
     { name = "requests", specifier = ">=2.34.0" },
-    { name = "scipy", specifier = ">=1.15.3" },
+    { name = "scipy", marker = "extra == 'chianti'", specifier = ">=1.15.3" },
     { name = "tqdm", specifier = ">=4.70.0" },
     { name = "urllib3", specifier = ">=2.2.0" },
     { name = "xopen", specifier = ">=2.1.0" },
 ]
+provides-extras = ["chianti"]
 
 [package.metadata.requires-dev]
 coverage = [{ name = "coverage", specifier = ">=7.15.3" }]

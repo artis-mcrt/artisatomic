@@ -25,19 +25,20 @@ readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
     "artistools>=2026.8.21",
-    "chiantipy>=0.15.1",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
     "polars>=1.43.2",
     "requests>=2.34.0",
-    # chiantipy declares no dependencies but imports matplotlib and scipy at module level
-    "matplotlib>=3.11.1",
-    "scipy>=1.15.3",
     "tqdm>=4.70.0",
     # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
     "urllib3>=2.2.0",
     "xopen>=2.1.0",
 ]
+
+[project.optional-dependencies]
+# only makeartisrecombratefile imports ChiantiPy, and only for an ion with no Nahar file.
+# chiantipy declares no dependencies but imports matplotlib and scipy at module level.
+chianti = ["chiantipy>=0.15.1", "matplotlib>=3.11.1", "scipy>=1.15.3"]
 
 [dependency-groups]
 # its own group so the workflow's combine job can install the coverage the lockfile pinned without
