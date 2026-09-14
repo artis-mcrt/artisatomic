@@ -21,13 +21,23 @@ from artisatomic.iondata import IonData
 
 
 def clear_files(args: argparse.Namespace) -> None:
-    """Truncate the output files and write the phixs header. The writer appends the ions after it."""
+    """Truncate the output files and write the phixs header. The writer appends the ions after it.
+
+    The option --nophixs writes no phixsdata_v2.txt. The run removes the file of an earlier run in
+    the same folder, because its level ids belong to that run's adata.txt.
+    """
     outdir = Path(args.output_folder)
     with (
         (outdir / "adata.txt").open("w", encoding="utf-8"),
         (outdir / "transitiondata.txt").open("w", encoding="utf-8"),
-        (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs,
     ):
+        pass
+
+    if args.nophixs:
+        (outdir / "phixsdata_v2.txt").unlink(missing_ok=True)
+        return
+
+    with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
 
@@ -394,7 +404,8 @@ def write_adata(
     # writelines() with a generator, as in write_transition_data(). A write() call for each level
     # costs more than the formatting.
     fatommodels.writelines(
-        f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm):19.16f} {float(g):8.3f} {transition_counts[levelid]:4d} {levelname:}\n"
+        # + 0.0 turns a -0.0 ground-state energy into 0.0, so the file never shows a minus sign
+        f"{levelid + 1:5d} {hc_in_ev_cm * float(energyabovegsinpercm) + 0.0:19.16f} {float(g):8.3f} {transition_counts[levelid]:4d} {levelname:}\n"
         for levelid, energyabovegsinpercm, g, levelname in dfout.select(
             "levelid", "energyabovegsinpercm", "g", "levelname"
         ).iter_rows(named=False)
@@ -652,17 +663,16 @@ def write_phixs_data(
             )
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
-        # the single-target form below implies a fraction of 1.0, so only a multi-target list
-        # needs its sum checked
-        if not (len(targetlist) == 1 and targetlist[0][1] > 0.99):
-            probability_sum = sum(fraction for _, fraction in targetlist)
-            if abs(probability_sum - 1.0) > 0.00001:
-                msg = (
-                    f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
-                    f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
-                )
-                log_and_print(flog, f"ERROR: {msg}")
-                raise ValueError(msg)
+        # the single-target form below implies a fraction of 1.0, so a single fraction must
+        # be 1.0 as well
+        probability_sum = sum(fraction for _, fraction in targetlist)
+        if abs(probability_sum - 1.0) > 0.00001:
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
+                f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
+            )
+            log_and_print(flog, f"ERROR: {msg}")
+            raise ValueError(msg)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one
@@ -672,7 +682,8 @@ def write_phixs_data(
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
         if not threshold_is_known(threshold_ev):
             threshold_ev = 0.0
-        if len(targetlist) == 1 and targetlist[0][1] > 0.99:
+        # the check above makes a single fraction 1.0, so one target takes the short form
+        if len(targetlist) == 1:
             upperionlevelid = targetlist[0][0]
 
             fphixs.write(

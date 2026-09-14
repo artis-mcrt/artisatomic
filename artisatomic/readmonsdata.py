@@ -8,7 +8,7 @@ import zipfile
 import numpy as np
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import get_nist_ionization_energies_ev
@@ -75,20 +75,21 @@ def extend_ion_list(
     with zipfile.ZipFile(datafilepath / levels_archive) as ziparchive:
         membernames = set(ziparchive.namelist())
 
-    for atomic_number in range(57, 72):
-        for ion_stage in (5, 6, 7):
-            if levels_member(atomic_number, ion_stage) in membernames:
-                ion_handlers = add_handler_if_not_set(
-                    ion_handlers,
-                    atomic_number,
-                    ion_stage,
-                    "mons",
-                    minionstage=minionstage,
-                    maxionstage=maxionstage,
-                    maxatomicnumber=maxatomicnumber,
-                )
+    monsions = [
+        (atomic_number, ion_stage)
+        for atomic_number in range(57, 72)
+        for ion_stage in (5, 6, 7)
+        if levels_member(atomic_number, ion_stage) in membernames
+    ]
 
-    return ion_handlers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        monsions,
+        "mons",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 def get_nearest_level_indices(sorted_energies: np.ndarray, energies: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

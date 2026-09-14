@@ -32,13 +32,14 @@ jobs:
               run: uv sync --compile-bytecode
 
             # every other job starts the tool with `python -m`, so this is the only place that
-            # runs the installed console scripts. --help reads no atomic data. makeartisrecombratefile
+            # runs the installed console scripts. --help reads no atomic data. makeartisgammaspecfiles
             # has no argument parser, so --help would start the whole job: the pytest suite checks
             # that its entry point resolves instead.
             - name: Check the console scripts start
               run: |
                   makeartisatomicfiles --help > /dev/null
                   makeartischargetransferfile --help > /dev/null
+                  makeartisrecombratefile --help > /dev/null
 
             - name: Run Ruff
               if: always()
@@ -82,12 +83,17 @@ jobs:
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
-                  key: atomic-data-hillier/atomic_data_21jun23/files
+                  key: atomic-data-hillier-atomic_21jun23-${{ hashFiles('atomic-data-hillier/setup_cmfgen_data.sh') }}
 
             - name: Download/extract CMFGEN atomic data
               if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
+
+            # test_get_ion_handlers_builds_the_built_in_selection skips without this sample
+            - name: Extract Floers25 atomic data
+              working-directory: atomic-data-floers25/
+              run: tar -xJvf testdata.tar.xz
 
             # -p gives each data file a unique name, so this one and every tests/ matrix job's
             # survive being downloaded into a single directory. There are more files than jobs
@@ -191,7 +197,7 @@ jobs:
               id: cache-cmfgendata
               with:
                   path: atomic-data-hillier/atomic_21jun23/**
-                  key: atomic-data-hillier/atomic_data_21jun23/files
+                  key: atomic-data-hillier-atomic_21jun23-${{ hashFiles('atomic-data-hillier/setup_cmfgen_data.sh') }}
 
             - name: Download/extract CMFGEN atomic data
               if: ${{ steps.cache-cmfgendata.outputs.cache-hit != 'true' }}

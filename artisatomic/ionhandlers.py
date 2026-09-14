@@ -13,7 +13,7 @@ from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import sort_ion_handlers
 from artisatomic.iondata import known_handlers
 
@@ -41,18 +41,19 @@ def get_ion_handlers(
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
 
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
-    for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3))):
-        for ion_stage in ion_stages:
-            ion_handlers = add_handler_if_not_set(
-                ion_handlers,
-                atomic_number,
-                ion_stage,
-                "kurucz",
-                minionstage=minionstage,
-                maxionstage=maxionstage,
-                maxatomicnumber=maxatomicnumber,
-            )
+    kuruczions = [
+        (atomic_number, ion_stage)
+        for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3)))
+        for ion_stage in ion_stages
+    ]
+    ion_handlers = add_handlers_if_not_set(
+        [],
+        kuruczions,
+        "kurucz",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
     # Include every ion that has data and that the limits keep.
     # The first call that adds an ion sets its handler, so the order of these calls matters.

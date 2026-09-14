@@ -14,7 +14,9 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
+from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
+from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import ryd_to_hz
 
 
@@ -111,7 +113,11 @@ def match_hydrogenic_phixs(
         photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
     reduced_phixs_dict = reduce_phixs_tables(
-        phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+        phixstables,
+        args.optimaltemperature,
+        args.nphixspoints,
+        args.phixsnuincrement,
+        label=f"Z={atomic_number} {elsymbols[atomic_number]} hydrogenic estimate",
     )
     for levelindex, reduced_phixs_table in reduced_phixs_dict.items():
         photoionization_crosssections[levelindex] = reduced_phixs_table
@@ -124,6 +130,7 @@ def reduce_phixs_tables[KeyType](
     optimaltemperature: float,
     nphixspoints: int,
     phixsnuincrement: float,
+    label: str | None = None,
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
@@ -131,43 +138,70 @@ def reduce_phixs_tables[KeyType](
     threshold energy.
 
     The result keeps the key type: callers index the tables by level name or by level id.
+
+    label names the source of the tables, for example "Z=27 Co II phot_data_A". A key alone does
+    not say which ion or which file the table came from. The messages of the worker name both.
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
+
+    # One call reduces many tables onto one grid. The worker gets that grid and builds none.
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
 
     return dict(
         zip(
             dicttables.keys(),
             parallel_map(
-                partial(
-                    reduce_phixs_tables_worker,
-                    optimaltemperature,
-                    nphixspoints,
-                    phixsnuincrement,
-                ),
+                partial(reduce_phixs_tables_worker, optimaltemperature, xgrid, label=label),
                 dicttables.values(),
+                dicttables.keys(),
             ),
             strict=True,
         )
     )
 
 
+def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Integrate each row of arr_y with the trapezoid rule, over the sample widths arr_dx.
+
+    np.trapezoid computes the widths from the x values at each call. The caller integrates two
+    functions over one set of x values, so it computes the widths once. The result of this
+    function is bit-identical to the result of np.trapezoid.
+    """
+    return np.sum(arr_dx * (arr_y[:, 1:] + arr_y[:, :-1]) / 2.0, axis=1)
+
+
 # This function downsamples the photoionisation cross section table to a regular grid. It keeps
 # the recombination rate integral constant if the temperature matches.
 def reduce_phixs_tables_worker(
     optimaltemperature: float,
-    nphixspoints: int,
-    phixsnuincrement: float,
+    xgrid: npt.NDArray[np.float64],
     tablein: np.ndarray,
+    key: object = None,
+    label: str | None = None,
 ) -> np.ndarray:
     """Downsample one cross section table onto the output's nu/nu_edge grid.
 
     Each output point is the average of the input over that point's frequency bin, with the
-    weight nu^2 exp(-h nu / k T). The weight preserves the recombination rate at
+    weight nu^2 exp(-h (nu - nu_low) / k T). The weight preserves the recombination rate at
     optimaltemperature, and not the cross section itself.
+
+    nu_low is the lowest frequency of the bin. The constant factor exp(h nu_low / k T) cancels in
+    the ratio of the two integrals, so the subtraction leaves the average unchanged. It also keeps
+    the weight at 1.0 or below. The absolute weight underflows to zero for h nu / k T > 745, which
+    is every bin above 16 eV at -optimaltemperature 1000.
+
+    xgrid is the nu/nu_edge grid of the output, which reduce_phixs_tables() builds once for the
+    whole batch. It holds one point more than the output, to close the last bin.
+
+    key is the key of the table in the dict that reduce_phixs_tables() received, for example a
+    level name. label names the source of the batch. The messages below name both.
+    parallel_map() maps a batch of tables, so the caller cannot catch an error for one table and
+    add the key itself.
     """
     minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
-
-    xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+    labeltext = "" if label is None else f" The tables come from {label}."
+    keytext = "" if key is None else f" The key of the table is {key!r}."
+    nphixspoints = len(xgrid) - 1
 
     # An empty table has no threshold to scale the grid, and a zero threshold would divide by
     # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
@@ -175,103 +209,116 @@ def reduce_phixs_tables_worker(
         return np.zeros(nphixspoints)
 
     threshold_old_ryd = tablein[0][0]
-    # tablein is an array of pairs (energy, phixs cross section). Split it once. The loop below
-    # reads both columns for each output point, and numpy re-slices a strided view of a 2D array
-    # every time.
+    # tablein is an array of pairs (energy, phixs cross section). Split it once, because numpy
+    # re-slices a strided view of a 2D array every time.
     tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
     tablein_sigma = np.ascontiguousarray(tablein[:, 1])
+    # not an assert: np.searchsorted() and np.interp() below both give a wrong result for a
+    # table that decreases in energy. This function also reads the first energy as the threshold.
+    if np.any(np.diff(tablein_energyryd) < 0.0):
+        msg = (
+            f"The energy column of a photoionisation table decreases. The table shape is {tablein.shape}"
+            f" and the first energy is {threshold_old_ryd:.6e} Ryd.{labeltext}{keytext}"
+        )
+        raise ValueError(msg)
+
     table_energy_last = tablein_energyryd[-1]
     table_sigma_last = tablein_sigma[-1]
 
-    arr_sigma_out = np.empty(nphixspoints)
-    # x is nu/nu_edge
+    def weighted_averages(arr_energyryd: np.ndarray, arr_sigma_megabarns: np.ndarray) -> np.ndarray:
+        """Average the cross section of each row over that row's bin, with the weight above.
 
-    # the interval edges depend only on the grid, so compute all of them at once
+        Each row holds the samples of one bin in energy order. The first sample gives nu_low.
+        """
+        arr_nu = arr_energyryd * ryd_to_hz
+        integrand_vals = arr_nu**2 * np.exp(minus_h_over_kb_t * (arr_nu - arr_nu[:, :1]))
+        # The two integrals cover one set of x values, so compute the sample widths once.
+        arr_dx = np.diff(arr_energyryd, axis=1)
+        integralnosigma = trapezoid_with_widths(integrand_vals, arr_dx)
+        integralwithsigma = trapezoid_with_widths(arr_sigma_megabarns * integrand_vals, arr_dx)
+        # The weight is positive, so integralnosigma is positive. A negative cross section is the
+        # only way to get a negative integralwithsigma, and the input must not contain one.
+        if np.any(integralwithsigma < 0.0) or np.any(integralnosigma <= 0.0):
+            msg = (
+                f"A photoionisation bin integral is not positive. The table shape is {tablein.shape},"
+                f" the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted integral is"
+                f" {integralwithsigma.min():.6e} and the smallest weight integral is"
+                f" {integralnosigma.min():.6e}.{labeltext}{keytext}"
+            )
+            raise ValueError(msg)
+        return integralwithsigma / integralnosigma
+
+    # x is nu/nu_edge. The interval edges depend only on the grid, so compute all of them at once.
     arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
     arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
-    # The table is in energy order (the old code called interp1d with assume_sorted). A bisection
-    # therefore finds each interval's slice, and the loop does not rebuild a boolean mask over the
-    # whole column for each point.
+    # The table is in energy order, so a bisection finds the samples of each interval. The code
+    # does not rebuild a boolean mask over the whole column for each output point.
     arr_startindex = np.searchsorted(tablein_energyryd, arr_enlow, side="left")
     arr_endindex = np.searchsorted(tablein_energyryd, arr_enhigh, side="right")
+    arr_nsamples_table = arr_endindex - arr_startindex
 
-    for i in range(nphixspoints):
+    # An interval gets an interpolated point at each edge that its own samples do not reach.
+    arr_first = tablein_energyryd[np.minimum(arr_startindex, len(tablein_energyryd) - 1)]
+    arr_add_low = (arr_nsamples_table == 0) | (((arr_first - arr_enlow) / arr_enlow) > 1e-20)
+    arr_last = np.where(arr_nsamples_table > 0, tablein_energyryd[np.maximum(arr_endindex - 1, 0)], arr_enlow)
+    arr_add_high = ((arr_enhigh - arr_last) / arr_last) > 1e-20
+    arr_nsamples = arr_nsamples_table + arr_add_low + arr_add_high
+
+    # Three groups of intervals, and the code does each group at once:
+    # - past: the whole interval lies above the table, and the two edges are the only samples;
+    # - dense: the table gives 50 samples or more, and the code keeps them;
+    # - the rest: the code resamples the interval onto 51 points.
+    arr_past = arr_enlow > table_energy_last
+    arr_dense = (arr_nsamples >= 50) & ~arr_past
+    arr_resample = ~(arr_past | arr_dense)
+
+    arr_sigma_out = np.empty(nphixspoints)
+
+    if np.any(arr_past):
+        # assume power law decay after the last point
+        edges_energyryd = np.stack([arr_enlow[arr_past], arr_enhigh[arr_past]], axis=1)
+        edges_sigma = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, edges_energyryd)
+        arr_sigma_out[arr_past] = weighted_averages(edges_energyryd, edges_sigma)
+
+    if np.any(arr_resample):
+        # 51 points from one bin edge to the other, so the integrals cover the whole bin. With
+        # endpoint=False the last two percent of every resampled bin were missing.
+        grid_energyryd = np.linspace(arr_enlow[arr_resample], arr_enhigh[arr_resample], num=51, axis=-1)
+        # np.interp holds the last cross section constant past the table's end. Apply the same
+        # power-law decay that the interval edges use, so a bin that straddles the table end
+        # does not overweight its tail.
+        # np.asarray() only names the type of the interpolated grid. np.interp() returns that
+        # array of float64 already, so the call copies nothing.
+        grid_sigma = np.asarray(np.interp(grid_energyryd, tablein_energyryd, tablein_sigma), dtype=np.float64)
+        # Almost every table reaches past the highest resampled energy, so the power law applies
+        # to no point at all. The grid increases along both axes, so its last value is its
+        # largest one. That scalar test keeps the power law off the whole grid in that case.
+        if grid_energyryd[-1, -1] > table_energy_last:
+            beyond = grid_energyryd > table_energy_last
+            grid_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, grid_energyryd[beyond])
+        arr_sigma_out[arr_resample] = weighted_averages(grid_energyryd, grid_sigma)
+
+    # Each dense interval keeps its own samples, so the number of samples changes from one
+    # interval to the next. Such intervals are rare, and this loop handles them one at a time.
+    for i in np.flatnonzero(arr_dense):
         enlow = arr_enlow[i]
         enhigh = arr_enhigh[i]
-
-        # start of interval interpolated point, input data points, and end of interval interpolated point
         sample_energyryd = tablein_energyryd[arr_startindex[i] : arr_endindex[i]]
         sample_sigma = tablein_sigma[arr_startindex[i] : arr_endindex[i]]
-
-        if len(sample_energyryd) == 0 or ((sample_energyryd[0] - enlow) / enlow) > 1e-20:
-            if i == 0 and len(sample_energyryd) != 0:
-                print(
-                    f"adding first point {enlow:.4e} {sample_energyryd[0]:.4e} {(sample_energyryd[0] - enlow) / enlow:.4e}"
-                )
-            if enlow <= table_energy_last:
-                # np.interp, not scipy's interp1d: identical linear interpolation (verified
-                # bit-for-bit) without a scipy call per interval edge
-                new_crosssection = np.interp(enlow, tablein_energyryd, tablein_sigma)
-                if new_crosssection < 0:
-                    print("negative extrap")
-            else:
-                # assume power law decay after last point
-                new_crosssection = table_sigma_last * (table_energy_last / enlow) ** 3
+        if arr_add_low[i]:
+            # np.interp, not scipy's interp1d: identical linear interpolation (verified
+            # bit-for-bit) without a scipy call per interval edge
             sample_energyryd = np.concatenate(([enlow], sample_energyryd))
-            sample_sigma = np.concatenate(([new_crosssection], sample_sigma))
-
-        if ((enhigh - sample_energyryd[-1]) / sample_energyryd[-1]) > 1e-20:
-            if enhigh <= table_energy_last:
-                new_crosssection = np.interp(enhigh, tablein_energyryd, tablein_sigma)
-                if new_crosssection < 0:
-                    print("negative extrap")
-            else:
-                new_crosssection = (
-                    table_sigma_last * (table_energy_last / enhigh) ** 3
-                )  # assume power law decay after last point
-
+            sample_sigma = np.concatenate(([np.interp(enlow, tablein_energyryd, tablein_sigma)], sample_sigma))
+        if arr_add_high[i]:
+            new_crosssection = (
+                np.interp(enhigh, tablein_energyryd, tablein_sigma)
+                if enhigh <= table_energy_last
+                else phixs_nu_cubed_tail(table_sigma_last, table_energy_last, enhigh)
+            )
             sample_energyryd = np.concatenate((sample_energyryd, [enhigh]))
             sample_sigma = np.concatenate((sample_sigma, [new_crosssection]))
 
-        nsamples = len(sample_energyryd)
-
-        if nsamples >= 50 or enlow > table_energy_last:
-            arr_energyryd = sample_energyryd
-            arr_sigma_megabarns = sample_sigma
-        else:
-            # 51 points from one bin edge to the other, so the integrals below cover the whole
-            # bin. With endpoint=False the last two percent of every resampled bin were missing.
-            arr_energyryd = np.linspace(enlow, enhigh, num=51)
-            # np.interp holds the last cross section constant past the table's end. Apply the
-            # same power-law decay that the interval edges above use, so a bin that straddles
-            # the table end does not overweight its tail.
-            arr_sigma_megabarns = np.where(
-                arr_energyryd > table_energy_last,
-                table_sigma_last * (table_energy_last / arr_energyryd) ** 3,
-                np.interp(arr_energyryd, tablein_energyryd, tablein_sigma),
-            )
-
-        # the recombination-rate weight nu^2 exp(-h nu / k T), evaluated over the whole interval at
-        # once. np.vectorize() called math.exp() once per sample, which dominated this function.
-        arr_nu = arr_energyryd * ryd_to_hz
-        integrand_vals = arr_nu**2 * np.exp(minus_h_over_kb_t * arr_nu)
-        if np.any(integrand_vals):
-            sigma_integrand_vals = arr_sigma_megabarns * integrand_vals
-
-            integralnosigma = np.trapezoid(integrand_vals, arr_energyryd)
-            integralwithsigma = np.trapezoid(sigma_integrand_vals, arr_energyryd)
-
-        else:
-            integralnosigma = 1.0
-            integralwithsigma = np.average(arr_sigma_megabarns)
-
-        if integralwithsigma > 0 and integralnosigma > 0:
-            arr_sigma_out[i] = integralwithsigma / integralnosigma
-        elif integralwithsigma == 0:
-            arr_sigma_out[i] = 0.0
-        else:
-            print("Math error: ", i, nsamples, integralwithsigma, integralnosigma)
-            print(np.column_stack([sample_energyryd, sample_sigma]))
-            arr_sigma_out[i] = 0.0
+        arr_sigma_out[i] = weighted_averages(sample_energyryd[np.newaxis, :], sample_sigma[np.newaxis, :])[0]
 
     return arr_sigma_out

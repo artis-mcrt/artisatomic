@@ -12,23 +12,31 @@ import polars as pl
 # the "qub_cobalt" handler reads the stages that the QUB data does not cover from the CMFGEN
 # files. readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
+from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_filename_pattern
+from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
+from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import split_count_and_n
 from artisatomic.phixs import reduce_phixs_tables
 
 qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
 tyndall_co3_path = (qubpath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
+
+# the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
+qub_filename_pattern = ion_filename_pattern(".adf04")
 
 
 class QUBTransitionRow(t.NamedTuple):
@@ -69,19 +77,17 @@ def extend_ion_list(
     """Add every ion with a QUB adf04 file to ion_handlers under the "qub" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     qubfiles = [f for ext in compression_extensions for f in qubpath.glob(f"*_*.adf04{ext}")]
-    qubions = sorted({tuple(int(x) for x in f.name.split(".")[0].split("_")) for f in qubfiles})
-    for atomic_number, ion_stage in qubions:
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "qub",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
+    # each name holds the atomic number and the ion stage, e.g. 26_2.adf04
+    qubions = ions_from_filenames(qubfiles, qub_filename_pattern)
 
-    return ion_handlers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        qubions,
+        "qub",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 adf04_section_end = "-1"
@@ -326,8 +332,11 @@ def read_adf04(
 def append_qub_transition(qub_energylevels, qub_transitions, id_lower, id_upper, A, filepath) -> None:
     """Validate one radiative transition row and append it to the transition list.
 
-    The ids are the file's 1-based level ids.
+    The ids are the file's 1-based level ids. The columns of a file do not always give the lower
+    level first, so the function sorts the pair. read_adf04() sorts each collision pair the same
+    way. A reversed pair would give a transition that the upsilon join misses.
     """
+    id_lower, id_upper = min(id_lower, id_upper), max(id_lower, id_upper)
     # a raise rather than an assert: this validates an input file. A non-positive
     # id would wrap to the wrong level through a negative index. An id one past the
     # end would raise a bare IndexError that names neither the file nor the transition.
@@ -450,8 +459,6 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
 
-        # the W II file has the first two columns in the opposite order to the standard one
-        uppercolumn, lowercolumn = ("lower", "upper") if (atomic_number, ion_stage) == (74, 2) else ("upper", "lower")
         # a radiative transition is a collision row with both level ids and an A-value. Before,
         # the reader selected the rows by the width of the line. That test dropped a row that
         # was one character shorter than the widest, and did not count it.
@@ -459,7 +466,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
-        for id_upper, id_lower, A in transitiondf.select(uppercolumn, lowercolumn, "avalue").iter_rows():
+        # append_qub_transition() sorts each pair of level ids. So a file that gives the two
+        # columns in the opposite order needs no special case here. The W II file does that.
+        for id_upper, id_lower, A in transitiondf.select("upper", "lower", "avalue").iter_rows():
             append_qub_transition(
                 qub_energylevels,
                 qub_transitions,
@@ -532,7 +541,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 phixstables[targetcolumn] = phixstable
 
             reduced_phixs_dict = reduce_phixs_tables(
-                phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+                phixstables,
+                args.optimaltemperature,
+                args.nphixspoints,
+                args.phixsnuincrement,
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
             )
             target_scalefactors = np.zeros(ntargets)
             targetcolumn_withmaxfraction = 1
@@ -681,7 +694,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
             # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
             dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
             phixsvalues = reduce_phixs_tables(
-                dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+                dict_phixstable,
+                args.optimaltemperature,
+                args.nphixspoints,
+                args.phixsnuincrement,
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
             )["gs"]
 
         # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
@@ -731,29 +748,22 @@ def get_level_valence_n(levelname: str) -> int | None:
         if not part[-1].isdigit():
             return None
         part = part.rstrip(string.digits)
+    if not part:
+        return None
+    valenceorbital = part[-1]
     part = part.strip(lchars.lower())
 
-    # inefficient way to find the last number in a string
-    for i in range(len(part)):
-        try:
-            n = int(part[i:])
-        except ValueError:
-            continue
-        else:
-            # a lower-case orbital letter before the number means that the number is an
-            # electron count of the previous orbital, then n. For example, the '24' in '3d24s'
-            # is two electrons and n=4. The same rule as readkuruczdata applies. A two-digit run
-            # that ends in 0 is a two-digit n ('5s10d'). A three-digit run is a two-digit count
-            # and a one-digit n ('4f145d'), unless that n would be 0 ('5s210d').
-            if i > 0 and part[i - 1] in lchars.lower():
-                digits = part[i:]
-                if len(digits) == 2 and digits[1] != "0":
-                    digits = digits[1:]
-                elif len(digits) == 3:
-                    digits = digits[2:] if digits[2] != "0" else digits[1:]
-                elif len(digits) > 3:
-                    return None
-                n = int(digits)
-            return n
+    # the last run of digits of the label, with the character in front of it. The run holds
+    # digits only, because split_count_and_n() reads each digit on its own
+    nmatch = re.search(r"(\D?)(\d+)$", part)
+    if nmatch is None:
+        return None
 
-    return None
+    # a lower-case orbital letter before the number means that the number is an electron count
+    # of the previous orbital, then n. For example, the '24' in '3d24s' is two electrons and
+    # n=4. The same rule as readkuruczdata applies, and it also reads '5s111s1' (5s1 11s1) as
+    # n = 11. A space in front of the run separates two shells, so the run holds n alone
+    if nmatch[1] and nmatch[1] in lchars.lower():
+        return split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
+
+    return int(nmatch[2])

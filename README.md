@@ -28,6 +28,6 @@ Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiond
 
 The package installs three more commands:
 
-- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files.
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
 - `makeartischargetransferfile` writes the charge transfer rate files.
 - `makeartisgammaspecfiles` downloads the ENDF decay data and writes a gamma spectrum for each nuclide.

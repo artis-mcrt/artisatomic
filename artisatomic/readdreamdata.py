@@ -10,7 +10,7 @@ import h5py
 import numpy as np
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
@@ -141,19 +141,19 @@ def extend_ion_list(
     """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
     init_dreamdata()
     assert dreamdata is not None
-    for atomic_number, charge in dreamdata.select("Z", "C").unique(maintain_order=True).iter_rows():
-        ion_stage = charge + 1
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "dream",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
+    dreamions = [
+        (atomic_number, charge + 1)
+        for atomic_number, charge in dreamdata.select("Z", "C").unique(maintain_order=True).iter_rows()
+    ]
 
-    return ion_handlers
+    return add_handlers_if_not_set(
+        ion_handlers,
+        dreamions,
+        "dream",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
 
 
 def energytuplefromrow(row, prefix):

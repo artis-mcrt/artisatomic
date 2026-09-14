@@ -3,6 +3,7 @@
 import typing as t
 from functools import cache
 
+from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import PYDIR
 
 datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
@@ -28,8 +29,8 @@ def get_aoife_dataset():
 class EnergyLevelRow(t.NamedTuple):
     """One level of the AOIFE levels_data table, with the derived fields appended.
 
-    The table's energy column is the energy above the ground state, kept once as
-    energyabovegsinpercm.
+    The table's energy column is the energy above the ground state in eV. The reader converts it
+    to cm^-1 once, in energyabovegsinpercm.
     """
 
     atomic_number: float
@@ -87,7 +88,7 @@ def read_levels_data(atomic_number, ion_stage):
     energy_levels: list[EnergyLevelRow] = []
 
     for rowtuple in levels_data:
-        atomic_num, ion_number, level_number, energyabovegsinpercm, g, metastable = rowtuple
+        atomic_num, ion_number, level_number, energy_ev, g, metastable = rowtuple
 
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
@@ -102,7 +103,8 @@ def read_levels_data(atomic_number, ion_stage):
                 level_number=level_number,
                 g=g,
                 metastable=metastable,
-                energyabovegsinpercm=energyabovegsinpercm,
+                # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196)
+                energyabovegsinpercm=energy_ev / hc_in_ev_cm,
                 # No parity: this data set supplies none. add_level_ids_forbidden() marks a
                 # transition forbidden when its two levels share one parity. So a fixed 0 made every
                 # transition of the ion forbidden (coll_str -2). Helium has many permitted ones. A

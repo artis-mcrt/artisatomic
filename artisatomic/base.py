@@ -7,6 +7,7 @@ import math
 import multiprocessing as mp
 import operator
 import os
+import re
 import sys
 import typing as t
 from collections.abc import Callable
@@ -46,29 +47,30 @@ _symbols, _masses = _read_atomic_properties()
 elsymbols = ["n", *_symbols]
 atomic_weights = ["n", *_masses]
 
-roman_numerals = (
-    "",
-    "I",
-    "II",
-    "III",
-    "IV",
-    "V",
-    "VI",
-    "VII",
-    "VIII",
-    "IX",
-    "X",
-    "XI",
-    "XII",
-    "XIII",
-    "XIV",
-    "XV",
-    "XVI",
-    "XVII",
-    "XVIII",
-    "XIX",
-    "XX",
-)
+
+def _roman_numeral(number: int) -> str:
+    """Roman numeral of a positive number."""
+    result = ""
+    for value, letters in (
+        (100, "C"),
+        (90, "XC"),
+        (50, "L"),
+        (40, "XL"),
+        (10, "X"),
+        (9, "IX"),
+        (5, "V"),
+        (4, "IV"),
+        (1, "I"),
+    ):
+        while number >= value:
+            result += letters
+            number -= value
+    return result
+
+
+# index = ion stage; the empty entry keeps ion stage 1 at index 1. Stages up to 100 cover every
+# ion of every element that a data source here holds (the FAC file names go above XX).
+roman_numerals = ("", *(_roman_numeral(stage) for stage in range(1, 101)))
 
 # the single copy of each constant for the whole package
 ryd_to_ev = 13.605693122994232
@@ -141,6 +143,28 @@ class PhixsData(t.NamedTuple):
     thresholds_ev: npt.NDArray[np.float64]  # (levelcount,)
     targetconfigs: list[list[tuple[str, float]] | None] | None = None
     targetfractions: list[list[tuple[int, float]]] | None = None
+
+
+def output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
+    """Build the nu/nu_edge grid of a cross section table after the downsample.
+
+    The grid holds nphixspoints + 1 points. The last point closes the bin of the last output
+    point, so the output keeps only the first nphixspoints values.
+    """
+    return np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+
+
+def phixs_nu_cubed_tail[EnergyType: (float, npt.NDArray[np.float64])](
+    sigma_last: float, energy_last: float, energy: EnergyType
+) -> EnergyType:
+    """Extrapolate a photoionisation cross section above the last energy of its table.
+
+    A table ends where its data ends, and the cross section above that energy falls as nu^-3.
+    CMFGEN extrapolates a tabulated type with the same law (sub_phot_gen.f line 375).
+    reduce_phixs_tables_worker() applies it past the end of an input table. Every reader of a
+    reduced table above its last grid point must apply it too.
+    """
+    return sigma_last * (energy_last / energy) ** 3
 
 
 def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> list[int]:
@@ -306,7 +330,155 @@ def isfloat(value: t.Any) -> bool:
     return True
 
 
+def split_levels_above_ionization(
+    dflevels: pl.DataFrame,
+    energycolumn: str,
+    indexcolumn: str,
+    ionization_energy_in_ev: float,
+    atomic_number: int,
+    ion_stage: int,
+    flog: t.Any,
+) -> tuple[pl.DataFrame, set[int]]:
+    """Split a level table into the bound levels and the file indices of the levels above the ionisation energy.
+
+    A level above the ionisation energy is not a bound level of the ion, so the reader drops it.
+    The function also returns the file index of every dropped level. With those indices, the
+    reader knows whether a transition names a dropped level or an unknown level.
+
+    The function stops the run when no bound level is left. Such an ion would go to the output
+    with no level.
+
+    The callers reject a level with no energy before they call this function. fill_null(False) is
+    a safety net, because a null compares as null and would leave the level in both results.
+    """
+    above_ionization = (pl.col(energycolumn) > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
+    fileindices_above_ionization = {int(fileindex) for fileindex in dflevels.filter(above_ionization)[indexcolumn]}
+    if fileindices_above_ionization:
+        log_and_print(
+            flog, f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy"
+        )
+
+    dfboundlevels = dflevels.filter(~above_ionization)
+
+    # not an assert: an ion with no bound level would go to the output as an empty ion
+    if dfboundlevels.is_empty():
+        msg = (
+            f"Every one of the {dflevels.height} levels of Z={atomic_number} ion_stage {ion_stage} is above the"
+            f" ionisation energy of {ionization_energy_in_ev} eV."
+        )
+        raise ValueError(msg)
+
+    return dfboundlevels, fileindices_above_ionization
+
+
+def check_no_nulls(table: pl.DataFrame, sourcename: str) -> pl.DataFrame:
+    """Stop the run if a column of a parsed table holds a null.
+
+    A null means that the field was blank, or that a line stopped before the end of the column.
+    Every column that a reader cuts must have a value in every row. A null that passes here
+    reaches int() or the output writer, which report neither the file nor the column.
+    """
+    # not an assert: a truncated data file must stop the run, and must name the column
+    nullcounts = {name: count for name, count in table.null_count().row(0, named=True).items() if count > 0}
+    if nullcounts:
+        msg = f"{sourcename} has rows with no value: {nullcounts}. A field is blank, or a line is too short."
+        raise ValueError(msg)
+
+    return table
+
+
+def check_row_count(
+    table: pl.DataFrame, headerlines: Iterable[str], key: str, separator: str, sourcename: str
+) -> pl.DataFrame:
+    """Stop the run if the table has fewer rows than the header of the file declares.
+
+    FAC writes "NLEV = N" in a level file and "NTRANS = N" in a transition file. The Lisbon files
+    write "Number Levels: N" and "Number Transitions: N". A copy of a shared-drive file can stop
+    between two rows. The short file then parses without an error, and the ion goes to the output
+    with a part of its levels or its transitions.
+    """
+    # not an assert: a partial data file must stop the run, and the check must survive python -O
+    pattern = re.compile(rf"\s*{re.escape(key)}\s*{re.escape(separator)}\s*(\d+)")
+    rowcounts = [int(match[1]) for line in headerlines if (match := pattern.match(line))]
+    if not rowcounts:
+        msg = f"{sourcename} has no {key} line in its header. The file is incomplete."
+        raise ValueError(msg)
+
+    if table.height != rowcounts[0]:
+        msg = f"{sourcename} declares {key} = {rowcounts[0]} but holds {table.height} rows. The file is incomplete."
+        raise ValueError(msg)
+
+    return table
+
+
+def drop_transitions_of_levels(
+    dflines: pl.DataFrame,
+    lowercolumn: str,
+    uppercolumn: str,
+    fileindices_dropped: set[int],
+    sourcename: str,
+    flog: t.Any,
+) -> pl.DataFrame:
+    """Drop the transitions that name a level above the ionisation energy.
+
+    split_levels_above_ionization() gives the file index of every dropped level. Such a level has
+    no level id, so every transition that names it goes with it.
+
+    A null file index stops the run. is_in() gives null for a null index, so the filter would drop
+    the row and count it with the transitions above the ionisation energy.
+    """
+    check_no_nulls(dflines.select(lowercolumn, uppercolumn), sourcename)
+
+    names_a_dropped_level = pl.col(lowercolumn).is_in(fileindices_dropped) | pl.col(uppercolumn).is_in(
+        fileindices_dropped
+    )
+    # fill_null(False) is a safety net: the check above rejects a null file index first
+    dfkeptlines = dflines.filter(~names_a_dropped_level.fill_null(False))
+
+    skipped_count = dflines.height - dfkeptlines.height
+    if dfkeptlines.is_empty() and skipped_count > 0:
+        # the writer accepts an ion with no transition, and 66DyIII_calib is such an ion
+        log_and_print(
+            flog,
+            f"WARNING: skipped every one of the {skipped_count:d} transitions, because each one references a level"
+            " above the ionisation energy. The ion goes to the output with no transitions.",
+        )
+    elif skipped_count > 0:
+        log_and_print(
+            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
+        )
+
+    return dfkeptlines
+
+
 compression_extensions = ("", ".zst", ".gz", ".xz")
+
+
+def ion_filename_pattern(suffix: str) -> re.Pattern[str]:
+    """Build the pattern of a data file that a reader names "<atomic number>_<ion stage><suffix>".
+
+    The pattern also accepts every compressed form of the name, e.g. "26_2.txt.zst".
+    """
+    extensions = "|".join(re.escape(ext) for ext in compression_extensions)
+    return re.compile(rf"^(\d+)_(\d+){re.escape(suffix)}({extensions})$")
+
+
+def ions_from_filenames(filepaths: Iterable[Path], pattern: re.Pattern[str]) -> list[tuple[int, int]]:
+    """Return the atomic number and the ion stage of each file name that the pattern matches.
+
+    A glob also finds a file that a sync client copied, e.g. "26_1 2.txt". This function prints a
+    warning for such a name and skips the file. int() on the parts of that name stops the whole
+    ion selection instead, with a message that names no file.
+    """
+    ions = set()
+    for filepath in filepaths:
+        match = pattern.match(filepath.name)
+        if match is None:
+            print(f"WARNING: The file name {filepath.name} is not <atomic number>_<ion stage>. The reader skips it.")
+            continue
+        ions.add((int(match[1]), int(match[2])))
+
+    return sorted(ions)
 
 
 def find_file_check_extension(filename: str | Path) -> Path | None:
@@ -428,12 +600,18 @@ def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, i
             datalines = datalines[:index]
             break
 
-    dfnist = pl.read_csv(
-        io.StringIO("\n".join(datalines)),
-        separator="\t",
-        columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-        infer_schema=False,
-    ).fill_null("")
+    # read_csv(columns=) keeps the file's column order, so select() puts them in the order
+    # that the loop below unpacks
+    dfnist = (
+        pl.read_csv(
+            io.StringIO("\n".join(datalines)),
+            separator="\t",
+            columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+            infer_schema=False,
+        )
+        .select("At. num", "Ion Charge", "Ionization Energy (a) (eV)")
+        .fill_null("")
+    )
     energies = {}
     for atomic_number, ion_charge, ioniz_ev in dfnist.iter_rows():
         if not ioniz_ev:
@@ -606,45 +784,47 @@ def sort_ion_handlers(
     )
 
 
-def add_handler_if_not_set(
+def add_handlers_if_not_set(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    atomic_number: int | str,
-    ion_stage: int | str,
+    ions: Iterable[tuple[int | str, int | str]],
     handler: str,
     *,
     minionstage: int | None = None,
     maxionstage: int | None = None,
     maxatomicnumber: int | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
+    """Return a new sorted ion_handlers list with the handler added to each (atomic_number, ion_stage) of ions.
 
-    Every reader adds an ion here, so this is where the limits apply. An ion outside a limit never
-    enters the list, and no later step removes it again. A limit of None includes every ion. The
-    function does not modify the input list, so the caller must use the return value.
+    An ion that the list already holds keeps the handler that it has. Every reader adds its ions
+    here, so this is where the limits apply. An ion outside a limit never enters the list, and no
+    later step removes it again. A limit of None includes every ion. The function does not modify
+    the input list, so the caller must use the return value.
     """
-    # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
-    # integers. Normalise them here and not in each caller.
-    atomic_number = int(atomic_number)
-    ion_stage = int(ion_stage)
-
     minstage = -sys.maxsize if minionstage is None else minionstage
     maxstage = sys.maxsize if maxionstage is None else maxionstage
     maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
-    if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-        # every path returns a new sorted list, so a caller can keep its own list unchanged
-        return sort_ion_handlers(ion_handlers)
 
-    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = []
-    found_element = False
-    for tmp_atomic_number, list_ions_handlers in ion_handlers:
-        list_ions_handlers_out: list[tuple[int, str]] = list(list_ions_handlers)
-        if tmp_atomic_number == atomic_number:
-            found_element = True
-            if ion_stage not in drop_handlers(list_ions_handlers_out):
-                list_ions_handlers_out.append((ion_stage, handler))
-        ion_handlers_out.append((tmp_atomic_number, list_ions_handlers_out))
+    ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = [
+        (atomic_number, list(list_ions_handlers)) for atomic_number, list_ions_handlers in ion_handlers
+    ]
+    # a duplicated element keeps only its last entry here, and sort_ion_handlers() rejects the list
+    list_ions_of_element = dict(ion_handlers_out)
 
-    if not found_element:
-        ion_handlers_out.append((atomic_number, [(ion_stage, handler)]))
+    for ion in ions:
+        # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+        # integers. Normalise them here and not in each caller.
+        atomic_number = int(ion[0])
+        ion_stage = int(ion[1])
+        if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
+            continue
+
+        list_ions_handlers_out = list_ions_of_element.get(atomic_number)
+        if list_ions_handlers_out is None:
+            list_ions_handlers_out = []
+            list_ions_of_element[atomic_number] = list_ions_handlers_out
+            ion_handlers_out.append((atomic_number, list_ions_handlers_out))
+
+        if ion_stage not in drop_handlers(list_ions_handlers_out):
+            list_ions_handlers_out.append((ion_stage, handler))
 
     return sort_ion_handlers(ion_handlers_out)

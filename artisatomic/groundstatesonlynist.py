@@ -5,7 +5,7 @@ from functools import cache
 
 import polars as pl
 
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import EnergyLevel
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
@@ -61,16 +61,12 @@ def extend_ion_list(
     """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
     groundstatesdata = read_groundstates_table()
 
-    for atomic_number, ion_stage in groundstatesdata.select("Z", "ion").iter_rows():
-        # add_handler_if_not_set() returns a new list and does not change its argument
-        ion_handlers = add_handler_if_not_set(
-            ion_handlers,
-            atomic_number,
-            ion_stage,
-            "gsnist",
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
-        )
-
-    return ion_handlers
+    # add_handlers_if_not_set() returns a new list and does not change its argument
+    return add_handlers_if_not_set(
+        ion_handlers,
+        groundstatesdata.select("Z", "ion").iter_rows(),
+        "gsnist",
+        minionstage=minionstage,
+        maxionstage=maxionstage,
+        maxatomicnumber=maxatomicnumber,
+    )
