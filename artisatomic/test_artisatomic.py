@@ -3704,7 +3704,7 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     )
     body = (
         "A                                       !Configuration name\n"
-        "4                                       !Type of cross-section\n"
+        "10                                      !Type of cross-section\n"
         "2                                       !Number of cross-section points\n"
         "1.0\n2.0\n"
         "B                                       !Configuration name\n"
@@ -3724,8 +3724,8 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     reader = PhotFileReader(56, 2, 1, [911.0, 455.5, 300.0], levelindices, levelindices, flog)
     reader.read_file(0, photfile, photfile.name)
 
-    assert reader.unknown_phixs_types == [4]
-    assert reader.phixs_type_levels[4] == {"A"}
+    assert reader.unknown_phixs_types == [10]
+    assert reader.phixs_type_levels[10] == {"A"}
     assert reader.phixs_type_levels[20] == {"B", "C"}
     assert set(reader.phixstables[0]) == {"B", "C"}
     # the short block keeps its two rows, and the log says so. The file gives the energy as a
@@ -3942,6 +3942,17 @@ def test_cmfgen_fit_functions():
     assert table5[0, 1] == pytest.approx(10.0)
     x = np.log10(3.0)
     assert table5[500, 1] == pytest.approx(10 ** (1.0 + 0.5 * x) * (3.0 / 6.0) ** 2)
+
+    # type 4: a polynomial in 1 / u, from the C IV 5s_2Se block of phot_data_A. At the threshold
+    # it is the sum of the coefficients. A negative value of the polynomial becomes zero.
+    coefficients = (-3.780e-3, 5.227e-2, 1.949, 1.223, -2.259, 1.122)
+    table4 = readhillierdata.get_leibowitz_phixstable(lambda_angstrom, *coefficients)
+    assert table4[0, 1] == pytest.approx(sum(coefficients))
+    ru = 1 / 6.0
+    expected4 = sum(coefficient * ru**power for power, coefficient in enumerate(coefficients))
+    assert table4[500, 1] == pytest.approx(expected4)
+    assert np.all(readhillierdata.get_leibowitz_phixstable(lambda_angstrom, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0)[:, 1] == 0.0)
+    assert readhillierdata.phixs_fit_functions[4] == (6, readhillierdata.get_leibowitz_phixstable)
 
     # type 6: a cubic in x = log10(u) below the break e, a straight line 10^(f + g x) above it
     table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.0, 0.0, 0.5, 0.0, -2.0, 0.0)

@@ -712,7 +712,7 @@ phixs_type_labels = {
     1: "Seaton formula fit [sigma_o, alpha, beta]",
     2: "Hydrogenic split l (z states, n > 11) [n, l_start, l_end]",
     3: "Hydrogenic pure n level (all l, n >= 13) [scale, n]",
-    4: "Used for CIV rates from Leobowitz (JQSRT 1972,12,299) (6 numbers)",
+    4: "Leibowitz (1972, JQSRT, 12, 299) polynomial fit for C IV s and p states (6 numbers)",
     5: "Opacity project fits (from Peach, Saraph, and Seaton (1988) (5 numbers)",
     6: "Hummer fits to the opacity cross-sections for HeI",
     7: "Modified Seaton formula fit (cross section zero until offset edge)",
@@ -1288,7 +1288,7 @@ class PhotFileReader:
             return
 
         if crosssectiontype in phixs_fit_functions:
-            # types 1, 5, 6 and 7 share one shape: single-float rows fill fitcoefficients
+            # types 1, 4, 5, 6 and 7 share one shape: single-float rows fill fitcoefficients
             # up to the type's count, and one call then builds the table
             fitcoefficients.append(value)
             ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
@@ -1797,6 +1797,24 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
+def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
+    """Evaluate the C IV fit of Leibowitz (CMFGEN type 4), a polynomial in E_threshold / E.
+
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. raw_subphot.f lines 187-193
+    evaluate the same polynomial. CMFGEN writes it for the s and p states of C IV only. The
+    reference is Leibowitz, E. M. 1972, JQSRT, 12, 299. A negative value of the polynomial
+    becomes zero, because a cross section cannot be negative.
+    """
+    thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+
+    energydivthreshold = fit_energy_div_threshold
+    ru = 1.0 / energydivthreshold
+
+    crosssection = np.maximum(a + ru * (b + ru * (c + ru * (d + ru * (e + ru * f)))), 0.0)
+
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
+
+
 # only applies to helium
 # the threshold cross sections seem correct, but the energy dependence could be slightly wrong
 # the fit does not use the h parameter; its meaning is unknown
@@ -1822,6 +1840,7 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
 # PhotFileReader.take_fit_coefficient() dispatches on this.
 phixs_fit_functions = {
     1: (3, get_seaton_phixstable),
+    4: (6, get_leibowitz_phixstable),
     5: (5, get_opproject_phixstable),
     6: (8, get_hummer_phixstable),
     7: (4, get_seaton_phixstable),
