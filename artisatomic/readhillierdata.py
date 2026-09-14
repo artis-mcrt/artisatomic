@@ -22,7 +22,6 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
-from artisatomic.base import output_xgrid
 from artisatomic.base import path_for_log
 from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PhixsData
@@ -734,12 +733,12 @@ def excitation_energy_ev_of_header_value(text: str) -> float:
     """Convert an "!Excitation energy of final state" header value to eV.
 
     This is the fallback of excitation_energy_ev_of_target(), which is more reliable. The unit
-    of the header value is not the same in every phot file. 715 of the 717 files that carry the
+    of the header value is not the same in every phot file. 721 of the 723 files that carry the
     line give no unit with it. The two that do are the Si II files, which write "(10^15 Hz)".
 
-    A census of every phot file of atomic_21jun23 gives 66 non-zero values. Two of them are
-    below 10 (O I 0.804 and Si II 6.51014), and both are in 10^15 Hz. The other 64 are above
-    20000, and those are in cm^-1.
+    A census of every phot file of atomic_21jun23 gives 66 non-zero values. Four of them are
+    below 10, for example O I 0.804 and Si II 6.51014, and those are in 10^15 Hz. The other 62
+    run from 88.89 up, and those are in cm^-1.
 
     The value is therefore in 10^15 Hz below 10, and in cm^-1 at or above 10. The boundary is
     safe for this data set. 10 x 10^15 Hz is 41 eV, which is more than the excitation energy of
@@ -872,7 +871,18 @@ class PhotFileReader:
         self.phixs_type_levels: defaultdict[int, set[str]] = defaultdict(set)
         self.unknown_phixs_types: list[int] = []
 
-        # the state of the file and the current block; read_file() resets it
+        self._reset_file_state()
+        self.lines = pl.Series("line", [], dtype=pl.String)
+        self.ncols = np.empty(0, dtype=np.int64)
+        self.f0 = np.empty(0)
+        self.f1 = np.empty(0)
+
+    def _reset_file_state(self) -> None:
+        """Clear the state of one phot file and of the block inside it.
+
+        __init__ and read_file() both call this. One list of these fields prevents a new field
+        that reaches only one of the two, which leaks the state of one file into the next.
+        """
         self.filenum = 0
         self.photfilename = ""
         self.lowerlevelindex = -1
@@ -889,11 +899,9 @@ class PhotFileReader:
         self.pending_levelname = ""
         self.pending_numpoints = 0
         self.thresholdenergyryd = 0.0
-        # excitation energy of this file's target level, in eV. resolve_excitation_energy() sets
-        # it one time for each file, at the first level block that needs an edge.
-        self.excitation_energy_ev = 0.0
-        self.excitation_from_upperion = False
-        self.excitation_resolved = False
+        # excitation energy of this file's target level, in eV. None means that
+        # resolve_excitation_energy() did not run yet for this file.
+        self.excitation_energy_ev: float | None = None
         # the header value of the current file, in eV, which is the fallback of the resolver
         self.excitation_header_ev = 0.0
         # the level names of the current file whose edge is zero or below, in file order. The
@@ -904,13 +912,11 @@ class PhotFileReader:
         self.duplicate_energy_first: tuple[str, float] | None = None
         # set to skip the problem lines in Fe VIII and Ni X phot_data_A (see read_file)
         self.in_header = False
-        self.lines = pl.Series("line", [], dtype=pl.String)
-        self.ncols = np.empty(0, dtype=np.int64)
-        self.f0 = np.empty(0)
-        self.f1 = np.empty(0)
 
-    def resolve_excitation_energy(self) -> None:
-        """Set the excitation energy of the current file's target, one time for the file.
+    def resolve_excitation_energy(self) -> float:
+        """Give the excitation energy of the current file's target, in eV.
+
+        The resolution runs one time for each file, and this returns the stored value after that.
 
         CMFGEN reads the phot file of route PHOT_ID from the name suffix A, B, C and so on
         (rdphot_gen_v2.f line 150). The first file of an ion is therefore route 1. For that
@@ -925,28 +931,28 @@ class PhotFileReader:
 
         redirect_stdout(): the read of the ion above writes its own log lines through
         log_and_print(), which prints. Those lines belong to the ion above and not to the ion
-        under conversion.
+        under conversion, so they go to the log file of this ion with a prefix and not to the
+        terminal. A notice of that read, for example a file rewritten as utf-8, stays on record.
         """
-        if self.excitation_resolved:
-            return
-        self.excitation_resolved = True
+        if self.excitation_energy_ev is not None:
+            return self.excitation_energy_ev
 
         if self.filenum == 0:
             self.excitation_energy_ev = 0.0
-            return
+            return self.excitation_energy_ev
 
-        with contextlib.redirect_stdout(io.StringIO()):
+        upperion_output = io.StringIO()
+        with contextlib.redirect_stdout(upperion_output):
             excitation_energy_ev = excitation_energy_ev_of_target(
                 self.atomic_number, self.ion_stage, self.targetlevelname
             )
-        self.excitation_from_upperion = excitation_energy_ev is not None
+            upperion_known = get_upperion_levels_for_targets(self.atomic_number, self.ion_stage + 1) is not None
+        self.flog.writelines(f"(read of the ion above) {line}\n" for line in upperion_output.getvalue().splitlines())
         if excitation_energy_ev is not None:
             self.excitation_energy_ev = excitation_energy_ev
-            return
+            return self.excitation_energy_ev
 
         self.excitation_energy_ev = self.excitation_header_ev
-        with contextlib.redirect_stdout(io.StringIO()):
-            upperion_known = get_upperion_levels_for_targets(self.atomic_number, self.ion_stage + 1) is not None
         reason = (
             f"no level of the ion above matches the photoionisation target {self.targetlevelname}"
             if upperion_known
@@ -956,61 +962,35 @@ class PhotFileReader:
             self.flog,
             f"WARNING: {reason}, so the reader takes the excitation energy from the {self.photfilename} header",
         )
+        return self.excitation_energy_ev
 
-    def edge_ev(self) -> float:
-        """Threshold energy of the current level for the route of the current file, in eV.
+    def edge_lambda_angstrom(self) -> float | None:
+        """Threshold wavelength of the current level for the route of the current file.
 
         CMFGEN evaluates every fit at EDGE = GS_EDGE + EXC_FREQ (sub_phot_gen.f lines 182 and
         215). GS_EDGE is the threshold of the level to the ground state of the ion above, which
         the oscillator file gives as Lam(A). CMFGEN keeps the sign of that value, and a level
         above the ionisation limit has a negative one. EXC_FREQ is the excitation energy of the
-        target level of the route.
+        target level of the route. A zero Lam(A) gives no threshold at all.
 
-        A zero Lam(A) gives no threshold at all, so this returns zero for it.
+        The fit functions take a wavelength, so this converts that edge. Returns None where the
+        edge is zero or below, and records the level. CMFGEN divides the frequency by the edge
+        (sub_phot_gen.f line 228), which gives no useful cross section for such a level. The
+        caller then stores no table, and read_file() logs one summary line for each file.
         """
-        self.resolve_excitation_energy()
+        excitation_energy_ev = self.resolve_excitation_energy()
         lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex]
-        if lambda_angstrom == 0.0:
-            return 0.0
-        return hc_in_ev_angstrom / lambda_angstrom + self.excitation_energy_ev
-
-    def edge_lambda_angstrom(self) -> float | None:
-        """Threshold wavelength of the current level for the route of the current file.
-
-        The fit functions take a wavelength, so this converts the edge of edge_ev(). Returns None
-        where that edge is zero or below. CMFGEN divides the frequency by the edge
-        (sub_phot_gen.f line 228), which gives no useful cross section for such a level.
-        """
-        edge_ev = self.edge_ev()
-        return hc_in_ev_angstrom / edge_ev if edge_ev > 0.0 else None
-
-    def note_level_without_edge(self) -> None:
-        """Record that the current level has an edge of zero or below, so it gets no table."""
-        self.levels_without_edge[self.lowerlevelname] = None
+        edge_ev = 0.0 if lambda_angstrom == 0.0 else hc_in_ev_angstrom / lambda_angstrom + excitation_energy_ev
+        if edge_ev <= 0.0:
+            self.levels_without_edge[self.lowerlevelname] = None
+            return None
+        return hc_in_ev_angstrom / edge_ev
 
     def read_file(self, filenum: int, filename: Path, photfilename: str) -> None:
         """Read one phot file into self.phixstables[filenum] and self.phixstargets[filenum]."""
+        self._reset_file_state()
         self.filenum = filenum
         self.photfilename = photfilename
-        self.lowerlevelindex = -1
-        self.lowerlevelname = ""
-        self.targetlevelname = ""
-        self.numpointsexpected = 0
-        self.crosssectiontype = -1
-        self.fitcoefficients = []
-        self.pending_energyryd = []
-        self.pending_sigma = []
-        self.pending_levelname = ""
-        self.pending_numpoints = 0
-        self.thresholdenergyryd = 0.0
-        self.excitation_energy_ev = 0.0
-        self.excitation_from_upperion = False
-        self.excitation_resolved = False
-        self.excitation_header_ev = 0.0
-        self.levels_without_edge = {}
-        self.duplicate_energy_rows = 0
-        self.duplicate_energy_first = None
-        self.in_header = False
 
         self.lines = scan_file_lines(filename).collect()["line"].fill_null("")
         is_event = self.lines.str.contains("!", literal=True) | (self.lines.str.strip_chars().str.len_chars() == 0)
@@ -1050,8 +1030,9 @@ class PhotFileReader:
         if self.levels_without_edge:
             log_and_print(
                 self.flog,
-                f"WARNING: {len(self.levels_without_edge)} levels of {photfilename} have a threshold energy of zero"
-                f" or below, so they get no cross section. The first is {next(iter(self.levels_without_edge))}.",
+                f"WARNING: {len(self.levels_without_edge)} level names of {photfilename} have a threshold energy of"
+                f" zero or below, so they get no cross section."
+                f" The first is {next(iter(self.levels_without_edge))}.",
             )
         if self.duplicate_energy_first is not None:
             duplicate_levelname, duplicate_energy = self.duplicate_energy_first
@@ -1250,7 +1231,6 @@ class PhotFileReader:
             self.pending_numpoints = self.numpointsexpected
             lambda_angstrom = self.edge_lambda_angstrom()
             if lambda_angstrom is None:
-                self.note_level_without_edge()
                 return
             self.thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
             # for these types the x value is a fraction of the threshold, not an energy
@@ -1286,7 +1266,6 @@ class PhotFileReader:
         if len(self.fitcoefficients) * 8 == self.numpointsexpected:
             lambda_angstrom = self.edge_lambda_angstrom()
             if lambda_angstrom is None:
-                self.note_level_without_edge()
                 return
             self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
 
@@ -1316,7 +1295,6 @@ class PhotFileReader:
             if len(fitcoefficients) == ncoefficients:
                 lambda_angstrom = self.edge_lambda_angstrom()
                 if lambda_angstrom is None:
-                    self.note_level_without_edge()
                     return
                 self.store_table(fitfunc(lambda_angstrom, *fitcoefficients))
             return
@@ -1334,7 +1312,6 @@ class PhotFileReader:
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
                     if lambda_angstrom is None:
-                        self.note_level_without_edge()
                         return
                     self.store_table(get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end))
             return
@@ -1350,7 +1327,6 @@ class PhotFileReader:
                     return
                 lambda_angstrom = self.edge_lambda_angstrom()
                 if lambda_angstrom is None:
-                    self.note_level_without_edge()
                     return
                 # scale the cross sections but not the energy grid
                 phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
@@ -1372,11 +1348,35 @@ class PhotFileReader:
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
                     if lambda_angstrom is None:
-                        self.note_level_without_edge()
                         return
                     self.store_table(
                         get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=self.zion)
                     )
+
+
+def phixs_open_edge_ev(phixstable: np.ndarray) -> float:
+    """Lowest energy of a raw cross section table with a cross section above zero, in eV.
+
+    This is the edge of the photoionisation route that the table belongs to. A table can be zero
+    at the nominal threshold, because a type 8 fit has an offset edge. Returns zero for a table
+    whose cross section is zero on every row.
+    """
+    nonzerorows = np.nonzero(phixstable[:, 1])[0]
+    return float(phixstable[nonzerorows[0], 0]) * ryd_to_ev if len(nonzerorows) > 0 else 0.0
+
+
+def phixs_at_energy(phixstable: np.ndarray, energy_ev: float) -> float:
+    """Read a raw cross section table at one energy, in Megabarns.
+
+    Each row of the table holds an energy in Rydberg and a cross section in Megabarns. A fit type
+    gives 1000 rows from the threshold to 21 times the threshold, and a tabulated type gives the
+    rows of the file. Above the last row the cross section falls as nu^-3. The caller reads the
+    table at or above the first energy of the table, so no row below that energy applies.
+    """
+    energy_ryd = energy_ev / ryd_to_ev
+    if energy_ryd > phixstable[-1, 0]:
+        return float(phixs_nu_cubed_tail(float(phixstable[-1, 1]), float(phixstable[-1, 0]), energy_ryd))
+    return float(np.interp(energy_ryd, phixstable[:, 0], phixstable[:, 1]))
 
 
 def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog) -> PhixsData:
@@ -1397,6 +1397,12 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     levelcount = dfenergy_levels.height
 
     photfilenames = ions_data[atomic_number, ion_stage].photfilenames
+    # CMFGEN numbers the routes by the file suffix A, B, C (rdphot_gen_v2.f line 150), and the
+    # reader takes the first file of the list as route 1. Not an assert: an entry out of order
+    # gives every level of two files a wrong edge, and the list is written by hand.
+    if list(photfilenames) != sorted(photfilenames, key=str.casefold):
+        msg = f"The photoionisation files of Z={atomic_number} ion_stage {ion_stage} are not in route order: {photfilenames}"
+        raise ValueError(msg)
     if not photfilenames:
         # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross section array
         # as "no data" and applies the hydrogenic estimate. A zero-filled array would pass as data.
@@ -1441,8 +1447,8 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     keptthreshold_of_levelname: dict[str, float] = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
     num_levelnames_with_zero_crosssection = 0
-    # every route of each level: (file number, reduced table, anchor energy of that table in eV)
-    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray, float]]] = defaultdict(list)
+    # every route of each level: (file number, reduced table, raw table as the file gives it)
+    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray, np.ndarray]]] = defaultdict(list)
 
     for filenum, photfilename in enumerate(photfilenames):
         filename = Path(
@@ -1453,36 +1459,25 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         reader.read_file(filenum, filename, photfilename)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
-            reader.phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+            reader.phixstables[filenum],
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} {photfilename}",
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            # The first energy of the input table, and not the nominal edge of the route.
-            # reduce_phixs_tables_worker() anchors the nu/nu_edge grid there, and the first
-            # energy of a tabulated block is often not the edge. The comparison below reads the
-            # reduced table on that grid, so it must use the same anchor.
             tablein = reader.phixstables[filenum][lowerlevelname]
             if len(tablein) == 0 or tablein[0][0] == 0.0:
                 # the worker gives such a table an all-zero reduced table, which is a closed route
                 continue
-            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable, float(tablein[0][0]) * ryd_to_ev))
-
-    # the nu/nu_edge grid of every reduced table, which reduce_phixs_tables_worker() builds
-    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)[: args.nphixspoints]
+            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable, tablein))
 
     for lowerlevelname, routes in routes_of_levelname.items():
-        # The first non-zero point of the grid, not index 0. A table can be zero at the nominal
-        # threshold: a type 8 offset fit, or a tabulated type whose data starts above nu_edge.
-        # Such a table has its own edge further up the grid.
-        openroutes = []
-        for filenum, reduced_phixstable, anchor_ev in routes:
-            nonzeropoints = np.nonzero(reduced_phixstable)[0]
-            if len(nonzeropoints) == 0:
-                # The cross section is zero everywhere on the output grid, so this route gives
-                # nothing. For type 8 (offset) this happens when the offset edge nu_edge + nu_o
-                # lies beyond the grid that reduce_phixs_tables() samples.
-                continue
-            openroutes.append((filenum, reduced_phixstable, anchor_ev, anchor_ev * xgrid[nonzeropoints[0]]))
+        # A route whose reduced table is zero on every output point gives no output table,
+        # whatever its raw table holds. A type 8 fit does that when its offset edge nu_edge +
+        # nu_o lies above the grid that reduce_phixs_tables() samples.
+        openroutes = [(filenum, reduced, raw) for filenum, reduced, raw in routes if reduced.any()]
 
         if not openroutes:
             num_levelnames_with_zero_crosssection += 1
@@ -1497,24 +1492,19 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # fractions therefore compare the routes, and the comparison needs one frequency.
         #
         # That frequency is the highest edge of the routes of the level, which is the lowest
-        # frequency at which every route is open. A route with a lower edge is read there on its
-        # own nu/nu_edge grid. The routes of one level start at different frequencies, because
-        # each route has the edge of its own target. A comparison of each route at its own edge
-        # would therefore compare different photon energies.
-        comparison_ev = max(openedge_ev for *_, openedge_ev in openroutes)
-        for filenum, reduced_phixstable, anchor_ev, openedge_ev in openroutes:
-            comparison_x = comparison_ev / anchor_ev
-            if openedge_ev == comparison_ev:
-                # this route sets the comparison frequency, so read its own first non-zero point
-                phixs_at_threshold = float(reduced_phixstable[np.nonzero(reduced_phixstable)[0][0]])
-            elif comparison_x > xgrid[-1]:
-                # The comparison frequency is above the end of this route's grid. np.interp()
-                # would give the last grid value there, which is far too large.
-                phixs_at_threshold = float(
-                    phixs_nu_cubed_tail(float(reduced_phixstable[-1]), float(xgrid[-1]), comparison_x)
-                )
-            else:
-                phixs_at_threshold = float(np.interp(comparison_x, xgrid, reduced_phixstable))
+        # frequency at which every route is open. The routes of one level start at different
+        # frequencies, because each route has the edge of its own target. A comparison of each
+        # route at its own edge would therefore compare different photon energies.
+        #
+        # The comparison reads the RAW table of each route, and not the reduced one. The raw
+        # table is the data of the file, so it needs no bin average and no anchor. It also runs
+        # far above the output grid, which the reduced table does not: on the reduced grid most
+        # comparisons fell past the last point, where only the nu^-3 tail law remained. The raw
+        # table holds real data there. The writer keeps one table for each level, so this
+        # comparison alone decides which route that is.
+        comparison_ev = max(phixs_open_edge_ev(raw) for *_, raw in openroutes)
+        for filenum, reduced_phixstable, raw_phixstable in openroutes:
+            phixs_at_threshold = phixs_at_energy(raw_phixstable, comparison_ev)
             phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
                 (reader.phixstargets[filenum], phixs_at_threshold)
             )
@@ -1548,13 +1538,14 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         if crosssectiontype in reader.unknown_phixs_types:
             log_and_print(
                 flog,
-                f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} levels with UNKNOWN cross section type"
+                f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} level names with UNKNOWN cross section type"
                 f" {crosssectiontype}: {typelabel}",
             )
         else:
             log_and_print(
                 flog,
-                f"{len(reader.phixs_type_levels[crosssectiontype])} levels with cross section type {crosssectiontype}:"
+                f"{len(reader.phixs_type_levels[crosssectiontype])} level names with cross section type"
+                f" {crosssectiontype}:"
                 f" {typelabel}",
             )
 
@@ -1626,7 +1617,8 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             # kept table. The writer gives every target of a level this one value, so a
             # per-target value has no column to go in. ARTIS ignores the column: it computes
             # the threshold of each route itself as the ionisation energy plus E(target) minus
-            # E(level). That is the edge of edge_ev(). See write_phixs_data() in output.py.
+            # E(level). That is the edge of edge_lambda_angstrom(). See write_phixs_data() in
+            # output.py.
             #
             # abs(): CMFGEN writes a negative Lam(A) for some levels, and that sign would read
             # as readqubdata's "no threshold value" sentinel. A zero Lam(A) gives no threshold

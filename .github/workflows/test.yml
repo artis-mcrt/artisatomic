@@ -90,6 +90,11 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            # test_get_ion_handlers_builds_the_built_in_selection skips without this sample
+            - name: Extract Floers25 atomic data
+              working-directory: atomic-data-floers25/
+              run: tar -xJvf testdata.tar.xz
+
             # -p gives each data file a unique name, so this one and every tests/ matrix job's
             # survive being downloaded into a single directory. There are more files than jobs
             # (each spawned phixs worker writes its own), and combine reporting some as skipped

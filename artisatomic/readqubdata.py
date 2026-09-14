@@ -14,6 +14,7 @@ import polars as pl
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
+from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import hc_in_ev_cm
@@ -23,6 +24,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
+from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
@@ -539,7 +541,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 phixstables[targetcolumn] = phixstable
 
             reduced_phixs_dict = reduce_phixs_tables(
-                phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+                phixstables,
+                args.optimaltemperature,
+                args.nphixspoints,
+                args.phixsnuincrement,
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
             )
             target_scalefactors = np.zeros(ntargets)
             targetcolumn_withmaxfraction = 1
@@ -688,7 +694,11 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
             # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
             dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
             phixsvalues = reduce_phixs_tables(
-                dict_phixstable, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+                dict_phixstable,
+                args.optimaltemperature,
+                args.nphixspoints,
+                args.phixsnuincrement,
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
             )["gs"]
 
         # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground

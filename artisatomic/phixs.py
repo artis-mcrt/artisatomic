@@ -1,7 +1,6 @@
 """Downsample photoionisation cross section tables and estimate hydrogenic ones where none exist."""
 
 from collections.abc import Callable
-from functools import cache
 from functools import partial
 
 import numpy as np
@@ -114,7 +113,11 @@ def match_hydrogenic_phixs(
         photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
     reduced_phixs_dict = reduce_phixs_tables(
-        phixstables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+        phixstables,
+        args.optimaltemperature,
+        args.nphixspoints,
+        args.phixsnuincrement,
+        label=f"Z={atomic_number} {elsymbols[atomic_number]} hydrogenic estimate",
     )
     for levelindex, reduced_phixs_table in reduced_phixs_dict.items():
         photoionization_crosssections[levelindex] = reduced_phixs_table
@@ -127,6 +130,7 @@ def reduce_phixs_tables[KeyType](
     optimaltemperature: float,
     nphixspoints: int,
     phixsnuincrement: float,
+    label: str | None = None,
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
@@ -134,37 +138,26 @@ def reduce_phixs_tables[KeyType](
     threshold energy.
 
     The result keeps the key type: callers index the tables by level name or by level id.
+
+    label names the source of the tables, for example "Z=27 Co II phot_data_A". A key alone does
+    not say which ion or which file the table came from. The messages of the worker name both.
     """
     print(f"Processing {len(dicttables.keys()):d} phixs tables")
+
+    # One call reduces many tables onto one grid. The worker gets that grid and builds none.
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
 
     return dict(
         zip(
             dicttables.keys(),
             parallel_map(
-                partial(
-                    reduce_phixs_tables_worker,
-                    optimaltemperature,
-                    nphixspoints,
-                    phixsnuincrement,
-                ),
+                partial(reduce_phixs_tables_worker, optimaltemperature, xgrid, label=label),
                 dicttables.values(),
                 dicttables.keys(),
             ),
             strict=True,
         )
     )
-
-
-@cache
-def cached_output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
-    """Give the read-only nu/nu_edge grid of the output.
-
-    One call of reduce_phixs_tables() reduces many tables with one grid. The cache builds that
-    grid once for each process of the pool.
-    """
-    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
-    xgrid.flags.writeable = False
-    return xgrid
 
 
 def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
@@ -181,10 +174,10 @@ def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np
 # the recombination rate integral constant if the temperature matches.
 def reduce_phixs_tables_worker(
     optimaltemperature: float,
-    nphixspoints: int,
-    phixsnuincrement: float,
+    xgrid: npt.NDArray[np.float64],
     tablein: np.ndarray,
     key: object = None,
+    label: str | None = None,
 ) -> np.ndarray:
     """Downsample one cross section table onto the output's nu/nu_edge grid.
 
@@ -197,14 +190,18 @@ def reduce_phixs_tables_worker(
     the weight at 1.0 or below. The absolute weight underflows to zero for h nu / k T > 745, which
     is every bin above 16 eV at -optimaltemperature 1000.
 
+    xgrid is the nu/nu_edge grid of the output, which reduce_phixs_tables() builds once for the
+    whole batch. It holds one point more than the output, to close the last bin.
+
     key is the key of the table in the dict that reduce_phixs_tables() received, for example a
-    level name. The messages below name it. parallel_map() maps a batch of tables, so the caller
-    cannot catch an error for one table and add the key itself.
+    level name. label names the source of the batch. The messages below name both.
+    parallel_map() maps a batch of tables, so the caller cannot catch an error for one table and
+    add the key itself.
     """
     minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
+    labeltext = "" if label is None else f" The tables come from {label}."
     keytext = "" if key is None else f" The key of the table is {key!r}."
-
-    xgrid = cached_output_xgrid(nphixspoints, phixsnuincrement)
+    nphixspoints = len(xgrid) - 1
 
     # An empty table has no threshold to scale the grid, and a zero threshold would divide by
     # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
@@ -216,12 +213,12 @@ def reduce_phixs_tables_worker(
     # re-slices a strided view of a 2D array every time.
     tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
     tablein_sigma = np.ascontiguousarray(tablein[:, 1])
-    # not an assert: np.searchsorted() and np.interp() below both give a wrong result for a table
-    # that decreases in energy, and this function reads the first energy as the threshold
+    # not an assert: np.searchsorted() and np.interp() below both give a wrong result for a
+    # table that decreases in energy. This function also reads the first energy as the threshold.
     if np.any(np.diff(tablein_energyryd) < 0.0):
         msg = (
             f"The energy column of a photoionisation table decreases. The table shape is {tablein.shape}"
-            f" and the first energy is {threshold_old_ryd:.6e} Ryd.{keytext}"
+            f" and the first energy is {threshold_old_ryd:.6e} Ryd.{labeltext}{keytext}"
         )
         raise ValueError(msg)
 
@@ -246,7 +243,7 @@ def reduce_phixs_tables_worker(
                 f"A photoionisation bin integral is not positive. The table shape is {tablein.shape},"
                 f" the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted integral is"
                 f" {integralwithsigma.min():.6e} and the smallest weight integral is"
-                f" {integralnosigma.min():.6e}.{keytext}"
+                f" {integralnosigma.min():.6e}.{labeltext}{keytext}"
             )
             raise ValueError(msg)
         return integralwithsigma / integralnosigma
@@ -293,10 +290,11 @@ def reduce_phixs_tables_worker(
         # np.asarray() only names the type of the interpolated grid. np.interp() returns that
         # array of float64 already, so the call copies nothing.
         grid_sigma = np.asarray(np.interp(grid_energyryd, tablein_energyryd, tablein_sigma), dtype=np.float64)
-        # Almost every table reaches past its own grid, so the power law applies to no point at
-        # all. The test keeps the power law off the whole grid in that case.
-        beyond = grid_energyryd > table_energy_last
-        if beyond.any():
+        # Almost every table reaches past the highest resampled energy, so the power law applies
+        # to no point at all. The grid increases along both axes, so its last value is its
+        # largest one. That scalar test keeps the power law off the whole grid in that case.
+        if grid_energyryd[-1, -1] > table_energy_last:
+            beyond = grid_energyryd > table_energy_last
             grid_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, grid_energyryd[beyond])
         arr_sigma_out[arr_resample] = weighted_averages(grid_energyryd, grid_sigma)
 

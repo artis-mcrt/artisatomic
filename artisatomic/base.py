@@ -146,7 +146,7 @@ class PhixsData(t.NamedTuple):
 
 
 def output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
-    """Build the nu/nu_edge grid of a downsampled photoionisation cross section table.
+    """Build the nu/nu_edge grid of a cross section table after the downsample.
 
     The grid holds nphixspoints + 1 points. The last point closes the bin of the last output
     point, so the output keeps only the first nphixspoints values.
@@ -331,7 +331,13 @@ def isfloat(value: t.Any) -> bool:
 
 
 def split_levels_above_ionization(
-    dflevels: pl.DataFrame, energycolumn: str, indexcolumn: str, ionization_energy_in_ev: float, flog: t.Any
+    dflevels: pl.DataFrame,
+    energycolumn: str,
+    indexcolumn: str,
+    ionization_energy_in_ev: float,
+    atomic_number: int,
+    ion_stage: int,
+    flog: t.Any,
 ) -> tuple[pl.DataFrame, set[int]]:
     """Split a level table into the bound levels and the file indices of the levels above the ionisation energy.
 
@@ -339,9 +345,11 @@ def split_levels_above_ionization(
     The function also returns the file index of every dropped level. With those indices, the
     reader knows whether a transition names a dropped level or an unknown level.
 
-    fill_null(False) keeps a level with no energy in the bound frame. A null compares as null, so
-    such a level would leave both results. Every transition that names it would then stop the run
-    with a message about the transitions file.
+    The function stops the run when no bound level is left. Such an ion would go to the output
+    with no level.
+
+    The callers reject a level with no energy before they call this function. fill_null(False) is
+    a safety net, because a null compares as null and would leave the level in both results.
     """
     above_ionization = (pl.col(energycolumn) > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
     fileindices_above_ionization = {int(fileindex) for fileindex in dflevels.filter(above_ionization)[indexcolumn]}
@@ -350,7 +358,97 @@ def split_levels_above_ionization(
             flog, f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy"
         )
 
-    return dflevels.filter(~above_ionization), fileindices_above_ionization
+    dfboundlevels = dflevels.filter(~above_ionization)
+
+    # not an assert: an ion with no bound level would go to the output as an empty ion
+    if dfboundlevels.is_empty():
+        msg = (
+            f"Every one of the {dflevels.height} levels of Z={atomic_number} ion_stage {ion_stage} is above the"
+            f" ionisation energy of {ionization_energy_in_ev} eV."
+        )
+        raise ValueError(msg)
+
+    return dfboundlevels, fileindices_above_ionization
+
+
+def check_no_nulls(table: pl.DataFrame, sourcename: str) -> pl.DataFrame:
+    """Stop the run if a column of a parsed table holds a null.
+
+    A null means that the field was blank, or that a line stopped before the end of the column.
+    Every column that a reader cuts must have a value in every row. A null that passes here
+    reaches int() or the output writer, which report neither the file nor the column.
+    """
+    # not an assert: a truncated data file must stop the run, and must name the column
+    nullcounts = {name: count for name, count in table.null_count().row(0, named=True).items() if count > 0}
+    if nullcounts:
+        msg = f"{sourcename} has rows with no value: {nullcounts}. A field is blank, or a line is too short."
+        raise ValueError(msg)
+
+    return table
+
+
+def check_row_count(
+    table: pl.DataFrame, headerlines: Iterable[str], key: str, separator: str, sourcename: str
+) -> pl.DataFrame:
+    """Stop the run if the table has fewer rows than the header of the file declares.
+
+    FAC writes "NLEV = N" in a level file and "NTRANS = N" in a transition file. The Lisbon files
+    write "Number Levels: N" and "Number Transitions: N". A copy of a shared-drive file can stop
+    between two rows. The short file then parses without an error, and the ion goes to the output
+    with a part of its levels or its transitions.
+    """
+    # not an assert: a partial data file must stop the run, and the check must survive python -O
+    pattern = re.compile(rf"\s*{re.escape(key)}\s*{re.escape(separator)}\s*(\d+)")
+    rowcounts = [int(match[1]) for line in headerlines if (match := pattern.match(line))]
+    if not rowcounts:
+        msg = f"{sourcename} has no {key} line in its header. The file is incomplete."
+        raise ValueError(msg)
+
+    if table.height != rowcounts[0]:
+        msg = f"{sourcename} declares {key} = {rowcounts[0]} but holds {table.height} rows. The file is incomplete."
+        raise ValueError(msg)
+
+    return table
+
+
+def drop_transitions_of_levels(
+    dflines: pl.DataFrame,
+    lowercolumn: str,
+    uppercolumn: str,
+    fileindices_dropped: set[int],
+    sourcename: str,
+    flog: t.Any,
+) -> pl.DataFrame:
+    """Drop the transitions that name a level above the ionisation energy.
+
+    split_levels_above_ionization() gives the file index of every dropped level. Such a level has
+    no level id, so every transition that names it goes with it.
+
+    A null file index stops the run. is_in() gives null for a null index, so the filter would drop
+    the row and count it with the transitions above the ionisation energy.
+    """
+    check_no_nulls(dflines.select(lowercolumn, uppercolumn), sourcename)
+
+    names_a_dropped_level = pl.col(lowercolumn).is_in(fileindices_dropped) | pl.col(uppercolumn).is_in(
+        fileindices_dropped
+    )
+    # fill_null(False) is a safety net: the check above rejects a null file index first
+    dfkeptlines = dflines.filter(~names_a_dropped_level.fill_null(False))
+
+    skipped_count = dflines.height - dfkeptlines.height
+    if dfkeptlines.is_empty() and skipped_count > 0:
+        # the writer accepts an ion with no transition, and 66DyIII_calib is such an ion
+        log_and_print(
+            flog,
+            f"WARNING: skipped every one of the {skipped_count:d} transitions, because each one references a level"
+            " above the ionisation energy. The ion goes to the output with no transitions.",
+        )
+    elif skipped_count > 0:
+        log_and_print(
+            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
+        )
+
+    return dfkeptlines
 
 
 compression_extensions = ("", ".zst", ".gz", ".xz")

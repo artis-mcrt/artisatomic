@@ -279,12 +279,10 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     label. The digits then hold n only. Otherwise they start with the electron count of that
     orbital. The function takes a count-plus-n reading only when it is physical: the count fits
     the previous orbital, and the valence orbital has l < n. So "5s111s1" (adf04, 5s1 11s1) gives
-    11 and not 1. Returns None when no reading is physical, when the run is too long, or when
-    digits holds a character that is not a digit.
+    11 and not 1. Returns None when no reading is physical, or when the run is too long.
+
+    Every caller matches the run of digits with a pattern, so the run holds digits only.
     """
-    # a caller can cut a run that starts with a space. int(" ") inside physical() raises
-    if not digits.isdigit():
-        return None
     if not previousorbital:
         return int(digits)
     lchars_lower = lchars.lower()

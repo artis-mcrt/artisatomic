@@ -35,7 +35,10 @@ The project requires Python >= 3.13 and uses [uv](https://docs.astral.sh/uv/):
 uv sync --frozen
 ```
 
-This installs the package in editable mode with the `dev` dependency group.
+This installs the package in editable mode with the `dev` dependency group. It installs no optional
+extra. The command `uv sync --frozen --extra chianti` adds ChiantiPy, matplotlib and scipy, which
+`makeartisrecombratefile` needs for an ion with no Nahar file. The type checkers pass without the
+extra, because `makerecombratefile.py` imports ChiantiPy through `importlib.import_module()`.
 
 Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, QUB, MONS and Floers+25 tests read committed samples, so the full test suite needs only the CMFGEN download. The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
 
