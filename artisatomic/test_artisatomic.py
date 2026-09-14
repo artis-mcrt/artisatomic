@@ -1366,15 +1366,18 @@ def lisbon_provenance(countkey: str, rowcount: int) -> str:
     """Return the eight provenance lines of a Lisbon CSV, with the row count that its header gives.
 
     The real files carry "Number Levels: N" in a levels file and "Number Transitions: N" in a
-    transitions file, on the seventh of the eight lines. The reader checks the count.
+    transitions file, on the seventh of the eight lines. The reader checks the count. The lines
+    above it differ between the two file types, and the reader reads none of them.
     """
+    islevels = countkey == "Number Levels"
     lines = [
-        "                Levels NdIII                 ",
+        f"                {'Levels' if islevels else 'Transitons'} NdIII                 ",
         "*" * 71,
         "Last updated: 2021-06-13 ",
+        *([] if islevels else ["Multipole:-1  #negative values for electic transtions, positive for magnetic"]),
         "Z: 60",
         "Ionization Stage: 2",
-        "Ground State Energy[eV]: -261525.855",
+        *(["Ground State Energy[eV]: -261525.855"] if islevels else []),
         f"{countkey}: {rowcount}",
         "*" * 71,
     ]
