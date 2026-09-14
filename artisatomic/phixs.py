@@ -1,6 +1,7 @@
 """Downsample photoionisation cross section tables and estimate hydrogenic ones where none exist."""
 
 from collections.abc import Callable
+from functools import cache
 from functools import partial
 
 import numpy as np
@@ -14,7 +15,9 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
+from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
+from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import ryd_to_hz
 
 
@@ -145,10 +148,33 @@ def reduce_phixs_tables[KeyType](
                     phixsnuincrement,
                 ),
                 dicttables.values(),
+                dicttables.keys(),
             ),
             strict=True,
         )
     )
+
+
+@cache
+def cached_output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
+    """Give the read-only nu/nu_edge grid of the output.
+
+    One call of reduce_phixs_tables() reduces many tables with one grid. The cache builds that
+    grid once for each process of the pool.
+    """
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
+    xgrid.flags.writeable = False
+    return xgrid
+
+
+def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+    """Integrate each row of arr_y with the trapezoid rule, over the sample widths arr_dx.
+
+    np.trapezoid computes the widths from the x values at each call. The caller integrates two
+    functions over one set of x values, so it computes the widths once. The result of this
+    function is bit-identical to the result of np.trapezoid.
+    """
+    return np.sum(arr_dx * (arr_y[:, 1:] + arr_y[:, :-1]) / 2.0, axis=1)
 
 
 # This function downsamples the photoionisation cross section table to a regular grid. It keeps
@@ -158,6 +184,7 @@ def reduce_phixs_tables_worker(
     nphixspoints: int,
     phixsnuincrement: float,
     tablein: np.ndarray,
+    key: object = None,
 ) -> np.ndarray:
     """Downsample one cross section table onto the output's nu/nu_edge grid.
 
@@ -169,10 +196,15 @@ def reduce_phixs_tables_worker(
     the ratio of the two integrals, so the subtraction leaves the average unchanged. It also keeps
     the weight at 1.0 or below. The absolute weight underflows to zero for h nu / k T > 745, which
     is every bin above 16 eV at -optimaltemperature 1000.
+
+    key is the key of the table in the dict that reduce_phixs_tables() received, for example a
+    level name. The messages below name it. parallel_map() maps a batch of tables, so the caller
+    cannot catch an error for one table and add the key itself.
     """
     minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
+    keytext = "" if key is None else f" The key of the table is {key!r}."
 
-    xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+    xgrid = cached_output_xgrid(nphixspoints, phixsnuincrement)
 
     # An empty table has no threshold to scale the grid, and a zero threshold would divide by
     # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
@@ -189,7 +221,7 @@ def reduce_phixs_tables_worker(
     if np.any(np.diff(tablein_energyryd) < 0.0):
         msg = (
             f"The energy column of a photoionisation table decreases. The table shape is {tablein.shape}"
-            f" and the first energy is {threshold_old_ryd:.6e} Ryd."
+            f" and the first energy is {threshold_old_ryd:.6e} Ryd.{keytext}"
         )
         raise ValueError(msg)
 
@@ -203,15 +235,18 @@ def reduce_phixs_tables_worker(
         """
         arr_nu = arr_energyryd * ryd_to_hz
         integrand_vals = arr_nu**2 * np.exp(minus_h_over_kb_t * (arr_nu - arr_nu[:, :1]))
-        integralnosigma = np.trapezoid(integrand_vals, arr_energyryd, axis=1)
-        integralwithsigma = np.trapezoid(arr_sigma_megabarns * integrand_vals, arr_energyryd, axis=1)
+        # The two integrals cover one set of x values, so compute the sample widths once.
+        arr_dx = np.diff(arr_energyryd, axis=1)
+        integralnosigma = trapezoid_with_widths(integrand_vals, arr_dx)
+        integralwithsigma = trapezoid_with_widths(arr_sigma_megabarns * integrand_vals, arr_dx)
         # The weight is positive, so integralnosigma is positive. A negative cross section is the
         # only way to get a negative integralwithsigma, and the input must not contain one.
         if np.any(integralwithsigma < 0.0) or np.any(integralnosigma <= 0.0):
             msg = (
                 f"A photoionisation bin integral is not positive. The table shape is {tablein.shape},"
                 f" the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted integral is"
-                f" {integralwithsigma.min():.6e} and the smallest weight integral is {integralnosigma.min():.6e}."
+                f" {integralwithsigma.min():.6e} and the smallest weight integral is"
+                f" {integralnosigma.min():.6e}.{keytext}"
             )
             raise ValueError(msg)
         return integralwithsigma / integralnosigma
@@ -245,7 +280,7 @@ def reduce_phixs_tables_worker(
     if np.any(arr_past):
         # assume power law decay after the last point
         edges_energyryd = np.stack([arr_enlow[arr_past], arr_enhigh[arr_past]], axis=1)
-        edges_sigma = table_sigma_last * (table_energy_last / edges_energyryd) ** 3
+        edges_sigma = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, edges_energyryd)
         arr_sigma_out[arr_past] = weighted_averages(edges_energyryd, edges_sigma)
 
     if np.any(arr_resample):
@@ -255,11 +290,14 @@ def reduce_phixs_tables_worker(
         # np.interp holds the last cross section constant past the table's end. Apply the same
         # power-law decay that the interval edges use, so a bin that straddles the table end
         # does not overweight its tail.
-        grid_sigma = np.where(
-            grid_energyryd > table_energy_last,
-            table_sigma_last * (table_energy_last / grid_energyryd) ** 3,
-            np.interp(grid_energyryd, tablein_energyryd, tablein_sigma),
-        )
+        # np.asarray() only names the type of the interpolated grid. np.interp() returns that
+        # array of float64 already, so the call copies nothing.
+        grid_sigma = np.asarray(np.interp(grid_energyryd, tablein_energyryd, tablein_sigma), dtype=np.float64)
+        # Almost every table reaches past its own grid, so the power law applies to no point at
+        # all. The test keeps the power law off the whole grid in that case.
+        beyond = grid_energyryd > table_energy_last
+        if beyond.any():
+            grid_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, grid_energyryd[beyond])
         arr_sigma_out[arr_resample] = weighted_averages(grid_energyryd, grid_sigma)
 
     # Each dense interval keeps its own samples, so the number of samples changes from one
@@ -278,7 +316,7 @@ def reduce_phixs_tables_worker(
             new_crosssection = (
                 np.interp(enhigh, tablein_energyryd, tablein_sigma)
                 if enhigh <= table_energy_last
-                else table_sigma_last * (table_energy_last / enhigh) ** 3
+                else phixs_nu_cubed_tail(table_sigma_last, table_energy_last, enhigh)
             )
             sample_energyryd = np.concatenate((sample_energyryd, [enhigh]))
             sample_sigma = np.concatenate((sample_sigma, [new_crosssection]))

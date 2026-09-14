@@ -23,8 +23,8 @@ from artisatomic.iondata import IonData
 def clear_files(args: argparse.Namespace) -> None:
     """Truncate the output files and write the phixs header. The writer appends the ions after it.
 
-    The option --nophixs writes no cross sections. The run therefore keeps phixsdata_v2.txt of an
-    earlier run in the same folder, and does not replace it with a header and no ion.
+    The option --nophixs writes no phixsdata_v2.txt. The run removes the file of an earlier run in
+    the same folder, because its level ids belong to that run's adata.txt.
     """
     outdir = Path(args.output_folder)
     with (
@@ -34,6 +34,7 @@ def clear_files(args: argparse.Namespace) -> None:
         pass
 
     if args.nophixs:
+        (outdir / "phixsdata_v2.txt").unlink(missing_ok=True)
         return
 
     with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:
@@ -681,7 +682,8 @@ def write_phixs_data(
         threshold_ev = photoionization_thresholds_ev[lowerlevelid]
         if not threshold_is_known(threshold_ev):
             threshold_ev = 0.0
-        if len(targetlist) == 1 and targetlist[0][1] > 0.99:
+        # the check above makes a single fraction 1.0, so one target takes the short form
+        if len(targetlist) == 1:
             upperionlevelid = targetlist[0][0]
 
             fphixs.write(

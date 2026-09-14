@@ -134,8 +134,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dflines.slice(transitionsectionstart)
         # the file may end with a blank line, which holds no transition
         .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
-        # split on white space, not at fixed positions: a wavelength of 1e9 nm or more is one
-        # character wider than its field and moves g_u*A one place right (Fe II 455 -> 454)
+        # split on white space, not at fixed positions. A wavelength of 1e9 nm or more is one
+        # character wider than its field. It moves g_u*A one place right (Fe II 455 -> 454)
         .with_columns(fields=pl.col("line").str.extract_all(r"\S+"))
         .select(
             # the file numbers levels from one; level ids are zero-based in memory
@@ -209,11 +209,11 @@ def get_level_valence_n(levelname: str) -> int | None:
         return int(shells[-1]) if shells else None
 
     configuration = levelname.split(",", maxsplit=2)[-1].split()
-    if len(configuration) > 1:
-        # the configuration column can glue two orbitals ("4p5s" is 4p 5s), so the last
-        # n-letter pair is the valence orbital, not the last underscore-separated token
-        shells = re.findall(r"(\d+)[a-z]", configuration[0])
-        return int(shells[-1]) if shells else None
-    lastshell = configuration[-1].rsplit(".", maxsplit=1)[-1].partition("_")[0] if configuration else ""
-    nmatch = re.match(r"\d+", lastshell)
-    return int(nmatch.group()) if nmatch is not None else None
+    if len(configuration) < 2:
+        # the name gives the LS term alone. No name of data_v2.1 has that shape
+        return None
+
+    # the configuration column can glue two orbitals ("4p5s" is 4p 5s), so the last
+    # n-letter pair is the valence orbital, not the last underscore-separated token
+    shells = re.findall(r"(\d+)[a-z]", configuration[0])
+    return int(shells[-1]) if shells else None

@@ -145,6 +145,28 @@ class PhixsData(t.NamedTuple):
     targetfractions: list[list[tuple[int, float]]] | None = None
 
 
+def output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
+    """Build the nu/nu_edge grid of a downsampled photoionisation cross section table.
+
+    The grid holds nphixspoints + 1 points. The last point closes the bin of the last output
+    point, so the output keeps only the first nphixspoints values.
+    """
+    return np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+
+
+def phixs_nu_cubed_tail[EnergyType: (float, npt.NDArray[np.float64])](
+    sigma_last: float, energy_last: float, energy: EnergyType
+) -> EnergyType:
+    """Extrapolate a photoionisation cross section above the last energy of its table.
+
+    A table ends where its data ends, and the cross section above that energy falls as nu^-3.
+    CMFGEN extrapolates a tabulated type with the same law (sub_phot_gen.f line 375).
+    reduce_phixs_tables_worker() applies it past the end of an input table. Every reader of a
+    reduced table above its last grid point must apply it too.
+    """
+    return sigma_last * (energy_last / energy) ** 3
+
+
 def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> list[int]:
     """Count the transitions that touch each level, indexed by zero-based level id, for adata.txt.
 
@@ -306,6 +328,29 @@ def isfloat(value: t.Any) -> bool:
         return False
 
     return True
+
+
+def split_levels_above_ionization(
+    dflevels: pl.DataFrame, energycolumn: str, indexcolumn: str, ionization_energy_in_ev: float, flog: t.Any
+) -> tuple[pl.DataFrame, set[int]]:
+    """Split a level table into the bound levels and the file indices of the levels above the ionisation energy.
+
+    A level above the ionisation energy is not a bound level of the ion, so the reader drops it.
+    The function also returns the file index of every dropped level. With those indices, the
+    reader knows whether a transition names a dropped level or an unknown level.
+
+    fill_null(False) keeps a level with no energy in the bound frame. A null compares as null, so
+    such a level would leave both results. Every transition that names it would then stop the run
+    with a message about the transitions file.
+    """
+    above_ionization = (pl.col(energycolumn) > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
+    fileindices_above_ionization = {int(fileindex) for fileindex in dflevels.filter(above_ionization)[indexcolumn]}
+    if fileindices_above_ionization:
+        log_and_print(
+            flog, f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy"
+        )
+
+    return dflevels.filter(~above_ionization), fileindices_above_ionization
 
 
 compression_extensions = ("", ".zst", ".gz", ".xz")
@@ -638,30 +683,6 @@ def sort_ion_handlers(
     return sorted(
         ((atomic_number, sorted(listions, key=operator.itemgetter(0))) for atomic_number, listions in ion_handlers),
         key=operator.itemgetter(0),
-    )
-
-
-def add_handler_if_not_set(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    atomic_number: int | str,
-    ion_stage: int | str,
-    handler: str,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Return a new ion_handlers list with (ion_stage, handler) added unless the ion is already present.
-
-    Use add_handlers_if_not_set() for a reader that adds the ions of a whole data set.
-    """
-    return add_handlers_if_not_set(
-        ion_handlers,
-        [(atomic_number, ion_stage)],
-        handler,
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 

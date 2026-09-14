@@ -7,14 +7,15 @@ from pathlib import Path
 import polars as pl
 
 from artisatomic.base import elsymbols
+from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
-from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
+from artisatomic.base import split_levels_above_ionization
 from artisatomic.base import Transition
 
 
@@ -27,13 +28,13 @@ def read_levels_csv(filename: Path | str) -> pl.DataFrame:
     text would swallow the header. infer_schema_length=None reads the whole column, as pandas did.
     A sample of the first rows can give Int64 to a float column.
 
-    The first column of the CSV numbers the levels. The lines name their levels by POSITION, so
-    the reader writes that position into a column of its own and does not use the CSV column as a
+    The first column of the CSV numbers the levels. The lines name their levels by POSITION. So
+    the reader writes that position into a column of its own. It does not use the CSV column as a
     key. The position stays with the level through the drop of the levels above the ionisation
     energy and through the sort by energy.
     """
     return (
-        pl.read_csv(filename, skip_lines=8, infer_schema_length=None)
+        pl.read_csv(find_file_check_extension_or_raise(filename), skip_lines=8, infer_schema_length=None)
         .select(
             energy=pl.col("Energy[cm^-1]"),
             j=0.5 * (pl.col("g") - 1),
@@ -48,7 +49,7 @@ def read_lines_csv(filename: Path | str) -> pl.DataFrame:
 
     See read_levels_csv() for the reason that this reader skips lines and reads the whole column.
     """
-    return pl.read_csv(filename, skip_lines=8, infer_schema_length=None).select(
+    return pl.read_csv(find_file_check_extension_or_raise(filename), skip_lines=8, infer_schema_length=None).select(
         level_index_lower=pl.col("Lower"),
         level_index_upper=pl.col("Upper"),
         gf=pl.col("gf"),
@@ -80,13 +81,9 @@ def read_levels_data(dflevels):
     This data set supplies no parities, so every level's parity is null and the Laporte rule
     never fires. It does supply J, which is part of each level name, so the delta J rule alone
     decides whether a transition is forbidden here.
-    """
-    # not an assert: a blank energy sorts before every number in polars, so it would take level
-    # id 0 and shift every other id. float() on it then reports neither the file nor the row
-    if dflevels["energy"].null_count() > 0:
-        msg = "The Lisbon levels file has a level with no energy"
-        raise ValueError(msg)
 
+    read_levels_and_transitions() rejects a level with no energy before it calls this function.
+    """
     # each level carries its file position through the sort. The sort is stable, so levels of one
     # energy keep the order of the file
     dflevels = dflevels.sort("energy", maintain_order=True)
@@ -105,16 +102,13 @@ def read_levels_data(dflevels):
     return energy_levels, levelid_of_fileindex_map(dflevels["fileposition"], "the Lisbon levels file")
 
 
-def read_lines_data(energy_levels, dflines, levelid_of_fileindex, filepositions_above_ionization, flog):
+def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
     The lines name their levels by position in the levels file, and read_levels_data() sorted the
     levels by energy. So the reader maps every position through levelid_of_fileindex and does not
     use it directly. A line that names a level that does not exist is an error, not something to
-    skip.
-
-    The reader skips a line that names a level above the ionisation energy, because the level
-    list stops there, as the FAC reader does.
+    skip. The caller removes the lines that name a level above the ionisation energy first.
 
     A = gf / (gf_to_a_coefficient * g_upper * wavelength^2) with the wavelength in Angstrom, as
     in readkuruczdata and readmonsdata. g_upper is the g of the level that is the upper level
@@ -122,27 +116,14 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex, filepositions_
     The file can list a pair in the reverse order, and the swap must not leave A with the wrong g.
     """
     transitions = []
-    skipped_count = 0
 
     for row in dflines.iter_rows(named=True):
-        if (
-            int(row["level_index_lower"]) in filepositions_above_ionization
-            or int(row["level_index_upper"]) in filepositions_above_ionization
-        ):
-            skipped_count += 1
-            continue
-
         lowerlevel, upperlevel = resolve_transition_levelids(
             row["level_index_lower"], row["level_index_upper"], levelid_of_fileindex, "the Lisbon transitions file"
         )
 
         A = row["gf"] / (gf_to_a_coefficient * energy_levels[upperlevel].g * row["wavelength"] ** 2)
         transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
-
-    if skipped_count > 0:
-        log_and_print(
-            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
-        )
 
     return transitions
 
@@ -200,26 +181,56 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         msg = f"The Lisbon data has no levels for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
 
+    # not an assert: a blank energy sorts before every number in polars, so it would take level
+    # id 0 and shift every other id. float() on it then reports neither the file nor the row.
+    # This runs before the drop below, which keeps such a level but cannot see it
+    if dfalllevels["energy"].null_count() > 0:
+        msg = "The Lisbon levels file has a level with no energy"
+        raise ValueError(msg)
+
     # drop the levels above the ionisation energy, as the FAC reader does, but keep their file
-    # positions. With them, read_lines_data() knows whether a line names a dropped level or an
-    # unknown level
-    above_ionization = pl.col("energy") > (ionization_energy_in_ev / hc_in_ev_cm)
-    filepositions_above_ionization = {int(pos) for pos in dfalllevels.filter(above_ionization)["fileposition"]}
-    dflevels = dfalllevels.filter(~above_ionization)
-    if filepositions_above_ionization:
-        log_and_print(
-            flog,
-            f"WARNING: dropped {len(filepositions_above_ionization):d} levels above the ionisation energy",
+    # positions. With them, the filter below knows whether a line names a dropped level
+    dflevels, filepositions_above_ionization = split_levels_above_ionization(
+        dfalllevels, "energy", "fileposition", ionization_energy_in_ev, flog
+    )
+
+    # not an assert: an ion with no bound level would go to the output as an empty ion
+    if dflevels.is_empty():
+        msg = (
+            f"Every one of the {dfalllevels.height} levels of Z={atomic_number} ion_stage {ion_stage} is above the"
+            f" ionisation energy of {ionization_energy_in_ev} eV."
         )
+        raise ValueError(msg)
 
     # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
-    dflines = read_lines_csv(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv")
+    dfalllines = read_lines_csv(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv")
 
-    transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex, filepositions_above_ionization, flog)
+    # a line that names a dropped level goes with it, because that level has no level id
+    dflines = dfalllines.filter(
+        ~pl.col("level_index_lower").is_in(filepositions_above_ionization)
+        & ~pl.col("level_index_upper").is_in(filepositions_above_ionization)
+    )
+    if dflines.height < dfalllines.height:
+        log_and_print(
+            flog,
+            f"WARNING: skipped {dfalllines.height - dflines.height:d} transitions that reference a level above the"
+            " ionisation energy",
+        )
+
+    transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
+
+    # the writer accepts an ion with no transition, so this is a warning and not an error
+    if not transitions and dfalllines.height > 0:
+        log_and_print(
+            flog,
+            f"WARNING: every one of the {dfalllines.height} transitions of Z={atomic_number} ion_stage {ion_stage}"
+            f" names a level above the ionisation energy of {ionization_energy_in_ev} eV."
+            " The ion goes to the output with no transitions.",
+        )
 
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 

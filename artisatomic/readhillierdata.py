@@ -1,5 +1,6 @@
 """Read levels, transitions, collision strengths and cross sections from Hillier's CMFGEN data."""
 
+import contextlib
 import io
 import os
 import re
@@ -21,7 +22,9 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
+from artisatomic.base import output_xgrid
 from artisatomic.base import path_for_log
+from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
@@ -166,8 +169,9 @@ ions_data |= {
     # V (only V I is in CMFGEN and it has a single level)
     # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot.dat",), "col_guess.dat"),
     # Fe
-    # REV_PHOT_DATA names its levels with an older convention, which matches only 14 of the 337
-    # terms of osc_data. phot_data_A matches all of them, as it does for the other Fe stages.
+    # REV_PHOT_DATA names its levels with an older convention. It matches only 15 of the 567
+    # distinct non-J names of osc_data, which is 45 of the 1578 levels. phot_data_A matches all
+    # of them, as it does for the other Fe stages.
     (26, 1): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
     (26, 4): IonFiles("19apr23", "feiv_osc_rev2", phot_data_names(1), "col_data"),
     # Cu, Zn and above are probably not in CMFGEN.
@@ -785,8 +789,9 @@ def excitation_energy_ev_of_target(atomic_number: int, ion_stage: int, targetlev
     level of it matches the name. The caller then falls back to the file header.
 
     This is more reliable than the header value. SIL/II/19apr23/phot_data_B writes 6.51014 for
-    the target 3s_3p_3Po, which is the g-weighted mean of the ionisation frequency of that term
-    in SIL/III/19apr23/osc_data, and not its excitation energy (52984.4 cm^-1 = 6.5694 eV).
+    the target 3s_3p_3Po. That value is the g-weighted mean of the ionisation frequency of that
+    term in SIL/III/19apr23/osc_data. The excitation energy of the term is 52984.4 cm^-1, which
+    is 6.5694 eV.
 
     The name matching is the one of get_photoiontargetfractions(). A '/' in the name separates
     two spellings of the same target, and a level name that matches either one counts. A name
@@ -884,15 +889,19 @@ class PhotFileReader:
         self.pending_levelname = ""
         self.pending_numpoints = 0
         self.thresholdenergyryd = 0.0
-        # excitation energy of this file's target level, in eV. Zero for a route to the ground
-        # state of the ion above, which the header marks with a value of exactly zero. For any
-        # other route excitation_energy_ev_of_target() sets it from the levels of the ion above,
-        # and the file header only fills it in when no level of that ion matches the target.
+        # excitation energy of this file's target level, in eV. resolve_excitation_energy() sets
+        # it one time for each file, at the first level block that needs an edge.
         self.excitation_energy_ev = 0.0
         self.excitation_from_upperion = False
-        # the edge of each stored table, in eV, so read_phixs_tables() can compare the routes
-        # of one level at a common frequency
-        self.phixs_edges_ev: list[dict[str, float]] = [{} for _ in range(photfilecount)]
+        self.excitation_resolved = False
+        # the header value of the current file, in eV, which is the fallback of the resolver
+        self.excitation_header_ev = 0.0
+        # the level names of the current file whose edge is zero or below, in file order. The
+        # counters below hold the rows of the current file that repeat an energy. read_file()
+        # logs one line for each of the two.
+        self.levels_without_edge: dict[str, None] = {}
+        self.duplicate_energy_rows = 0
+        self.duplicate_energy_first: tuple[str, float] | None = None
         # set to skip the problem lines in Fe VIII and Ni X phot_data_A (see read_file)
         self.in_header = False
         self.lines = pl.Series("line", [], dtype=pl.String)
@@ -900,23 +909,84 @@ class PhotFileReader:
         self.f0 = np.empty(0)
         self.f1 = np.empty(0)
 
-    def edge_lambda_angstrom(self) -> float:
+    def resolve_excitation_energy(self) -> None:
+        """Set the excitation energy of the current file's target, one time for the file.
+
+        CMFGEN reads the phot file of route PHOT_ID from the name suffix A, B, C and so on
+        (rdphot_gen_v2.f line 150). The first file of an ion is therefore route 1. For that
+        route CMFGEN sets EXC_FREQ = 0 (rdphot_gen_v2.f line 282) and discards the header value.
+        The edge of the route is then Lam(A), which is already the threshold to the lowest level
+        of the ion above.
+
+        For a later route CMFGEN resolves the energy from the level list of the ion above
+        (rdphot_gen_v2.f line 612). The header value is the fallback (lines 615 and 619). This
+        reader follows that rule. The resolver reads the ion above, so call this only where the
+        edge of a level is needed. A file with no level block then reads no other ion.
+
+        redirect_stdout(): the read of the ion above writes its own log lines through
+        log_and_print(), which prints. Those lines belong to the ion above and not to the ion
+        under conversion.
+        """
+        if self.excitation_resolved:
+            return
+        self.excitation_resolved = True
+
+        if self.filenum == 0:
+            self.excitation_energy_ev = 0.0
+            return
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            excitation_energy_ev = excitation_energy_ev_of_target(
+                self.atomic_number, self.ion_stage, self.targetlevelname
+            )
+        self.excitation_from_upperion = excitation_energy_ev is not None
+        if excitation_energy_ev is not None:
+            self.excitation_energy_ev = excitation_energy_ev
+            return
+
+        self.excitation_energy_ev = self.excitation_header_ev
+        with contextlib.redirect_stdout(io.StringIO()):
+            upperion_known = get_upperion_levels_for_targets(self.atomic_number, self.ion_stage + 1) is not None
+        reason = (
+            f"no level of the ion above matches the photoionisation target {self.targetlevelname}"
+            if upperion_known
+            else "CMFGEN has no oscillator file for the ion above"
+        )
+        log_and_print(
+            self.flog,
+            f"WARNING: {reason}, so the reader takes the excitation energy from the {self.photfilename} header",
+        )
+
+    def edge_ev(self) -> float:
+        """Threshold energy of the current level for the route of the current file, in eV.
+
+        CMFGEN evaluates every fit at EDGE = GS_EDGE + EXC_FREQ (sub_phot_gen.f lines 182 and
+        215). GS_EDGE is the threshold of the level to the ground state of the ion above, which
+        the oscillator file gives as Lam(A). CMFGEN keeps the sign of that value, and a level
+        above the ionisation limit has a negative one. EXC_FREQ is the excitation energy of the
+        target level of the route.
+
+        A zero Lam(A) gives no threshold at all, so this returns zero for it.
+        """
+        self.resolve_excitation_energy()
+        lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex]
+        if lambda_angstrom == 0.0:
+            return 0.0
+        return hc_in_ev_angstrom / lambda_angstrom + self.excitation_energy_ev
+
+    def edge_lambda_angstrom(self) -> float | None:
         """Threshold wavelength of the current level for the route of the current file.
 
-        CMFGEN evaluates every fit at EDGE = GS_EDGE + EXC_FREQ (raw_subphot.f line 84). GS_EDGE
-        is the threshold of the level to the ground state of the ion above, which the oscillator
-        file gives as Lam(A). EXC_FREQ is the excitation energy of the target level, which the
-        phot file header gives. The fit functions take a wavelength, so return the wavelength of
-        that edge.
-
-        abs(): CMFGEN writes a negative Lam(A) for some levels, and only the magnitude is a
-        threshold.
+        The fit functions take a wavelength, so this converts the edge of edge_ev(). Returns None
+        where that edge is zero or below. CMFGEN divides the frequency by the edge
+        (sub_phot_gen.f line 228), which gives no useful cross section for such a level.
         """
-        lambda_angstrom = abs(self.lambdaangstroms[self.lowerlevelindex])
-        if self.excitation_energy_ev == 0.0:
-            # the common route to the ground state, which must give the value unchanged
-            return lambda_angstrom
-        return hc_in_ev_angstrom / (hc_in_ev_angstrom / lambda_angstrom + self.excitation_energy_ev)
+        edge_ev = self.edge_ev()
+        return hc_in_ev_angstrom / edge_ev if edge_ev > 0.0 else None
+
+    def note_level_without_edge(self) -> None:
+        """Record that the current level has an edge of zero or below, so it gets no table."""
+        self.levels_without_edge[self.lowerlevelname] = None
 
     def read_file(self, filenum: int, filename: Path, photfilename: str) -> None:
         """Read one phot file into self.phixstables[filenum] and self.phixstargets[filenum]."""
@@ -935,6 +1005,11 @@ class PhotFileReader:
         self.thresholdenergyryd = 0.0
         self.excitation_energy_ev = 0.0
         self.excitation_from_upperion = False
+        self.excitation_resolved = False
+        self.excitation_header_ev = 0.0
+        self.levels_without_edge = {}
+        self.duplicate_energy_rows = 0
+        self.duplicate_energy_first = None
         self.in_header = False
 
         self.lines = scan_file_lines(filename).collect()["line"].fill_null("")
@@ -971,6 +1046,22 @@ class PhotFileReader:
         self.take_data_rows(segment_start, len(self.lines))
         self.finish_tabulated_block(validate=False)
 
+        # one summary for the file, and not one line for each level or each row
+        if self.levels_without_edge:
+            log_and_print(
+                self.flog,
+                f"WARNING: {len(self.levels_without_edge)} levels of {photfilename} have a threshold energy of zero"
+                f" or below, so they get no cross section. The first is {next(iter(self.levels_without_edge))}.",
+            )
+        if self.duplicate_energy_first is not None:
+            duplicate_levelname, duplicate_energy = self.duplicate_energy_first
+            log_and_print(
+                self.flog,
+                f"WARNING: the first column of the photoionisation tables of {photfilename} repeats an energy on"
+                f" {self.duplicate_energy_rows} rows. The first is the energy {duplicate_energy} of"
+                f" {duplicate_levelname}.",
+            )
+
         # a file with no "!Cross-section unit" line never leaves the header state. The reader
         # then skipped every level block with a warning, and the file gave no cross sections.
         if not self.in_header:
@@ -989,7 +1080,6 @@ class PhotFileReader:
             return
 
         if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
-            # nothing uses this here, because the reader does not know the upper ion's levels at this time
             self.targetlevelname = row[0]
             log_and_print(self.flog, "Photoionisation target: " + self.targetlevelname)
             if "[" in self.targetlevelname:
@@ -999,19 +1089,6 @@ class PhotFileReader:
                 msg = f"Multiple phixs files for the same target configuration {self.targetlevelname}"
                 raise ValueError(msg)
             self.phixstargets[self.filenum] = self.targetlevelname
-            excitation_energy_ev = excitation_energy_ev_of_target(
-                self.atomic_number, self.ion_stage, self.targetlevelname
-            )
-            self.excitation_from_upperion = excitation_energy_ev is not None
-            if excitation_energy_ev is None:
-                log_and_print(
-                    self.flog,
-                    f"WARNING: no level of the ion above matches the photoionisation target"
-                    f" {self.targetlevelname}, so the reader takes the excitation energy from the"
-                    f" {self.photfilename} header",
-                )
-            else:
-                self.excitation_energy_ev = excitation_energy_ev
 
         if len(row) >= 2 and " ".join(row[-3:]) == "!Split J levels":
             if row[0].lower() in {"true", "false"}:
@@ -1060,19 +1137,11 @@ class PhotFileReader:
                 raise ValueError(msg)
 
         if len(row) >= 2 and " ".join(row[1:]).startswith("!Excitation energy of final state"):
-            # A value of exactly zero is a flag and not a measured energy. It marks the route to
-            # the ground state of the ion above, so the excitation energy stays zero. Lam(A) in
-            # the oscillator file is already the threshold to the lowest level of that ion. The
-            # target of such a file is a term, and the g-weighted mean of its levels would add
-            # the fine structure of the term, which GS_EDGE does not hold.
-            #
-            # A non-zero value keeps the energy from the levels of the ion above, because the
-            # header value is not reliable. SIL/II/19apr23/phot_data_B writes 6.51014, which is
-            # the ionisation frequency of the target and not its excitation energy.
-            if fortran_float(row[0]) == 0.0:
-                self.excitation_energy_ev = 0.0
-            elif not self.excitation_from_upperion:
-                self.excitation_energy_ev = excitation_energy_ev_of_header_value(row[0])
+            # Only the fallback of resolve_excitation_energy() reads this value. CMFGEN discards
+            # it for the first file of an ion, and prefers the levels of the ion above for a
+            # later file. The value is not reliable: SIL/II/19apr23/phot_data_B writes 6.51014,
+            # which is the ionisation frequency of the target and not its excitation energy.
+            self.excitation_header_ev = excitation_energy_ev_of_header_value(row[0])
 
         if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
             # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
@@ -1146,7 +1215,6 @@ class PhotFileReader:
         # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
-        self.phixs_edges_ev[self.filenum][self.pending_levelname] = self.thresholdenergyryd * ryd_to_ev
 
     def take_data_rows(self, start: int, end: int) -> None:
         """Read the data rows start to end - 1 into the current block."""
@@ -1181,6 +1249,9 @@ class PhotFileReader:
             self.pending_levelname = self.lowerlevelname
             self.pending_numpoints = self.numpointsexpected
             lambda_angstrom = self.edge_lambda_angstrom()
+            if lambda_angstrom is None:
+                self.note_level_without_edge()
+                return
             self.thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
             # for these types the x value is a fraction of the threshold, not an energy
             if abs(x[0] - 1.0) > 0.5:
@@ -1201,11 +1272,11 @@ class PhotFileReader:
                 f" from energy {allenergy[decreasing[0]]} to {allenergy[decreasing[0] + 1]}"
             )
             raise ValueError(msg)
-        for index in np.flatnonzero(steps == 0):
-            print(
-                f"WARNING: the first column of the photoionisation table for {self.lowerlevelname} has the"
-                f" energy value {allenergy[index]} two times"
-            )
+        duplicates = np.flatnonzero(steps == 0)
+        if len(duplicates) > 0:
+            if self.duplicate_energy_first is None:
+                self.duplicate_energy_first = (self.lowerlevelname, float(allenergy[duplicates[0]]))
+            self.duplicate_energy_rows += len(duplicates)
         self.pending_energyryd.append(energyryd)
         self.pending_sigma.append(seg_f1[ispoint])
 
@@ -1214,12 +1285,14 @@ class PhotFileReader:
         self.fitcoefficients.append(VY95PhixsFitRow(int(row[0]), int(row[1]), *[fortran_float(x) for x in row[2:]]))
         if len(self.fitcoefficients) * 8 == self.numpointsexpected:
             lambda_angstrom = self.edge_lambda_angstrom()
+            if lambda_angstrom is None:
+                self.note_level_without_edge()
+                return
             self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
 
     def store_table(self, table: np.ndarray) -> None:
         """Keep the evaluated table of the current level, and close the block to more coefficients."""
         self.phixstables[self.filenum][self.lowerlevelname] = table
-        self.phixs_edges_ev[self.filenum][self.lowerlevelname] = hc_in_ev_angstrom / self.edge_lambda_angstrom()
         self.numpointsexpected = len(table)
 
     def take_fit_coefficient(self, value: float) -> None:
@@ -1242,6 +1315,9 @@ class PhotFileReader:
             ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
             if len(fitcoefficients) == ncoefficients:
                 lambda_angstrom = self.edge_lambda_angstrom()
+                if lambda_angstrom is None:
+                    self.note_level_without_edge()
+                    return
                 self.store_table(fitfunc(lambda_angstrom, *fitcoefficients))
             return
 
@@ -1257,6 +1333,9 @@ class PhotFileReader:
                     log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
+                    if lambda_angstrom is None:
+                        self.note_level_without_edge()
+                        return
                     self.store_table(get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end))
             return
 
@@ -1270,6 +1349,9 @@ class PhotFileReader:
                     )
                     return
                 lambda_angstrom = self.edge_lambda_angstrom()
+                if lambda_angstrom is None:
+                    self.note_level_without_edge()
+                    return
                 # scale the cross sections but not the energy grid
                 phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
                 phixstable[:, 1] *= scale
@@ -1289,6 +1371,9 @@ class PhotFileReader:
                     log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
+                    if lambda_angstrom is None:
+                        self.note_level_without_edge()
+                        return
                     self.store_table(
                         get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=self.zion)
                     )
@@ -1356,7 +1441,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     keptthreshold_of_levelname: dict[str, float] = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
     num_levelnames_with_zero_crosssection = 0
-    # every route of each level: (file number, reduced table, edge of that route in eV)
+    # every route of each level: (file number, reduced table, anchor energy of that table in eV)
     routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray, float]]] = defaultdict(list)
 
     for filenum, photfilename in enumerate(photfilenames):
@@ -1372,28 +1457,32 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            routes_of_levelname[lowerlevelname].append(
-                (filenum, reduced_phixstable, reader.phixs_edges_ev[filenum][lowerlevelname])
-            )
+            # The first energy of the input table, and not the nominal edge of the route.
+            # reduce_phixs_tables_worker() anchors the nu/nu_edge grid there, and the first
+            # energy of a tabulated block is often not the edge. The comparison below reads the
+            # reduced table on that grid, so it must use the same anchor.
+            tablein = reader.phixstables[filenum][lowerlevelname]
+            if len(tablein) == 0 or tablein[0][0] == 0.0:
+                # the worker gives such a table an all-zero reduced table, which is a closed route
+                continue
+            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable, float(tablein[0][0]) * ryd_to_ev))
 
     # the nu/nu_edge grid of every reduced table, which reduce_phixs_tables_worker() builds
-    xgrid = np.linspace(
-        1.0, 1.0 + args.phixsnuincrement * (args.nphixspoints + 1), num=args.nphixspoints + 1, endpoint=False
-    )[: args.nphixspoints]
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)[: args.nphixspoints]
 
     for lowerlevelname, routes in routes_of_levelname.items():
         # The first non-zero point of the grid, not index 0. A table can be zero at the nominal
         # threshold: a type 8 offset fit, or a tabulated type whose data starts above nu_edge.
         # Such a table has its own edge further up the grid.
         openroutes = []
-        for filenum, reduced_phixstable, edge_ev in routes:
+        for filenum, reduced_phixstable, anchor_ev in routes:
             nonzeropoints = np.nonzero(reduced_phixstable)[0]
             if len(nonzeropoints) == 0:
                 # The cross section is zero everywhere on the output grid, so this route gives
                 # nothing. For type 8 (offset) this happens when the offset edge nu_edge + nu_o
                 # lies beyond the grid that reduce_phixs_tables() samples.
                 continue
-            openroutes.append((filenum, reduced_phixstable, edge_ev, edge_ev * xgrid[nonzeropoints[0]]))
+            openroutes.append((filenum, reduced_phixstable, anchor_ev, anchor_ev * xgrid[nonzeropoints[0]]))
 
         if not openroutes:
             num_levelnames_with_zero_crosssection += 1
@@ -1408,17 +1497,24 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # fractions therefore compare the routes, and the comparison needs one frequency.
         #
         # That frequency is the highest edge of the routes of the level, which is the lowest
-        # frequency at which every route is open. A route with a lower edge is read there by
-        # interpolation on its own nu/nu_edge grid. The routes of one level now start at
-        # different frequencies, because each route has the edge of its own target, so a
-        # comparison of each route at its own edge would compare different photon energies.
+        # frequency at which every route is open. A route with a lower edge is read there on its
+        # own nu/nu_edge grid. The routes of one level start at different frequencies, because
+        # each route has the edge of its own target. A comparison of each route at its own edge
+        # would therefore compare different photon energies.
         comparison_ev = max(openedge_ev for *_, openedge_ev in openroutes)
-        for filenum, reduced_phixstable, edge_ev, openedge_ev in openroutes:
+        for filenum, reduced_phixstable, anchor_ev, openedge_ev in openroutes:
+            comparison_x = comparison_ev / anchor_ev
             if openedge_ev == comparison_ev:
                 # this route sets the comparison frequency, so read its own first non-zero point
                 phixs_at_threshold = float(reduced_phixstable[np.nonzero(reduced_phixstable)[0][0]])
+            elif comparison_x > xgrid[-1]:
+                # The comparison frequency is above the end of this route's grid. np.interp()
+                # would give the last grid value there, which is far too large.
+                phixs_at_threshold = float(
+                    phixs_nu_cubed_tail(float(reduced_phixstable[-1]), float(xgrid[-1]), comparison_x)
+                )
             else:
-                phixs_at_threshold = float(np.interp(comparison_ev / edge_ev, xgrid, reduced_phixstable))
+                phixs_at_threshold = float(np.interp(comparison_x, xgrid, reduced_phixstable))
             phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
                 (reader.phixstargets[filenum], phixs_at_threshold)
             )
@@ -1475,55 +1571,40 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         target_configfactors_nofilter = phixs_targetconfigfactors_of_levelname[lowerlevelname]
         # the factors are arbitrary, so the code below normalises them into fractions
 
-        # filter out low fraction targets
+        # filter out low fraction targets. The sum is positive: a level enters reduced_phixs_dict
+        # only with a factor above zero, and no factor of a reduced table is negative.
         factor_sum_nofilter = sum(x[1] for x in target_configfactors_nofilter)
+        target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
 
-        if factor_sum_nofilter <= 0.0:
-            # Every factor came out zero or less, so there is nothing to normalise. The level
-            # keeps its cross section table and takes an empty target list. An empty list is not
-            # None: get_photoiontargetfractions() reads None as "this level has no
-            # photoionisation data" and gives it no target, which makes write_phixs_data() drop
-            # the table. It reads an empty list as "no target matched" and sends the level to the
-            # ground state of the ion above, which is what this branch wants.
-            phixs_targetconfigfractions_of_levelname[lowerlevelname] = []
+        if len(target_configfactors) == 0:
+            # every target was below the 1% cut, so keep them all and do not divide by zero
             log_and_print(
                 flog,
-                f"WARNING: every photoionisation target factor of {lowerlevelname} is zero or less"
-                f" ({target_configfactors_nofilter}), so the reader sends the level to the ground state"
-                " of the ion above",
+                f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
+                f" ({target_configfactors_nofilter}), so the reader keeps all of them",
             )
-        else:
-            target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
+            target_configfactors = target_configfactors_nofilter
 
-            if len(target_configfactors) == 0:
-                # every target was below the 1% cut, so keep them all and do not divide by zero
-                log_and_print(
-                    flog,
-                    f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
-                    f" ({target_configfactors_nofilter}), so the reader keeps all of them",
-                )
-                target_configfactors = target_configfactors_nofilter
+        factor_sum = sum(x[1] for x in target_configfactors)
 
-            factor_sum = sum(x[1] for x in target_configfactors)
+        for target_config, target_factor in target_configfactors:
+            target_fraction = target_factor / factor_sum
+            phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
 
-            for target_config, target_factor in target_configfactors:
-                target_fraction = target_factor / factor_sum
-                phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
-
-            # The kept table is one target's cross section. write_phixs_data() writes it as the
-            # level's total and splits it over every target by the fractions above. Divide by the
-            # kept target's own fraction first. Without this, a level whose kept target holds 50%
-            # would get both targets' rates halved. readqubdata does the same with max_fraction.
-            #
-            # The kept target has the largest factor, so it is never below the 1% cut. .get() only
-            # misses if its factor was zero, and then there is nothing to rescale.
-            kept_fraction = dict(phixs_targetconfigfractions_of_levelname[lowerlevelname]).get(
-                kepttarget_of_levelname[lowerlevelname]
-            )
-            # not in place: reduce_phixs_tables() hands out these arrays, so this function must
-            # not mutate them
-            if kept_fraction:
-                reduced_phixs_dict[lowerlevelname] = reduced_phixstable / kept_fraction
+        # The kept table is one target's cross section. write_phixs_data() writes it as the
+        # level's total and splits it over every target by the fractions above. Divide by the
+        # kept target's own fraction first. Without this, a level whose kept target holds 50%
+        # would get both targets' rates halved. readqubdata does the same with max_fraction.
+        #
+        # The kept target has the largest factor, so it is never below the 1% cut. .get() only
+        # misses if its factor was zero, and then there is nothing to rescale.
+        kept_fraction = dict(phixs_targetconfigfractions_of_levelname[lowerlevelname]).get(
+            kepttarget_of_levelname[lowerlevelname]
+        )
+        # not in place: reduce_phixs_tables() hands out these arrays, so this function must
+        # not mutate them
+        if kept_fraction:
+            reduced_phixs_dict[lowerlevelname] = reduced_phixstable / kept_fraction
 
     # map the non-J-split cross sections onto J-split levels. A table matches every level that
     # shares the configuration, so index the level list by match name once and do not rescan it.
@@ -1536,16 +1617,16 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             photoionization_crosssections[levelindex] = phixstable
             # .get() and not __getitem__, because the dict is a defaultdict: __getitem__ would
             # add an entry for a name that the loop above did not reach. Every name of
-            # reduced_phixs_dict has an entry, so the value is a list and never None here. None
-            # stays the mark of a level with no photoionisation data at all.
+            # reduced_phixs_dict has an entry, so the value is a list here. None stays the mark
+            # of a level with no photoionisation data at all.
             photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
                 lowerlevelname_a
             )
             # The ground-state edge of the level, and not the edge of the route that gave the
             # kept table. The writer gives every target of a level this one value, so a
             # per-target value has no column to go in. ARTIS ignores the column: it computes
-            # the threshold of each route itself as IE + E(target) - E(level), which is the
-            # EDGE of edge_lambda_angstrom(). See write_phixs_data() in output.py.
+            # the threshold of each route itself as the ionisation energy plus E(target) minus
+            # E(level). That is the edge of edge_ev(). See write_phixs_data() in output.py.
             #
             # abs(): CMFGEN writes a negative Lam(A) for some levels, and that sign would read
             # as readqubdata's "no threshold value" sentinel. A zero Lam(A) gives no threshold

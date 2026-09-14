@@ -3,6 +3,7 @@
 
 import argparse
 import functools
+import gzip
 import importlib
 import io
 import json
@@ -23,12 +24,14 @@ from artisatomic import readkuruczdata
 from artisatomic import readmonsdata
 from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
-from artisatomic.base import add_handler_if_not_set
+from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
+from artisatomic.base import output_xgrid
+from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
@@ -656,23 +659,32 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
         write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
-def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
+def test_read_phixs_tables_multiple_photoionisation_files():
     """A level with a cross section table in more than one phot file keeps the largest, rescaled.
 
     Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
     state of the upper ion. A level is normally present in all of them: O I's phot_nosm_A and
     phot_nosm_B share all 107 of their configuration names. The reader used to treat the second
-    table as an error. That made those ions (C I, C III, N I, N III, O I, O IV, F II, F III, P IV)
-    unreadable. None of them was in the tests/ matrix, which was Fe/Co/Ni only.
+    table as an error. That made those ions unreadable. The ions are C I, C III, N I, N III,
+    O I, O IV, F II, F III and P IV. None of them was in the tests/ matrix, which was Fe, Co and
+    Ni only.
 
     The writer can write only one table per level, so one route wins. read_phixs_tables()
-    compares the routes at one frequency and keeps the largest. write_phixs_data() writes that
-    table as the level's TOTAL and splits it over the targets. The reader must therefore first
-    divide the table by the kept target's own fraction. This test checks two things. A read of
-    each phot file alone gives that target's raw table. The combined read reproduces one of the
-    two, divided by that target's fraction.
+    compares the routes at one frequency and keeps the largest. The frequency is the highest
+    edge of the open routes, and a route that the frequency leaves off its grid falls as nu^-3.
+    write_phixs_data() writes the kept table as the level's TOTAL and splits it over the
+    targets. The reader therefore first divides the table by the kept target's own fraction.
+    This test computes the winner, the fractions and the rescale from the routes. It then
+    compares them with the read.
+
+    The test reads both files through one PhotFileReader, and not each file on its own. A lone
+    second file would be photoionisation route 1, which has no excitation energy. Its edges and
+    its tables would then be the ones of another route.
     """
     import contextlib
+    from operator import itemgetter
+
+    from artisatomic.phixs import reduce_phixs_tables
 
     ionfiles = readhillierdata.ions_data[8, 1]
     # checked before the expensive reads below, so a change here fails as itself
@@ -681,21 +693,13 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     rhd.read_hyd_phixsdata()
     args = phixs_args()
 
-    def read_phixs(photfilenames):
-        """Read O I's cross sections with only the named phot files."""
-        monkeypatch.setitem(readhillierdata.ions_data, (8, 1), ionfiles._replace(photfilenames=photfilenames))
-        flog = io.StringIO()
-        with contextlib.redirect_stdout(io.StringIO()):
-            _, dflevels, _ = rhd.read_levels_and_transitions(8, 1, flog)
-            phixs = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
-            crosssections, targetconfigs = phixs.crosssections, phixs.targetconfigs
-            assert targetconfigs is not None
-        return crosssections, targetconfigs, flog.getvalue()
-
-    file_a, file_b = ionfiles.photfilenames
-    crosssections_a, targets_a, _ = read_phixs((file_a,))
-    crosssections_b, targets_b, _ = read_phixs((file_b,))
-    crosssections, targetconfigs, log = read_phixs((file_a, file_b))
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(8, 1, flog)
+        phixs = rhd.read_phixs_tables(8, 1, dflevels, args, flog)
+    crosssections, targetconfigs = phixs.crosssections, phixs.targetconfigs
+    assert targetconfigs is not None
+    log = flog.getvalue()
 
     # the reader reports the duplicates and does not raise
     assert "has a cross section table in more than one photoionisation file" in log
@@ -703,37 +707,88 @@ def test_read_phixs_tables_multiple_photoionisation_files(monkeypatch):
     # every level that the reader read has a table, not only the ones from the first file
     assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
 
-    # the read records both targets for a level in both files
+    # the routes of every level, read the way read_phixs_tables() reads them
+    levelnames = dflevels["levelname"].to_list()
+    firstindex_of_name: dict[str, int] = {}
+    firstindex_of_namenoj: dict[str, int] = {}
+    for levelindex, levelname in enumerate(levelnames):
+        firstindex_of_name.setdefault(levelname, levelindex)
+        firstindex_of_namenoj.setdefault(levelname.split("[")[0], levelindex)
+    reader = rhd.PhotFileReader(
+        8, 1, 2, dflevels["lambdaangstrom"].to_list(), firstindex_of_name, firstindex_of_namenoj, io.StringIO()
+    )
+    reduced_of_filenum = []
+    for filenum, photfilename in enumerate(ionfiles.photfilenames):
+        photpath = Path(rhd.hillier_ion_folder(8, 1), ionfiles.folder, photfilename)
+        with contextlib.redirect_stdout(io.StringIO()):
+            reader.read_file(filenum, photpath, photfilename)
+        reduced_of_filenum.append(
+            reduce_phixs_tables(
+                reader.phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
+            )
+        )
+
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)[: args.nphixspoints]
+
+    def expected_routes(matchname: str) -> list[tuple[str, float, np.ndarray]]:
+        """Give the target, the cross section at the comparison frequency, and the table of each route."""
+        openroutes = []
+        for filenum, reduced in enumerate(reduced_of_filenum):
+            table = reduced.get(matchname)
+            tablein = reader.phixstables[filenum].get(matchname)
+            if table is None or tablein is None or len(tablein) == 0:
+                continue
+            nonzeropoints = np.nonzero(table)[0]
+            if len(nonzeropoints) == 0:
+                continue
+            anchor_ev = float(tablein[0][0]) * ryd_to_ev
+            openroutes.append((reader.phixstargets[filenum], table, anchor_ev, anchor_ev * xgrid[nonzeropoints[0]]))
+
+        comparison_ev = max(openedge_ev for *_, openedge_ev in openroutes)
+        factors = []
+        for target, table, anchor_ev, openedge_ev in openroutes:
+            comparison_x = comparison_ev / anchor_ev
+            if openedge_ev == comparison_ev:
+                value = float(table[np.nonzero(table)[0][0]])
+            elif comparison_x > xgrid[-1]:
+                # the route is read past the end of its own grid, where the tail rule applies
+                value = float(phixs_nu_cubed_tail(float(table[-1]), float(xgrid[-1]), comparison_x))
+            else:
+                value = float(np.interp(comparison_x, xgrid, table))
+            factors.append((target, value, table))
+        return factors
+
+    matchname_of_levelid = [name if reader.j_splitting_on else name.split("[")[0] for name in levelnames]
     levelids_in_both = [
         levelid
-        for levelid, targets in enumerate(targetconfigs)
-        if targets and len(targets) > 1 and np.any(crosssections_a[levelid]) and np.any(crosssections_b[levelid])
+        for levelid, matchname in enumerate(matchname_of_levelid)
+        if all(np.any(reduced.get(matchname, np.zeros(1))) for reduced in reduced_of_filenum)
     ]
     assert levelids_in_both, "expected O I levels with a cross section table in both phot files"
 
     for levelid in levelids_in_both:
-        # each single-file read has one target that holds 100% of the level, so the reader does not rescale its table
-        targetlist_a, targetlist_b, targetlist = targets_a[levelid], targets_b[levelid], targetconfigs[levelid]
-        assert targetlist_a is not None
-        assert targetlist_b is not None
-        assert targetlist is not None
+        factors = expected_routes(matchname_of_levelid[levelid])
+        assert len(factors) > 1, f"level {levelid}: expected a route in each of the two files"
+        kepttarget, _keptvalue, kepttable = max(factors, key=itemgetter(1))
 
-        # The test does not repeat the rule that picks the winner. It checks the rescale: the
-        # combined table is one of the two raw tables, divided by that target's own fraction.
-        fraction_of_target = dict(targetlist)
-        kept = [
-            (target, fraction_of_target[target])
-            for target, single in (
-                (targetlist_a[0][0], crosssections_a[levelid]),
-                (targetlist_b[0][0], crosssections_b[levelid]),
-            )
-            if target in fraction_of_target
-            and fraction_of_target[target] > 0.0
-            and np.allclose(crosssections[levelid], single / fraction_of_target[target], rtol=1e-10)
-        ]
-        assert kept, f"level {levelid}: the combined table is neither raw table divided by its fraction"
-        # a table left at one target's share would be low by exactly this factor
-        assert all(0.0 < fraction < 1.0 for _, fraction in kept)
+        # the targets below 1% of the total drop out, and the rest normalise to one
+        factor_sum_nofilter = sum(value for _, value, _ in factors)
+        keptfactors = [(target, value) for target, value, _ in factors if value / factor_sum_nofilter > 0.01]
+        factor_sum = sum(value for _, value in keptfactors)
+        expected_fractions = [(target, value / factor_sum) for target, value in keptfactors]
+
+        targetlist = targetconfigs[levelid]
+        assert targetlist is not None
+        assert [target for target, _ in targetlist] == [target for target, _ in expected_fractions]
+        assert [fraction for _, fraction in targetlist] == pytest.approx(
+            [fraction for _, fraction in expected_fractions]
+        )
+
+        # the kept table is the winner's table, divided by the winner's own fraction. A table
+        # left at one target's share would be low by exactly that factor.
+        keptfraction = dict(expected_fractions)[kepttarget]
+        assert 0.0 < keptfraction < 1.0
+        assert np.allclose(crosssections[levelid], kepttable / keptfraction, rtol=1e-10)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -1222,7 +1277,7 @@ def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
     assert [level.levelname for level in energy_levels] == ["4f(2)0, j=0.0, index=0", "4f(2)4, j=2.0, index=1"]
     assert [level.g for level in energy_levels] == [1.0, 5.0]
 
-    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex, set(), io.StringIO())
+    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
     assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
     assert pytest.approx(0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)) == transitions[0].A
 
@@ -1267,7 +1322,7 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
             "wavelength": [2000.0, 2000.0],
         }
     )
-    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex, set(), io.StringIO())
+    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     # ...which is level id 0 -> 2 after the sort, written with the lower id first, both times
     assert len(transitions) == 2
@@ -1293,11 +1348,7 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
         {"level_index_lower": [2], "level_index_upper": [99], "gf": [1.0], "wavelength": [2000.0]}
     )
     with pytest.raises(ValueError, match="names file index 99"):
-        readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex, set(), io.StringIO())
-
-    # a line that names a level above the ionisation energy goes, because that level has no id
-    transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex, {0}, io.StringIO())
-    assert transitions == []
+        readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
 
 
 def write_lisbon_fixture(tmp_path, energies_percm):
@@ -1349,6 +1400,77 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     assert "skipped 2 transitions" in flog.getvalue()
 
 
+def test_readlisbondata_keeps_a_level_at_the_ionisation_energy(tmp_path, monkeypatch):
+    """The drop takes a level ABOVE the ionisation energy, so a level at that energy stays.
+
+    The FAC reader uses the same strict comparison. A level at the ionisation energy is the
+    series limit, and it still has an energy that adata.txt can hold.
+    """
+    from artisatomic import readlisbondata
+    from artisatomic.base import hc_in_ev_cm
+
+    # Nd III ionises at 22.09 eV. The second level sits exactly there, the third just above it
+    at_ionization = 22.09 / hc_in_ev_cm
+    write_lisbon_fixture(tmp_path, [0.0, at_ionization, at_ionization * 1.001])
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    _, energy_levels, _ = readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+    assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, at_ionization]
+
+
+def test_readlisbondata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
+    """An ion with no bound level stops the run, as an ion with no level in the file does.
+
+    The guard on the file itself runs before the drop, so it cannot see this case. Such an ion
+    would go to the output with no level and no line.
+    """
+    from artisatomic import readlisbondata
+
+    write_lisbon_fixture(tmp_path, [200000.0, 300000.0])
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    with pytest.raises(ValueError, match="Every one of the 2 levels"):
+        readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+
+def test_readlisbondata_stops_on_a_level_with_no_energy(tmp_path, monkeypatch):
+    """A level with a blank energy stops the run, and the message names the levels file.
+
+    The drop of the levels above the ionisation energy keeps such a level, because a null
+    comparison is null. The check runs before the drop, so it sees every level of the file.
+    """
+    from artisatomic import readlisbondata
+
+    write_lisbon_fixture(tmp_path, [0.0, "", 2000.0])
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    with pytest.raises(ValueError, match="level with no energy"):
+        readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+
+def test_readlisbondata_reads_a_compressed_csv(tmp_path, monkeypatch):
+    """The reader finds a compressed levels or transitions CSV, as every other reader does.
+
+    The setup scripts of the other data sets compress their files. polars reads the compressed
+    file itself, so the reader only has to resolve the name.
+    """
+    from artisatomic import readlisbondata
+
+    write_lisbon_fixture(tmp_path, [0.0, 1000.0, 2000.0])
+    iondir = tmp_path / "Nd" / "NdIII"
+    for csvfile in (iondir / "NdIII_Levels.csv", iondir / "NdIII_Transitions.csv"):
+        with gzip.open(f"{csvfile}.gz", "wt", encoding="utf-8") as fgz:
+            fgz.write(csvfile.read_text(encoding="utf-8"))
+        csvfile.unlink()
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    _, energy_levels, transitions = readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+    assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 2000.0]
+    assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 1), (1, 2)]
+
+
 def test_readlisbondata_stops_on_an_ion_that_the_data_set_does_not_hold():
     """The reader knows the file layout of Nd and U, ion stages 2 and 3, and of no other ion.
 
@@ -1364,21 +1486,21 @@ def test_readlisbondata_stops_on_an_ion_that_the_data_set_does_not_hold():
         readlisbondata.read_levels_and_transitions(60, 4, io.StringIO())
 
 
-def test_add_handler_if_not_set():
-    """add_handler_if_not_set() returns a new list and never overrides an ion that is already present."""
+def test_add_handlers_if_not_set():
+    """add_handlers_if_not_set() returns a new list and never overrides an ion that is already present."""
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
     unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
     # add an ion for a new element
-    result = add_handler_if_not_set(ion_handlers, 58, 1, "dream")
+    result = add_handlers_if_not_set(ion_handlers, [(58, 1)], "dream")
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
     # add an ion to an existing element
-    result = add_handler_if_not_set(ion_handlers, 26, 3, "dream")
+    result = add_handlers_if_not_set(ion_handlers, [(26, 3)], "dream")
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
     # an ion stage that is already present keeps its handler, whatever the new one says
-    result = add_handler_if_not_set(ion_handlers, 26, 2, "dream")
+    result = add_handlers_if_not_set(ion_handlers, [(26, 2)], "dream")
     assert result == unchanged
 
     # each call returns a new list, so none of them changed the input list
@@ -1386,7 +1508,7 @@ def test_add_handler_if_not_set():
 
     # the caller can give the ion stages as tuples or as lists (e.g. directly from json.load())
     ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
-    result = add_handler_if_not_set(ion_handlers_json, 26, 1, "dream")
+    result = add_handlers_if_not_set(ion_handlers_json, [(26, 1)], "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 
 
@@ -1403,23 +1525,23 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
-def test_add_handler_if_not_set_applies_the_limits():
+def test_add_handlers_if_not_set_applies_the_limits():
     """A limit keeps an ion out of the list, and every element in the list keeps one ion or more."""
     limits = {"minionstage": 2, "maxionstage": 3, "maxatomicnumber": 30}
 
-    assert add_handler_if_not_set([], 26, 2, "cmfgen", **limits) == [(26, [(2, "cmfgen")])]
-    assert add_handler_if_not_set([], 26, 1, "cmfgen", **limits) == []
-    assert add_handler_if_not_set([], 26, 4, "cmfgen", **limits) == []
-    assert add_handler_if_not_set([], 38, 2, "cmfgen", **limits) == []
+    assert add_handlers_if_not_set([], [(26, 2)], "cmfgen", **limits) == [(26, [(2, "cmfgen")])]
+    assert add_handlers_if_not_set([], [(26, 1)], "cmfgen", **limits) == []
+    assert add_handlers_if_not_set([], [(26, 4)], "cmfgen", **limits) == []
+    assert add_handlers_if_not_set([], [(38, 2)], "cmfgen", **limits) == []
 
     # A limit of None includes every ion, which is what a direct call to a reader gets. Ion stage 0
     # comes from a reader that counts the charge, so the lower limit must keep it.
-    assert add_handler_if_not_set([], 38, 9, "cmfgen") == [(38, [(9, "cmfgen")])]
-    assert add_handler_if_not_set([], 38, 0, "cmfgen") == [(38, [(0, "cmfgen")])]
+    assert add_handlers_if_not_set([], [(38, 9)], "cmfgen") == [(38, [(9, "cmfgen")])]
+    assert add_handlers_if_not_set([], [(38, 0)], "cmfgen") == [(38, [(0, "cmfgen")])]
 
     # a rejected ion returns a new sorted list, as an accepted ion does
     unsorted = [(38, [(2, "cmfgen")]), (26, [(1, "cmfgen")])]
-    assert add_handler_if_not_set(unsorted, 26, 9, "cmfgen", **limits) == [
+    assert add_handlers_if_not_set(unsorted, [(26, 9)], "cmfgen", **limits) == [
         (26, [(1, "cmfgen")]),
         (38, [(2, "cmfgen")]),
     ]
@@ -1458,7 +1580,7 @@ def test_extend_ion_list_forwards_the_limits(modulename):
     """Each reader gives the three limits to add_handlers_if_not_set(), which keeps its own ions out.
 
     get_ion_handlers() gives the limits to each reader by keyword. A reader that drops one of them
-    changes which ions a run writes, and no checksum set finds it, because each set reads an ion
+    changes which ions a run writes. No checksum set finds that, because each set reads an ion
     handlers file instead. The limits below come from the ions of the reader itself, so each one
     excludes a part of them whatever the data set holds.
     """
@@ -1469,6 +1591,9 @@ def test_extend_ion_list_forwards_the_limits(modulename):
         pytest.skip(f"the data set of {modulename} is not available here: {exc}")
 
     if not allions:
+        if module is readhillierdata:
+            msg = "the CMFGEN corpus is missing"
+            raise AssertionError(msg)
         pytest.skip(f"{modulename} found no ion here")
 
     ion_stages = sorted({ion_stage for _, listions in allions for ion_stage, _ in listions})
@@ -1514,8 +1639,8 @@ def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
 def test_parent_elevel_zero_normalisation_is_anchored():
     """Only a parent level that IS 0.0 may become 0, not one that only contains it.
 
-    An earlier str.replace("0.0", "0") matched anywhere in the value, so it also rewrote "10.05"
-    to "105" and "100.0" to "100", which moved those levels into the wrong group_by bucket in
+    An earlier str.replace("0.0", "0") matched anywhere in the value. So it also rewrote "10.05"
+    to "105" and "100.0" to "100". Those levels then went into the wrong group_by bucket in
     download_gammaspec_betaminus_alpha. The test calls the script's own expression.
     """
     from artisatomic.download_gammaspec_betaminus_alpha import normalise_parent_elevel
@@ -1690,7 +1815,7 @@ def test_reduce_phixs_tables_worker():
         return np.trapezoid(sigmas * nu**2 * np.exp(-h_over_kb_in_k_sec * nu / temperature), nu)
 
     # reconstruct the reduced table as piecewise-constant over the output grid intervals
-    xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
     interval_edges = [xgrid[0], *(0.5 * (xgrid[i] + xgrid[i + 1]) for i in range(nphixspoints))]
     dense_en: list[float] = []
     dense_sigma: list[float] = []
@@ -1719,7 +1844,7 @@ def test_reduce_phixs_tables_worker_weight_does_not_underflow():
     binindex = 50
 
     # the edges of one output bin, as the worker computes them
-    xgrid = np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
     enlow = 0.5 * (xgrid[binindex - 1] + xgrid[binindex]) * threshold_ryd
     enhigh = 0.5 * (xgrid[binindex] + xgrid[binindex + 1]) * threshold_ryd
 
@@ -1743,6 +1868,20 @@ def test_reduce_phixs_tables_worker_rejects_unsorted_table():
     tablein = np.column_stack([energyryd, np.full_like(energyryd, 2.0)])
     with pytest.raises(ValueError, match="decreases"):
         reduce_phixs_tables_worker(6000.0, 100, 0.03, tablein)
+
+
+def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
+    """A negative cross section must raise, and the message must name the key of the table.
+
+    reduce_phixs_tables() holds the keys, and the worker gets one table. The worker must
+    therefore receive the key of its own table.
+    """
+    from artisatomic.phixs import reduce_phixs_tables
+
+    energyryd = np.linspace(1.0, 20.0, 500)
+    tablein = np.column_stack([energyryd, np.full_like(energyryd, -1.0)])
+    with pytest.raises(ValueError, match=r"bin integral is not positive.*'Fe I 3d7 a4F'"):
+        reduce_phixs_tables({"Fe I 3d7 a4F": tablein}, 6000.0, 100, 0.03)
 
 
 def adf04_sample_path() -> Path:
@@ -1932,7 +2071,7 @@ def write_fac_fixture(tmp_path):
     - an occupation of 1, and an occupation of 10 or more;
     - two levels of one energy;
     - a negative A beside a positive monopole, and a positive A beside a negative monopole;
-    - a level index of six digits, in fac_wide.tr.asc.
+    - a file index of six digits, in fac_wide.tr.asc.
     """
 
     def row(width: int, fields: list[tuple[str, int, int]]) -> str:
@@ -1964,7 +2103,7 @@ def write_fac_fixture(tmp_path):
     factrans += [""]
     (tmp_path / "fac.tr.asc").write_text("\n".join(factrans) + "\n")
 
-    # a level index of six digits fills its whole field, so no space separates it from the field
+    # a file index of six digits fills its whole field, so no space separates it from the field
     # on its left. It goes into a file of its own, because the levels file above has three levels
     facwide = fac_lines_header("FAC", 1)
     facwide += [FAC_TRANSITION_FORMAT % (999999, 4, 123456, 4, 1.5e00, 1.0e-02, 1.0e05, 1.0e-01), ""]
@@ -1998,8 +2137,8 @@ def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
     """The reader cuts the same values out of the FAC and the cFAC fixed-width layouts.
 
     Both layouts give the same level table here, because the two files describe the same ion.
-    The transition table shows that every field keeps its own window: a negative monopole stays
-    out of the A column, a negative A keeps its sign, and a six-digit level index stays whole.
+    The transition table shows that every field keeps its own window. A negative monopole stays
+    out of the A column. A negative A keeps its sign, and a six-digit file index stays whole.
     """
     write_fac_fixture(tmp_path)
 
@@ -2021,7 +2160,7 @@ def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
         (2, 1, -7.77e4),  # a negative A keeps its sign
     ]
 
-    # a level index of six digits touches the field on its left, and must still parse
+    # a file index of six digits touches the field on its left, and must still parse
     assert list(readfacdata.GetLines(tmp_path / "fac_wide.tr.asc").select("Upper", "Lower", "A").iter_rows()) == [
         (999999, 123456, 1.0e5)
     ]
@@ -2102,11 +2241,11 @@ def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
         )
 
 
-def test_readfacdata_stops_on_an_ion_whose_transitions_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
-    """66DyIII_calib skips every one of its 1873047 transitions, and wrote an ion with none.
+def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
+    """66DyIII_calib skips every one of its 1873047 transitions, and writes an ion with none.
 
-    An ion with no transitions is a silent gap in the line list. The reader stops instead, as
-    readlisbondata and readdreamdata do for an ion with no levels.
+    The writer accepts an ion with no transition, so the reader writes a warning and continues.
+    readlisbondata gives the same warning for the same case.
     """
 
     def levelrow(ilev: int, energy_ev: float, twoj: int) -> str:
@@ -2139,8 +2278,14 @@ def test_readfacdata_stops_on_an_ion_whose_transitions_are_all_above_the_ionisat
     (iondir / "57LaII_calib.tr.asc").write_text("\n".join(lines) + "\n")
 
     monkeypatch.setenv("ARTISATOMIC_FAC_PATH", str(tmp_path))
-    with pytest.raises(ValueError, match="Every one of the 2 transitions"):
-        readfacdata.read_levels_and_transitions(57, 2, io.StringIO())
+    flog = io.StringIO()
+    _, energy_levels, transitions = readfacdata.read_levels_and_transitions(57, 2, flog)
+
+    # the ion keeps its bound levels and goes to the output with no line
+    assert len(energy_levels) == 2
+    assert transitions == []
+    assert "every one of the 2 transitions" in flog.getvalue()
+    assert "dropped 1 levels above the ionisation energy" in flog.getvalue()
 
 
 def test_path_for_log_renders_a_path_relative_to_a_directory():
@@ -2312,10 +2457,13 @@ def test_get_level_valence_n():
     )
     # parent terms may follow a shell ("4p(3)4S") or stand as their own segment ("3P2_3P.7p")
     assert readtanakajpltdata.get_level_valence_n("6,odd,3s2_3p6_3d10_4s4p3   3s(2).3p(6).3d(10).4s.4p(3)4S_5S") == 4
+    # the valence orbital comes from the configuration column, so a name that gives the LS term
+    # alone gives None. No level name of data_v2.1 has that shape
     assert (
-        readtanakajpltdata.get_level_valence_n("60,odd,3d(10)1S0.4s(2).4p(6).4d(10)1S0_1S.5s(2).5p(2)3P2_3P.7p_4D") == 7
+        readtanakajpltdata.get_level_valence_n("60,odd,3d(10)1S0.4s(2).4p(6).4d(10)1S0_1S.5s(2).5p(2)3P2_3P.7p_4D")
+        is None
     )
-    assert readtanakajpltdata.get_level_valence_n("1,even,5d(10).6s(2).6p(6).7s(2)_1S") == 7
+    assert readtanakajpltdata.get_level_valence_n("1,even,5d(10).6s(2).6p(6).7s(2)_1S") is None
     assert readfloers25data.get_level_valence_n("4f10") == 4
     assert readfloers25data.get_level_valence_n("4f9.6s") == 6
     assert readfloers25data.get_level_valence_n("5s2.5p5") == 5
@@ -2333,6 +2481,8 @@ def test_get_level_valence_n():
     # the count of the previous orbital and a two-digit n: 5s1 11s1, not 5s11 1s
     assert readqubdata.get_level_valence_n("5s111s1_2Se[1/2]_id=1") == 11
     assert readqubdata.get_level_valence_n("3d24s_2Se[1/2]_id=1") == 4
+    # an adf04 label separates its shells with a space, so the last run holds n alone
+    assert readqubdata.get_level_valence_n("3S2 3P6 3D6 4S 4P_5D0[8]_id=1") == 4
 
     # a Kurucz label can end in a parent term and an odd-parity mark after the valence orbital
     assert readkuruczdata.get_level_valence_n("4f3(4I*)6s6p*(3P*) 5I,enpercm=12345.0,j=2.5") == 6
@@ -2498,6 +2648,75 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
 
     # ...and level 2's cross sections are all there
     assert written.splitlines()[4:] == ["  2.00000000E+00", "  1.00000000E+00"]
+
+
+def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_path, monkeypatch):
+    """A wavelength of 1e9 nm or more is one character wider than its field and moves g_u*A right.
+
+    Fe II 455 -> 454 in data_v2.1 is such a line. A cut at fixed positions read "2.386e-1" from
+    "2.386e-13". The reader splits the line on white space instead.
+    """
+    from artisatomic import readtanakajpltdata
+
+    lines = [
+        "# Japan-Lithuania Opacity Database for Kilonova (version 1.1)",
+        "# Se I ",
+        "# 34 1 ",
+        "# 3 2 ",
+        "# CLOSED=  1s+  2s+ ",
+        "# IP = 9.752 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)      configuration ",
+        "      1   5.0  even  0.0000000e+00 {  4s+ 2  4p- 2  4p+ 2 } ",
+        "      2   3.0  even  2.3450344e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
+        "      3   1.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+        "      3       1       330.290     5.619e+05        -3.037 ",
+        "      3       2 1290010779.045     2.386e-13        -8.225 ",
+    ]
+    (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+
+    _ionization_energy_ev, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(
+        34, 1, io.StringIO()
+    )
+
+    assert dflevels.height == 3
+    assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5, 2.386e-13], rel=1e-12)
+
+
+def test_write_adata_writes_a_negative_zero_energy_as_zero():
+    """A ground state read as -0.0 cm^-1 writes without a minus sign."""
+    dflevels = leveltuples_to_pldataframe(
+        pl.DataFrame(
+            {
+                "levelname": ["gs"],
+                "g": [1.0],
+                "energyabovegsinpercm": [-0.0],
+                "lambdaangstrom": [911.0],
+                "hillierlevelid": [1],
+                "parity": [0],
+            }
+        )
+    )
+    buf = io.StringIO()
+    write_adata(buf, 13, 5, dflevels, 100.0, [0], io.StringIO())
+    energyfield = buf.getvalue().splitlines()[1].split()[1]
+    assert energyfield == "0.0000000000000000"
+
+
+def test_write_phixs_data_rejects_a_single_target_fraction_below_one():
+    """A single target implies a fraction of 1.0 in the short output form, so 0.995 is an error."""
+    from artisatomic.output import write_phixs_data
+
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5]])
+    thresholds = np.array([13.6])
+    with pytest.raises(ValueError, match=r"sum to 0\.99500"):
+        write_phixs_data(io.StringIO(), 8, 1, crosssections, [[(0, 0.995)]], thresholds, args, io.StringIO())
+    # 1.0 within the tolerance passes
+    write_phixs_data(io.StringIO(), 8, 1, crosssections, [[(0, 1.0 - 1e-7)]], thresholds, args, io.StringIO())
 
 
 def test_get_photoiontargetfractions_merges_targets_that_match_one_level():
@@ -3406,10 +3625,15 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
 def test_photfilereader_excitation_energy_units(tmp_path):
     """The reader converts the excitation energy of the target, in either unit, and shifts the edge.
 
-    The header value is the fallback of the match against the levels of the ion above. CMFGEN
-    has no oscillator file for Ba III, so this Ba II file takes the fallback and logs it. The
-    header value is in cm^-1 above 10 and in 10^15 Hz below it. The C II 19apr23 phot_data_B
-    file writes 52419.42 (cm^-1) and the O I one writes 0.804D0 (10^15 Hz).
+    The first phot file of an ion is CMFGEN's photoionisation route 1, and that route always has
+    an excitation energy of zero (rdphot_gen_v2.f line 282). The reader therefore discards the
+    header value of the first file. NIT/I/19apr23/phot_data_A writes 88.89 there, and CMFGEN
+    reads none of it.
+
+    A later file resolves the energy from the levels of the ion above, and the header value is
+    the fallback. CMFGEN has no oscillator file for Ba III, so this Ba II file takes the fallback
+    and logs it. The header value is in cm^-1 above 10 and in 10^15 Hz below it. The C II
+    19apr23 phot_data_B file writes 52419.42 (cm^-1) and the O I one writes 0.804D0 (10^15 Hz).
     """
     from artisatomic.readhillierdata import excitation_energy_ev_of_header_value
     from artisatomic.readhillierdata import PhotFileReader
@@ -3418,7 +3642,7 @@ def test_photfilereader_excitation_energy_units(tmp_path):
     assert excitation_energy_ev_of_header_value("0.804D0") == pytest.approx(0.804e15 * h_in_ev_seconds)
     assert excitation_energy_ev_of_header_value("0.0D0") == 0.0
 
-    def read_one_file(excitationline: str) -> PhotFileReader:
+    def read_one_file(excitationline: str, filenum: int = 1) -> tuple[PhotFileReader, str]:
         header = (
             "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
             "1                                       !Number of energy levels\n"
@@ -3437,16 +3661,27 @@ def test_photfilereader_excitation_energy_units(tmp_path):
         photfile = tmp_path / "phot_test"
         photfile.write_text(header + body)
         flog = io.StringIO()
-        reader = PhotFileReader(56, 2, 1, [911.0], {"A": 0}, {"A": 0}, flog)
-        reader.read_file(0, photfile, photfile.name)
+        reader = PhotFileReader(56, 2, 2, [911.0], {"A": 0}, {"A": 0}, flog)
+        reader.read_file(filenum, photfile, photfile.name)
         assert not reader.excitation_from_upperion
-        assert "no level of the ion above matches the photoionisation target" in flog.getvalue()
-        return reader
+        return reader, flog.getvalue()
 
     # no excitation line at all, so the edge is the level's own threshold wavelength
-    plain = read_one_file("")
+    plain, plainlog = read_one_file("")
     assert plain.excitation_energy_ev == 0.0
     assert plain.edge_lambda_angstrom() == 911.0
+    assert "CMFGEN has no oscillator file for the ion above" in plainlog
+
+    # the first file of an ion is route 1, so the reader discards a non-zero header value there
+    firstfile, firstfilelog = read_one_file(
+        "88.89                                   !Excitation energy of final state\n", filenum=0
+    )
+    assert firstfile.excitation_energy_ev == 0.0
+    assert firstfile.edge_lambda_angstrom() == 911.0
+    assert "the ion above" not in firstfilelog
+    assert firstfile.phixstables[0]["A"][:, 0].tolist() == pytest.approx(
+        [hc_in_ev_angstrom / 911.0 / ryd_to_ev, 2.0 * hc_in_ev_angstrom / 911.0 / ryd_to_ev]
+    )
 
     gs_threshold_ev = hc_in_ev_angstrom / 911.0
     for excitationline, expected_ev in (
@@ -3457,13 +3692,14 @@ def test_photfilereader_excitation_energy_units(tmp_path):
             6.51014e15 * h_in_ev_seconds,
         ),
     ):
-        reader = read_one_file(excitationline)
+        reader, log = read_one_file(excitationline)
         assert reader.excitation_energy_ev == pytest.approx(expected_ev)
+        assert "CMFGEN has no oscillator file for the ion above" in log
         # the fits take the edge of the route, which is the ground-state edge plus the excitation
         assert reader.edge_lambda_angstrom() == pytest.approx(hc_in_ev_angstrom / (gs_threshold_ev + expected_ev))
         # the first column of a tabulated block is a multiple of that edge, not of the level's own
         expected_ryd = (gs_threshold_ev + expected_ev) / ryd_to_ev
-        assert reader.phixstables[0]["A"][:, 0].tolist() == pytest.approx([expected_ryd, 2.0 * expected_ryd])
+        assert reader.phixstables[1]["A"][:, 0].tolist() == pytest.approx([expected_ryd, 2.0 * expected_ryd])
 
 
 def test_readhillierdata_get_level_valence_n():
@@ -3619,22 +3855,27 @@ def test_readhillierdata_rejects_a_file_with_no_ionization_energy(monkeypatch, t
         readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
 
 
-def test_clear_files_keeps_phixsdata_with_nophixs(tmp_path):
-    """--nophixs writes no cross sections, so clear_files() keeps phixsdata_v2.txt of an earlier run."""
+def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
+    """--nophixs writes no cross sections, so clear_files() removes phixsdata_v2.txt of an earlier run.
+
+    The level ids in that file belong to the earlier adata.txt, so the file must not stay beside a
+    new one.
+    """
     from artisatomic.output import clear_files
 
     phixspath = tmp_path / "phixsdata_v2.txt"
-    earlier_run = "100\n 3.0000000e-02\n26 2 0 1 10 1.0\n"
-    phixspath.write_text(earlier_run, encoding="utf-8")
+    phixspath.write_text("100\n 3.0000000e-02\n26 2 0 1 10 1.0\n", encoding="utf-8")
     (tmp_path / "adata.txt").write_text("an earlier run\n", encoding="utf-8")
 
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
 
-    # the option promises no phixsdata_v2.txt, so the file of the earlier run stays complete
-    assert phixspath.read_text(encoding="utf-8") == earlier_run
+    assert not phixspath.exists()
     # the other two files always start again
     assert not (tmp_path / "adata.txt").read_text(encoding="utf-8")
     assert not (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    # a folder with no phixsdata_v2.txt is fine too
+    clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
+    assert not phixspath.exists()
 
     # a run that writes cross sections truncates the file and writes the header for the ions
     clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path)))
@@ -3654,8 +3895,8 @@ def test_extend_ion_list_skips_a_file_name_that_names_no_ion(
     """A stray file that the glob matches gives a warning, and the ion selection continues.
 
     A sync client leaves a conflict copy, e.g. "26_1 2.txt.zst", beside the data file. int() on
-    the parts of that name stopped every run that used the built-in ion selection, with a message
-    that named neither the reader nor the file.
+    the parts of that name stopped every run that used the built-in ion selection. The message
+    named neither the reader nor the file.
     """
     module = importlib.import_module(f"artisatomic.{modulename}")
     (tmp_path / dataname).touch()
@@ -3716,6 +3957,9 @@ def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
 
     if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
         pytest.skip("the CMFGEN data set is not available here")
+    # the built-in selection asks every reader, and the Floers+25 reader stops without its data
+    if not readfloers25data.get_basepath(withforbidden=False).is_dir():
+        pytest.skip("the Floers+25 test sample is not available here")
 
     # a directory with no artisatomicionhandlers.json, so the function builds the selection
     monkeypatch.chdir(tmp_path)

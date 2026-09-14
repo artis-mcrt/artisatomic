@@ -19,6 +19,7 @@ from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
+from artisatomic.base import split_levels_above_ionization
 from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
 
@@ -353,12 +354,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them,
     # read_lines_data() knows whether a transition names a dropped level or an unknown level
-    # fill_null(False): a null energy compares as null, which would drop the level from the kept
-    # levels and from the set below. The level would then be in neither, and every transition that
-    # names it would stop the run with a message about the transitions file
-    above_ionization = (pl.col("energypercm") > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
-    ilevs_above_ionization = {int(ilev) for ilev in dfalllevels.filter(above_ionization)["Ilev"]}
-    dflevels = dfalllevels.filter(~above_ionization)
+    dflevels, ilevs_above_ionization = split_levels_above_ionization(
+        dfalllevels, "energypercm", "Ilev", ionization_energy_in_ev, flog
+    )
 
     # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
@@ -372,16 +370,15 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map, ilevs_above_ionization, flog)
 
-    # not an assert: an ion with no transitions goes to the output as a silent gap in the line
-    # list, and the check must survive python -O. readlisbondata and readdreamdata guard an empty
-    # ion the same way
+    # the writer accepts an ion with no transition, and 66DyIII_calib is such an ion. So this is
+    # a warning and not an error, as in readlisbondata
     if not transitions and dflines.height > 0:
-        msg = (
-            f"Every one of the {dflines.height} transitions of Z={atomic_number} ion_stage {ion_stage} names a level"
-            f" above the ionisation energy of {ionization_energy_in_ev} eV."
-            " The ion would go to the output with no transitions."
+        log_and_print(
+            flog,
+            f"WARNING: every one of the {dflines.height} transitions of Z={atomic_number} ion_stage {ion_stage} names"
+            f" a level above the ionisation energy of {ionization_energy_in_ev} eV."
+            " The ion goes to the output with no transitions.",
         )
-        raise ValueError(msg)
 
     log_and_print(flog, f"Read {len(transitions)} transitions")
 

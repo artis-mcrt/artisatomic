@@ -464,8 +464,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
-        # append_qub_transition() sorts each pair of level ids, so a file that gives the two
-        # columns in the opposite order (the W II file does) needs no special case here.
+        # append_qub_transition() sorts each pair of level ids. So a file that gives the two
+        # columns in the opposite order needs no special case here. The W II file does that.
         for id_upper, id_lower, A in transitiondf.select("upper", "lower", "avalue").iter_rows():
             append_qub_transition(
                 qub_energylevels,
@@ -743,19 +743,17 @@ def get_level_valence_n(levelname: str) -> int | None:
     valenceorbital = part[-1]
     part = part.strip(lchars.lower())
 
-    # inefficient way to find the last number in a string
-    for i in range(len(part)):
-        try:
-            n = int(part[i:])
-        except ValueError:
-            continue
-        else:
-            # a lower-case orbital letter before the number means that the number is an
-            # electron count of the previous orbital, then n. For example, the '24' in '3d24s'
-            # is two electrons and n=4. The same rule as readkuruczdata applies, and it also
-            # reads '5s111s1' (5s1 11s1) as n = 11.
-            if i > 0 and part[i - 1] in lchars.lower():
-                return split_count_and_n(part[i - 1], part[i:], valenceorbital)
-            return n
+    # the last run of digits of the label, with the character in front of it. The run holds
+    # digits only, because split_count_and_n() reads each digit on its own
+    nmatch = re.search(r"(\D?)(\d+)$", part)
+    if nmatch is None:
+        return None
 
-    return None
+    # a lower-case orbital letter before the number means that the number is an electron count
+    # of the previous orbital, then n. For example, the '24' in '3d24s' is two electrons and
+    # n=4. The same rule as readkuruczdata applies, and it also reads '5s111s1' (5s1 11s1) as
+    # n = 11. A space in front of the run separates two shells, so the run holds n alone
+    if nmatch[1] and nmatch[1] in lchars.lower():
+        return split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
+
+    return int(nmatch[2])
