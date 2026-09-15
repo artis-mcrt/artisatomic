@@ -659,26 +659,62 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
         write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
+@pytest.mark.parametrize("threshold_ratio", [0.5, 2.0])
+@pytest.mark.parametrize("amplitudes", [(1.0, 1.0), (1.0, 3.0), (3.0, 1.0)])
+@pytest.mark.parametrize("offset", [False, True])
+def test_photoion_target_fractions_preserve_normalised_amplitudes(monkeypatch, threshold_ratio, amplitudes, offset):
+    """Targets with the same normalised shape retain their amplitude ratio at different thresholds."""
+    from artisatomic import phixs as phixs_module
+
+    args = phixs_args()
+    u = np.linspace(1.0, 6.0, 501)
+    shape = u**-3
+    if offset:
+        shape[u < 2.0] = 0.0
+    tables = [
+        np.column_stack((u * threshold, amplitude * shape))
+        for threshold, amplitude in zip((1.0, threshold_ratio), amplitudes, strict=True)
+    ]
+
+    def read_file(reader, filenum, _filename, _photfilename):
+        reader.phixstables[filenum] = {"ground": tables[filenum]}
+        reader.phixstargets[filenum] = f"target{filenum}"
+
+    def reduce_tables(tables, temperature, npoints, increment, **_kwargs: t.Any):
+        return {
+            name: reduce_phixs_tables_worker(temperature, output_xgrid(npoints, increment), table)
+            for name, table in tables.items()
+        }
+
+    monkeypatch.setattr(rhd.PhotFileReader, "read_file", read_file)
+    monkeypatch.setattr(rhd, "read_hyd_phixsdata", lambda: None)
+    monkeypatch.setattr(phixs_module, "reduce_phixs_tables", reduce_tables)
+    levels = pl.DataFrame({"levelname": ["ground"], "lambdaangstrom": [hc_in_ev_angstrom / ryd_to_ev]})
+    result = rhd.read_phixs_tables(8, 1, levels, args, io.StringIO())
+    assert result.targetconfigs is not None
+    targets = result.targetconfigs[0]
+    assert targets is not None
+    assert [name for name, _ in targets] == ["target0", "target1"]
+    fractions = [fraction for _, fraction in targets]
+    assert fractions == pytest.approx(np.array(amplitudes) / sum(amplitudes))
+
+    # ARTIS multiplies the shared table by each fraction at that target's own threshold.
+    kept = int(np.argmax(amplitudes))
+    reference = (
+        reduce_phixs_tables_worker(
+            args.optimaltemperature, output_xgrid(args.nphixspoints, args.phixsnuincrement), tables[kept]
+        )
+        / amplitudes[kept]
+    )
+    for fraction, amplitude in zip(fractions, amplitudes, strict=True):
+        np.testing.assert_allclose(result.crosssections[0] * fraction, reference * amplitude)
+
+
 def test_read_phixs_tables_multiple_photoionisation_files():
-    """A level with a cross section table in more than one phot file keeps the largest, rescaled.
+    """The O I target fractions use the same normalised frequency for both routes.
 
-    Every CMFGEN ion with several entries in ions_data[...].photfilenames has one file per final
-    state of the upper ion. A level is normally present in all of them: O I's phot_data_A and
-    phot_data_B share all 107 of their configuration names. The reader used to treat the second
-    table as an error. That made those ions unreadable. The ions are C I, C III, N I, N III,
-    O I, O IV, F II, F III and P IV. None of them was in the tests/ matrix, which was Fe, Co and
-    Ni only.
-
-    The writer can write only one table per level, so one route wins. read_phixs_tables()
-    compares the routes at one frequency and keeps the largest. This test computes that
-    comparison from the RAW tables of the two files, with plain numpy and no helper of the
-    reader. write_phixs_data() writes the kept table as the level's TOTAL and splits it over the
-    targets. The reader therefore first divides the table by the kept target's own fraction. The
-    test also pins two literal fractions, so a change in a shared helper cannot pass unseen.
-
-    The test reads both files through one PhotFileReader, and not each file on its own. A lone
-    second file would be photoionisation route 1, which has no excitation energy. Its edges and
-    its tables would then be the ones of another route.
+    The test reads the raw tables independently and checks the fractions and the shared output table.
+    It also checks two reference fractions. Both files use one reader, so the second route keeps its excitation energy.
     """
     import contextlib
     from operator import itemgetter
@@ -728,13 +764,7 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         )
 
     def expected_routes(matchname: str) -> list[tuple[str, float, np.ndarray]]:
-        """Give the target, the cross section at the comparison frequency, and the reduced table.
-
-        The energies below are in Rydberg, which is the unit of the first column of a raw table.
-        The edge of a route is its lowest energy with a cross section above zero. The comparison
-        frequency is the highest edge of the open routes. A route with no reduced table and a
-        route whose reduced table is zero everywhere give no output, so both drop out here.
-        """
+        """Calculate the target factors at a common ratio of energy to threshold energy."""
         openroutes = []
         for filenum, reduced in enumerate(reduced_of_filenum):
             reducedtable = reduced.get(matchname)
@@ -743,13 +773,19 @@ def test_read_phixs_tables_multiple_photoionisation_files():
                 continue
             nonzerorows = np.nonzero(rawtable[:, 1])[0]
             openroutes.append(
-                (reader.phixstargets[filenum], reducedtable, rawtable, float(rawtable[nonzerorows[0], 0]))
+                (
+                    reader.phixstargets[filenum],
+                    reducedtable,
+                    rawtable,
+                    float(rawtable[nonzerorows[0], 0] / rawtable[0, 0]),
+                )
             )
 
-        comparison_ryd = max(openedge_ryd for *_, openedge_ryd in openroutes)
+        comparison_u = max(openedge_u for *_, openedge_u in openroutes)
         factors = []
-        for target, reducedtable, rawtable, _openedge_ryd in openroutes:
+        for target, reducedtable, rawtable, _openedge_u in openroutes:
             energyryd = rawtable[:, 0]
+            comparison_ryd = comparison_u * energyryd[0]
             sigma = rawtable[:, 1]
             if comparison_ryd > energyryd[-1]:
                 # the file ends below the comparison frequency, and the cross section falls as nu^-3
@@ -793,12 +829,11 @@ def test_read_phixs_tables_multiple_photoionisation_files():
 
     # The two fractions of one O I level, as literals. The comparison above and the reader share
     # the raw tables, so a literal is the only check that a change to a shared helper cannot move.
-    # This level lies above the edge of the second route, so the comparison reads both raw tables
-    # well above their first energy.
+    # Both routes have a non-zero cross section at their own threshold.
     targetlist_1do = targetconfigs[levelnames.index("2s2_2p3(2Do)3s_1Do[2]")]
     assert targetlist_1do is not None
     assert [target for target, _ in targetlist_1do] == ["2s2_2p3_4So/2p^3_4So", "2s2_2p3_2Do"]
-    assert [fraction for _, fraction in targetlist_1do] == pytest.approx([0.4231, 0.5769], abs=5e-5)
+    assert [fraction for _, fraction in targetlist_1do] == pytest.approx([0.5, 0.5])
 
 
 def test_read_coldata_term_to_j_redistribution():

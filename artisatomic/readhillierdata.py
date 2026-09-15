@@ -1441,7 +1441,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     )
     reduced_phixs_dict = {}
     # the target whose table reduced_phixs_dict keeps, and that table's cross section at the
-    # comparison frequency. The normalisation below divides by that target's fraction to recover
+    # comparison ratio. The normalisation below divides by that target's fraction to recover
     # the level's total cross section.
     kepttarget_of_levelname: dict[str, str] = {}
     keptthreshold_of_levelname: dict[str, float] = {}
@@ -1486,24 +1486,13 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             )
             continue
 
-        # The output format carries one cross section table for each level, with a list of
-        # targets and a fraction for each of them. ARTIS multiplies the one table by each
-        # fraction, so the routes must collapse into one table whatever their shape. The
-        # fractions therefore compare the routes, and the comparison needs one frequency.
-        #
-        # That frequency is the highest edge of the routes of the level, which is the lowest
-        # frequency at which every route is open. The routes of one level start at different
-        # frequencies, because each route has the edge of its own target. A comparison of each
-        # route at its own edge would therefore compare different photon energies.
-        #
-        # The comparison reads the RAW table of each route, and not the reduced one. The raw
-        # table is the data of the file, so it needs no bin average and no anchor. It also runs
-        # far above the output grid, which the reduced table does not: on the reduced grid most
-        # comparisons fell past the last point, where only the nu^-3 tail law remained. The raw
-        # table holds real data there. The writer keeps one table for each level, so this
-        # comparison alone decides which route that is.
-        comparison_ev = max(phixs_open_edge_ev(raw) for *_, raw in openroutes)
+        # ARTIS evaluates the shared table at nu/nu_edge for each target, then applies its fraction.
+        # Compare the routes at the same ratio. An absolute frequency compares different table positions.
+        # The largest normalised open edge includes routes with an offset. Use the raw tables to
+        # keep the fractions independent of the output bins and their temperature weights.
+        comparison_u = max(phixs_open_edge_ev(raw) / (raw[0, 0] * ryd_to_ev) for *_, raw in openroutes)
         for filenum, reduced_phixstable, raw_phixstable in openroutes:
+            comparison_ev = comparison_u * raw_phixstable[0, 0] * ryd_to_ev
             phixs_at_threshold = phixs_at_energy(raw_phixstable, comparison_ev)
             phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
                 (reader.phixstargets[filenum], phixs_at_threshold)
@@ -1513,7 +1502,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             # the upper ion. A level is usually present in all of them, so a second table for a
             # level is the normal multi-target case and not an error. The code above records
             # every target. Only one table can go to the output per level, so keep the one with
-            # the largest cross section at the comparison frequency. The normalisation below
+            # the largest cross section at the comparison ratio. The normalisation below
             # divides it by that target's fraction, which recovers the level's total and not one
             # target's share.
             if lowerlevelname in reduced_phixs_dict:
