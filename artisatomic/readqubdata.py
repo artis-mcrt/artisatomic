@@ -17,6 +17,7 @@ from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
+from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
@@ -448,7 +449,8 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
         qub_energylevels: list[QUBEnergyLevel] = [QUBEnergyLevel("groundstate", 1, 5, 2, 4.0, 0.0, 2 * 4.0 + 1, 0)]
         qub_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
-        ionization_energy_ev = 54.9000015
+        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+        log_and_print(flog, f"ionisation energy: {ionization_energy_ev} eV (NIST)")
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
