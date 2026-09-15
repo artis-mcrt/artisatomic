@@ -1366,6 +1366,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     # phixs imports this module for get_hydrogenic_n_phixstable(), so a module-level import
     # of reduce_phixs_tables here would be circular
     from artisatomic.phixs import combine_phixs_routes
+    from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
     from artisatomic.phixs import reduce_phixs_tables
 
     # pulled out of the frame once: the loops below index these per level, per cross section table
@@ -1445,41 +1446,35 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable))
 
     for lowerlevelname, routes in routes_of_levelname.items():
+        # Every ion with more than one photoionisation file has one file per final state of
+        # the upper ion. A level is usually present in all of them, so a second table for a
+        # level is the normal multi-target case and not an error.
+        #
+        # The ratio grid of a route starts at the first energy of its raw table. For a
+        # tabulated type that is the first row of the file, which can lie below the threshold.
+        combined = combine_phixs_routes([(reader.phixstargets[filenum], reduced) for filenum, reduced in routes])
+
         # A route whose reduced table is zero on every output point gives no output table,
         # whatever its raw table holds. A type 8 fit does that when its offset edge nu_edge +
         # nu_o lies above the grid that reduce_phixs_tables() samples.
-        openroutes = [(filenum, reduced) for filenum, reduced in routes if reduced.any()]
-
-        if not openroutes:
+        if not combined.fractions:
             num_levelnames_with_zero_crosssection += 1
             log_and_print(
                 flog, f"WARNING: every cross section point of {lowerlevelname} is zero, so it will have no phixs"
             )
             continue
 
-        # Every ion with more than one photoionisation file has one file per final state of
-        # the upper ion. A level is usually present in all of them, so a second table for a
-        # level is the normal multi-target case and not an error. combine_phixs_routes() sums
-        # the routes into the one table of the level and gives the fractions.
-        #
-        # The ratio grid of a route starts at the first energy of its raw table. For a
-        # tabulated type that is the first row of the file, which can lie below the threshold.
-        table, fractions, factors = combine_phixs_routes(
-            [(reader.phixstargets[filenum], reduced) for filenum, reduced in openroutes], fractioncut=0.01
-        )
-        reduced_phixs_dict[lowerlevelname] = table
-        phixs_targetconfigfractions_of_levelname[lowerlevelname] = fractions
-        if len(openroutes) > 1:
-            kepttargets = {target for target, _ in fractions}
-            factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in factors)
+        reduced_phixs_dict[lowerlevelname] = combined.table
+        phixs_targetconfigfractions_of_levelname[lowerlevelname] = combined.fractions
+        if len(combined.factors) > 1:
+            factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in combined.factors)
             droppedtext = "".join(
-                f" Target {target} is below the 1% cut, so its route drops out."
-                for target, _ in factors
-                if target not in kepttargets
+                f" Target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut, so its route drops out."
+                for target, _ in combined.dropped
             )
             log_and_print(
                 flog,
-                f"{lowerlevelname} has a cross section table in {len(openroutes)} photoionisation files."
+                f"{lowerlevelname} has a cross section table in {len(combined.factors)} photoionisation files."
                 f" The sums of the reduced tables are {factortext}.{droppedtext}",
             )
 

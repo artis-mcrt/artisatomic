@@ -781,7 +781,7 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "Target target1 is below the 1% cut" in log
+    assert "Target target1 is below the 2% cut" in log
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -1960,18 +1960,32 @@ def test_combine_phixs_routes():
     strong = np.array([4.0, 2.0, 1.0])
     weak = np.array([1.0, 1.0, 1.0])
     faint = np.array([0.05, 0.0, 0.0])
-    table, fractions, factors = combine_phixs_routes([("a", strong), ("b", weak), ("c", faint)], fractioncut=0.01)
-    assert factors == [("a", 7.0), ("b", 3.0), ("c", 0.05)]
-    assert [target for target, _ in fractions] == ["a", "b"]
-    assert [fraction for _, fraction in fractions] == pytest.approx([0.7, 0.3])
-    np.testing.assert_array_equal(table, strong + weak)
+    closed = np.zeros(3)
+    combined = combine_phixs_routes([("a", strong), ("b", weak), ("c", faint), ("d", closed)], fractioncut=0.01)
+    assert combined.factors == [("a", 7.0), ("b", 3.0), ("c", 0.05)]
+    assert [target for target, _ in combined.fractions] == ["a", "b"]
+    assert [fraction for _, fraction in combined.fractions] == pytest.approx([0.7, 0.3])
+    assert combined.dropped == [("c", 0.05)]
+    np.testing.assert_array_equal(combined.table, strong + weak)
     # the input tables stay as they were
     np.testing.assert_array_equal(strong, [4.0, 2.0, 1.0])
 
-    # one route keeps everything, and a higher cut drops the weak route
-    table, fractions, _factors = combine_phixs_routes([("a", strong), ("b", weak)], fractioncut=0.5)
-    assert fractions == [("a", 1.0)]
-    np.testing.assert_array_equal(table, strong)
+    # a higher cut drops the weak route, and the kept route takes the whole fraction
+    combined = combine_phixs_routes([("a", strong), ("b", weak)], fractioncut=0.5)
+    assert combined.fractions == [("a", 1.0)]
+    np.testing.assert_array_equal(combined.table, strong)
+
+    # the strongest routes stay at every cut, so the table is never empty
+    combined = combine_phixs_routes([("a", weak), ("b", weak)], fractioncut=0.5)
+    assert combined.fractions == [("a", 0.5), ("b", 0.5)]
+    assert combined.dropped == []
+
+    # no open route gives a zero table and no target
+    combined = combine_phixs_routes([("a", closed)])
+    assert combined.fractions == []
+    np.testing.assert_array_equal(combined.table, closed)
+    with pytest.raises(ValueError, match="at least one route"):
+        combine_phixs_routes([])
 
 
 def test_reduce_phixs_tables_worker():
