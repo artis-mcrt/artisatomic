@@ -48,6 +48,7 @@ from artisatomic.output import add_level_ids_forbidden
 from artisatomic.output import write_adata
 from artisatomic.output import write_phixs_data
 from artisatomic.output import write_transition_data
+from artisatomic.phixs import combine_phixs_routes
 from artisatomic.phixs import match_hydrogenic_phixs
 from artisatomic.phixs import reduce_phixs_tables_worker
 
@@ -1952,6 +1953,25 @@ def test_hillier_extend_ion_list():
     assert {(2, 1), (26, 1)} <= {(atomic_number, ion_stage) for atomic_number, l in result for ion_stage, _ in l}
 
     assert any(atomic_number == 1 for atomic_number, _ in readhillierdata.extend_ion_list([], include_hydrogen=True))
+
+
+def test_combine_phixs_routes():
+    """The level's table is the sum of the kept routes, and the fractions are the shares of the sums."""
+    strong = np.array([4.0, 2.0, 1.0])
+    weak = np.array([1.0, 1.0, 1.0])
+    faint = np.array([0.05, 0.0, 0.0])
+    table, fractions, factors = combine_phixs_routes([("a", strong), ("b", weak), ("c", faint)], fractioncut=0.01)
+    assert factors == [("a", 7.0), ("b", 3.0), ("c", 0.05)]
+    assert [target for target, _ in fractions] == ["a", "b"]
+    assert [fraction for _, fraction in fractions] == pytest.approx([0.7, 0.3])
+    np.testing.assert_array_equal(table, strong + weak)
+    # the input tables stay as they were
+    np.testing.assert_array_equal(strong, [4.0, 2.0, 1.0])
+
+    # one route keeps everything, and a higher cut drops the weak route
+    table, fractions, _factors = combine_phixs_routes([("a", strong), ("b", weak)], fractioncut=0.5)
+    assert fractions == [("a", 1.0)]
+    np.testing.assert_array_equal(table, strong)
 
 
 def test_reduce_phixs_tables_worker():

@@ -1365,6 +1365,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     """
     # phixs imports this module for get_hydrogenic_n_phixstable(), so a module-level import
     # of reduce_phixs_tables here would be circular
+    from artisatomic.phixs import combine_phixs_routes
     from artisatomic.phixs import reduce_phixs_tables
 
     # pulled out of the frame once: the loops below index these per level, per cross section table
@@ -1458,44 +1459,23 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
 
         # Every ion with more than one photoionisation file has one file per final state of
         # the upper ion. A level is usually present in all of them, so a second table for a
-        # level is the normal multi-target case and not an error. Only one table can go to the
-        # output per level, and write_phixs_data() writes it as the level's total. ARTIS reads
-        # that table at the ratio of the frequency to the edge of each target, then applies
-        # the fraction of the target.
+        # level is the normal multi-target case and not an error. combine_phixs_routes() sums
+        # the routes into the one table of the level and gives the fractions.
         #
-        # The table is therefore the sum of the reduced tables of the routes. Each reduced
-        # table is on the ratio grid of its own route, which is the grid that ARTIS reads for
-        # that target. The factor of a target is the sum of the reduced table of its route.
-        # That sum is the integral of the cross section over the output grid, with the
-        # weights that build the table. A target then gets its share of the total shape.
-        #
-        # The sum is exact for routes of one shape. For routes of different shapes it spreads
-        # the error over the targets, so no target gets a zero where its own route is open.
         # The ratio grid of a route starts at the first energy of its raw table. For a
         # tabulated type that is the first row of the file, which can lie below the threshold.
-        factors = [(reader.phixstargets[filenum], float(reduced.sum())) for filenum, reduced in openroutes]
-        # positive: an open route has a reduced table above zero, and no cross section is negative
-        factor_sum = sum(factor for _, factor in factors)
-        # a target below 1% of the total drops out, with its route. The largest fraction is at
-        # least one over the route count, so at least one target stays.
-        keptroutes = [
-            (target, factor, reduced)
-            for (target, factor), (_, reduced) in zip(factors, openroutes, strict=True)
-            if factor / factor_sum > 0.01
-        ]
-        keptfactor_sum = sum(factor for _, factor, _ in keptroutes)
-        phixs_targetconfigfractions_of_levelname[lowerlevelname] = [
-            (target, factor / keptfactor_sum) for target, factor, _ in keptroutes
-        ]
-        # a new array: reduce_phixs_tables() hands out the reduced tables, so this function
-        # must not mutate them
-        reduced_phixs_dict[lowerlevelname] = np.sum([reduced for _, _, reduced in keptroutes], axis=0)
+        table, fractions, factors = combine_phixs_routes(
+            [(reader.phixstargets[filenum], reduced) for filenum, reduced in openroutes], fractioncut=0.01
+        )
+        reduced_phixs_dict[lowerlevelname] = table
+        phixs_targetconfigfractions_of_levelname[lowerlevelname] = fractions
         if len(openroutes) > 1:
+            kepttargets = {target for target, _ in fractions}
             factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in factors)
             droppedtext = "".join(
                 f" Target {target} is below the 1% cut, so its route drops out."
-                for target, factor in factors
-                if factor / factor_sum <= 0.01
+                for target, _ in factors
+                if target not in kepttargets
             )
             log_and_print(
                 flog,
