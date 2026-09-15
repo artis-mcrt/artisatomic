@@ -708,22 +708,19 @@ def test_photoion_target_fractions_preserve_normalised_amplitudes(monkeypatch, t
     fractions = [fraction for _, fraction in targets]
     assert fractions == pytest.approx(np.array(amplitudes) / sum(amplitudes))
 
-    # the shared table is the reduced table of the kept route divided by the fraction of its
-    # target. The first route wins a tie, as np.argmax() does.
-    kept = int(np.argmax(amplitudes))
-    reduced_kept = reduce_phixs_tables_worker(
-        args.optimaltemperature, output_xgrid(args.nphixspoints, args.phixsnuincrement), tables[kept]
-    )
-    np.testing.assert_allclose(result.crosssections[0] * fractions[kept], reduced_kept)
+    # the shared table is the sum of the reduced tables of the two routes
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)
+    reduced_sum = sum(reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table) for table in tables)
+    np.testing.assert_allclose(result.crosssections[0], reduced_sum)
 
 
 def test_photoion_target_fractions_offset_route(monkeypatch):
-    """A route with an offset edge gets the fraction of its integral, and the open route gives the table.
+    """A route with an offset edge gets the fraction of its integral, and the shared table stays open.
 
     Both routes fall as u^-3. Route 1 is zero below u = 2. The output grid runs from u = 1 to
-    u = 4, so the integrals are 15/32 and 3/32. The reader must keep the table of route 0,
-    which is open at u = 1. Before this rule, a comparison at the open edge of route 1 read
-    route 0 in its tail, and the table of route 1, zero below u = 2, went to both targets.
+    u = 4, so the integrals are 15/32 and 3/32. The shared table is the sum of the two reduced
+    tables, so it is open at u = 1. Before this rule, a comparison at the open edge of route 1
+    read route 0 in its tail, and the table of route 1, zero below u = 2, went to both targets.
     """
     args = phixs_args()
     assert output_xgrid(args.nphixspoints, args.phixsnuincrement)[-1] == pytest.approx(4.0)
@@ -738,7 +735,8 @@ def test_photoion_target_fractions_offset_route(monkeypatch):
     assert [name for name, _ in targets] == ["target0", "target1"]
     assert [fraction for _, fraction in targets] == pytest.approx([15 / 18, 3 / 18], rel=1e-3)
     assert result.crosssections[0][0] > 0.0
-    assert "for target target1 against" in log
+    assert "gives 9.3" in log
+    assert "Mb for target target1" in log
 
 
 def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
@@ -848,12 +846,6 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     for levelid in levelids_in_both:
         factors = expected_routes(matchname_of_levelid[levelid])
         assert len(factors) > 1, f"level {levelid}: expected a route in each of the two files"
-        # the first route wins a tie, and a tie allows for round-off between the ratio grids
-        kepttarget, keptvalue, kepttable = factors[0]
-        for target, value, reducedtable in factors[1:]:
-            if value > keptvalue * (1.0 + 1e-9):
-                kepttarget, keptvalue, kepttable = target, value, reducedtable
-
         # the targets below 1% of the total drop out, and the rest normalise to one
         factor_sum_nofilter = sum(value for _, value, _ in factors)
         keptfactors = [(target, value) for target, value, _ in factors if value / factor_sum_nofilter > 0.01]
@@ -867,11 +859,8 @@ def test_read_phixs_tables_multiple_photoionisation_files():
             [fraction for _, fraction in expected_fractions]
         )
 
-        # the kept table is the winner's table, divided by the winner's own fraction. A table
-        # left at one target's share would be low by exactly that factor.
-        keptfraction = dict(expected_fractions)[kepttarget]
-        assert 0.0 < keptfraction < 1.0
-        assert np.allclose(crosssections[levelid], kepttable / keptfraction, rtol=1e-10)
+        # the shared table is the sum of the reduced tables of the routes, before the 1% cut
+        assert np.allclose(crosssections[levelid], sum(reducedtable for _, _, reducedtable in factors), rtol=1e-10)
 
     # The fractions of two O I levels, as literals. The comparison above and the reader share the
     # raw tables, so a literal is the only check that a change to a shared helper cannot move.
