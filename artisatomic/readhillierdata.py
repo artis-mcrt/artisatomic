@@ -1354,26 +1354,25 @@ class PhotFileReader:
                     )
 
 
-def phixs_open_edge_ev(phixstable: np.ndarray) -> float:
-    """Lowest energy of a raw cross section table with a cross section above zero, in eV.
+def phixs_open_edge_ryd(phixstable: np.ndarray) -> float:
+    """Lowest energy of a raw cross section table with a cross section above zero, in Rydberg.
 
     This is the edge of the photoionisation route that the table belongs to. A table can be zero
     at the nominal threshold, because a type 8 fit has an offset edge. Returns zero for a table
     whose cross section is zero on every row.
     """
     nonzerorows = np.nonzero(phixstable[:, 1])[0]
-    return float(phixstable[nonzerorows[0], 0]) * ryd_to_ev if len(nonzerorows) > 0 else 0.0
+    return float(phixstable[nonzerorows[0], 0]) if len(nonzerorows) > 0 else 0.0
 
 
-def phixs_at_energy(phixstable: np.ndarray, energy_ev: float) -> float:
-    """Read a raw cross section table at one energy, in Megabarns.
+def phixs_at_energy(phixstable: np.ndarray, energy_ryd: float) -> float:
+    """Read a raw cross section table at one energy in Rydberg, in Megabarns.
 
     Each row of the table holds an energy in Rydberg and a cross section in Megabarns. A fit type
     gives 1000 rows from the threshold to 21 times the threshold, and a tabulated type gives the
     rows of the file. Above the last row the cross section falls as nu^-3. The caller reads the
     table at or above the first energy of the table, so no row below that energy applies.
     """
-    energy_ryd = energy_ev / ryd_to_ev
     if energy_ryd > phixstable[-1, 0]:
         return float(phixs_nu_cubed_tail(float(phixstable[-1, 1]), float(phixstable[-1, 0]), energy_ryd))
     return float(np.interp(energy_ryd, phixstable[:, 0], phixstable[:, 1]))
@@ -1440,11 +1439,11 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         flog,
     )
     reduced_phixs_dict = {}
-    # the target whose table reduced_phixs_dict keeps, and that table's cross section at the
-    # comparison ratio. The normalisation below divides by that target's fraction to recover
-    # the level's total cross section.
+    # the target whose table reduced_phixs_dict keeps, and the factor of that target, which is
+    # its cross section at the comparison ratio. The normalisation below divides by that
+    # target's fraction to recover the level's total cross section.
     kepttarget_of_levelname: dict[str, str] = {}
-    keptthreshold_of_levelname: dict[str, float] = {}
+    keptfactor_of_levelname: dict[str, float] = {}
     phixs_targetconfigfactors_of_levelname = defaultdict(list)
     num_levelnames_with_zero_crosssection = 0
     # every route of each level: (file number, reduced table, raw table as the file gives it)
@@ -1486,36 +1485,63 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             )
             continue
 
-        # ARTIS evaluates the shared table at nu/nu_edge for each target, then applies its fraction.
-        # Compare the routes at the same ratio. An absolute frequency compares different table positions.
-        # The largest normalised open edge includes routes with an offset. Use the raw tables to
-        # keep the fractions independent of the output bins and their temperature weights.
-        comparison_u = max(phixs_open_edge_ev(raw) / (raw[0, 0] * ryd_to_ev) for *_, raw in openroutes)
-        for filenum, reduced_phixstable, raw_phixstable in openroutes:
-            comparison_ev = comparison_u * raw_phixstable[0, 0] * ryd_to_ev
-            phixs_at_threshold = phixs_at_energy(raw_phixstable, comparison_ev)
+        # ARTIS reads the shared table at the ratio of the frequency to the edge of each target,
+        # then applies the fraction of that target. The factors of the routes must therefore come
+        # from one comparison ratio, which is the ratio of the energy to the first energy of the
+        # raw table. That first energy is the anchor of reduce_phixs_tables_worker() too. For a
+        # tabulated type it is the first row of the file, which can lie below the threshold.
+        # An absolute energy compares different positions of the tables.
+        #
+        # The comparison ratio is the largest open edge of the routes, in units of the first
+        # energy of its table. Every route is then open at the comparison ratio, also a route
+        # with an offset edge. The raw tables give the factors, so the temperature weights of
+        # the output bins do not enter them. The open routes come from the reduced tables, so
+        # the output grid still decides which routes take part.
+        openedges_ryd = [phixs_open_edge_ryd(raw) for *_, raw in openroutes]
+        comparison_u = max(
+            openedge_ryd / raw[0, 0] for openedge_ryd, (*_, raw) in zip(openedges_ryd, openroutes, strict=True)
+        )
+        for (filenum, reduced_phixstable, raw_phixstable), openedge_ryd in zip(openroutes, openedges_ryd, strict=True):
+            # max(): the product can round to one ulp below the open edge of the route that set
+            # the comparison ratio. A tabulated type can repeat that energy with a zero row
+            # before it, and np.interp() then reads the zero row.
+            comparison_ryd = max(comparison_u * raw_phixstable[0, 0], openedge_ryd)
+            phixs_at_comparison = phixs_at_energy(raw_phixstable, comparison_ryd)
             phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
-                (reader.phixstargets[filenum], phixs_at_threshold)
+                (reader.phixstargets[filenum], phixs_at_comparison)
             )
 
             # Every ion with more than one photoionisation file has one file per final state of
             # the upper ion. A level is usually present in all of them, so a second table for a
             # level is the normal multi-target case and not an error. The code above records
             # every target. Only one table can go to the output per level, so keep the one with
-            # the largest cross section at the comparison ratio. The normalisation below
-            # divides it by that target's fraction, which recovers the level's total and not one
+            # the largest factor. The files often repeat one fit for every route, and the factors
+            # then tie. The first file wins a tie. The normalisation below divides the kept
+            # table by the fraction of its target, which recovers the level's total and not one
             # target's share.
             if lowerlevelname in reduced_phixs_dict:
                 log_and_print(
                     flog,
                     f"{lowerlevelname} has a cross section table in more than one photoionisation file."
-                    f" Target {reader.phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb against"
-                    f" {keptthreshold_of_levelname[lowerlevelname]:.4e} Mb for {kepttarget_of_levelname[lowerlevelname]}.",
+                    f" At the comparison ratio {comparison_u:.4f}, target {reader.phixstargets[filenum]} gives"
+                    f" {phixs_at_comparison:.4e} Mb against {keptfactor_of_levelname[lowerlevelname]:.4e} Mb"
+                    f" for {kepttarget_of_levelname[lowerlevelname]}.",
                 )
-            if phixs_at_threshold > keptthreshold_of_levelname.get(lowerlevelname, 0.0):
+            if phixs_at_comparison > keptfactor_of_levelname.get(lowerlevelname, 0.0):
                 reduced_phixs_dict[lowerlevelname] = reduced_phixstable
                 kepttarget_of_levelname[lowerlevelname] = reader.phixstargets[filenum]
-                keptthreshold_of_levelname[lowerlevelname] = phixs_at_threshold
+                keptfactor_of_levelname[lowerlevelname] = phixs_at_comparison
+
+        if lowerlevelname not in reduced_phixs_dict:
+            # every factor is zero, so no route can give the table. The route that sets the
+            # comparison ratio is open there, so this needs a raw table with a negative row. The
+            # writer skips the level, so the log must name it.
+            num_levelnames_with_zero_crosssection += 1
+            log_and_print(
+                flog,
+                f"WARNING: every route of {lowerlevelname} has a zero cross section at the comparison"
+                f" ratio {comparison_u:.4f}, so it will have no phixs",
+            )
 
     # one summary for the ion, not one per photoionisation file. The counts below accumulate
     # over every file, so a log inside that loop repeated them with partial totals.

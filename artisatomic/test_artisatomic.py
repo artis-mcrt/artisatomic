@@ -2,6 +2,7 @@
 """Tests for the artisatomic readers, parsers and output writers."""
 
 import argparse
+import contextlib
 import functools
 import importlib
 import io
@@ -32,6 +33,7 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import output_xgrid
+from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
@@ -659,38 +661,48 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
         write_output_files(26, [lower, make_iondata(2, is_top_ion=True)], tmpargs)
 
 
-@pytest.mark.parametrize("threshold_ratio", [0.5, 2.0])
-@pytest.mark.parametrize("amplitudes", [(1.0, 1.0), (1.0, 3.0), (3.0, 1.0)])
-@pytest.mark.parametrize("offset", [False, True])
-def test_photoion_target_fractions_preserve_normalised_amplitudes(monkeypatch, threshold_ratio, amplitudes, offset):
-    """Targets with the same normalised shape retain their amplitude ratio at different thresholds."""
-    from artisatomic import phixs as phixs_module
+def read_phixs_tables_of_one_level(monkeypatch, tables: list[np.ndarray], args) -> tuple[PhixsData, str]:
+    """Run read_phixs_tables() on one level with one synthetic raw table for each O I phot file.
 
-    args = phixs_args()
-    u = np.linspace(1.0, 6.0, 501)
-    shape = u**-3
-    if offset:
-        shape[u < 2.0] = 0.0
-    tables = [
-        np.column_stack((u * threshold, amplitude * shape))
-        for threshold, amplitude in zip((1.0, threshold_ratio), amplitudes, strict=True)
-    ]
+    The fake read_file() stores the tables, so no file is read. The result is the PhixsData
+    record and the log text.
+    """
+    assert len(readhillierdata.ions_data[8, 1].photfilenames) == len(tables)
 
     def read_file(reader, filenum, _filename, _photfilename):
         reader.phixstables[filenum] = {"ground": tables[filenum]}
         reader.phixstargets[filenum] = f"target{filenum}"
 
-    def reduce_tables(tables, temperature, npoints, increment, **_kwargs: t.Any):
-        return {
-            name: reduce_phixs_tables_worker(temperature, output_xgrid(npoints, increment), table)
-            for name, table in tables.items()
-        }
-
     monkeypatch.setattr(rhd.PhotFileReader, "read_file", read_file)
     monkeypatch.setattr(rhd, "read_hyd_phixsdata", lambda: None)
-    monkeypatch.setattr(phixs_module, "reduce_phixs_tables", reduce_tables)
     levels = pl.DataFrame({"levelname": ["ground"], "lambdaangstrom": [hc_in_ev_angstrom / ryd_to_ev]})
-    result = rhd.read_phixs_tables(8, 1, levels, args, io.StringIO())
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = rhd.read_phixs_tables(8, 1, levels, args, flog)
+    return result, flog.getvalue()
+
+
+@pytest.mark.parametrize("threshold_ratio", [0.5, 2.0])
+@pytest.mark.parametrize("amplitudes", [(1.0, 1.0), (1.0, 3.0), (3.0, 1.0)])
+@pytest.mark.parametrize("offset_route", [None, 0, 1])
+def test_photoion_target_fractions_preserve_normalised_amplitudes(
+    monkeypatch, threshold_ratio, amplitudes, offset_route
+):
+    """Targets with the same normalised shape keep their amplitude ratio at different thresholds.
+
+    offset_route names the route whose cross section is zero below twice its first energy. The
+    comparison ratio must then come from that route, or the other route reads a zero.
+    """
+    args = phixs_args()
+    u = np.linspace(1.0, 6.0, 501)
+    tables = []
+    for filenum, (threshold, amplitude) in enumerate(zip((1.0, threshold_ratio), amplitudes, strict=True)):
+        shape = u**-3
+        if filenum == offset_route:
+            shape[u < 2.0] = 0.0
+        tables.append(np.column_stack((u * threshold, amplitude * shape)))
+
+    result, _log = read_phixs_tables_of_one_level(monkeypatch, tables, args)
     assert result.targetconfigs is not None
     targets = result.targetconfigs[0]
     assert targets is not None
@@ -698,25 +710,38 @@ def test_photoion_target_fractions_preserve_normalised_amplitudes(monkeypatch, t
     fractions = [fraction for _, fraction in targets]
     assert fractions == pytest.approx(np.array(amplitudes) / sum(amplitudes))
 
-    # ARTIS multiplies the shared table by each fraction at that target's own threshold.
+    # the shared table is the reduced table of the kept route divided by the fraction of its
+    # target. The first route wins a tie, as np.argmax() does.
     kept = int(np.argmax(amplitudes))
-    reference = (
-        reduce_phixs_tables_worker(
-            args.optimaltemperature, output_xgrid(args.nphixspoints, args.phixsnuincrement), tables[kept]
-        )
-        / amplitudes[kept]
+    reduced_kept = reduce_phixs_tables_worker(
+        args.optimaltemperature, output_xgrid(args.nphixspoints, args.phixsnuincrement), tables[kept]
     )
-    for fraction, amplitude in zip(fractions, amplitudes, strict=True):
-        np.testing.assert_allclose(result.crosssections[0] * fraction, reference * amplitude)
+    np.testing.assert_allclose(result.crosssections[0] * fractions[kept], reduced_kept)
+
+
+def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
+    """A route whose open edge repeats an energy after a zero row keeps its cross section.
+
+    C II 2s2_6s_2Se has such a tabulated table. A product that rounds to one ulp below the edge
+    reads the zero row through np.interp(), and the level then loses its table.
+    """
+    edge = 0.19199342756764298
+    table = np.array([[0.14034607278336475, 0.0], [edge, 0.0], [edge, 1.372], [1.0, 0.1]])
+    result, log = read_phixs_tables_of_one_level(monkeypatch, [table, np.empty((0, 2))], phixs_args())
+    assert result.targetconfigs is not None
+    assert result.targetconfigs[0] == [("target0", 1.0)]
+    assert np.any(result.crosssections[0])
+    assert "zero cross section at the comparison ratio" not in log
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
-    """The O I target fractions use the same normalised frequency for both routes.
+    """The O I target fractions come from one comparison ratio for both routes.
 
-    The test reads the raw tables independently and checks the fractions and the shared output table.
-    It also checks two reference fractions. Both files use one reader, so the second route keeps its excitation energy.
+    The mirror below reads the raw tables with plain numpy and calls no helper of the reader. A
+    change to a shared helper therefore cannot pass unseen. The test checks the fractions and the
+    shared table of every level with two routes, and it pins the fractions of two levels as
+    literals. Both files go through one reader, so the second route keeps its excitation energy.
     """
-    import contextlib
     from operator import itemgetter
 
     from artisatomic.phixs import reduce_phixs_tables
@@ -764,7 +789,13 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         )
 
     def expected_routes(matchname: str) -> list[tuple[str, float, np.ndarray]]:
-        """Calculate the target factors at a common ratio of energy to threshold energy."""
+        """Give the target, the factor and the reduced table of each open route of a level.
+
+        The energies are in Rydberg, the unit of the first column of a raw table. The open edge of
+        a route is its lowest energy with a cross section above zero. The comparison ratio is the
+        largest open edge in units of the first energy of its table. A route with no reduced table
+        or with an all-zero reduced table drops out here, as it does in the reader.
+        """
         openroutes = []
         for filenum, reduced in enumerate(reduced_of_filenum):
             reducedtable = reduced.get(matchname)
@@ -788,7 +819,7 @@ def test_read_phixs_tables_multiple_photoionisation_files():
             comparison_ryd = comparison_u * energyryd[0]
             sigma = rawtable[:, 1]
             if comparison_ryd > energyryd[-1]:
-                # the file ends below the comparison frequency, and the cross section falls as nu^-3
+                # the file ends below the comparison ratio, and the cross section falls as nu^-3
                 value = float(sigma[-1]) * (float(energyryd[-1]) / comparison_ryd) ** 3
             else:
                 value = float(np.interp(comparison_ryd, energyryd, sigma))
@@ -827,13 +858,19 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         assert 0.0 < keptfraction < 1.0
         assert np.allclose(crosssections[levelid], kepttable / keptfraction, rtol=1e-10)
 
-    # The two fractions of one O I level, as literals. The comparison above and the reader share
-    # the raw tables, so a literal is the only check that a change to a shared helper cannot move.
-    # Both routes have a non-zero cross section at their own threshold.
+    # The fractions of two O I levels, as literals. The comparison above and the reader share the
+    # raw tables, so a literal is the only check that a change to a shared helper cannot move.
+    # The two files hold one identical table for the 1Do level, so its fractions are equal at
+    # every comparison ratio. The 3Do level has two different tables, so its fractions pin the
+    # comparison ratio.
     targetlist_1do = targetconfigs[levelnames.index("2s2_2p3(2Do)3s_1Do[2]")]
     assert targetlist_1do is not None
     assert [target for target, _ in targetlist_1do] == ["2s2_2p3_4So/2p^3_4So", "2s2_2p3_2Do"]
     assert [fraction for _, fraction in targetlist_1do] == pytest.approx([0.5, 0.5])
+    targetlist_3do = targetconfigs[levelnames.index("2s2_2p3(2Do)3s_3Do[3]")]
+    assert targetlist_3do is not None
+    assert [target for target, _ in targetlist_3do] == ["2s2_2p3_4So/2p^3_4So", "2s2_2p3_2Do"]
+    assert [fraction for _, fraction in targetlist_3do] == pytest.approx([0.6994, 0.3006], abs=5e-5)
 
 
 def test_read_coldata_term_to_j_redistribution():
