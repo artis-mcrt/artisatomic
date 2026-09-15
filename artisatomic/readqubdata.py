@@ -578,6 +578,10 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 if target_fraction > 0.001:
                     photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
 
+            # This keeps the table of one target and rescales it to the level's total. The
+            # CMFGEN reader (readhillierdata.read_phixs_tables) writes the sum of the reduced
+            # tables of every target instead, with fractions from the sums of those tables. A
+            # change here to that rule alters the qub checksums.
             max_fraction = max_scalefactor / scalefactorsum
             photoionization_crosssections[lowerlevelid] = (
                 reduced_phixs_dict[targetcolumn_withmaxfraction] / max_fraction
