@@ -1,5 +1,6 @@
 """Downsample photoionisation cross section tables and estimate hydrogenic ones where none exist."""
 
+import typing as t
 from collections.abc import Callable
 from functools import partial
 
@@ -123,6 +124,67 @@ def match_hydrogenic_phixs(
         photoionization_crosssections[levelindex] = reduced_phixs_table
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
+
+
+# a target below this share of the level's total drops out of the target list, with its route.
+# Every multi-route target of the CMFGEN test sets is above 3%, so the value only acts on QUB data.
+PHIXS_TARGET_FRACTION_CUT = 0.02
+
+
+class PhixsRoutes[TargetType](t.NamedTuple):
+    """The one output table of a level and the targets of its routes, from combine_phixs_routes()."""
+
+    table: npt.NDArray[np.float64]
+    # the kept targets with their fractions, and the open targets with their factors
+    fractions: list[tuple[TargetType, float]]
+    factors: list[tuple[TargetType, float]]
+    # the open targets below the cut
+    dropped: list[tuple[TargetType, float]]
+
+
+def combine_phixs_routes[TargetType](
+    routes: list[tuple[TargetType, npt.NDArray[np.float64]]], fractioncut: float = PHIXS_TARGET_FRACTION_CUT
+) -> PhixsRoutes[TargetType]:
+    """Combine the routes of one level into one table and the fractions of its targets.
+
+    Each route is a target and its reduced table. The output format carries one table for each
+    level. ARTIS reads that table at the ratio of the frequency to the edge of each target, then
+    applies the fraction of the target. The table is therefore the sum of the reduced tables.
+    Each reduced table is on the ratio grid of its own route, which is the grid that ARTIS reads
+    for that target. A target then gets its share of the total shape.
+
+    The factor of a target is the sum of its reduced table. That sum is the integral of the
+    cross section over the output grid, with the weights that build the table. A route whose
+    table is zero everywhere is closed and drops out. A target below fractioncut of the factor
+    sum drops out with its route. The strongest target always stays.
+
+    The sum is exact for routes of one shape. For routes of different shapes it spreads the
+    error over the targets, so no target gets a zero where its own route is open. With no open
+    route the table is zero and the fraction list is empty.
+    """
+    if not routes:
+        msg = "combine_phixs_routes() needs at least one route"
+        raise ValueError(msg)
+    openroutes = [(target, reduced, float(reduced.sum())) for target, reduced in routes if reduced.any()]
+    factors = [(target, factor) for target, _, factor in openroutes]
+    if not openroutes:
+        return PhixsRoutes(np.zeros_like(routes[0][1]), [], [], [])
+    factor_sum = sum(factor for _, factor in factors)
+    largest = max(factor for _, factor in factors)
+    keptroutes = [
+        (target, reduced, factor)
+        for target, reduced, factor in openroutes
+        if factor == largest or factor / factor_sum > fractioncut
+    ]
+    kepttargets = {target for target, _, _ in keptroutes}
+    keptfactor_sum = sum(factor for _, _, factor in keptroutes)
+    # a new array: the caller hands out the reduced tables, so this function must not mutate them
+    return PhixsRoutes(
+        np.sum([reduced for _, reduced, _ in keptroutes], axis=0),
+        [(target, factor / keptfactor_sum) for target, _, factor in keptroutes],
+        factors,
+        [(target, factor) for target, factor in factors if target not in kepttargets],
+    )
 
 
 def reduce_phixs_tables[KeyType](
