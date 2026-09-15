@@ -125,6 +125,42 @@ def match_hydrogenic_phixs(
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
+def combine_phixs_routes[TargetType](
+    routes: list[tuple[TargetType, npt.NDArray[np.float64]]], fractioncut: float
+) -> tuple[npt.NDArray[np.float64], list[tuple[TargetType, float]], list[tuple[TargetType, float]]]:
+    """Combine the reduced tables of the routes of one level into one table and the fractions.
+
+    Each route is a target and its reduced table. The output format carries one table for each
+    level. ARTIS reads that table at the ratio of the frequency to the edge of each target, then
+    applies the fraction of the target. The table is therefore the sum of the reduced tables.
+    Each reduced table is on the ratio grid of its own route, which is the grid that ARTIS reads
+    for that target. A target then gets its share of the total shape.
+
+    The factor of a target is the sum of its reduced table. That sum is the integral of the
+    cross section over the output grid, with the weights that build the table. A target below
+    fractioncut of the factor sum drops out with its route. The largest fraction is at least
+    one over the route count, so at least one target stays.
+
+    The sum is exact for routes of one shape. For routes of different shapes it spreads the
+    error over the targets, so no target gets a zero where its own route is open.
+
+    Every route must have a reduced table above zero. The function gives the summed table, the
+    (target, fraction) pairs of the kept routes, and the (target, factor) pairs of every route.
+    """
+    factors = [(target, float(reduced.sum())) for target, reduced in routes]
+    factor_sum = sum(factor for _, factor in factors)
+    keptroutes = [
+        (target, factor, reduced)
+        for (target, factor), (_, reduced) in zip(factors, routes, strict=True)
+        if factor / factor_sum > fractioncut
+    ]
+    keptfactor_sum = sum(factor for _, factor, _ in keptroutes)
+    fractions = [(target, factor / keptfactor_sum) for target, factor, _ in keptroutes]
+    # a new array: the caller hands out the reduced tables, so this function must not mutate them
+    table = np.sum([reduced for _, _, reduced in keptroutes], axis=0)
+    return table, fractions, factors
+
+
 def reduce_phixs_tables[KeyType](
     dicttables: dict[KeyType, npt.NDArray[np.float64]],
     optimaltemperature: float,

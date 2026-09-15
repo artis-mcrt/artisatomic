@@ -31,6 +31,7 @@ from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
+from artisatomic.phixs import combine_phixs_routes
 from artisatomic.phixs import reduce_phixs_tables
 
 qubpath = (PYDIR / ".." / "atomic-data-qub").resolve()
@@ -549,43 +550,24 @@ def read_qub_photoionizations(atomic_number, ion_stage, levelcount: int, args, f
                 args.phixsnuincrement,
                 label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
             )
-            target_scalefactors = np.zeros(ntargets)
-            targetcolumn_withmaxfraction = 1
-            max_scalefactor = 0.0
-            for targetcolumn, reduced_phixstable in reduced_phixs_dict.items():
-                # take the ratio of cross sections at the threshold energies
-                scalefactor = reduced_phixstable[0]
-                target_scalefactors[targetcolumn - 1] = scalefactor
-                if scalefactor > max_scalefactor:
-                    targetcolumn_withmaxfraction = targetcolumn
-                    max_scalefactor = scalefactor
-
-            scalefactorsum = sum(target_scalefactors)
-            if scalefactorsum <= 0.0:
-                # the code assigned nothing for this level, so write_phixs_data() will skip it
+            # column n of the file is the cross section to the upper ion's level id n - 1. A
+            # column whose reduced table is zero everywhere is a closed route.
+            routes = [
+                (targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items() if reduced.any()
+            ]
+            if not routes:
+                # the code assigns nothing for this level, so write_phixs_data() will skip it
                 log_and_print(
                     flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
                 )
                 continue
-            target_scalefactors = [x if (x / scalefactorsum > 0.02) else 0.0 for x in target_scalefactors]
-            scalefactorsum = sum(target_scalefactors)
 
             # NaN, the arrays' initial value, says: the threshold energy comes from the level
             # energies, not from the first energy point of the cross section table
             photoionization_thresholds_ev[lowerlevelid] = np.nan
-            for upperlevelid, target_scalefactor in enumerate(target_scalefactors):
-                target_fraction = target_scalefactor / scalefactorsum
-                if target_fraction > 0.001:
-                    photoionization_targetfractions[lowerlevelid].append((upperlevelid, target_fraction))
-
-            # This keeps the table of one target and rescales it to the level's total. The
-            # CMFGEN reader (readhillierdata.read_phixs_tables) writes the sum of the reduced
-            # tables of every target instead, with fractions from the sums of those tables. A
-            # change here to that rule alters the qub checksums.
-            max_fraction = max_scalefactor / scalefactorsum
-            photoionization_crosssections[lowerlevelid] = (
-                reduced_phixs_dict[targetcolumn_withmaxfraction] / max_fraction
-            )
+            table, fractions, _factors = combine_phixs_routes(routes, fractioncut=0.02)
+            photoionization_targetfractions[lowerlevelid] = fractions
+            photoionization_crosssections[lowerlevelid] = table
 
     elif atomic_number == 27 and ion_stage == 3:
         # photoionize to a single level ion
