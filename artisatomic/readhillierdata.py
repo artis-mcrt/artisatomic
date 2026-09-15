@@ -23,7 +23,6 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import path_for_log
-from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
@@ -1354,31 +1353,6 @@ class PhotFileReader:
                     )
 
 
-def phixs_open_edge_ev(phixstable: np.ndarray) -> float:
-    """Lowest energy of a raw cross section table with a cross section above zero, in eV.
-
-    This is the edge of the photoionisation route that the table belongs to. A table can be zero
-    at the nominal threshold, because a type 8 fit has an offset edge. Returns zero for a table
-    whose cross section is zero on every row.
-    """
-    nonzerorows = np.nonzero(phixstable[:, 1])[0]
-    return float(phixstable[nonzerorows[0], 0]) * ryd_to_ev if len(nonzerorows) > 0 else 0.0
-
-
-def phixs_at_energy(phixstable: np.ndarray, energy_ev: float) -> float:
-    """Read a raw cross section table at one energy, in Megabarns.
-
-    Each row of the table holds an energy in Rydberg and a cross section in Megabarns. A fit type
-    gives 1000 rows from the threshold to 21 times the threshold, and a tabulated type gives the
-    rows of the file. Above the last row the cross section falls as nu^-3. The caller reads the
-    table at or above the first energy of the table, so no row below that energy applies.
-    """
-    energy_ryd = energy_ev / ryd_to_ev
-    if energy_ryd > phixstable[-1, 0]:
-        return float(phixs_nu_cubed_tail(float(phixstable[-1, 1]), float(phixstable[-1, 0]), energy_ryd))
-    return float(np.interp(energy_ryd, phixstable[:, 0], phixstable[:, 1]))
-
-
 def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog) -> PhixsData:
     """Read one ion's CMFGEN photoionisation cross sections, downsampled onto the output grid.
 
@@ -1439,16 +1413,12 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         firstlevelindex_of_levelnamenoJ,
         flog,
     )
-    reduced_phixs_dict = {}
-    # the target whose table reduced_phixs_dict keeps, and that table's cross section at the
-    # comparison frequency. The normalisation below divides by that target's fraction to recover
-    # the level's total cross section.
-    kepttarget_of_levelname: dict[str, str] = {}
-    keptthreshold_of_levelname: dict[str, float] = {}
-    phixs_targetconfigfactors_of_levelname = defaultdict(list)
+    # the sum of the reduced tables of the routes of each level, and the fraction of each target
+    reduced_phixs_dict: dict[str, np.ndarray] = {}
+    phixs_targetconfigfractions_of_levelname: dict[str, list[tuple[str, float]]] = {}
     num_levelnames_with_zero_crosssection = 0
-    # every route of each level: (file number, reduced table, raw table as the file gives it)
-    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray, np.ndarray]]] = defaultdict(list)
+    # every route of each level: (file number, reduced table)
+    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray]]] = defaultdict(list)
 
     for filenum, photfilename in enumerate(photfilenames):
         filename = Path(
@@ -1471,13 +1441,13 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             if len(tablein) == 0 or tablein[0][0] == 0.0:
                 # the worker gives such a table an all-zero reduced table, which is a closed route
                 continue
-            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable, tablein))
+            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable))
 
     for lowerlevelname, routes in routes_of_levelname.items():
         # A route whose reduced table is zero on every output point gives no output table,
         # whatever its raw table holds. A type 8 fit does that when its offset edge nu_edge +
         # nu_o lies above the grid that reduce_phixs_tables() samples.
-        openroutes = [(filenum, reduced, raw) for filenum, reduced, raw in routes if reduced.any()]
+        openroutes = [(filenum, reduced) for filenum, reduced in routes if reduced.any()]
 
         if not openroutes:
             num_levelnames_with_zero_crosssection += 1
@@ -1486,47 +1456,52 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             )
             continue
 
-        # The output format carries one cross section table for each level, with a list of
-        # targets and a fraction for each of them. ARTIS multiplies the one table by each
-        # fraction, so the routes must collapse into one table whatever their shape. The
-        # fractions therefore compare the routes, and the comparison needs one frequency.
+        # Every ion with more than one photoionisation file has one file per final state of
+        # the upper ion. A level is usually present in all of them, so a second table for a
+        # level is the normal multi-target case and not an error. Only one table can go to the
+        # output per level, and write_phixs_data() writes it as the level's total. ARTIS reads
+        # that table at the ratio of the frequency to the edge of each target, then applies
+        # the fraction of the target.
         #
-        # That frequency is the highest edge of the routes of the level, which is the lowest
-        # frequency at which every route is open. The routes of one level start at different
-        # frequencies, because each route has the edge of its own target. A comparison of each
-        # route at its own edge would therefore compare different photon energies.
+        # The table is therefore the sum of the reduced tables of the routes. Each reduced
+        # table is on the ratio grid of its own route, which is the grid that ARTIS reads for
+        # that target. The factor of a target is the sum of the reduced table of its route.
+        # That sum is the integral of the cross section over the output grid, with the
+        # weights that build the table. A target then gets its share of the total shape.
         #
-        # The comparison reads the RAW table of each route, and not the reduced one. The raw
-        # table is the data of the file, so it needs no bin average and no anchor. It also runs
-        # far above the output grid, which the reduced table does not: on the reduced grid most
-        # comparisons fell past the last point, where only the nu^-3 tail law remained. The raw
-        # table holds real data there. The writer keeps one table for each level, so this
-        # comparison alone decides which route that is.
-        comparison_ev = max(phixs_open_edge_ev(raw) for *_, raw in openroutes)
-        for filenum, reduced_phixstable, raw_phixstable in openroutes:
-            phixs_at_threshold = phixs_at_energy(raw_phixstable, comparison_ev)
-            phixs_targetconfigfactors_of_levelname[lowerlevelname].append(
-                (reader.phixstargets[filenum], phixs_at_threshold)
+        # The sum is exact for routes of one shape. For routes of different shapes it spreads
+        # the error over the targets, so no target gets a zero where its own route is open.
+        # The ratio grid of a route starts at the first energy of its raw table. For a
+        # tabulated type that is the first row of the file, which can lie below the threshold.
+        factors = [(reader.phixstargets[filenum], float(reduced.sum())) for filenum, reduced in openroutes]
+        # positive: an open route has a reduced table above zero, and no cross section is negative
+        factor_sum = sum(factor for _, factor in factors)
+        # a target below 1% of the total drops out, with its route. The largest fraction is at
+        # least one over the route count, so at least one target stays.
+        keptroutes = [
+            (target, factor, reduced)
+            for (target, factor), (_, reduced) in zip(factors, openroutes, strict=True)
+            if factor / factor_sum > 0.01
+        ]
+        keptfactor_sum = sum(factor for _, factor, _ in keptroutes)
+        phixs_targetconfigfractions_of_levelname[lowerlevelname] = [
+            (target, factor / keptfactor_sum) for target, factor, _ in keptroutes
+        ]
+        # a new array: reduce_phixs_tables() hands out the reduced tables, so this function
+        # must not mutate them
+        reduced_phixs_dict[lowerlevelname] = np.sum([reduced for _, _, reduced in keptroutes], axis=0)
+        if len(openroutes) > 1:
+            factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in factors)
+            droppedtext = "".join(
+                f" Target {target} is below the 1% cut, so its route drops out."
+                for target, factor in factors
+                if factor / factor_sum <= 0.01
             )
-
-            # Every ion with more than one photoionisation file has one file per final state of
-            # the upper ion. A level is usually present in all of them, so a second table for a
-            # level is the normal multi-target case and not an error. The code above records
-            # every target. Only one table can go to the output per level, so keep the one with
-            # the largest cross section at the comparison frequency. The normalisation below
-            # divides it by that target's fraction, which recovers the level's total and not one
-            # target's share.
-            if lowerlevelname in reduced_phixs_dict:
-                log_and_print(
-                    flog,
-                    f"{lowerlevelname} has a cross section table in more than one photoionisation file."
-                    f" Target {reader.phixstargets[filenum]} gives {phixs_at_threshold:.4e} Mb against"
-                    f" {keptthreshold_of_levelname[lowerlevelname]:.4e} Mb for {kepttarget_of_levelname[lowerlevelname]}.",
-                )
-            if phixs_at_threshold > keptthreshold_of_levelname.get(lowerlevelname, 0.0):
-                reduced_phixs_dict[lowerlevelname] = reduced_phixstable
-                kepttarget_of_levelname[lowerlevelname] = reader.phixstargets[filenum]
-                keptthreshold_of_levelname[lowerlevelname] = phixs_at_threshold
+            log_and_print(
+                flog,
+                f"{lowerlevelname} has a cross section table in {len(openroutes)} photoionisation files."
+                f" The sums of the reduced tables are {factortext}.{droppedtext}",
+            )
 
     # one summary for the ion, not one per photoionisation file. The counts below accumulate
     # over every file, so a log inside that loop repeated them with partial totals.
@@ -1555,47 +1530,6 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             f"WARNING: {num_levelnames_with_zero_crosssection} level names have a cross section that is zero"
             " everywhere on the output energy grid, so those levels get no photoionisation",
         )
-
-    # normalise the target factors into fractions
-    phixs_targetconfigfractions_of_levelname = defaultdict(list)
-    for lowerlevelname, reduced_phixstable in reduced_phixs_dict.items():
-        target_configfactors_nofilter = phixs_targetconfigfactors_of_levelname[lowerlevelname]
-        # the factors are arbitrary, so the code below normalises them into fractions
-
-        # filter out low fraction targets. The sum is positive: a level enters reduced_phixs_dict
-        # only with a factor above zero, and no factor of a reduced table is negative.
-        factor_sum_nofilter = sum(x[1] for x in target_configfactors_nofilter)
-        target_configfactors = [x for x in target_configfactors_nofilter if (x[1] / factor_sum_nofilter > 0.01)]
-
-        if len(target_configfactors) == 0:
-            # every target was below the 1% cut, so keep them all and do not divide by zero
-            log_and_print(
-                flog,
-                f"WARNING: all photoionisation targets for {lowerlevelname} are below the 1% cut"
-                f" ({target_configfactors_nofilter}), so the reader keeps all of them",
-            )
-            target_configfactors = target_configfactors_nofilter
-
-        factor_sum = sum(x[1] for x in target_configfactors)
-
-        for target_config, target_factor in target_configfactors:
-            target_fraction = target_factor / factor_sum
-            phixs_targetconfigfractions_of_levelname[lowerlevelname].append((target_config, target_fraction))
-
-        # The kept table is one target's cross section. write_phixs_data() writes it as the
-        # level's total and splits it over every target by the fractions above. Divide by the
-        # kept target's own fraction first. Without this, a level whose kept target holds 50%
-        # would get both targets' rates halved. readqubdata does the same with max_fraction.
-        #
-        # The kept target has the largest factor, so it is never below the 1% cut. .get() only
-        # misses if its factor was zero, and then there is nothing to rescale.
-        kept_fraction = dict(phixs_targetconfigfractions_of_levelname[lowerlevelname]).get(
-            kepttarget_of_levelname[lowerlevelname]
-        )
-        # not in place: reduce_phixs_tables() hands out these arrays, so this function must
-        # not mutate them
-        if kept_fraction:
-            reduced_phixs_dict[lowerlevelname] = reduced_phixstable / kept_fraction
 
     # map the non-J-split cross sections onto J-split levels. A table matches every level that
     # shares the configuration, so index the level list by match name once and do not rescan it.
