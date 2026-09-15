@@ -711,8 +711,8 @@ def test_photoion_target_fractions_preserve_normalised_amplitudes(monkeypatch, t
     fractions = [fraction for _, fraction in targets]
     assert fractions == pytest.approx(np.array(amplitudes) / sum(amplitudes), rel=1e-2)
 
-    # the fraction of a target is the sum of the reduced table of its route over the total,
-    # and the shared table is the sum of the reduced tables of the two routes
+    # the fraction of a target is the sum of the reduced table of its route over the total.
+    # The shared table is the sum of the reduced tables of the two routes.
     xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)
     reduced = [reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table) for table in tables]
     sums = [table.sum() for table in reduced]
@@ -876,8 +876,9 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         # the shared table is the sum of the reduced tables of the routes, before the 1% cut
         assert np.allclose(crosssections[levelid], sum(reducedtable for _, _, reducedtable in factors), rtol=1e-10)
 
-    # The fractions of two O I levels, as literals. The comparison above and the reader share the
-    # raw tables, so a literal is the only check that a change to a shared helper cannot move.
+    # The fractions of two O I levels, as literals. The mirror above and the reader share the
+    # raw tables. A literal is therefore the only check that a change to a shared helper cannot
+    # move.
     # The two files give the 1Do level one cross section as a function of the ratio, scaled to
     # two edges. Its fractions differ from one half only through the bin weights. The 3Do level
     # has two different tables, so its fractions pin the rule.
