@@ -1,5 +1,6 @@
 """Parse level names: split a configuration into orbitals and a term, and derive the parity."""
 
+import re
 import string
 from collections.abc import Iterator
 
@@ -308,3 +309,69 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
             return int(digits[2:])
         return int(digits[1:]) if physical(digits[:1], digits[1:]) else None
     return None
+
+
+orb_lab = [f"{j}{lchars[i].lower()}" for j in range(len(lchars) + 1) for i in range(j)]
+LIT = [
+    "0",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "F",
+    "G",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "O",
+    "P",
+    "Q",
+    "R",
+    "S",
+    "T",
+]
+LIT_TO_ORB = dict(zip(LIT[1:], orb_lab, strict=False))
+
+# Matches a 2-digit occupation code and a 1-character shell indicator
+eissner_regex = re.compile(r"(\d{2})([0-9A-Za-z])")
+
+
+def convert_eissner_to_standard(eissner_config: str) -> str:
+    """Convert an Eissner notation electron configuration string into standard notation.
+
+    Example:
+        '521522563524565' -> '1s22s22p63s23p6'
+
+    LLM conversion of Fortran code from Leo Mulholland, more info on the notation here:
+    https://open.adas.ac.uk/man/appxa-04.pdf [pg. 5-6]
+    https://www.sciencedirect.com/science/article/pii/S0010465598000824 [pg. 323]
+    """
+    vals = eissner_regex.findall(eissner_config)
+
+    shell_parts: list[str] = []
+    for qs, ql in vals:
+        shell_occ = int(qs) % 50
+        ql_upper = ql.upper()
+
+        if ql_upper not in LIT_TO_ORB:
+            msg = f"Unknown shell character {ql!r} in config: {eissner_config!r}"
+            raise ValueError(msg)
+
+        shell_label = LIT_TO_ORB[ql_upper]
+        shell_parts.append(f"{shell_label}{shell_occ}")
+
+    return "".join(shell_parts)
