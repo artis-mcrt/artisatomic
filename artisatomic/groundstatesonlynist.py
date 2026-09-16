@@ -1,4 +1,8 @@
-"""Read ground states only, from the NIST ground-state table."""
+"""Read ground states only, from the NIST ground-state table.
+
+The table is an export of the NIST Atomic Spectra Database: Kramida, A., Ralchenko, Yu., Reader, J.
+and NIST ASD Team, https://physics.nist.gov/asd, doi:10.18434/T4W30F.
+"""
 
 import typing as t
 from functools import cache
@@ -46,7 +50,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
             energyabovegsinpercm=0.0,
         ),
     ]
-    transitions: list[t.Any] = []  # this handler provides ground states only, so never any transitions
+    transitions: list[t.Any] = []
 
     return ionization_energy_in_ev, energy_levels, transitions
 

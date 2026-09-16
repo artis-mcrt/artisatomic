@@ -1,4 +1,10 @@
-"""Read levels and transitions from the Tanaka et al. Japan-Lithuania database."""
+"""Read levels and transitions from the Japan-Lithuania opacity database for kilonovae.
+
+The database papers are Tanaka, M., Kato, D., Gaigalas, G., Kawaguchi, K. (2020), MNRAS, 496,
+1369-1392, doi:10.1093/mnras/staa1576 (version 1) and Kato, D., Tanaka, M., Gaigalas, G.,
+Kitovienė, L., Rynkun, P. (2024), MNRAS, 535, 2670-2686, doi:10.1093/mnras/stae2504 (version 2).
+The second line of each data file names the paper of that ion.
+"""
 
 import re
 
@@ -200,8 +206,10 @@ def get_level_valence_n(levelname: str) -> int | None:
     data_v2.1 mixes two conventions. In the original relativistic one, "{  4s+ 2  4p- 1 }",
     the valence orbital heads the last shell token. In the LS-coupled one of the 2024 files,
     "4s2_4p6_4f2 4s(2).4p(6).4d(10)1S0_1S.4f(2)3H1_3H.5s(2).5p(6)_3H", the configuration column
-    before the LS term gives it as the last underscore-separated orbital. The LS term is no
-    guide: the lanthanide files write the closed 5s(2).5p(6) shells after the open 4f shell.
+    before the LS term gives it. The valence orbital is the last n-letter pair of that column. A
+    token can glue two orbitals ("3d10_4s4p4"), so the last underscore-separated token is not
+    always one orbital. The LS term is no guide: the lanthanide files write the closed 5s(2).5p(6)
+    shells after the open 4f shell.
     """
     if "{" in levelname:
         # a two-digit n has one leading space ("6p+ 4 10s+ 1"), so read every shell by pattern

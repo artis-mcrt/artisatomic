@@ -95,7 +95,8 @@ handlers: dict[str, Handler] = {
         lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
     ),
     "kurucz": Handler(readkuruczdata.read_levels_and_transitions, readkuruczdata.get_level_valence_n),
-    "dream": Handler(readdreamdata.read_levels_and_transitions),  # DREAM database of Z >= 57
+    # the DREAM database of Z >= 57: Quinet & Palmeri (2020), Atoms, 8, 18, doi:10.3390/atoms8020018
+    "dream": Handler(readdreamdata.read_levels_and_transitions),
     "lisbon": Handler(readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
@@ -111,14 +112,18 @@ handlers: dict[str, Handler] = {
     ),
     # fac reads an early version of the floers25 calib data
     "fac": Handler(readfacdata.read_levels_and_transitions, readfacdata.get_level_valence_n),
-    "mons": Handler(
-        readmonsdata.read_levels_and_transitions  # Carvajal Gallego et al. (University of Mons) lanthanides V-VII
-    ),
+    # the University of Mons lanthanides V-VII: Carvajal Gallego, Deprince, Maison, Palmeri & Quinet
+    # (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723
+    "mons": Handler(readmonsdata.read_levels_and_transitions),
+    # the Japan-Lithuania database of 26 <= Z <= 88: Tanaka, Kato, Gaigalas & Kawaguchi (2020),
+    # MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576
     "tanakajplt": Handler(
-        readtanakajpltdata.read_levels_and_transitions,  # Tanaka Japan-Lithuania database of 26 <= Z <= 88
+        readtanakajpltdata.read_levels_and_transitions,
         readtanakajpltdata.get_level_valence_n,
     ),
-    "gsnist": Handler(groundstatesonlynist.read_ground_levels),  # ground states taken from NIST
+    # ground states from the NIST Atomic Spectra Database: Kramida, Ralchenko, Reader & NIST ASD Team,
+    # https://physics.nist.gov/asd, doi:10.18434/T4W30F
+    "gsnist": Handler(groundstatesonlynist.read_ground_levels),
     # The adf04 files tabulate the collision strengths at several temperatures, and
     # -electrontemperature picks one, so the reader takes args.
     "qub": Handler(
@@ -127,7 +132,8 @@ handlers: dict[str, Handler] = {
         returns_upsilondict=True,
         reader_takes_args=True,
     ),
-    # Hillier's CMFGEN model atoms: levels, collision strengths and cross sections
+    # the CMFGEN model atoms of Hillier: levels, collision strengths and cross sections. Hillier &
+    # Miller (1998), ApJ, 496, 407-427, doi:10.1086/305350
     "cmfgen": Handler(
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
@@ -136,8 +142,9 @@ handlers: dict[str, Handler] = {
     ),
     # The QUB Co III and Co IV level lists and the QUB Co II and Co III cross sections. The CMFGEN
     # files supply every other stage of the ion.
-    # The parser is the CMFGEN one. A stage with QUB levels takes the QUB cross sections, so the
-    # hydrogenic estimate never parses a QUB level name here.
+    # The parser is the CMFGEN one. Co III takes the QUB cross sections. Co IV has QUB levels and
+    # no QUB cross sections, so the hydrogenic estimate parses its QUB level names with the CMFGEN
+    # parser when Co IV is not the top ion.
     "qub_cobalt": Handler(
         readqubdata.read_cobalt_levels_and_transitions,
         readhillierdata.get_level_valence_n,

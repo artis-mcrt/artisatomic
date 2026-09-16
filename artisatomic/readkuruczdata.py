@@ -1,4 +1,4 @@
-"""Read levels and transitions from the Kurucz gfall line lists."""
+"""Read levels and transitions from the Kurucz gfall line lists (http://kurucz.harvard.edu/linelists/gfall/)."""
 
 import itertools
 import re
@@ -94,7 +94,8 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     gfall = gfall.drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
     double_columns = [col.replace("_first", "") for col in gfall.collect_schema().names() if col.endswith("first")]
 
-    # because the file stores the energy in 1/cm
+    # compare the magnitudes: a negative energy marks a predicted level, and the sign does not
+    # order the levels
     gfall = gfall.with_columns(
         order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     )
@@ -113,11 +114,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     )
 
     # Clean labels. str.replace_all(), not Expr.replace(): the latter swaps whole values that
-    # equal the literal string "\s+". So it never collapsed the internal whitespace runs that pad
-    # the gfall columns ('s4d  1D'), and those went into the level names as they were.
-    # fill_null(""): a blank label parsed to null. A null is_in() result made filter() drop the
-    # row, so U II lost 495 of its 595 lines. The filter removes only the three pseudo-level
-    # labels.
+    # equal the literal string "\s+", so it cannot collapse the whitespace runs that pad the gfall
+    # columns ('s4d  1D'). fill_null(""): a blank label parses to null, and a null is_in() result
+    # makes filter() drop the row. The filter removes only the three pseudo-level labels.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
     gfall = gfall.with_columns(
         pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
@@ -211,8 +210,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     ).collect()
 
     # One file holds one ion. The atomic number and the ion charge both come from the file's
-    # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows that
-    # are in memory: on the lazy frame it read and parsed the whole file a second time.
+    # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows in
+    # memory. A test on the lazy frame would read and parse the whole file again.
     if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)

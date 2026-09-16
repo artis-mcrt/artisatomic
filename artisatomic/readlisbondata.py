@@ -91,7 +91,7 @@ def get_levelname(row, fileindex: int):
 
     The label alone is not unique, and neither is the label with J. In Nd II, most levels share
     their relativistic configuration and J with another level. The file index makes the name
-    unique, as the FAC, Floers+25 and MONS readers do with theirs.
+    unique, as the FAC and Floers+25 readers do with theirs.
     """
     return f"{row['label']}, j={row['j']}, index={fileindex}"
 
@@ -196,15 +196,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         )
         raise FileNotFoundError(msg)
 
-    # from NIST, as every other reader whose data set carries no ionisation energy does. This was
-    # -1, which went into adata.txt verbatim as the ion's ionisation energy.
+    # from NIST, as every other reader whose data set carries no ionisation energy does
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     dfalllevels = read_levels_csv(iondir / f"{elsym}{ion_stage_roman}_Levels.csv")
-    # not an assert: an empty frame would write an ion with no levels. The pandas reader that this
-    # replaced raised a KeyError here, as the DREAM reader's guard does
+    # not an assert: an empty frame would write an ion with no levels
     if dfalllevels.is_empty():
         msg = f"The Lisbon data has no levels for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
@@ -222,7 +220,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dfalllevels, "energy", "fileindex", ionization_energy_in_ev, atomic_number, ion_stage, flog
     )
 
-    # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")

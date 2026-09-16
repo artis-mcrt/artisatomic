@@ -50,6 +50,7 @@ from artisatomic.output import write_phixs_data
 from artisatomic.output import write_transition_data
 from artisatomic.phixs import combine_phixs_routes
 from artisatomic.phixs import match_hydrogenic_phixs
+from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
 from artisatomic.phixs import reduce_phixs_tables_worker
 
 
@@ -362,7 +363,8 @@ def test_hydrogenic_phixs_effective_charge_scaling():
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
             phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
 
-            # Kramers: sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
+            # Kramers (1923, Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244):
+            # sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
             # depends only on n. A comparison at the same n therefore leaves a ratio of exactly n / Z**2
             same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
@@ -432,7 +434,8 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
         args=args,
         flog=io.StringIO(),
     )
-    assert np.isnan(thresholds[0])  # NaN is "no threshold energy", which write_phixs_data() skips
+    # NaN means "no threshold energy". The empty target list below makes write_phixs_data() skip the level.
+    assert np.isnan(thresholds[0])
     assert targetfractions[0] == []
     assert np.all(crosssections[0] == 0.0)
 
@@ -534,7 +537,8 @@ def test_write_phixs_data_with_no_phixs_arrays():
     """A reader that found no photoionisation data must not make write_phixs_data() index off the end.
 
     resolve_photoion_targetfractions() fills a target list for every level whenever the reader supplied none, and
-    readhillierdata.get_photoiontargetfractions() always gives at least the ground state. If the
+    readhillierdata.get_photoiontargetfractions() gives at least the ground state to every level
+    that has a target configuration list. If the
     reader also left the cross section and threshold arrays empty, the level ids from those target
     lists have nothing behind them.
     """
@@ -770,7 +774,7 @@ def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
 
 
 def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
-    """A target below 1% of the total leaves the target list, and its route leaves the table."""
+    """A target below 2% of the total leaves the target list, and its route leaves the table."""
     args = phixs_args()
     u = np.linspace(1.0, 6.0, 501)
     tables = [np.column_stack((u, u**-3)), np.column_stack((u, 0.005 * u**-3))]
@@ -861,9 +865,16 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     for levelid in levelids_in_both:
         factors = expected_routes(matchname_of_levelid[levelid])
         assert len(factors) > 1, f"level {levelid}: expected a route in each of the two files"
-        # the targets below 1% of the total drop out, and the rest normalise to one
+        # the targets below the 2% cut drop out, and the rest normalise to one. The strongest
+        # route always stays.
         factor_sum_nofilter = sum(value for _, value, _ in factors)
-        keptfactors = [(target, value) for target, value, _ in factors if value / factor_sum_nofilter > 0.01]
+        largest = max(value for _, value, _ in factors)
+        keptroutes = [
+            (target, value, reducedtable)
+            for target, value, reducedtable in factors
+            if value == largest or value / factor_sum_nofilter > PHIXS_TARGET_FRACTION_CUT
+        ]
+        keptfactors = [(target, value) for target, value, _ in keptroutes]
         factor_sum = sum(value for _, value in keptfactors)
         expected_fractions = [(target, value / factor_sum) for target, value in keptfactors]
 
@@ -874,8 +885,8 @@ def test_read_phixs_tables_multiple_photoionisation_files():
             [fraction for _, fraction in expected_fractions]
         )
 
-        # the shared table is the sum of the reduced tables of the routes, before the 1% cut
-        assert np.allclose(crosssections[levelid], sum(reducedtable for _, _, reducedtable in factors), rtol=1e-10)
+        # the shared table is the sum of the reduced tables of the kept routes, after the 2% cut
+        assert np.allclose(crosssections[levelid], sum(reducedtable for _, _, reducedtable in keptroutes), rtol=1e-10)
 
     # The fractions of two O I levels, as literals. The mirror above and the reader share the
     # raw tables. A literal is therefore the only check that a change to a shared helper cannot
@@ -901,7 +912,7 @@ def test_read_coldata_term_to_j_redistribution():
 
         sum_i sum_j upsilon_ij == upsilon_term,   upsilon_ij = upsilon_term * g_i/g_L * g_j/g_U
 
-    O III has term-resolved collision data (col_data_oiii_butler_2012.dat) and a J-split level
+    O III has term-resolved collision data (col_data in OXY/III/19apr23) and a J-split level
     list, so it exercises the redistribution. Fe II names its collision transitions with J
     values, so its values must pass through unchanged.
     """
@@ -1176,9 +1187,9 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
     has many permitted ones. A null parity cannot match another, which is how readlisbondata and
     readkuruczdata say the same thing.
 
-    The aoife.hdf5 in the repository is a placeholder. The real file is in .gitignore, and its README
-    says how to fetch it. This test therefore builds the three tables that the reader wants in
-    memory.
+    The repository does not hold aoife.hdf5. The .gitignore of atomic-data-helium-boyle excludes
+    every .hdf5 file, and its README.txt gives the download link. This test therefore builds the
+    three tables that the reader wants in memory.
     """
     import h5py
 
@@ -1507,7 +1518,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     """
     from artisatomic import readlisbondata
 
-    # Nd III ionises at 22.09 eV, which is 178182 cm^-1. The last two levels are above it
+    # Nd III ionises at 22.09 eV, which is 178168 cm^-1. The last two levels are above it
     write_lisbon_fixture(tmp_path, [0.0, 1000.0, 2000.0, 200000.0, 300000.0])
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
@@ -1662,11 +1673,9 @@ def test_add_handlers_if_not_set():
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
     unchanged = [(26, [(1, "cmfgen"), (2, "cmfgen")])]
 
-    # add an ion for a new element
     result = add_handlers_if_not_set(ion_handlers, [(58, 1)], "dream")
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen")]), (58, [(1, "dream")])]
 
-    # add an ion to an existing element
     result = add_handlers_if_not_set(ion_handlers, [(26, 3)], "dream")
     assert result == [(26, [(1, "cmfgen"), (2, "cmfgen"), (3, "dream")])]
 
@@ -1705,8 +1714,8 @@ def test_add_handlers_if_not_set_applies_the_limits():
     assert add_handlers_if_not_set([], [(26, 4)], "cmfgen", **limits) == []
     assert add_handlers_if_not_set([], [(38, 2)], "cmfgen", **limits) == []
 
-    # A limit of None includes every ion, which is what a direct call to a reader gets. Ion stage 0
-    # comes from a reader that counts the charge, so the lower limit must keep it.
+    # A limit of None includes every ion, which is what a direct call to a reader gets. A lower
+    # limit of None excludes no ion stage, not even 0.
     assert add_handlers_if_not_set([], [(38, 9)], "cmfgen") == [(38, [(9, "cmfgen")])]
     assert add_handlers_if_not_set([], [(38, 0)], "cmfgen") == [(38, [(0, "cmfgen")])]
 
@@ -2002,8 +2011,8 @@ def test_reduce_phixs_tables_worker():
 
     reduced = reduce_phixs_tables_worker(temperature, xgrid, tablein)
     assert len(reduced) == nphixspoints
-    assert abs(reduced[0] / sigma_0 - 1) < 0.05  # first point close to the threshold cross section
-    assert np.all(np.diff(reduced) < 0)  # monotonically decreasing
+    assert abs(reduced[0] / sigma_0 - 1) < 0.05
+    assert np.all(np.diff(reduced) < 0)
 
     # a constant cross section must stay exact
     tablein_const = np.column_stack([energyryd, np.full_like(energyryd, 2.5)])
@@ -2092,7 +2101,7 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
     with pytest.raises(ValueError, match=r"Z=26 Fe I phot_data.*'Fe I 3d7 a4F'"):
         reduce_phixs_tables({"Fe I 3d7 a4F": tablein}, 6000.0, 100, 0.03, label="Z=26 Fe I phot_data")
 
-    # parallel_map() runs a batch of more than 32 tables in the process pool, so the key must
+    # parallel_map() runs a batch of more than 32 tables in the pool, so the key must
     # reach the worker there too, and the error must come back with its message
     goodtable = np.column_stack([energyryd, np.full_like(energyryd, 1.0)])
     tables = {f"level {i}": goodtable for i in range(40)}
@@ -2388,7 +2397,7 @@ def test_readfacdata_parses_the_fac_and_cfac_column_layouts(tmp_path):
 
     # a file that neither code wrote must not parse as either of them
     (tmp_path / "other.lev.asc").write_text("SOMETHINGELSE 1.0\n" + "\n".join(f"h{i}" for i in range(1, 12)) + "\n")
-    with pytest.raises(ValueError, match="No FAC-like code"):
+    with pytest.raises(ValueError, match="names neither FAC nor cFAC"):
         readfacdata.GetLevels(tmp_path / "other.lev.asc")
 
 
@@ -2879,7 +2888,7 @@ def test_write_phixs_data_keeps_a_table_with_no_threshold():
     args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5], [2.0, 1.0]])
     targetfractions = [[(0, 1.0)], [(0, 1.0)]]
-    thresholds = np.array([13.6, np.nan])  # the second level's threshold is unknown
+    thresholds = np.array([13.6, np.nan])
 
     out = io.StringIO()
     write_phixs_data(out, 8, 1, crosssections, targetfractions, thresholds, args, io.StringIO())
@@ -3132,7 +3141,7 @@ def test_write_phixs_data_rejects_a_duplicated_target():
 
     args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
-    targetfractions = [[(0, 0.4), (1, 0.3), (0, 0.3)]]  # target level 0 occurs two times
+    targetfractions = [[(0, 0.4), (1, 0.3), (0, 0.3)]]
     thresholds = np.array([13.6])
 
     out = io.StringIO()
@@ -3149,7 +3158,7 @@ def test_write_phixs_data_rejects_a_bad_fraction_sum_before_output():
 
     args = phixs_args(optimaltemperature=3000, nphixspoints=2, phixsnuincrement=0.1)
     crosssections = np.array([[1.0, 0.5]])
-    targetfractions = [[(0, 0.4), (1, 0.3)]]  # the fractions sum to 0.7
+    targetfractions = [[(0, 0.4), (1, 0.3)]]
     thresholds = np.array([13.6])
 
     out = io.StringIO()
@@ -3260,8 +3269,10 @@ def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
     """A reader's negative upsilon says "forbidden, no value", and resolve_coll_str() must not read it as permitted.
 
     readhillierdata writes -2 for the J pairs within a term. Those pairs carry no A. A permitted
-    flag would therefore send them to van Regemorter with an oscillator strength of zero, which is
-    no collisional coupling at all. The -2 asks for Axelrod's approximation instead.
+    flag would therefore send them to the van Regemorter formula (van Regemorter 1962, ApJ, 136,
+    906-915, doi:10.1086/147445) with an oscillator strength of zero, which is no collisional
+    coupling at all. The -2 asks instead for the approximation of Axelrod (1980, PhD thesis,
+    University of California, Santa Cruz).
     """
     from artisatomic.output import resolve_coll_str
 
@@ -3303,9 +3314,9 @@ def test_resolve_coll_str_negative_upsilon_is_a_forbidden_marker():
 def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     """A reader marks a threshold it does not have in two ways, and both have to count.
 
-    The arrays start as NaN. readqubdata writes -1.0 to say that the threshold comes from the level
-    energies and not from its cross section table. Only NaN counted at first. That left every QUB
-    level with its -1 and made the calculation dead code for the one reader that asks for it.
+    The arrays start as NaN. threshold_is_known() also counts a value at or below zero as missing.
+    readqubdata wrote -1.0 at one time, and only NaN counted then. That left every QUB level with
+    its -1 and made the calculation dead code for the one reader that asks for it.
     """
     from artisatomic.iondata import IonData
     from artisatomic.output import fill_missing_phixs_thresholds
@@ -3593,7 +3604,8 @@ def test_iondata_handlers_registry():
     assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"qub", "qub_cobalt"}
     assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"qub", "qub_cobalt"}
 
-    # the two data sources with collision strengths in their own file and with cross sections
+    # cmfgen is the one data source with collision strengths in its own file. cmfgen and
+    # qub_cobalt are the two with cross sections.
     assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
         "cmfgen": readhillierdata.read_coldata,
     }
@@ -3655,9 +3667,9 @@ def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
 def test_console_script_entry_points_resolve():
     """Each console script must name a module and a function that exist.
 
-    The CI jobs start the tool with `python -m artisatomic`, so nothing else runs the console
-    scripts that pyproject.toml declares. A wrong module path there fails only when a user runs
-    the installed command, and every CI check still passes.
+    The lint job of CI starts three of the four console scripts with --help. makeartisgammaspecfiles
+    has no argument parser, so CI does not start it. A wrong module path for that script fails
+    only when a user runs the installed command.
     """
     from importlib.metadata import entry_points
 
@@ -3784,10 +3796,11 @@ def test_readhillierdata_bare_proton_has_one_state():
 
 
 def test_get_level_valence_n_glued_digit_runs():
-    """A digit run after an orbital letter is a count and an n, and the split follows one rule.
+    """A digit run after an orbital letter splits into a count and an n by one rule.
 
-    A two-digit run that ends in 0 is a two-digit n. A three-digit run is a two-digit count and
-    a one-digit n, unless that n would be 0. The QUB parser took the first digit alone as the
+    The count must fit the shell before it, the n must not start with 0, and the valence orbital
+    must have l < n. A two-digit run that fails the rule is a two-digit n. A three-digit run
+    tries a two-digit count first and a one-digit count second. The QUB parser took the first digit alone as the
     count, so 4f145d gave n = 45. The Kurucz parser always split a three-digit run as 2 + 1, so
     s210d gave n = 0.
     """
@@ -4098,7 +4111,8 @@ def test_cmfgen_fit_functions():
     assert table6[0, 1] == pytest.approx(10.0)
     assert table6[500, 1] == pytest.approx(6.0**-2.0)
 
-    # type 9: the Verner et al. (1996) H I ground-state fit gives the 6.3 Mb threshold cross section
+    # type 9: the H I ground-state fit of Verner & Yakovlev (1995, A&AS, 109, 125-133, bibcode
+    # 1995A&AS..109..125V) gives the 6.3 Mb threshold cross section
     fit = readhillierdata.VY95PhixsFitRow(
         n=1, l=0, E_th_eV=13.6, E_0=0.4298, sigma_0=5.475e4, y_a=32.88, P=2.963, y_w=0.0
     )
@@ -4290,7 +4304,7 @@ def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
 
     if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
         pytest.skip("the CMFGEN data set is not available here")
-    # the built-in selection asks every reader, and the Floers+25 reader stops without its data
+    # the built-in selection asks four readers, and the Floers+25 reader stops without its data
     if not readfloers25data.get_basepath(withforbidden=False).is_dir():
         pytest.skip("the Floers+25 test sample is not available here")
 

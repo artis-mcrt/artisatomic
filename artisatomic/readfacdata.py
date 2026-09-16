@@ -1,4 +1,10 @@
-"""Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data."""
+"""Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data.
+
+The Floers+25 paper is Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G.
+(2026), Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. FAC is the Flexible Atomic Code of Gu, M. F.
+(2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197. cFAC is its fork at
+https://github.com/fnevgeny/cfac.
+"""
 
 import os
 import re
@@ -106,6 +112,7 @@ def finish_levels(levels: pl.DataFrame) -> pl.DataFrame:
     check_no_nulls(levels, "The FAC levels file")
 
     # remove only a lone occupation of 1 ("6s1" -> "6s"); occupations of 10-14 keep their digits.
+    # The pattern acts after an s, p, d, f or g letter only.
     # The regex engine of polars supports no lookaround, so this runs in Python. A level table
     # holds a few thousand rows, so the cost is small
     lone_occupation_1 = re.compile(r"(?<=[spdfg])1(?![0-9])")
@@ -140,7 +147,7 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
     elif version_FAC == "cFAC":
         levels = GetLevels_cFAC(filename)
     else:
-        msg = "No FAC-like code detected on output file"
+        msg = f"The first line of {filename} names neither FAC nor cFAC"
         raise ValueError(msg)
 
     return check_row_count(levels, headerlines, "NLEV", "=", "The FAC levels file")
@@ -173,12 +180,9 @@ def GetLines_cFAC(filename: Path | str) -> pl.DataFrame:
 
 
 def GetLines(filename: Path | str) -> pl.DataFrame:
-    """Get a dataframe of the transitions extracted from ascii level output of cFAC and csv and dat files.
+    """Get a frame of the transitions in the ascii transition output of FAC or cFAC.
 
-    Parameters
-    ----------
-    filename : str
-        Filename of cFAC ascii output for the transitions
+    The first line of the file names the code, which selects the column layout.
     """
     headerlines: list[str] = []
     with Path(filename).open(encoding="utf-8") as f:
@@ -192,7 +196,7 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
     elif version_FAC == "cFAC":
         lines = GetLines_cFAC(filename)
     else:
-        msg = "No FAC-like code detected on output file"
+        msg = f"The first line of {filename} names neither FAC nor cFAC"
         raise ValueError(msg)
 
     return check_row_count(lines, headerlines, "NTRANS", "=", f"The {version_FAC} transitions file")
@@ -291,8 +295,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     lines_file = ion_folder / f"{ionstr}.tr.asc"
 
     if atomic_number == 92 and ion_stage in {2, 3}:
-        # U II and U III come from a separate convergence study, which sits beside the
-        # OptimizedFAC folders rather than inside them
+        # U II and U III come from a separate convergence study. Its folder Paper_Nd_U sits beside
+        # the OptimizedFACdata directory, two levels above the OptimizedFAC_lanthanides folder.
         ionstr = f"{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
         ion_folder = get_basepath().parent.parent / "Paper_Nd_U" / "FAC" / ionstr
         levels_file = ion_folder / f"{ionstr}.lev.asc"
@@ -316,7 +320,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dfalllevels, "energypercm", "Ilev", ionization_energy_in_ev, atomic_number, ion_stage, flog
     )
 
-    # the map associates the file indices with the energy-sorted level ids (0 indexed)
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
     log_and_print(flog, f"Read {len(energy_levels):d} levels")

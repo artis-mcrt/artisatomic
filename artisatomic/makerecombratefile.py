@@ -132,11 +132,11 @@ def main():
             upperionstage = lowerionstage + 1
             print(f"Z={atomic_number} {elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
 
-            if naharfilename is not None:  # use Nahar's values if available
+            if naharfilename is not None:
                 recombrates = read_nahar_rrcfile(naharfilename)
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
                 frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
-            else:  # use Chianti with ChiantiPy
+            else:
                 assert ch is not None
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)

@@ -655,9 +655,9 @@ def get_process_pool() -> ProcessPoolExecutor:
     """Get the one process pool for the whole run, and create it on the first use.
 
     A new pool costs about 0.6 s however small the batch, because "spawn" makes every worker
-    re-import this package and its numpy and polars dependencies. A build asks for one pool
-    for each ion and each photoionisation file. A pool for each call therefore spent most of its
-    time in startup. The peak memory does not change (the same workers, alive for longer).
+    re-import this package and its numpy and polars dependencies. A build calls parallel_map()
+    for each ion and for each photoionisation file. A new pool for each call would spend most of
+    its time in startup. The peak memory does not change (the same workers, alive for longer).
     """
     global _process_pool
     if _process_pool is None:
@@ -705,7 +705,7 @@ def parallel_map[ResultType](
 
     if chunksize is None:
         # Without a chunk size, items go to the workers one at a time, and the IPC for each item
-        # costs more than the work. Above 1000 items, tqdm warns about it.
+        # costs more than the work.
         chunksize = max(1, nitems // (mp.cpu_count() * 4))
 
     # disable=None means "disable on non-TTY". The bar is for a person who watches a build, and

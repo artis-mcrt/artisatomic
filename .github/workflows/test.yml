@@ -190,7 +190,7 @@ jobs:
               run: uv sync --compile-bytecode
 
             # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
-            # hydrogenic photoionisation tables from HYD/I on any run without -nophixs, so gating this
+            # hydrogenic photoionisation tables from HYD/I on any run without --nophixs, so gating this
             # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
@@ -205,7 +205,7 @@ jobs:
               run: source ./setup_cmfgen_data.sh
 
             # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
-            # no-ops when the data is there, while setup_cmfgen_data.sh curls and extracts anyway
+            # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
               uses: actions/cache@v6

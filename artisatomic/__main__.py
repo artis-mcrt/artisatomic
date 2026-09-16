@@ -1,4 +1,7 @@
-"""Entry point for `python -m artisatomic`, which `coverage run -m` can name and the console script cannot."""
+"""Entry point for `python -m artisatomic`.
+
+`coverage run -m` needs a module name, and the console script makeartisatomicfiles is not one.
+"""
 
 from artisatomic.cli import main
 

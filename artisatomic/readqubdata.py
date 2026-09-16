@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Read levels, transitions and collision strengths from the QUB (Queen's University Belfast) data."""
+"""Read levels, transitions and collision strengths from the QUB (Queen's University Belfast) data.
+
+The Sr I file comes from Dougan, D. J., McElroy, N. E., Ballance, C. P., Ramsbottom, C. A. (2025),
+MNRAS, 541, 367-383, doi:10.1093/mnras/staf1013. The Co data in co_tyndall comes from a private
+communication (see atomic-data-qub/README.txt).
+"""
 
 import re
 import string
@@ -45,8 +50,8 @@ qub_filename_pattern = ion_filename_pattern(".adf04")
 class QUBTransitionRow(t.NamedTuple):
     """One QUB bound-bound transition.
 
-    nameto is the UPPER level's name and namefrom is the LOWER level's name.
-    add_level_ids_forbidden() joins on these columns to recover upperlevel and lowerlevel.
+    nameto is the name of the upper level, and namefrom is the name of the lower level. The row
+    carries the level ids, so add_level_ids_forbidden() does not join on the names.
     """
 
     lowerlevel: int
@@ -172,9 +177,9 @@ def read_adf04(
         line = fleveltrans.readline()
         row = line.split()
         ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
-        # The calculation-details section at the end of each file has no standard format. The
-        # reader skips it when it follows the data blocks. The reader does not handle a note at
-        # any other position.
+        # A note between two 'C-' rule lines can sit inside the level block, and the reader skips
+        # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
+        # collision block.
         atomic_group_note = False
         layout = ""  # the layout of the file, from its first level line
         while True:
@@ -414,8 +419,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
     args gives -electrontemperature, which picks the tabulated collision strengths.
 
-    Covers both the newer per-ion adf04 calculations and the older Co II/III/IV data sets, which
-    have their own file layouts. Also returns the effective collision strengths, so this reader
+    The function reads the per-ion adf04 files, the Co III files in the co_tyndall directory, and
+    the single level of Co IV. The Co III and the Co IV data have their own layouts. Also returns
+    the effective collision strengths, so this reader
     supplies an upsilondict. Most other readers leave another module to fill it.
     """
     # the plain name, not the found path: read_adf04() logs the name that it receives. The
@@ -463,9 +469,9 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
 
-        # a radiative transition is a collision row with both level ids and an A-value. Before,
-        # the reader selected the rows by the width of the line. That test dropped a row that
-        # was one character shorter than the widest, and did not count it.
+        # a radiative transition is a collision row with both level ids and an A-value. The width
+        # of a line does not identify such a row, because a row can be one character shorter than
+        # the widest.
         transitiondf = collisiondf.filter(
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
@@ -745,8 +751,8 @@ def get_level_valence_n(levelname: str) -> int | None:
     valenceorbital = part[-1]
     part = part.strip(lchars.lower())
 
-    # the last run of digits of the label, with the character in front of it. The run holds
-    # digits only, because split_count_and_n() reads each digit on its own
+    # the last run of digits of the label, with the character in front of it. The pattern
+    # matches digits only, which split_count_and_n() requires.
     nmatch = re.search(r"(\D?)(\d+)$", part)
     if nmatch is None:
         return None

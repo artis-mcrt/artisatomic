@@ -6,14 +6,16 @@ It converts them into one fit form and writes one reaction for each line. The sc
 setup_chargetransfer_data.sh in that folder downloads the tables. The sources are:
 
 - The Cloudy master data files ctrecombdata.dat and ctiondata.dat (gitlab.nublado.org). They carry
-  the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) for reactions with hydrogen. Cloudy
-  adds later updates to individual reactions. The script compares each row against the KF96 paper
-  tables (transcribed below) and names each update in the comment of its line.
-- The table of Arnaud & Rothenflug (1985), A&AS, 60, 425 (AR85) for recombination with neutral
-  helium, from the ASCII file ct2.dat of D. Verner (pa.uky.edu/~verner).
-- The CDS tables of Sterling & Stancil (2011), A&A, 535, A117 (SS11). They cover the n-capture
-  elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish tabulated k(T) values and no
-  fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
+  the fits of Kingdon & Ferland (1996), ApJS, 106, 205-211, doi:10.1086/192335 (KF96) for reactions
+  with hydrogen. Cloudy adds later updates to individual reactions. The script compares each row
+  against the KF96 paper tables (transcribed below) and names each update in the comment of its
+  line.
+- The table of Arnaud & Rothenflug (1985), A&AS, 60, 425-457, bibcode 1985A&AS...60..425A (AR85)
+  for recombination with neutral helium, from the ASCII file ct2.dat of D. Verner
+  (pa.uky.edu/~verner).
+- The CDS tables of Sterling & Stancil (2011), A&A, 535, A117, doi:10.1051/0004-6361/201117584
+  (SS11). They cover the n-capture elements Ge, Se, Br, Kr, Rb, and Xe with hydrogen. SS11 publish
+  tabulated k(T) values and no fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
@@ -146,7 +148,18 @@ KF96_ION = {
 }
 
 # Notes on the AR85 helium rows where the Cloudy source uses a different expression. The notes
-# come from the Cloudy file source/atmdat_char_tran.cpp: (Z, q) -> note
+# come from the Cloudy file source/atmdat_char_tran.cpp: (Z, q) -> note. Each note goes into the
+# output file, so a note keeps the short form of the papers that Cloudy cites. The papers are:
+# - Butler & Dalgarno (1980b): ApJ, 241, 838-843, doi:10.1086/158395
+# - Sun et al.: Sun, Sadeghpour, Kirby, Dalgarno & Lafyatis (1996), Int. Rev. Phys. Chem., 15, 53-64,
+#   doi:10.1080/01442359609353174
+# - Fang & Kwong (1997) for N2+ + He: ApJ, 474, 529-531, doi:10.1086/303468
+# - Fang & Kwong (1997) for Si3+ + He: ApJ, 483, 527-530, doi:10.1086/304240
+# - Feickert (1984): Feickert, Blint, Surratt & Watson (1984), ApJ, 286, 371-376, doi:10.1086/162609
+# - Rittby (1984): Rittby, Elander, Brandas & Barany (1984), J. Phys. B, 17, L677-L681,
+#   doi:10.1088/0022-3700/17/20/005
+# - Opradolce et al. (1985): Opradolce, McCarroll & Valiron (1985), A&A, 148, 229-238,
+#   bibcode 1985A&A...148..229O
 CLOUDY_HE_NOTES = {
     (6, 2): "absent in Cloudy (no CharExcRecTo[He][C][1] entry)",
     (6, 3): "Cloudy: 4.6e-19*Te^2 (Butler & Dalgarno 1980b) = AR85",
@@ -223,13 +236,15 @@ def format_header(source_counts: Counter[str]) -> str:
         f"Cloudy ({source_counts['Cloudy']} reactions): reactions with hydrogen, from the Cloudy data files",
         "  https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctrecombdata.dat",
         "  https://gitlab.nublado.org/cloudy/cloudy/-/raw/master/data/ctiondata.dat",
-        "  They hold the fits of Kingdon & Ferland (1996), ApJS, 106, 205 (KF96) plus the later updates of",
-        "  Cloudy. The comment of a line names each update, with the values that KF96 published.",
+        "  They hold the fits of Kingdon & Ferland (1996), ApJS, 106, 205-211, doi:10.1086/192335 (KF96)",
+        "  plus the later updates of Cloudy. The comment of a line names each update, with the values",
+        "  that KF96 published.",
         f"AR85 ({source_counts['AR85']} reactions): recombination with neutral helium, from the table of",
-        "  Arnaud & Rothenflug (1985), A&AS, 60, 425, in the file ct2.dat of D. Verner",
+        "  Arnaud & Rothenflug (1985), A&AS, 60, 425-457, bibcode 1985A&AS...60..425A, in the file",
+        "  ct2.dat of D. Verner",
         "  https://www.pa.uky.edu/~verner/dima/ct/ct2.dat",
         f"SS11 ({source_counts['SS11']} reactions): Ge, Se, Br, Kr, Rb, and Xe with hydrogen, from the CDS tables of",
-        "  Sterling & Stancil (2011), A&A, 535, A117",
+        "  Sterling & Stancil (2011), A&A, 535, A117, doi:10.1051/0004-6361/201117584",
         "  https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table4.dat",
         "  https://cdsarc.cds.unistra.fr/ftp/J/A+A/535/A117/table5.dat",
         "  SS11 publish tabulated k(T) values and no fit coefficients. This script fits their tables, see",

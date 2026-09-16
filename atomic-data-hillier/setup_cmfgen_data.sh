@@ -2,7 +2,6 @@
 
 set -x
 
-# version="15nov16"
 version="21jun23"
 
 if [ ! -f atomic_data_$version.tar.xz ]; then curl -O -L https://github.com/artis-mcrt/artisatomic/releases/download/v2026.5.17/atomic_data_$version.tar.xz; fi
@@ -10,7 +9,6 @@ if [ ! -f atomic_data_$version.tar.xz ]; then curl -O -L https://github.com/arti
 md5sum -c atomic_data_$version.tar.xz.md5
 tar -xJf atomic_data_$version.tar.xz
 mv atomic/ atomic_$version/
-# rsync -a atomic_diff/ atomic_$version/
 
 # CMFGEN writes an author's name with an accent, which leaves a few files in iso-8859-1.
 # The readers expect utf-8, so convert those files once, here.

@@ -55,8 +55,8 @@ def match_hydrogenic_phixs(
     ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only. A level
     outside that range also gets no estimate, and the function does not read past the table.
     """
-    # stdout only, as before: the tested log files must not change for an ion that gets the
-    # same estimate as before. A skipped level below is new information, so that goes to the log.
+    # stdout only: the warning concerns the whole ion, and the ion log holds the messages about
+    # single levels. A skipped level below goes to the log.
     if get_level_valence_n is None:
         print(
             f"WARNING: no hydrogenic photoionisation cross sections, because no parser gives the principal"
@@ -110,6 +110,7 @@ def match_hydrogenic_phixs(
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
+        # (Kramers 1923, Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244)
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
         photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
@@ -196,7 +197,7 @@ def reduce_phixs_tables[KeyType](
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
-    The energy unit does not matter. The function reads the first (lowest) energy point as the
+    The energies must be in Rydberg. The function reads the first (lowest) energy point as the
     threshold energy.
 
     The result keeps the key type: callers index the tables by level name or by level id.
@@ -232,8 +233,6 @@ def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np
     return np.sum(arr_dx * (arr_y[:, 1:] + arr_y[:, :-1]) / 2.0, axis=1)
 
 
-# This function downsamples the photoionisation cross section table to a regular grid. It keeps
-# the recombination rate integral constant if the temperature matches.
 def reduce_phixs_tables_worker(
     optimaltemperature: float,
     xgrid: npt.NDArray[np.float64],
@@ -250,7 +249,7 @@ def reduce_phixs_tables_worker(
     nu_low is the lowest frequency of the bin. The constant factor exp(h nu_low / k T) cancels in
     the ratio of the two integrals, so the subtraction leaves the average unchanged. It also keeps
     the weight at 1.0 or below. The absolute weight underflows to zero for h nu / k T > 745, which
-    is every bin above 16 eV at -optimaltemperature 1000.
+    is every bin above about 64 eV at -optimaltemperature 1000.
 
     xgrid is the nu/nu_edge grid of the output, which reduce_phixs_tables() builds once for the
     whole batch. It holds one point more than the output, to close the last bin.
@@ -343,8 +342,7 @@ def reduce_phixs_tables_worker(
         arr_sigma_out[arr_past] = weighted_averages(edges_energyryd, edges_sigma)
 
     if np.any(arr_resample):
-        # 51 points from one bin edge to the other, so the integrals cover the whole bin. With
-        # endpoint=False the last two percent of every resampled bin were missing.
+        # 51 points from one bin edge to the other, so the integrals cover the whole bin
         grid_energyryd = np.linspace(arr_enlow[arr_resample], arr_enhigh[arr_resample], num=51, axis=-1)
         # np.interp holds the last cross section constant past the table's end. Apply the same
         # power-law decay that the interval edges use, so a bin that straddles the table end
@@ -368,8 +366,7 @@ def reduce_phixs_tables_worker(
         sample_energyryd = tablein_energyryd[arr_startindex[i] : arr_endindex[i]]
         sample_sigma = tablein_sigma[arr_startindex[i] : arr_endindex[i]]
         if arr_add_low[i]:
-            # np.interp, not scipy's interp1d: identical linear interpolation (verified
-            # bit-for-bit) without a scipy call per interval edge
+            # np.interp and not scipy: scipy is an optional extra of this package
             sample_energyryd = np.concatenate(([enlow], sample_energyryd))
             sample_sigma = np.concatenate(([np.interp(enlow, tablein_energyryd, tablein_sigma)], sample_sigma))
         if arr_add_high[i]:
