@@ -2119,7 +2119,7 @@ def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
     ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
-        adf04_sample_path(), flog, electrontemperature=5010.0
+        adf04_sample_path(), flog, 5010.0, 27, 3
     )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
@@ -2157,7 +2157,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
@@ -2172,7 +2172,7 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(upsilondict) == 235
 
 
@@ -4132,11 +4132,11 @@ def test_read_adf04_selects_the_nearest_temperature():
     per element chose 5010 K before, whatever the command line said.
     """
     flog = io.StringIO()
-    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=6000.0)
+    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
     assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
 
     flog = io.StringIO()
-    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=1000.0)
+    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
     assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)

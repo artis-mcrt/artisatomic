@@ -33,6 +33,7 @@ from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
+from artisatomic.levelnames import convert_eissner_to_standard
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
@@ -151,8 +152,52 @@ def adf04_number(text: str) -> float:
     return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
 
 
+float_with_decimal_regex = r"\d+\.\d*"
+
+adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({float_with_decimal_regex})\(.*\)")
+
+# Finds: qub_id, config, 2+1, l, j, energy_above_ground
+# TODO: using .* to get the config name isn't great but they're so inconsistent so there's not really another way to reasonably do it
+adf04_level_regex = re.compile(
+    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\d+)\(\s*({float_with_decimal_regex})\)\s+({float_with_decimal_regex})"
+)
+
+
+# def _evaluate_adf04_header(line: str) -> float:
+def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: str | Path) -> float:
+    read_atomic_number, read_ion_stage, read_energy = adf04_header_regex.findall(line)[0]
+    read_atomic_number = int(read_atomic_number)
+    read_ion_stage = int(read_ion_stage)
+    read_energy = float(read_energy)
+
+    assert atomic_number == read_atomic_number, (
+        f"Atomic number ({atomic_number}) does not match that read from {filepath} ({read_atomic_number})"
+    )
+    assert ion_stage == read_ion_stage, (
+        f"Ion stage ({ion_stage}) does not match that read from {filepath} ({read_ion_stage})"
+    )
+
+    return read_energy * hc_in_ev_cm
+
+
+def _process_config(config: str) -> tuple[str, bool]:
+    # Second return item is True if the configuration had to be converted from Eissner to standard notation
+
+    config = config.strip()
+
+    # TODO: would be nice to have a more robust way of checking this
+    # if config.isnumeric():
+    if all(config[i] == "5" for i in range(0, len(config), 3)):
+        return convert_eissner_to_standard(config), True
+
+    # Is probably fine to just call config.lower(), but this leaves the term uppercase to be consistent
+    config = "(".join([part.lower() if i == 0 else part for i, part in enumerate(config.split("("))])
+
+    return config, False
+
+
 def read_adf04(
-    filepath: str | Path, flog, electrontemperature: float
+    filepath: str | Path, flog, electrontemperature: float, atomic_number: int, ion_stage: int
 ) -> tuple[float, list[QUBEnergyLevel], dict[tuple[int, int], float], pl.DataFrame]:
     """Read levels and effective collision strengths from an ADAS adf04 file.
 
@@ -173,15 +218,14 @@ def read_adf04(
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
     log_and_print(flog, f"Reading {path_for_log(filepath)}")
+    uses_eissner_notation = False
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
-        row = line.split()
-        ionization_energy_ev = float(row[4].split("(")[0]) * hc_in_ev_cm
+        ionization_energy_ev = _evaluate_adf04_header(line, atomic_number, ion_stage, filepath)
         # A note between two 'C-' rule lines can sit inside the level block, and the reader skips
         # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
         # collision block.
         atomic_group_note = False
-        layout = ""  # the layout of the file, from its first level line
         while True:
             line = fleveltrans.readline()
             if not line or is_adf04_terminator(line):
@@ -192,35 +236,16 @@ def read_adf04(
             if atomic_group_note:
                 continue
 
-            if not layout:
-                layout = adf04_level_layout(line)
-            if layout == "tyndall":
-                config = line[5:21].strip()
-                energylevel = QUBEnergyLevel(
-                    config,
-                    int(line[:5]),
-                    int(line[25:26]),
-                    int(line[27:28]),
-                    float(line[29:33]),
-                    float(line[34:55]),
-                    0.0,
-                    0,
-                )
+            qub_id, config, two_plus_one, l, j, energy_above_gs = adf04_level_regex.findall(line)[0]
+            config, config_was_converted = _process_config(config)
+            if not uses_eissner_notation and config_was_converted:
+                uses_eissner_notation = True
+                log_and_print(flog, "Eissner notation detected for electron configuration")
 
-            else:
-                # the whole configuration, with any parent term and any orbital after it: a name
-                # cut at the parent term lost the orbital that followed it
-                config = line[5:27].strip()
-                energylevel = QUBEnergyLevel(
-                    config,
-                    int(line[:5]),
-                    int(line[29:30]),
-                    int(line[31:32], 16),
-                    float(line[33:37]),
-                    float(line[39:59]),
-                    0.0,
-                    0,
-                )
+            energylevel = QUBEnergyLevel(
+                config, int(qub_id), int(two_plus_one), int(l), float(j), float(energy_above_gs), 0.0, 0
+            )
+
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
             # L in their own columns (read just above). A cut of a term off the end would lose
             # the last orbital of '3S2 3P6 3D5 4P1'. It would also read the bare '5s2' as a term
@@ -431,7 +456,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
     if (atomic_number == 27) and (ion_stage == 3):
         # Co III takes its A-values from a separate file, so the collision rows are not needed
         ionization_energy_ev, qub_energylevels, upsilondict, _ = read_adf04(
-            tyndall_co3_path / "adf04_v1", flog, args.electrontemperature
+            tyndall_co3_path / "adf04_v1", flog, args.electrontemperature, atomic_number, ion_stage
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
@@ -464,7 +489,7 @@ def read_qub_levels_and_transitions(atomic_number, ion_stage, flog, args):
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
         # qubpath. So an adf04 file that discovery registers is one that this reader accepts.
         ionization_energy_ev, qub_energylevels, upsilondict, collisiondf = read_adf04(
-            atom_filepath, flog, args.electrontemperature
+            atom_filepath, flog, args.electrontemperature, atomic_number, ion_stage
         )
 
         qub_transitions: list[QUBTransitionRow] | pl.DataFrame = []
