@@ -159,7 +159,7 @@ adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({float
 # Finds: qub_id, config, 2+1, l, j, energy_above_ground
 # TODO: using .* to get the config name isn't great but they're so inconsistent so there's not really another way to reasonably do it
 adf04_level_regex = re.compile(
-    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\d+)\(\s*({float_with_decimal_regex})\)\s+({float_with_decimal_regex})"
+    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\w+)\(\s*({float_with_decimal_regex})\)\s+({float_with_decimal_regex})"
 )
 
 
@@ -237,6 +237,7 @@ def read_adf04(
                 continue
 
             qub_id, config, two_plus_one, l, j, energy_above_gs = adf04_level_regex.findall(line)[0]
+            l = int(l, 16)
             config, config_was_converted = _process_config(config)
             if not uses_eissner_notation and config_was_converted:
                 uses_eissner_notation = True
