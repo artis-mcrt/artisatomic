@@ -45,7 +45,7 @@ def main():
     with Q <= 0 or with no positive lifetime, and an alpha row with no positive half-life. It
     writes the gamma lines of the ground-level decay of each nuclide to
     artis_files/data/gamma_<nuclide>.txt under the repository root. A nuclide with no gamma line
-    gets no file.
+    gets no new file. The script does not delete a file from an earlier run.
     """
     outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
