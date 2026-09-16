@@ -170,12 +170,12 @@ def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepa
     read_ion_stage = int(read_ion_stage)
     read_energy = float(read_energy)
 
-    assert atomic_number == read_atomic_number, (
-        f"Atomic number ({atomic_number}) does not match that read from {filepath} ({read_atomic_number})"
-    )
-    assert ion_stage == read_ion_stage, (
-        f"Ion stage ({ion_stage}) does not match that read from {filepath} ({read_ion_stage})"
-    )
+    if atomic_number != read_atomic_number:
+        msg = f"Atomic number ({atomic_number}) does not match that read from {filepath} ({read_atomic_number})"
+        raise ValueError(msg)
+    if ion_stage != read_ion_stage:
+        msg = f"Ion stage ({ion_stage}) does not match that read from {filepath} ({read_ion_stage})"
+        raise ValueError(msg)
 
     return read_energy * hc_in_ev_cm
 
