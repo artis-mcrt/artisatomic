@@ -143,7 +143,7 @@ def main() -> None:
 
     log_folder = Path(args.output_folder) / args.output_folder_logs
     if log_folder.exists():
-        # delete any existing log files
+        # a log of an ion that this run does not select would otherwise stay beside the new logs
         for logfile in sorted(log_folder.glob("*.txt")):
             logfile.unlink(missing_ok=True)
             print("deleting", logfile)

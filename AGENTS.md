@@ -23,7 +23,7 @@ Use these terms and spellings in the prose. Identifiers, output-file formats and
 
 ## What this project is
 
-artisatomic converts published atomic data (for example CMFGEN, NORAD, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool is not user friendly by design. To change ions or data sources, edit the Python code or supply an ion handlers JSON file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers JSON file, because that file selects the ions itself.
+artisatomic converts published atomic data (for example CMFGEN, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an ion handlers JSON file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers JSON file, because that file selects the ions itself.
 
 The command-line scripts (`makeartisatomicfiles`, `makeartisrecombratefile`, `makeartischargetransferfile`, and `makeartisgammaspecfiles`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
 
@@ -40,7 +40,7 @@ extra. The command `uv sync --frozen --extra chianti` adds ChiantiPy, matplotlib
 `makeartisrecombratefile` needs for an ion with no Nahar file. The type checkers pass without the
 extra, because `makerecombratefile.py` imports ChiantiPy through `importlib.import_module()`.
 
-Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, QUB, MONS and Floers+25 tests read committed samples, so the full test suite needs only the CMFGEN download. The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
+Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, QUB, MONS and Floers+25 tests read committed samples. The full test suite therefore needs the CMFGEN download and the extracted Floers+25 sample (`tar -xJf testdata.tar.xz` in `atomic-data-floers25`). The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
 
 ## Commands
 
@@ -52,7 +52,7 @@ Run all commands through uv so they use the locked environment:
 - Type checks: `uv run pyrefly check`, `uv run ty check`
 - Pre-commit hooks: `prek install` once, then hooks run on each commit
 
-CI (`.github/workflows/test.yml`) runs the format check, both type checks, the tests, and the output checksums. Run them locally before you push.
+CI (`.github/workflows/test.yml`) runs the lint check, the format check, both type checks, the prek hooks, the tests, and the output checksums. Run them locally before you push.
 
 ## Output checksums
 
@@ -72,7 +72,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
 - `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
-- `tests/` contains test configurations and reference checksums for each data source. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
+- `tests/` contains test configurations and reference checksums for the data sources that CI covers. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
 
 ## Code style
 

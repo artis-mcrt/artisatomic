@@ -1,4 +1,8 @@
-"""Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated."""
+"""Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated.
+
+Paper: Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026),
+Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. Data set: doi:10.5281/zenodo.15835360.
+"""
 
 import re
 import string

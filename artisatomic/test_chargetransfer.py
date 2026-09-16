@@ -1,6 +1,6 @@
 """Tests of makechargetransferfile, the generator of the charge transfer file for ARTIS.
 
-Most tests build small source tables in memory and patch read_source(). One test reads the
+Most tests build small source tables in memory and patch read_source(). Two tests read the
 committed files in atomic-data-chargetransfer, so a change of their format fails here.
 """
 

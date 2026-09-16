@@ -1,4 +1,8 @@
-"""Read helium levels and transitions from the Boyle AOIFE data set."""
+"""Read helium levels and transitions from the Boyle AOIFE data set.
+
+The data set belongs to the helium work of Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W.
+(2017), A&A, 599, A46, doi:10.1051/0004-6361/201629712.
+"""
 
 import typing as t
 from functools import cache
@@ -13,10 +17,10 @@ datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
 def get_aoife_dataset():
     """Open the AOIFE HDF5 file, once, on first use.
 
-    The open happens here and not at import. `import artisatomic` pulls this module in. So an
-    open at import held a file handle for the whole of every run, whichever handlers the user
-    selected. Returns None when the file (or h5py) is absent. The readers below use that to
-    report that this data set is unavailable.
+    The open happens here and not at import. iondata.py imports this module for the handler
+    registry. So an open at import would hold a file handle for the whole of every run, whichever
+    handlers the user selected. Returns None when the file (or h5py) is absent. The readers below
+    use that to report that this data set is unavailable.
     """
     try:
         import h5py
@@ -93,9 +97,8 @@ def read_levels_data(atomic_number, ion_stage):
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
 
-        # named fields, not *rowtuple plus three positional extras. No type checker could count
-        # through those (they needed three suppressions), and they let a bare 0 become the parity
-        # of every level
+        # named fields, not *rowtuple plus three positional extras: a bare 0 in the extras would
+        # become the parity of every level
         energy_levels.append(
             EnergyLevelRow(
                 atomic_number=atomic_num,
@@ -106,10 +109,9 @@ def read_levels_data(atomic_number, ion_stage):
                 # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196)
                 energyabovegsinpercm=energy_ev / hc_in_ev_cm,
                 # No parity: this data set supplies none. add_level_ids_forbidden() marks a
-                # transition forbidden when its two levels share one parity. So a fixed 0 made every
-                # transition of the ion forbidden (coll_str -2). Helium has many permitted ones. A
-                # null parity never matches another, here as in the other readers whose data set has
-                # no parities.
+                # transition forbidden when its two levels share one parity, and helium has many
+                # permitted ones. A null parity never matches another, here as in the other readers
+                # whose data set has no parities.
                 parity=None,
                 # int() as read_lines_data() does, so the two agree on the name whatever dtype the
                 # file stores the level number in
@@ -160,7 +162,6 @@ def read_lines_data(atomic_number, ion_stage):
 
         if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
             continue
-        # the file's level numbers are already zero-based, the same as the level ids in memory.
         # transitiondata.txt has the lower id first, so this code swaps a pair that the file lists
         # in the reverse order.
         levelid_lower = min(int(level_number_lower), int(level_number_upper))

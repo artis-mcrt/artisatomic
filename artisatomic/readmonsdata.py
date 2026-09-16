@@ -1,6 +1,8 @@
-"""Read levels and transitions from the Carvajal Gallego et al. (University of Mons) lanthanide V-VII data set.
+"""Read levels and transitions from the University of Mons lanthanide V-VII data set.
 
-Data: https://doi.org/10.5281/zenodo.10635803 (see atomic-data-mons/readme.txt for the file formats).
+Paper: Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., Quinet, P. (2024), A&A, 685, A91,
+doi:10.1051/0004-6361/202347723. Data: https://doi.org/10.5281/zenodo.10635803 (see
+atomic-data-mons/readme.txt for the file formats).
 """
 
 import zipfile
@@ -179,7 +181,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     # not.
     A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
 
-    # level ids are zero-based in memory
     dftransitions = pl.DataFrame(
         {"lowerlevel": lowerlevels, "upperlevel": upperlevels, "A": A_ul}, schema=empty_transitions_schema
     )

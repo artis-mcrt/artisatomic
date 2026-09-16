@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download ENDF decay data and write the gamma spectra that ARTIS uses."""
+"""Download the NuDat3 decay tables of the NNDC and write the gamma spectra that ARTIS uses."""
 
 import io
 import math
@@ -39,9 +39,13 @@ def normalise_parent_elevel() -> pl.Expr:
 
 
 def main():
-    """Fetch a NuDat3 decay table for every nuclide in betaminusdecays.txt and alphadecays.txt.
+    """Fetch a NuDat3 decay table for each nuclide in betaminusdecays.txt and alphadecays.txt.
 
-    The script writes the gamma lines of each nuclide to artis_files/data/gamma_<nuclide>.txt.
+    The script reads the two files from the artistools data directory. It skips a beta-minus row
+    with Q <= 0 or with no positive lifetime, and an alpha row with no positive half-life. It
+    writes the gamma lines of the ground-level decay of each nuclide to
+    artis_files/data/gamma_<nuclide>.txt under the repository root. A nuclide with no gamma line
+    gets no new file. The script does not delete a file from an earlier run.
     """
     outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
@@ -114,7 +118,6 @@ def main():
                     continue
 
                 textdata = textdata.replace("**********", "0.")
-                # match
 
                 startindex = textdata.find("<pre>") + len("<pre>")
                 endindex = textdata.rfind("</pre>")

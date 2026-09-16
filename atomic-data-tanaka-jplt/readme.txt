@@ -1,3 +1,6 @@
+# artisatomic note: setup_jplt_data.sh builds data_v2.1, and readme_v2.1.txt describes that version.
+# The text below is the upstream readme of version 1.0. The paper is Tanaka, M., Kato, D., Gaigalas, G.,
+# Kawaguchi, K. (2020), MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576.
 # Japan-Lithuania Opacity Database for Kilonova (version 1.0)
 # M. Tanaka, D. Kato, G. Gaigalas, K. Kawaguchi, "Systematic opacity calculations for kilonovae" Monthly Notices of the Royal Astronomical Society 496 (2020) 1369-1392.
 

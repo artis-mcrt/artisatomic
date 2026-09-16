@@ -1,8 +1,11 @@
-"""Read levels and transitions from the DREAM database of lanthanides and actinides."""
+"""Read levels and transitions from the DREAM database of lanthanides and actinides.
+
+DREAM is the Database on Rare Earths At Mons university: Quinet, P., Palmeri, P. (2020), Atoms, 8,
+18, doi:10.3390/atoms8020018.
+"""
 
 # the pandas HDFStore format holds a block of Python objects as a pickle, so this module must
-# unpickle it. The file comes from the DREAM parser that the user runs, as every other data
-# file of this package does
+# unpickle it. The file comes from the DREAM parser that the user runs, so it is a trusted input
 import pickle  # ruff: ignore[suspicious-pickle-import]
 from pathlib import Path
 
@@ -184,8 +187,8 @@ def read_levels_data(dflines):
     Each line carries both of its levels inline, so the levels are the distinct lower and upper
     levels over all lines, sorted by energy.
     """
-    # a set for the membership test, not `not in energy_levels`: that was a linear scan of the
-    # list per candidate. The build of the level list then cost O(levels^2)
+    # a set for the membership test, not `not in energy_levels`: a list scan for each candidate
+    # costs O(levels^2) for the build of the level list
     seen: set[EnergyLevel] = set()
     energy_levels = []
 
@@ -207,7 +210,7 @@ def read_lines_data(dfiondata):
     """Convert DREAM lines to transitions referencing zero-based level ids."""
     transitions = []
 
-    # numpy columns, not iterrows(): that built a Series for each of the 10^5 lines of an ion.
+    # numpy columns, not iterrows(): iterrows() builds a Series for each of the 10^5 lines of an ion.
     # read_levels_data() sorted the levels by energy, and transitiondata.txt has the lower id
     # first. So this code swaps a pair that the file lists in the reverse order.
     lowerindices = np.minimum(dfiondata["Lower_index"].to_numpy(), dfiondata["Upper_index"].to_numpy())
@@ -228,7 +231,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     charge = ion_stage - 1
     dfiondata = dreamdata.filter((pl.col("Z") == atomic_number) & (pl.col("C") == charge))
     # not an assert: an ion that the database does not hold would give an empty level list and an
-    # ion with no lines in the output. The pandas reader that this replaced raised a KeyError
+    # ion with no lines in the output
     if dfiondata.is_empty():
         msg = f"The DREAM database has no lines for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
@@ -236,8 +239,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels = read_levels_data(dfiondata)
 
-    # a dict, not energy_levels.index(): that scanned the level list once per level of every
-    # line. The id resolution then cost O(lines x levels) for a database of Z >= 57 lanthanides
+    # a dict, not energy_levels.index(): a list scan for each level of every line costs
+    # O(lines x levels)
     levelid_of_leveltuple = {leveltuple: levelid for levelid, leveltuple in enumerate(energy_levels)}
 
     def get_level_index(row, prefix):

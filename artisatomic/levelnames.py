@@ -36,7 +36,7 @@ def _split_orbitals(instr: str) -> list[str]:
     Parent terms keep their parentheses, so callers can tell them from occupied orbitals. The
     caller has already removed any term from the end, so all of this is configuration.
     """
-    max_n = 20  # maximum possible principal quantum number n
+    max_n = 20  # is_two_digit_n() accepts an n below this value only
 
     def is_two_digit_n(strn: str) -> bool:
         """Test whether two digits are a principal quantum number, not one digit of another number.
@@ -128,9 +128,9 @@ def interpret_configuration(
     else:
         term_parity = [0, 1][(instr[-1] == "o")]
         if all(char not in lchars for char in instr):
-            # This will be an incorrectly formatted QUB file with no term
+            # a name with no term letter. The QUB reader passes hasterm=False and never reaches this.
             if warn:
-                print("Warning: Check the format of the QUB file")
+                print(f"WARNING: the level name '{instr_orig}' has no term letter")
         else:
             # drop the parity letter, so the term parse below sees the term only
             instr = instr[:-1]
@@ -145,13 +145,13 @@ def interpret_configuration(
             instr = instr[:-1]
             break
         if not str.isdigit(instr[-1]):
-            term_parity += (
-                2  # this accounts for names such as '3d7(4F)6d_5Pbe' in the Hillier levels. These must not match
-            )
+            # A letter between the term and the parity letter, as in CMFGEN's '3d7(4F)6d_5Pbe', adds
+            # 2 to the parity. Such a level then matches no level of parity 0 or 1.
+            term_parity += 2
         instr = instr[:-1]
         if all(char not in lchars for char in instr):
             if warn:
-                print("Warning: Check the format of the QUB file")
+                print(f"WARNING: the level name '{instr_orig}' has no term letter")
             break
 
     if instr and str.isdigit(instr[-1]):
@@ -191,7 +191,7 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
     l = 17 < 18 would pass the test. The walk yields those with merged=True, so callers can tell
     the two cases apart.
 
-    One token can hold more than one orbital, because interpret_configuration() keeps a
+    One token can hold more than one orbital, because _split_orbitals() keeps a
     digit-letter-letter run together. '4sp(3P)_7Po' gives '4sp', which is 4s and 4p with one
     shared principal quantum number. The walk therefore takes each letter in turn, with the
     digits that follow it as its occupation and 1 where it has none.
@@ -240,7 +240,7 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
 
 
 def has_merged_orbital(instr, hasterm: bool = True) -> bool:
-    """Whether the configuration contains a merge marker, i.e. an orbital with l >= n.
+    """Whether the configuration contains a merge marker: a w or z orbital, or an orbital with l >= n.
 
     CMFGEN writes its merged high-l levels in this way ('2s2_13w_2W', '10z_2Z'). The letter
     stands for several l of both parities at once. The level therefore has no parity, not an
@@ -279,7 +279,8 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     label. The digits then hold n only. Otherwise they start with the electron count of that
     orbital. The function takes a count-plus-n reading only when it is physical: the count fits
     the previous orbital, and the valence orbital has l < n. So "5s111s1" (adf04, 5s1 11s1) gives
-    11 and not 1. Returns None when no reading is physical, or when the run is too long.
+    11 and not 1. For two digits, the function falls back to a two-digit n. For three digits, it
+    returns None when no reading is physical. A run of four or more digits gives None.
 
     Every caller matches the run of digits with a pattern, so the run holds digits only.
     """

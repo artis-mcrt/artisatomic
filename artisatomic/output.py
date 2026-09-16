@@ -85,8 +85,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     - Delta J: E1 has |J_upper - J_lower| <= 1, and J = 0 -> J = 0 is forbidden outright.
 
     Either rule is sufficient on its own, so the function ORs the two. Neither rule can fire on a
-    level that does not carry the quantum number it needs. A data set that gives no J thus keeps
-    the behaviour it had before this code read J at all.
+    level that does not carry the quantum number it needs. A data set that gives no J gets the
+    Laporte rule only.
 
     The delta J rule yields to a transition the source made strong enough to be E1, as
     strength_asserts_e1() judges it. Some files disagree with their own J labels. CMFGEN's
@@ -95,8 +95,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     reaches 0.695.
 
     To call such a line forbidden would give a strong line the forbidden collision approximation,
-    which is worse than the label it corrects. Instead, write_output_files() logs those. A weak
-    line proves nothing, so the J labels decide it.
+    which is worse than the label it corrects. Instead, log_deltaj_contradictions() reports
+    those. A weak line proves nothing, so the J labels decide it.
 
     A null parity means the level has no definite parity. Either the level merges sub-levels of
     both parities (CMFGEN's '1___' and '2s2_13w_2W'), or the reader could not read one from the
@@ -104,9 +104,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     and not to true, so an absent parity cannot match another absent one. Readers need no
     sentinel number to spell it.
 
-    A null J means the same, and the casts below resolve both in the same way. Anything a reader
-    could not give a number for casts to null and disables only its own rule. Examples are a NaN
-    and a text value that a reader could not parse as a number.
+    A null J means the same. The casts below give null for a text value that a reader could not
+    parse as a number. A NaN J stays NaN, and every comparison with NaN gives false. Each case
+    disables only its own rule.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -133,8 +133,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             raise ValueError(msg)
 
     if "forbidden" not in dftransitions_ion.columns:
-        # The cast gives null for every value that is not a number. A NaN therefore cannot compare
-        # equal to itself, and a string column cannot raise in a comparison with numbers.
+        # The cast gives null for a text value, so a string column cannot raise in a comparison
+        # with numbers. A NaN survives the float cast, and a comparison with NaN gives false.
         knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
@@ -171,8 +171,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
         dftransitions_ion = (
             dftransitions_ion
-            # The delta J rule gets its own column, because write_output_files() reports the
-            # transitions that break it while the source still gives them an f.
+            # The delta J rule gets its own column, because log_deltaj_contradictions() reports
+            # the transitions that break it while the source still gives them an f.
             .with_columns(
                 breaksdeltaj=(
                     ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
@@ -231,8 +231,10 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     mark therefore sets the flag, and not the parities alone: a merged term has no parity, so the
     parities alone would leave the pair permitted.
 
-    Those pairs carry no A, so van Regemorter would give an oscillator strength of zero, which is
-    no collisional coupling at all. The -2 asks instead for Axelrod's approximation.
+    Those pairs carry no A, so the van Regemorter formula (van Regemorter 1962, ApJ, 136, 906-915,
+    doi:10.1086/147445) would give an oscillator strength of zero, which is no collisional coupling
+    at all. The -2 asks instead for the approximation of Axelrod (1980, PhD thesis, University of
+    California, Santa Cruz).
 
     coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
     reaches the -1, because a negative one has already made the flag true.
@@ -396,7 +398,8 @@ def write_adata(
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    # every reader names its own levels, and that name is the whole level comment
+    # the level name is the whole level comment. A frame with no levelname column gets an empty
+    # comment.
     dfout = (
         dfenergylevels if "levelname" in dfenergylevels.columns else dfenergylevels.with_columns(levelname=pl.lit(""))
     )

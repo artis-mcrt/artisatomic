@@ -162,10 +162,10 @@ ions_data |= {
     # P
     (15, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # Ti IV: the 19apr23 files hold 126 levels and 1000 transitions, but the collision file is a
-    # header only. The 18oct00 files hold a single level. Not included.
+    # header only. The 18oct00 file tkiv_osc.dat declares the same 126 levels. Not included.
     # (22, 4): IonFiles("19apr23", "osc_data", phot_data_names(1), "col_data"),
     # V (only V I is in CMFGEN and it has a single level)
-    # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot.dat",), "col_guess.dat"),
+    # (23, 1): IonFiles("27may10", "vi_osc", ("vi_phot",), "col_guess.dat"),
     # Fe
     # REV_PHOT_DATA names its levels with an older convention. It matches only 15 of the 567
     # distinct non-J names of osc_data, which is 45 of the 1578 levels. phot_data_A matches all
@@ -211,7 +211,7 @@ atomic_number_to_hillier_code = {elsymbols.index(k): v for (k, v) in elsymboltoh
 
 
 class VY95PhixsFitRow(t.NamedTuple):
-    """One Verner & Yakovlev (1995) analytic photoionisation cross section fit."""
+    """One analytic photoionisation cross section fit of Verner & Yakovlev (1995), A&AS, 109, 125-133."""
 
     n: int
     l: int
@@ -262,7 +262,8 @@ def get_level_parity(config: str) -> int:
     - its merged n-levels ('1___', '13___', g = 2n^2);
     - He I's merged singlets and triplets ('8SNG', '8TRP').
 
-    Those are -1, which add_level_ids_forbidden() never counts as a parity match.
+    Those are -1. read_levels_and_transitions_from_file() stores them as null, and
+    add_level_ids_forbidden() never counts a null as a parity match.
     """
     config = config.split("[", maxsplit=1)[0]
     if not config:
@@ -352,7 +353,7 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
 
     # a malformed name just means the term is unreadable, which says nothing about the parity
     try:
-        twosplusone = int(config[lposition - 1])  # could this be two digits long?
+        twosplusone = int(config[lposition - 1])  # one digit: a multiplicity of 10 or more would need two
     except ValueError:
         return (-1, -1, parity)
 
@@ -368,7 +369,8 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
     between them keep their dashes, which the exponents of the f and the A values need.
 
     The file marks no end of the table. A line that is not a transition, e.g. a title, gives
-    parts that fit neither layout below, and the filter drops it.
+    parts that fit neither layout below, and the filter drops it. The parser stops at a second
+    'Oscillator strengths' title, because a file can hold two tables.
     """
     # collect once: the frame comes from scan_csv, and every collect() of the lazy frame reads
     # and decompresses the file again. The table-start search and the parse below share one read.
@@ -424,9 +426,10 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
             lambdaangstrom=as_float(4).fill_null(-1.0),
             i=part(5).str.strip_chars_end("-").cast(pl.Int64),
             j=part(6).cast(pl.Int64),
-            # the when() masks the id column before the cast, not after. The other layout holds a
-            # bar there, and polars evaluates both arms of a when(). Only the 8-part layout carries
-            # the id there. In the wide layout the column holds a bar, so the position fills in.
+            # the when() masks the id column before the cast, not after. The other layout can hold
+            # a bar there, and polars evaluates both arms of a when(). Only the 8-part layout
+            # supplies the id. In the wide layout token 7 holds the id in some files and a bar in
+            # others, so the reader numbers those rows itself.
             hilliertransitionid=pl.when(pl.col("partcount") == 8)
             .then(part(7))
             .cast(pl.Int64)
@@ -455,9 +458,10 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion, and rewrite its file as utf-8 first if CMFGEN wrote it in iso-8859-1.
 
-    Python raises a UnicodeDecodeError for such a file, and polars raises a ComputeError. The
-    except clause covers both reads of read_levels_and_transitions_from_file().
-    rewrite_file_as_utf8() converts the file once, so the second call reads it.
+    Python raises a UnicodeDecodeError for such a file, and polars raises a ComputeError. That
+    function reads the file twice, once in Python and once with polars. The except clause covers
+    both reads of the first call. rewrite_file_as_utf8() converts the file once, so the second
+    call reads it.
     """
     try:
         return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
@@ -691,7 +695,6 @@ def read_levels_and_transitions_from_file(
         msg = f"{filename} declares {expected_transitions} transitions but has {dftransitions.height}"
         raise ValueError(msg)
 
-    # filter out levels with no transitions
     names_with_transitions = pl.concat([dftransitions["namefrom"], dftransitions["nameto"]]).unique()
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
         # implode(): polars 1.44 deprecates is_in() with a bare Series of the same dtype
@@ -701,24 +704,28 @@ def read_levels_and_transitions_from_file(
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
 
 
-# the energy grid of the analytic fits (types 1, 5, 6, 7 and 9) as a multiple of the threshold
-# energy. The grid has 1000 points from the threshold to 21 times the threshold, denser near the threshold.
+# the energy grid of the fit types 1, 4, 5, 6, 7 and 9, as a multiple of the threshold energy. The
+# grid has 1000 points from the threshold to 20.96 times the threshold, denser near the threshold.
 fit_energy_div_threshold = 1 + 20 * (np.arange(0, 1.0, 0.001) ** 2)
 
-# cross section types
+# the labels of the cross section types for the log. Lines 10 to 18 of raw_subphot.f list the
+# types 1 to 9. The references are Leibowitz, E. M. (1972), JQSRT, 12, 299-306,
+# doi:10.1016/0022-4073(72)90048-9; Peach, G., Saraph, H. E., Seaton, M. J. (1988), J. Phys. B, 21,
+# 3669-3683, doi:10.1088/0953-4075/21/22/006; Verner, D. A., Yakovlev, D. G. (1995), A&AS, 109,
+# 125-133, bibcode 1995A&AS..109..125V.
 phixs_type_labels = {
     0: "Constant (always zero?) [constant]",
     1: "Seaton formula fit [sigma_o, alpha, beta]",
     2: "Hydrogenic split l (z states, n > 11) [n, l_start, l_end]",
     3: "Hydrogenic pure n level (all l, n >= 13) [scale, n]",
-    4: "Leibowitz (1972, JQSRT, 12, 299) polynomial fit for C IV s and p states (6 numbers)",
-    5: "Opacity project fits (from Peach, Saraph, and Seaton (1988) (5 numbers)",
+    4: "Leibowitz (1972, JQSRT, 12, 299-306) polynomial fit for C IV s and p states (6 numbers)",
+    5: "Opacity Project fits of Peach, Saraph and Seaton (1988, J. Phys. B, 21, 3669-3683) (5 numbers)",
     6: "Hummer fits to the opacity cross-sections for HeI",
     7: "Modified Seaton formula fit (cross section zero until offset edge)",
     8: "Modified hydrogenic split l (cross-section zero until offset edge) [n,l_start,l_end,nu_o]",
-    9: "Verner & Yakolev 1995 ground state fits (multiple shells)",
-    20: "Opacity Project: smoothed [number of data points]",
-    21: "Opacity Project: scaled, smoothed [number of data points]",
+    9: "Verner & Yakovlev (1995, A&AS, 109, 125-133) ground state fits (multiple shells)",
+    20: "Opacity Project: smoothed [number of data pairs]",
+    21: "Opacity Project: scaled, smoothed [number of data pairs]",
     22: "energy is in units of threshold, cross section in Megabarns? [number of data points]",
 }
 
@@ -732,8 +739,8 @@ def excitation_energy_ev_of_header_value(text: str) -> float:
     """Convert an "!Excitation energy of final state" header value to eV.
 
     This is the fallback of excitation_energy_ev_of_target(), which is more reliable. The unit
-    of the header value is not the same in every phot file. 721 of the 723 files that carry the
-    line give no unit with it. The two that do are the Si II files, which write "(10^15 Hz)".
+    of the header value is not the same in every phot file. Nearly every file that carries the
+    line gives no unit with it. The two that do are the Si II files, which write "(10^15 Hz)".
 
     A census of every phot file of atomic_21jun23 gives 66 non-zero values. Four of them are
     below 10, for example O I 0.804 and Si II 6.51014, and those are in 10^15 Hz. The other 62
@@ -783,13 +790,14 @@ def excitation_energy_ev_of_target(atomic_number: int, ion_stage: int, targetlev
     """Excitation energy of a photoionisation target, from the levels of the ion above, in eV.
 
     atomic_number and ion_stage name the ion that the phot file belongs to, so the levels come
-    from ion_stage + 1. Returns None where that ion has no CMFGEN oscillator file, or where no
-    level of it matches the name. The caller then falls back to the file header.
+    from ion_stage + 1. Returns None where that ion has no CMFGEN oscillator file, where no
+    level of it matches the name, or where the matched levels have no statistical weight. The
+    caller then falls back to the file header.
 
     This is more reliable than the header value. SIL/II/19apr23/phot_data_B writes 6.51014 for
     the target 3s_3p_3Po. That value is the g-weighted mean of the ionisation frequency of that
     term in SIL/III/19apr23/osc_data. The excitation energy of the term is 52984.4 cm^-1, which
-    is 6.5694 eV.
+    is 6.5692 eV.
 
     The name matching is the one of get_photoiontargetfractions(). A '/' in the name separates
     two spellings of the same target, and a level name that matches either one counts. A name
@@ -834,7 +842,8 @@ class PhotFileReader:
     a slice of the parsed columns.
 
     The ion-wide state stays on the instance across the files. That state is the tables and
-    the target of each file, the J-splitting mode, and the level names of each type.
+    the target of each file, the J-splitting mode, the level names of each type, and the types
+    that the reader does not evaluate.
     """
 
     def __init__(
@@ -909,7 +918,7 @@ class PhotFileReader:
         self.levels_without_edge: dict[str, None] = {}
         self.duplicate_energy_rows = 0
         self.duplicate_energy_first: tuple[str, float] | None = None
-        # set to skip the problem lines in Fe VIII and Ni X phot_data_A (see read_file)
+        # set to skip the problem lines in Fe VIII and Ni X phot_data_A (see take_event_line)
         self.in_header = False
 
     def resolve_excitation_energy(self) -> float:
@@ -1106,9 +1115,9 @@ class PhotFileReader:
             # J). A name with no level that matches falls back to index 0, so the fit uses
             # the ground state's threshold wavelength. Nothing uses that table: the
             # levelindices_of_matchname mapping in read_phixs_tables() has the same key,
-            # finds no level for the name, and drops the table. The phot files often cover
-            # levels that the oscillator file does not (1145 of them for Co II). This
-            # fallback is therefore silent and not an error.
+            # finds no level for the name, and drops the table. The phot files can cover
+            # levels that the oscillator file does not. This fallback is therefore silent and
+            # not an error.
             self.lowerlevelindex = (
                 self.firstlevelindex_of_levelname if self.j_splitting_on else self.firstlevelindex_of_levelnamenoJ
             ).get(self.lowerlevelname, 0)
@@ -1125,8 +1134,8 @@ class PhotFileReader:
 
         if len(row) >= 2 and " ".join(row[-3:]) == "!Screened nuclear charge":
             # CMFGEN's ZION comes from the oscillator file: RDPHOT_GEN_V2 never reads
-            # this field, and the two disagree for 29 shipped files. Keep ion_stage (which
-            # matches the oscillator value for every ion in ions_data) and just report it.
+            # this field, and the two disagree for 18 of the files that ions_data reads. Keep
+            # ion_stage (which matches the oscillator value for every ion in ions_data) and report it.
             zion_from_photfile = int(fortran_float(row[0]))
             if zion_from_photfile != self.ion_stage:
                 log_and_print(
@@ -1149,14 +1158,13 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
             self.crosssectiontype = int(row[0])
             self.phixs_type_levels[self.crosssectiontype].add(self.lowerlevelname)
-            # dropped here, once, and not on every marker line. A check that ran on the next
-            # block's "!Configuration name" line cleared that block's name when no blank line
-            # separated the two blocks.
+            # dropped here, once, and not on the next "!Configuration name" line: two blocks can
+            # follow each other with no blank line between them
             if not self.type_is_known():
                 self.note_unknown_type()
 
     def type_is_known(self) -> bool:
-        """Whether the current cross section type is one that this reader evaluates."""
+        """Whether the current cross section type is one that this reader reads or evaluates."""
         return self.crosssectiontype in phixs_fit_functions or self.crosssectiontype in {0, 2, 3, 8, 9, 20, 21, 22}
 
     def note_unknown_type(self) -> None:
@@ -1232,7 +1240,7 @@ class PhotFileReader:
             if lambda_angstrom is None:
                 return
             self.thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
-            # for these types the x value is a fraction of the threshold, not an energy
+            # for these types the x value is a multiple of the threshold, not an energy
             if abs(x[0] - 1.0) > 0.5:
                 print(
                     f"{self.lowerlevelname} cross section type {self.crosssectiontype}: the first value {x[0]:.3f}"
@@ -1269,7 +1277,7 @@ class PhotFileReader:
             self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
 
     def store_table(self, table: np.ndarray) -> None:
-        """Keep the evaluated table of the current level, and close the block to more coefficients."""
+        """Keep the evaluated table of the current level, and record its point count."""
         self.phixstables[self.filenum][self.lowerlevelname] = table
         self.numpointsexpected = len(table)
 
@@ -1369,7 +1377,6 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
     from artisatomic.phixs import reduce_phixs_tables
 
-    # pulled out of the frame once: the loops below index these per level, per cross section table
     levelcount = dfenergy_levels.height
 
     photfilenames = ions_data[atomic_number, ion_stage].photfilenames
@@ -1388,6 +1395,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     # the type 2, 3 and 8 fits interpolate the hydrogenic tables
     read_hyd_phixsdata()
 
+    # pulled out of the frame once: the loops below index these per level, per cross section table
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     lambdaangstroms: list[float] = dfenergy_levels["lambdaangstrom"].to_list()
 
@@ -1399,7 +1407,8 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         firstlevelindex_of_levelname.setdefault(levelname, levelindex)
         firstlevelindex_of_levelnamenoJ.setdefault(levelname.split("[")[0], levelindex)
 
-    # this gets partially overwritten anyway
+    # zero rows stay for the levels that get no table. Their target entry stays None, which marks
+    # them as levels with no photoionisation data.
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     photoionization_thresholds_ev = np.full(levelcount, np.nan)
     # None means "no photoionisation data for this level". get_photoiontargetfractions() relies
@@ -1529,9 +1538,9 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             # E(level). That is the edge of edge_lambda_angstrom(). See write_phixs_data() in
             # output.py.
             #
-            # abs(): CMFGEN writes a negative Lam(A) for some levels, and that sign would read
-            # as readqubdata's "no threshold value" sentinel. A zero Lam(A) gives no threshold
-            # at all, which avoids a division by zero. The level keeps its NaN, and
+            # abs(): CMFGEN writes a negative Lam(A) for some levels, and threshold_is_known() in
+            # output.py treats a value at or below zero as a missing threshold. A zero Lam(A) gives
+            # no threshold at all, which avoids a division by zero. The level keeps its NaN, and
             # write_phixs_data() skips it.
             if lambdaangstroms[levelindex] != 0.0:
                 photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
@@ -1558,10 +1567,8 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
         crosssection = sigmat * (beta + (1 - beta) * threshold_div_energy) * (threshold_div_energy**s)
     else:
         # type 7
-        # include Christian Vogl's python adaption of CMFGEN sub_phot_gen.f:
-        # Altered 07-Oct-2015 : Bug fix for Type 7 (modified Seaton formula).
-        #                       Offset was being added to the current frequency instead
-        #                       of the ionisation edge.
+        # CMFGEN adds the offset to the ionisation edge and not to the frequency (sub_phot_gen.f,
+        # bug fix of 7 Oct 2015)
 
         threshold_energy_ev = hc_in_ev_angstrom / lambda_angstrom
         offset_threshold_div_energy = (energy_div_threshold**-1) * (
@@ -1656,12 +1663,14 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
 # test: hydrogen n = 1: 13.606 eV threshold cross section is near 6.3029 Mb
 # test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb. The source of this value is unknown.
-# gives the same results as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1)
+# gives nearly the same threshold value as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1),
+# on a different grid
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The Kramers scale factor
-    already accounts for the effective charge, so the caller must not rescale the result.
+    already holds the effective charge. The type 3 caller applies the scale coefficient of the
+    file only.
     """
     read_hyd_phixsdata()
     if n < 1 or n > max_hyd_gaunt_n:
@@ -1686,11 +1695,11 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-# Peach, Saraph, and Seaton (1988)
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
-    """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (1988) (CMFGEN type 5).
+    """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (CMFGEN type 5).
 
-    Returns (energy in Rydberg, cross section in Megabarns) pairs.
+    Returns (energy in Rydberg, cross section in Megabarns) pairs. The reference is Peach, G.,
+    Saraph, H. E., Seaton, M. J. (1988), J. Phys. B, 21, 3669-3683, doi:10.1088/0953-4075/21/22/006.
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
@@ -1711,8 +1720,8 @@ def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. raw_subphot.f lines 187-193
     evaluate the same polynomial. CMFGEN writes it for the s and p states of C IV only. The
-    reference is Leibowitz, E. M. 1972, JQSRT, 12, 299. A negative value of the polynomial
-    becomes zero, because a cross section cannot be negative.
+    reference is Leibowitz, E. M. (1972), JQSRT, 12, 299-306, doi:10.1016/0022-4073(72)90048-9. A
+    negative value of the polynomial becomes zero, because a cross section cannot be negative.
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
@@ -1724,9 +1733,8 @@ def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-# only applies to helium
-# the threshold cross sections seem correct, but the energy dependence could be slightly wrong
-# the fit does not use the h parameter; its meaning is unknown
+# only applies to helium. CMFGEN's HEI_PHOT_OPAC is the source of the fit (raw_subphot.f line 218).
+# The fit does not use the h parameter.
 def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ignore[unused-function-argument]
     """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
 
@@ -1759,8 +1767,9 @@ phixs_fit_functions = {
 def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     """Verner & Yakovlev (1995) multi-shell ground-state fits (CMFGEN cross section type 9).
 
-    Each shell contributes only above its own threshold E_th, and the code evaluates the fit at
-    the actual photon energy. See the type-9 branch of SUB_PHOT_GEN in CMFGEN's
+    The reference is Verner, D. A., Yakovlev, D. G. (1995), A&AS, 109, 125-133, bibcode
+    1995A&AS..109..125V. Each shell contributes only above its own threshold E_th, and the code
+    evaluates the fit at the actual photon energy. See the type-9 branch of SUB_PHOT_GEN in CMFGEN's
     newsubs/sub_phot_gen.f. There U = FREQ / CROSS_A(LMIN+3) / EV_TO_HZ is the photon energy in
     eV divided by E_0. Each shell after the first contributes only where
     FREQ >= EV_TO_HZ * E_th_eV.
@@ -1822,15 +1831,15 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     gvalues: list[float] = dfenergy_levels["g"].to_list()
 
-    found_nonjsplit_transition = False
+    found_nonjsplit_level = False
     level_ids_of_level_name = {}
     for levelid, levelname in enumerate(levelnames):
         levelnamenoJ = levelname.split("[")[0]
         if levelname != levelnamenoJ:  # levels are J split
             level_ids_of_level_name[levelname] = [levelid]
-        elif not found_nonjsplit_transition:
-            log_and_print(flog, "Found at least one transition that names a level with no J value")
-            found_nonjsplit_transition = True
+        elif not found_nonjsplit_level:
+            log_and_print(flog, "Found at least one level name with no J value")
+            found_nonjsplit_level = True
 
         # keep the level ids of states that differ by J only, for the case that the level names
         # in the collision file have no J
@@ -1874,7 +1883,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 )
                 break  # some files have lines of stars at the end, e.g. Na VI and Ne V. Stop at the first one.
 
-            if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):  # found in col_ariii
+            # found in ARG/III col_data
+            if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):
                 break
 
             if line.lstrip().startswith(r"Transition\T"):  # found the header row
@@ -1952,7 +1962,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
 
                 # the collision file can name a level that the oscillator file does not have.
                 # A membership test, not a try/except KeyError around the whole block: that
-                # reported any KeyError below as an unlisted level.
+                # would report every KeyError below as an unlisted level.
                 unlisted = [name for name in (namefrom, nameto) if name not in level_ids_of_level_name]
                 if unlisted:
                     unlisted_from_message = " (unlisted)" if namefrom in unlisted else ""
@@ -2159,8 +2169,9 @@ def get_photoiontargetfractions(
 def read_hyd_phixsdata(force: bool = False) -> None:
     """Load the hydrogenic photoionisation tables that the type 2, 3 and 8 fits interpolate.
 
-    Fills the module-level hyd_phixs / hyd_gaunt tables. The functions that read the tables
-    call this first, so a caller needs no call of its own. A second call does nothing unless
+    Fills the module-level hyd_phixs / hyd_gaunt tables. get_hydrogenic_n_phixstable() and
+    read_phixs_tables() call this first. A caller of get_hydrogenic_nl_phixstable() must call it
+    itself. A second call does nothing unless
     force is set. The thresholds come from the H I level list, so the index of that list must be
     the principal quantum number.
     """
@@ -2293,8 +2304,8 @@ def extend_ion_list(
 ):
     """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
 
-    The default excludes hydrogen: its levels are also the source of the hydrogenic
-    photoionisation tables, which serve as a fallback for other elements.
+    include_hydrogen=False leaves out H I. The built-in selection of ionhandlers.py passes True,
+    so that list holds H I.
     """
     cmfgenions = [
         (atomic_number, ion_stage) for atomic_number, ion_stage in ions_data if include_hydrogen or atomic_number != 1
