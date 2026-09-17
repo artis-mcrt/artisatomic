@@ -35,6 +35,7 @@ from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
 from artisatomic.levelnames import get_config_parity
+from artisatomic.levelnames import is_eissner_config
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
 from artisatomic.phixs import combine_phixs_routes
@@ -132,21 +133,6 @@ def adf04_float(index: int) -> pl.Expr:
     return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
-def adf04_level_layout(line: str) -> str:
-    """Name the column layout of one adf04 level line, "standard" or "tyndall".
-
-    The standard layout puts the (2S+1) group at column 28, after a 22-column configuration. The
-    Tyndall Co III and Fe III files put it at column 24, after a 16-column configuration. The
-    layout is a property of the file, not of the element, so the line gives it.
-    """
-    if line[28:29] == "(" and line[30:31] == ")":
-        return "standard"
-    if line[24:25] == "(" and line[26:27] == ")":
-        return "tyndall"
-    msg = f"adf04 level line has no (2S+1) group at column 24 or 28: {line.rstrip()!r}"
-    raise ValueError(msg)
-
-
 def adf04_number(text: str) -> float:
     """Convert a number in the ADAS form, where the exponent has a sign and no letter ("5.00+03")."""
     return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
@@ -157,13 +143,12 @@ float_with_decimal_regex = r"\d+\.\d*"
 adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({float_with_decimal_regex})\(.*\)")
 
 # Finds: qub_id, config, 2+1, l, j, energy_above_ground
-# TODO: using .* to get the config name isn't great but they're so inconsistent so there's not really another way to reasonably do it
+# The configuration column has no fixed width or format, so ".*" captures it.
 adf04_level_regex = re.compile(
     rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\w+)\(\s*({float_with_decimal_regex})\)\s+({float_with_decimal_regex})"
 )
 
 
-# def _evaluate_adf04_header(line: str) -> float:
 def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: str | Path) -> float:
     read_atomic_number, read_ion_stage, read_energy = adf04_header_regex.findall(line)[0]
     read_atomic_number = int(read_atomic_number)
@@ -180,17 +165,12 @@ def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepa
     return read_energy * hc_in_ev_cm
 
 
-# An Eissner configuration is a sequence of triples: "5", the occupation digit, the shell character.
-# The bare configuration "5s2" does not match, because its second character is not a digit.
-eissner_config_regex = re.compile(r"(?:5\d[0-9A-Za-z])+")
-
-
 def _process_config(config: str) -> tuple[str, bool]:
     # Second return item is True if the configuration had to be converted from Eissner to standard notation
 
     config = config.strip()
 
-    if eissner_config_regex.fullmatch(config):
+    if is_eissner_config(config):
         return convert_eissner_to_standard(config), True
 
     # Is probably fine to just call config.lower(), but this leaves the term uppercase to be consistent
@@ -239,15 +219,18 @@ def read_adf04(
             if atomic_group_note:
                 continue
 
-            qub_id, config, two_plus_one, l, j, energy_above_gs = adf04_level_regex.findall(line)[0]
-            l = int(l, 16)
+            levelmatch = adf04_level_regex.match(line)
+            if levelmatch is None:
+                msg = f"Cannot read the adf04 level line in {filepath}: {line.rstrip()!r}"
+                raise ValueError(msg)
+            qub_id, config, two_plus_one, l, j, energy_above_gs = levelmatch.groups()
             config, config_was_converted = _process_config(config)
             if not uses_eissner_notation and config_was_converted:
                 uses_eissner_notation = True
                 log_and_print(flog, "Eissner notation detected for electron configuration")
 
             energylevel = QUBEnergyLevel(
-                config, int(qub_id), int(two_plus_one), int(l), float(j), float(energy_above_gs), 0.0, 0
+                config, int(qub_id), int(two_plus_one), int(l, 16), float(j), float(energy_above_gs), 0.0, 0
             )
 
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and

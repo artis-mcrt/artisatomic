@@ -311,43 +311,19 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     return None
 
 
-orb_lab = [f"{j}{lchars[i].lower()}" for j in range(len(lchars) + 1) for i in range(j)]
-LIT = [
-    "0",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "A",
-    "B",
-    "C",
-    "D",
-    "E",
-    "F",
-    "G",
-    "H",
-    "I",
-    "J",
-    "K",
-    "L",
-    "M",
-    "N",
-    "O",
-    "P",
-    "Q",
-    "R",
-    "S",
-    "T",
-]
-LIT_TO_ORB = dict(zip(LIT[1:], orb_lab, strict=False))
+# An Eissner shell character gives the shell in the order 1s, 2s, 2p, 3s, ...: "1" to "9", then "A" to "T".
+eissner_shell_chars = string.digits[1:] + string.ascii_uppercase[:20]
+orb_lab = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
+LIT_TO_ORB = dict(zip(eissner_shell_chars, orb_lab[: len(eissner_shell_chars)], strict=True))
 
-# Matches a 2-digit occupation code and a 1-character shell indicator
+# One Eissner triple: "5", the occupation digit, the shell character.
 eissner_regex = re.compile(r"(\d{2})([0-9A-Za-z])")
+eissner_config_regex = re.compile(r"(?:5\d[0-9A-Za-z])+")
+
+
+def is_eissner_config(config: str) -> bool:
+    """Return True if the full string is a sequence of Eissner triples. The bare "5s2" is not."""
+    return eissner_config_regex.fullmatch(config) is not None
 
 
 def convert_eissner_to_standard(eissner_config: str) -> str:
@@ -364,14 +340,10 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
 
     shell_parts: list[str] = []
     for qs, ql in vals:
-        shell_occ = int(qs) % 50
-        ql_upper = ql.upper()
-
-        if ql_upper not in LIT_TO_ORB:
+        shell_label = LIT_TO_ORB.get(ql.upper())
+        if shell_label is None:
             msg = f"Unknown shell character {ql!r} in config: {eissner_config!r}"
             raise ValueError(msg)
-
-        shell_label = LIT_TO_ORB[ql_upper]
-        shell_parts.append(f"{shell_label}{shell_occ}")
+        shell_parts.append(f"{shell_label}{int(qs) % 50}")
 
     return "".join(shell_parts)

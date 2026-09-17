@@ -4067,18 +4067,6 @@ def test_readhillierdata_get_level_valence_n():
     assert readhillierdata.get_level_valence_n("8SNG") is None
 
 
-def test_adf04_level_layout():
-    """adf04_level_layout() reads the column layout from the line, not from the element."""
-    tyndall_co = "    1   3s23p63d7(4F)   (4)3( 4.5)               0.0000"
-    tyndall_fe = "    1 3S2 3P6 3D6       (5)2( 4.0)               0.0000"
-    standard_sr = "    1          4p65s2(1S)   (1)0( 0.0)            0.0000"
-    assert readqubdata.adf04_level_layout(tyndall_co) == "tyndall"
-    assert readqubdata.adf04_level_layout(tyndall_fe) == "tyndall"
-    assert readqubdata.adf04_level_layout(standard_sr) == "standard"
-    with pytest.raises(ValueError, match="no \\(2S\\+1\\) group"):
-        readqubdata.adf04_level_layout("    1 3S2 3P6 3D6 0.0000")
-
-
 def test_cmfgen_fit_functions():
     """Each analytic fit gives its formula's value at the threshold and at one point above it.
 
