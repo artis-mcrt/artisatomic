@@ -34,6 +34,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
+from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import is_eissner_config
 from artisatomic.levelnames import lchars
@@ -140,7 +141,9 @@ def adf04_number(text: str) -> float:
 
 decimal_number_pattern = r"\d+\.\d*"
 
-adf04_header_regex = re.compile(rf"\s*[A-Za-z]{{1,2}}\s*\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})\(.*\)")
+# The specification lets a file omit the parent term after the ionisation potential. Some files
+# also leave the element symbol blank.
+adf04_header_regex = re.compile(rf"\s*[A-Za-z]{{0,2}}\s*\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})")
 
 # The groups are: qub_id, config, multiplicity (2S+1), L as a hexadecimal digit, J, energy above the ground level.
 # The configuration column has no fixed width or format, so ".*" captures it.
@@ -178,7 +181,7 @@ def _standardise_config(config: str) -> tuple[str, bool]:
 
     # The term in parentheses stays in upper case, e.g. "4P65S2(1S)" becomes "4p65s2(1S)".
     head, sep, tail = config.partition("(")
-    return head.lower() + sep + tail, False
+    return expand_standard_config(head.lower() + sep + tail), False
 
 
 def read_adf04(
@@ -266,6 +269,11 @@ def read_adf04(
                 raise ValueError(msg)
 
         upsilonheader = fleveltrans.readline().split()
+        # ITYP=3 gives upsilon values against the electron temperature. ITYP=1 gives collision
+        # strengths against a threshold parameter, and this reader cannot use them.
+        if len(upsilonheader) < 2 or upsilonheader[1] != "3":
+            msg = f"{filepath} does not give upsilon values against temperature (the adf04 ITYP field must be 3)"
+            raise ValueError(msg)
         temperatures = upsilonheader[2:]
 
         # ADAS writes auxiliary rows with a process code in the first field: R for recombination,
@@ -274,6 +282,10 @@ def read_adf04(
         collision_lines: list[str] = []
         skipped_rows = 0
         for line in fleveltrans:
+            # Column 1 can hold the transition code "1", "2" or "3". Each is an electron impact
+            # excitation, and the level ids follow the code.
+            if line[:1] in {"1", "2", "3"} and line[1:2] == " ":
+                line = " " + line[1:]
             firstfield = adf04_first_field(line)
             if firstfield == adf04_section_end:
                 break

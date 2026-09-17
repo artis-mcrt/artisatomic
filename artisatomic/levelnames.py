@@ -311,22 +311,57 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     return None
 
 
-# An Eissner shell character gives the shell in the order 1s, 2s, 2p, 3s, ...: "1" to "9", then "A" to "T".
-eissner_shell_chars = string.digits[1:] + string.ascii_uppercase[:20]
+# The Eissner collating sequence: 1=1s, 2=2s, 3=2p, ..., 9=4d, A=4f, B=5s, ..., Z, then a, b, ...
+# The shell character is case-sensitive. The ADAS adf04 specification (appxa-04) gives 0=4f and
+# A=5s. The adf04 files from AUTOSTRUCTURE do not follow it: in the Ca III file each "A" level has
+# a total L of 2, 3 or 4, and only 3p5 4f gives those terms. The reader follows the files.
+eissner_shell_chars = "123456789" + string.ascii_uppercase + string.ascii_lowercase
 eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
 eissner_shell_label_by_char = dict(
     zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
 )
 
 # One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
-eissner_triple_pattern = r"(5[1-9]|6[0-4])([0-9A-Za-z])"
+eissner_triple_pattern = r"(5[1-9]|6[0-4])([1-9A-Za-z])"
 eissner_triple_regex = re.compile(eissner_triple_pattern)
 eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
 
 
+def _full_eissner_config(config: str) -> str:
+    """Return the configuration with a full first triple.
+
+    The specification lets the first shell give the occupation q in place of 50 + q. The function
+    needs a second triple to accept the short form, because a bare "2P" is a standard label.
+    """
+    if len(config) % 3 == 2 and len(config) >= 5 and config[0] in "123456789":
+        return "5" + config
+    return config
+
+
 def is_eissner_config(config: str) -> bool:
     """Return True if the full string is a sequence of Eissner triples. The bare "5s2" is not."""
-    return eissner_config_regex.fullmatch(config) is not None
+    return eissner_config_regex.fullmatch(_full_eissner_config(config)) is not None
+
+
+# One word of the standard form of the specification: n, the orbital letter, the occupation q.
+# n and q use the collating sequence 1 to 9, then a=10, b=11, ...
+standard_word_regex = re.compile(rf"([1-9a-z])([{lchars.lower()}])([1-9a-z])")
+
+
+def expand_standard_config(config: str) -> str:
+    """Write n and q as decimal numbers if each word of the lower-case configuration is "nlq".
+
+    The word "3da" becomes "3d10". A configuration in a different form stays as it is.
+    """
+    words = config.split()
+    matches = [standard_word_regex.fullmatch(word) for word in words]
+    if not words or not all(matches):
+        return config
+
+    def decimal(char: str) -> str:
+        return char if char.isdigit() else str(10 + ord(char) - ord("a"))
+
+    return " ".join(f"{decimal(m[1])}{m[2]}{decimal(m[3])}" for m in matches if m is not None)
 
 
 def convert_eissner_to_standard(eissner_config: str) -> str:
@@ -342,14 +377,9 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
     if not is_eissner_config(eissner_config):
         msg = f"Not an Eissner configuration: {eissner_config!r}"
         raise ValueError(msg)
-    triples = eissner_triple_regex.findall(eissner_config)
+    triples = eissner_triple_regex.findall(_full_eissner_config(eissner_config))
 
-    shell_parts: list[str] = []
-    for occupation_code, shell_char in triples:
-        shell_label = eissner_shell_label_by_char.get(shell_char.upper())
-        if shell_label is None:
-            msg = f"Unknown shell character {shell_char!r} in config: {eissner_config!r}"
-            raise ValueError(msg)
-        shell_parts.append(f"{shell_label}{int(occupation_code) % 50}")
-
-    return "".join(shell_parts)
+    return "".join(
+        f"{eissner_shell_label_by_char[shell_char]}{int(occupation_code) % 50}"
+        for occupation_code, shell_char in triples
+    )

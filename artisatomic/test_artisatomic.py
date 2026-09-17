@@ -2187,17 +2187,60 @@ def test_convert_eissner_to_standard():
     """The converter gives the standard notation of the documented example and of a Ca III level."""
     assert convert_eissner_to_standard("521522563524565") == "1s22s22p63s23p6"
     assert convert_eissner_to_standard("522563524555516") == "2s22p63s23p53d1"
-    for malformed in ("521junk", "501", "651"):
+    # the collating sequence of the AUTOSTRUCTURE files: 9=4d, A=4f, B=5s. The first shell can give q alone.
+    assert convert_eissner_to_standard("51951A51B") == "4d14f15s1"
+    assert convert_eissner_to_standard("21522") == "1s22s2"
+    for malformed in ("521junk", "501", "651", "520"):
         with pytest.raises(ValueError, match="Not an Eissner configuration"):
             convert_eissner_to_standard(malformed)
-    with pytest.raises(ValueError, match="Unknown shell character"):
-        convert_eissner_to_standard("52Z")
+
+
+def test_read_adf04_header_accepts_the_forms_of_the_specification():
+    """The parent term is optional, and a file can leave the element symbol blank."""
+    for line in (
+        "H+ 0         1         1    109679.\n",
+        "HE+ 0         2         1    109679.0000\n",
+        "C + 3         6         4    109679.0(1S)  2931440.0(3S)\n",
+        "  + 2        26         3    109679.(6S)\n",
+    ):
+        z, stage = int(line.split("+")[1].split()[1]), int(line.split("+")[1].split()[2])
+        energy_ev = readqubdata._read_adf04_header(line, z, stage, "x.adf04")  # ruff: ignore[private-member-access]
+        assert energy_ev == pytest.approx(13.5984, abs=1e-3)
+    with pytest.raises(ValueError, match="Ion stage"):
+        readqubdata._read_adf04_header("H+ 0         1         1    109679.\n", 1, 2, "x.adf04")  # ruff: ignore[private-member-access]
+
+
+def test_read_adf04_transition_code_and_ityp(tmp_path):
+    """A row with the transition code "1" in column 1 is a collision row. ITYP must be 3."""
+    text = (
+        "H+ 0         1         1    109679.\n"
+        "    1 1S                 (2)0( 0.5)        0.\n"
+        "    2 2P                 (2)1( 2.5)    82303.\n"
+        "   -1\n"
+        " 1.00    {ityp}       5.80+03 1.16+04\n"
+        "1  2   1 6.27+08 4.29-01 5.29-01\n"
+        "  -1\n"
+        "  -1  -1\n"
+    )
+    good = tmp_path / "good.adf04"
+    good.write_text(text.format(ityp=3), encoding="utf-8")
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(good, io.StringIO(), 5000.0, 1, 1)
+    assert len(energylevels) == 2
+    assert upsilondict == {(0, 1): pytest.approx(0.429)}
+
+    bad = tmp_path / "bad.adf04"
+    bad.write_text(text.format(ityp=1), encoding="utf-8")
+    with pytest.raises(ValueError, match="ITYP"):
+        readqubdata.read_adf04(bad, io.StringIO(), 5000.0, 1, 1)
 
 
 def test_standardise_config_converts_only_eissner_triples():
     """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
     assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("522563524565606") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("1S2 2SA") == ("1s2 2s10", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("2P") == ("2p", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("3S2 3P6 3D6 4S 4P") == ("3s2 3p6 3d6 4s 4p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
 
@@ -4280,8 +4323,8 @@ def test_read_qub_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypat
         "    1          4p65s2(1S)   (1)0( 0.0)            0.0000\n"
         "    2       4p65s15p1(3P)   (3)1( 0.0)        14317.5023\n"
         "   -1\n"
-        "   -1  1.00+03  1.00+04\n"
-        "   1    2  1.00+08  5.00-01\n"
+        " 1.00    3       1.00+03 1.00+04\n"
+        "   1   2 1.00+08 5.00-01 5.00-01\n"
         "  -1\n"
     )
     (tmp_path / "99_1.adf04").write_text(adf04, encoding="utf-8")
