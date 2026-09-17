@@ -119,19 +119,19 @@ def is_adf04_terminator(line: str) -> bool:
     return adf04_first_field(line) == adf04_section_end
 
 
-def adf04_field(index: int) -> pl.Expr:
-    """Return an expression for the whitespace-separated field at index of the "line" column."""
-    return pl.col("line").str.extract(rf"^\s*(?:\S+\s+){{{index}}}(\S+)", 1)
+def adf04_column(offset: int, length: int) -> pl.Expr:
+    """Return an expression for the fixed columns of the "line" column, with no white space at the ends."""
+    return pl.col("line").str.slice(offset, length).str.strip_chars()
 
 
-def adf04_float(index: int) -> pl.Expr:
-    """Return an expression for the field at index as a float.
+def adf04_float(offset: int, length: int) -> pl.Expr:
+    """Return an expression for the fixed columns as a float.
 
     adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The replacement puts the "E"
     only after a digit or a point. A leading sign and a field that already has an "E" stay as
     they are.
     """
-    return adf04_field(index).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
+    return adf04_column(offset, length).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
 def adf04_number(text: str) -> float:
@@ -282,16 +282,13 @@ def read_adf04(
         collision_lines: list[str] = []
         skipped_rows = 0
         for line in fleveltrans:
-            # Column 1 can hold the transition code "1", "2" or "3". Each is an electron impact
-            # excitation, and the level ids follow the code.
-            if line[:1] in {"1", "2", "3"} and line[1:2] == " ":
-                line = " " + line[1:]
-            firstfield = adf04_first_field(line)
-            if firstfield == adf04_section_end:
+            if is_adf04_terminator(line):
                 break
-            if not firstfield:
+            if not line.strip():
                 continue
-            if not firstfield.isdigit():
+            # Column 1 holds the transition code. A blank, "1", "2" or "3" is an electron impact
+            # excitation.
+            if line[0] not in " 123":
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
@@ -310,20 +307,21 @@ def read_adf04(
             f" {', '.join(temperatures)}",
         )
 
-        # each collision row holds these fields in order:
-        #  - upper,
-        #  - lower,
-        #  - A-value,
+        # The specification gives each collision row in fixed columns (a1,i3,i4,16e8.2):
+        #  - the transition code,
+        #  - the upper level id,
+        #  - the lower level id,
+        #  - the A-value,
         #  - one upsilon for each temperature,
         #  - the infinite-energy (Born) limit.
+        # A split at white space fails where two values touch, for example "2.81-01-3.01-02".
         # A cut of only the wanted fields needs about a third of the memory of a split of every
         # line into all of its columns.
-        upsilonindex = 3 + nearest_index
         collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
-            adf04_field(0).cast(pl.Int64, strict=False).alias("upper"),
-            adf04_field(1).cast(pl.Int64, strict=False).alias("lower"),
-            adf04_float(2).alias("avalue"),
-            adf04_float(upsilonindex).alias("upsilon"),
+            adf04_column(1, 3).cast(pl.Int64, strict=False).alias("upper"),
+            adf04_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
+            adf04_float(8, 8).alias("avalue"),
+            adf04_float(16 + 8 * nearest_index, 8).alias("upsilon"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null

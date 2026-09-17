@@ -2218,7 +2218,7 @@ def test_read_adf04_transition_code_and_ityp(tmp_path):
         "    2 2P                 (2)1( 2.5)    82303.\n"
         "   -1\n"
         " 1.00    {ityp}       5.80+03 1.16+04\n"
-        "1  2   1 6.27+08 4.29-01 5.29-01\n"
+        "1  2   1 6.27+08 4.29-01 5.29-01-3.01-02\n"
         "  -1\n"
         "  -1  -1\n"
     )
@@ -2227,6 +2227,9 @@ def test_read_adf04_transition_code_and_ityp(tmp_path):
     _, energylevels, upsilondict, _ = readqubdata.read_adf04(good, io.StringIO(), 5000.0, 1, 1)
     assert len(energylevels) == 2
     assert upsilondict == {(0, 1): pytest.approx(0.429)}
+    # the last upsilon touches the Born limit, and the fixed columns still separate them
+    _, _, upsilondict_hot, _ = readqubdata.read_adf04(good, io.StringIO(), 1e6, 1, 1)
+    assert upsilondict_hot == {(0, 1): pytest.approx(0.529)}
 
     bad = tmp_path / "bad.adf04"
     bad.write_text(text.format(ityp=1), encoding="utf-8")
@@ -2836,7 +2839,7 @@ def test_get_level_valence_n():
 def test_adf04_float_reads_every_exponent_form():
     """adf04 writes 1.23-04 for 1.23e-04, and the reader must not break a sign or an E that is there."""
     lines = pl.DataFrame({"line": ["1.23-04", "4.66+04", "-1.23-04", "1.23E-04", "1.23", "-2.5"]})
-    values = lines.select(readqubdata.adf04_float(0)).to_series().to_list()
+    values = lines.select(readqubdata.adf04_float(0, 8)).to_series().to_list()
     assert values == [1.23e-4, 4.66e4, -1.23e-4, 1.23e-4, 1.23, -2.5]
 
 
