@@ -1,5 +1,6 @@
 """Parse level names: split a configuration into orbitals and a term, and derive the parity."""
 
+import re
 import string
 from collections.abc import Iterator
 
@@ -308,3 +309,47 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
             return int(digits[2:])
         return int(digits[1:]) if physical(digits[:1], digits[1:]) else None
     return None
+
+
+# An Eissner shell character gives the shell in the order 1s, 2s, 2p, 3s, ...: "1" to "9", then "A" to "T".
+eissner_shell_chars = string.digits[1:] + string.ascii_uppercase[:20]
+eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
+eissner_shell_label_by_char = dict(
+    zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
+)
+
+# One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
+eissner_triple_pattern = r"(5[1-9]|6[0-4])([0-9A-Za-z])"
+eissner_triple_regex = re.compile(eissner_triple_pattern)
+eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
+
+
+def is_eissner_config(config: str) -> bool:
+    """Return True if the full string is a sequence of Eissner triples. The bare "5s2" is not."""
+    return eissner_config_regex.fullmatch(config) is not None
+
+
+def convert_eissner_to_standard(eissner_config: str) -> str:
+    """Convert an electron configuration from Eissner notation to standard notation.
+
+    The configuration "521522563524565" becomes "1s22s22p63s23p6".
+
+    The function follows a Fortran routine from Leo Mulholland. Appendix A of the ADAS manual
+    (https://open.adas.ac.uk/man/appxa-04.pdf, pages 5 to 6) describes the notation. See also
+    Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
+    doi:10.1016/S0010-4655(98)00082-4.
+    """
+    if not is_eissner_config(eissner_config):
+        msg = f"Not an Eissner configuration: {eissner_config!r}"
+        raise ValueError(msg)
+    triples = eissner_triple_regex.findall(eissner_config)
+
+    shell_parts: list[str] = []
+    for occupation_code, shell_char in triples:
+        shell_label = eissner_shell_label_by_char.get(shell_char.upper())
+        if shell_label is None:
+            msg = f"Unknown shell character {shell_char!r} in config: {eissner_config!r}"
+            raise ValueError(msg)
+        shell_parts.append(f"{shell_label}{int(occupation_code) % 50}")
+
+    return "".join(shell_parts)

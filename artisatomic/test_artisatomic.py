@@ -41,6 +41,7 @@ from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
 from artisatomic.cli import build_parser
+from artisatomic.levelnames import convert_eissner_to_standard
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import interpret_configuration
@@ -2119,7 +2120,7 @@ def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
     ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
-        adf04_sample_path(), flog, electrontemperature=5010.0
+        adf04_sample_path(), flog, 5010.0, 27, 3
     )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
@@ -2157,7 +2158,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
@@ -2172,13 +2173,33 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, electrontemperature=5010.0)
+    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(upsilondict) == 235
 
 
 def test_extend_ion_list_finds_a_compressed_adf04():
     """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
     assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
+    assert (20, [(3, "qub")]) in readqubdata.extend_ion_list({})
+
+
+def test_convert_eissner_to_standard():
+    """The converter gives the standard notation of the documented example and of a Ca III level."""
+    assert convert_eissner_to_standard("521522563524565") == "1s22s22p63s23p6"
+    assert convert_eissner_to_standard("522563524555516") == "2s22p63s23p53d1"
+    for malformed in ("521junk", "501", "651"):
+        with pytest.raises(ValueError, match="Not an Eissner configuration"):
+            convert_eissner_to_standard(malformed)
+    with pytest.raises(ValueError, match="Unknown shell character"):
+        convert_eissner_to_standard("52Z")
+
+
+def test_standardise_config_converts_only_eissner_triples():
+    """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
+    assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("522563524565606") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
@@ -4050,18 +4071,6 @@ def test_readhillierdata_get_level_valence_n():
     assert readhillierdata.get_level_valence_n("8SNG") is None
 
 
-def test_adf04_level_layout():
-    """adf04_level_layout() reads the column layout from the line, not from the element."""
-    tyndall_co = "    1   3s23p63d7(4F)   (4)3( 4.5)               0.0000"
-    tyndall_fe = "    1 3S2 3P6 3D6       (5)2( 4.0)               0.0000"
-    standard_sr = "    1          4p65s2(1S)   (1)0( 0.0)            0.0000"
-    assert readqubdata.adf04_level_layout(tyndall_co) == "tyndall"
-    assert readqubdata.adf04_level_layout(tyndall_fe) == "tyndall"
-    assert readqubdata.adf04_level_layout(standard_sr) == "standard"
-    with pytest.raises(ValueError, match="no \\(2S\\+1\\) group"):
-        readqubdata.adf04_level_layout("    1 3S2 3P6 3D6 0.0000")
-
-
 def test_cmfgen_fit_functions():
     """Each analytic fit gives its formula's value at the threshold and at one point above it.
 
@@ -4132,11 +4141,11 @@ def test_read_adf04_selects_the_nearest_temperature():
     per element chose 5010 K before, whatever the command line said.
     """
     flog = io.StringIO()
-    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=6000.0)
+    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
     assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
 
     flog = io.StringIO()
-    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, electrontemperature=1000.0)
+    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
     assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)
