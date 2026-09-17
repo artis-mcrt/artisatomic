@@ -2179,6 +2179,7 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
 def test_extend_ion_list_finds_a_compressed_adf04():
     """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
     assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
+    assert (20, [(3, "qub")]) in readqubdata.extend_ion_list({})
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
