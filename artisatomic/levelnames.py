@@ -318,9 +318,9 @@ eissner_shell_label_by_char = dict(
     zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
 )
 
-# One Eissner triple: "5", the occupation digit, the shell character.
-eissner_triple_regex = re.compile(r"(\d{2})([0-9A-Za-z])")
-eissner_config_regex = re.compile(r"(?:5\d[0-9A-Za-z])+")
+# One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
+eissner_triple_regex = re.compile(r"([56]\d)([0-9A-Za-z])")
+eissner_config_regex = re.compile(r"(?:[56]\d[0-9A-Za-z])+")
 
 
 def is_eissner_config(config: str) -> bool:

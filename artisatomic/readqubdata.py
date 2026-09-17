@@ -140,12 +140,12 @@ def adf04_number(text: str) -> float:
 
 decimal_number_pattern = r"\d+\.\d*"
 
-adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})\(.*\)")
+adf04_header_regex = re.compile(rf"\s*[A-Za-z]{{1,2}}\s*\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})\(.*\)")
 
 # The groups are: qub_id, config, multiplicity (2S+1), L as a hexadecimal digit, J, energy above the ground level.
 # The configuration column has no fixed width or format, so ".*" captures it.
 adf04_level_regex = re.compile(
-    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\w+)\(\s*({decimal_number_pattern})\)\s+({decimal_number_pattern})"
+    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)([0-9A-Fa-f])\(\s*({decimal_number_pattern})\)\s+({decimal_number_pattern})"
 )
 
 
