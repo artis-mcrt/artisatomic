@@ -2187,6 +2187,9 @@ def test_convert_eissner_to_standard():
     """The converter gives the standard notation of the documented example and of a Ca III level."""
     assert convert_eissner_to_standard("521522563524565") == "1s22s22p63s23p6"
     assert convert_eissner_to_standard("522563524555516") == "2s22p63s23p53d1"
+    for malformed in ("521junk", "501", "651"):
+        with pytest.raises(ValueError, match="Not an Eissner configuration"):
+            convert_eissner_to_standard(malformed)
     with pytest.raises(ValueError, match="Unknown shell character"):
         convert_eissner_to_standard("52Z")
 

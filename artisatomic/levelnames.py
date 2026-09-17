@@ -319,8 +319,9 @@ eissner_shell_label_by_char = dict(
 )
 
 # One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
-eissner_triple_regex = re.compile(r"([56]\d)([0-9A-Za-z])")
-eissner_config_regex = re.compile(r"(?:[56]\d[0-9A-Za-z])+")
+eissner_triple_pattern = r"(5[1-9]|6[0-4])([0-9A-Za-z])"
+eissner_triple_regex = re.compile(eissner_triple_pattern)
+eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
 
 
 def is_eissner_config(config: str) -> bool:
@@ -338,6 +339,9 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
     Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
     doi:10.1016/S0010-4655(98)00082-4.
     """
+    if not is_eissner_config(eissner_config):
+        msg = f"Not an Eissner configuration: {eissner_config!r}"
+        raise ValueError(msg)
     triples = eissner_triple_regex.findall(eissner_config)
 
     shell_parts: list[str] = []
