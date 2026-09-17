@@ -313,11 +313,13 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
 
 # An Eissner shell character gives the shell in the order 1s, 2s, 2p, 3s, ...: "1" to "9", then "A" to "T".
 eissner_shell_chars = string.digits[1:] + string.ascii_uppercase[:20]
-orb_lab = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
-LIT_TO_ORB = dict(zip(eissner_shell_chars, orb_lab[: len(eissner_shell_chars)], strict=True))
+eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
+eissner_shell_label_by_char = dict(
+    zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
+)
 
 # One Eissner triple: "5", the occupation digit, the shell character.
-eissner_regex = re.compile(r"(\d{2})([0-9A-Za-z])")
+eissner_triple_regex = re.compile(r"(\d{2})([0-9A-Za-z])")
 eissner_config_regex = re.compile(r"(?:5\d[0-9A-Za-z])+")
 
 
@@ -336,14 +338,14 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
     Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
     doi:10.1016/S0010-4655(98)00082-4.
     """
-    vals = eissner_regex.findall(eissner_config)
+    triples = eissner_triple_regex.findall(eissner_config)
 
     shell_parts: list[str] = []
-    for qs, ql in vals:
-        shell_label = LIT_TO_ORB.get(ql.upper())
+    for occupation_code, shell_char in triples:
+        shell_label = eissner_shell_label_by_char.get(shell_char.upper())
         if shell_label is None:
-            msg = f"Unknown shell character {ql!r} in config: {eissner_config!r}"
+            msg = f"Unknown shell character {shell_char!r} in config: {eissner_config!r}"
             raise ValueError(msg)
-        shell_parts.append(f"{shell_label}{int(qs) % 50}")
+        shell_parts.append(f"{shell_label}{int(occupation_code) % 50}")
 
     return "".join(shell_parts)

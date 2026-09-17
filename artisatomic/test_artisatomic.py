@@ -2191,11 +2191,11 @@ def test_convert_eissner_to_standard():
         convert_eissner_to_standard("52Z")
 
 
-def test_process_config_converts_only_eissner_triples():
+def test_standardise_config_converts_only_eissner_triples():
     """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
-    assert readqubdata._process_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
-    assert readqubdata._process_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._process_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():

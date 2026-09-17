@@ -138,34 +138,38 @@ def adf04_number(text: str) -> float:
     return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
 
 
-float_with_decimal_regex = r"\d+\.\d*"
+decimal_number_pattern = r"\d+\.\d*"
 
-adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({float_with_decimal_regex})\(.*\)")
+adf04_header_regex = re.compile(rf"[A-Z][a-z]?\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})\(.*\)")
 
-# Finds: qub_id, config, 2+1, l, j, energy_above_ground
+# The groups are: qub_id, config, multiplicity (2S+1), L as a hexadecimal digit, J, energy above the ground level.
 # The configuration column has no fixed width or format, so ".*" captures it.
 adf04_level_regex = re.compile(
-    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\w+)\(\s*({float_with_decimal_regex})\)\s+({float_with_decimal_regex})"
+    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)(\w+)\(\s*({decimal_number_pattern})\)\s+({decimal_number_pattern})"
 )
 
 
-def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: str | Path) -> float:
-    read_atomic_number, read_ion_stage, read_energy = adf04_header_regex.findall(line)[0]
-    read_atomic_number = int(read_atomic_number)
-    read_ion_stage = int(read_ion_stage)
-    read_energy = float(read_energy)
-
-    if atomic_number != read_atomic_number:
-        msg = f"Atomic number ({atomic_number}) does not match that read from {filepath} ({read_atomic_number})"
+def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: str | Path) -> float:
+    """Return the ionisation energy in eV from the adf04 header. The header must name the requested ion."""
+    headermatch = adf04_header_regex.match(line)
+    if headermatch is None:
+        msg = f"Cannot read the adf04 header line in {filepath}: {line.rstrip()!r}"
         raise ValueError(msg)
-    if ion_stage != read_ion_stage:
-        msg = f"Ion stage ({ion_stage}) does not match that read from {filepath} ({read_ion_stage})"
+    header_atomic_number = int(headermatch[1])
+    header_ion_stage = int(headermatch[2])
+    ionization_energy_percm = float(headermatch[3])
+
+    if atomic_number != header_atomic_number:
+        msg = f"Atomic number ({atomic_number}) does not match that read from {filepath} ({header_atomic_number})"
+        raise ValueError(msg)
+    if ion_stage != header_ion_stage:
+        msg = f"Ion stage ({ion_stage}) does not match that read from {filepath} ({header_ion_stage})"
         raise ValueError(msg)
 
-    return read_energy * hc_in_ev_cm
+    return ionization_energy_percm * hc_in_ev_cm
 
 
-def _process_config(config: str) -> tuple[str, bool]:
+def _standardise_config(config: str) -> tuple[str, bool]:
     """Return the configuration in standard notation. The flag is True if the input was Eissner notation."""
     config = config.strip()
 
@@ -202,7 +206,7 @@ def read_adf04(
     uses_eissner_notation = False
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
-        ionization_energy_ev = _evaluate_adf04_header(line, atomic_number, ion_stage, filepath)
+        ionization_energy_ev = _read_adf04_header(line, atomic_number, ion_stage, filepath)
         # A note between two 'C-' rule lines can sit inside the level block, and the reader skips
         # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
         # collision block.
@@ -221,14 +225,14 @@ def read_adf04(
             if levelmatch is None:
                 msg = f"Cannot read the adf04 level line in {filepath}: {line.rstrip()!r}"
                 raise ValueError(msg)
-            qub_id, config, two_plus_one, l, j, energy_above_gs = levelmatch.groups()
-            config, config_was_converted = _process_config(config)
-            if not uses_eissner_notation and config_was_converted:
+            qub_id, config, multiplicity, l_hex, j, energy_percm = levelmatch.groups()
+            config, was_eissner_notation = _standardise_config(config)
+            if not uses_eissner_notation and was_eissner_notation:
                 uses_eissner_notation = True
                 log_and_print(flog, "Eissner notation detected for electron configuration")
 
             energylevel = QUBEnergyLevel(
-                config, int(qub_id), int(two_plus_one), int(l, 16), float(j), float(energy_above_gs), 0.0, 0
+                config, int(qub_id), int(multiplicity), int(l_hex, 16), float(j), float(energy_percm), 0.0, 0
             )
 
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
