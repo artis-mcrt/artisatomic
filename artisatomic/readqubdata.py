@@ -166,17 +166,15 @@ def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepa
 
 
 def _process_config(config: str) -> tuple[str, bool]:
-    # Second return item is True if the configuration had to be converted from Eissner to standard notation
-
+    """Return the configuration in standard notation. The flag is True if the input was Eissner notation."""
     config = config.strip()
 
     if is_eissner_config(config):
         return convert_eissner_to_standard(config), True
 
-    # Is probably fine to just call config.lower(), but this leaves the term uppercase to be consistent
-    config = "(".join([part.lower() if i == 0 else part for i, part in enumerate(config.split("("))])
-
-    return config, False
+    # The term in parentheses stays in upper case, e.g. "4P65S2(1S)" becomes "4p65s2(1S)".
+    head, sep, tail = config.partition("(")
+    return head.lower() + sep + tail, False
 
 
 def read_adf04(

@@ -327,14 +327,14 @@ def is_eissner_config(config: str) -> bool:
 
 
 def convert_eissner_to_standard(eissner_config: str) -> str:
-    """Convert an Eissner notation electron configuration string into standard notation.
+    """Convert an electron configuration from Eissner notation to standard notation.
 
-    Example:
-        '521522563524565' -> '1s22s22p63s23p6'
+    The configuration "521522563524565" becomes "1s22s22p63s23p6".
 
-    LLM conversion of Fortran code from Leo Mulholland, more info on the notation here:
-    https://open.adas.ac.uk/man/appxa-04.pdf [pg. 5-6]
-    https://www.sciencedirect.com/science/article/pii/S0010465598000824 [pg. 323]
+    The function follows a Fortran routine from Leo Mulholland. Appendix A of the ADAS manual
+    (https://open.adas.ac.uk/man/appxa-04.pdf, pages 5 to 6) describes the notation. See also
+    Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
+    doi:10.1016/S0010-4655(98)00082-4.
     """
     vals = eissner_regex.findall(eissner_config)
 
