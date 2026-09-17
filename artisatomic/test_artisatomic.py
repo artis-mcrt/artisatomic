@@ -2242,6 +2242,8 @@ def test_standardise_config_converts_only_eissner_triples():
     assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("522563524565606") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("1S2 2SA") == ("1s2 2s10", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("3D54P") == ("3d54p", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("4FA(3H)") == ("4f10(3H)", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("2P") == ("2p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("3S2 3P6 3D6 4S 4P") == ("3s2 3p6 3d6 4s 4p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]

@@ -181,7 +181,7 @@ def _standardise_config(config: str) -> tuple[str, bool]:
 
     # The term in parentheses stays in upper case, e.g. "4P65S2(1S)" becomes "4p65s2(1S)".
     head, sep, tail = config.partition("(")
-    return expand_standard_config(head.lower() + sep + tail), False
+    return expand_standard_config(head.lower()) + sep + tail, False
 
 
 def read_adf04(
