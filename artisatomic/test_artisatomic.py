@@ -2194,7 +2194,7 @@ def test_convert_eissner_to_standard():
 def test_standardise_config_converts_only_eissner_triples():
     """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
     assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("522563524565560") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("522563524565606") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
 
