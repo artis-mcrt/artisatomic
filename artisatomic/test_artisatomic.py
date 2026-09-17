@@ -41,6 +41,7 @@ from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
 from artisatomic.cli import build_parser
+from artisatomic.levelnames import convert_eissner_to_standard
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import interpret_configuration
@@ -2180,6 +2181,21 @@ def test_extend_ion_list_finds_a_compressed_adf04():
     """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
     assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
     assert (20, [(3, "qub")]) in readqubdata.extend_ion_list({})
+
+
+def test_convert_eissner_to_standard():
+    """The converter gives the standard notation of the documented example and of a Ca III level."""
+    assert convert_eissner_to_standard("521522563524565") == "1s22s22p63s23p6"
+    assert convert_eissner_to_standard("522563524555516") == "2s22p63s23p53d1"
+    with pytest.raises(ValueError, match="Unknown shell character"):
+        convert_eissner_to_standard("52Z")
+
+
+def test_process_config_converts_only_eissner_triples():
+    """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
+    assert readqubdata._process_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
+    assert readqubdata._process_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._process_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():

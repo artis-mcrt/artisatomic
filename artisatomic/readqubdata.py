@@ -180,14 +180,17 @@ def _evaluate_adf04_header(line: str, atomic_number: int, ion_stage: int, filepa
     return read_energy * hc_in_ev_cm
 
 
+# An Eissner configuration is a sequence of triples: "5", the occupation digit, the shell character.
+# The bare configuration "5s2" does not match, because its second character is not a digit.
+eissner_config_regex = re.compile(r"(?:5\d[0-9A-Za-z])+")
+
+
 def _process_config(config: str) -> tuple[str, bool]:
     # Second return item is True if the configuration had to be converted from Eissner to standard notation
 
     config = config.strip()
 
-    # TODO: would be nice to have a more robust way of checking this
-    # if config.isnumeric():
-    if all(config[i] == "5" for i in range(0, len(config), 3)):
+    if eissner_config_regex.fullmatch(config):
         return convert_eissner_to_standard(config), True
 
     # Is probably fine to just call config.lower(), but this leaves the term uppercase to be consistent
