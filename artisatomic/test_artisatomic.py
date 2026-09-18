@@ -2161,7 +2161,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    assert "Skipped rows without a numeric level id: 1" in flog.getvalue()
+    assert "Skipped rows with a transition code that is not an electron impact excitation: 1" in flog.getvalue()
     assert "Read 235 effective collision strengths" in flog.getvalue()
 
 
@@ -2201,6 +2201,7 @@ def test_read_adf04_header_accepts_the_forms_of_the_specification():
     """The parent term is optional, and a file can leave the element symbol blank."""
     for line in (
         "H+ 0         1         1    109679.\n",
+        "H+ 0         1         1    109679\n",
         "HE+ 0         2         1    109679.0000\n",
         "C + 3         6         4    109679.0(1S)  2931440.0(3S)\n",
         "  + 2        26         3    109679.(6S)\n",
@@ -2239,6 +2240,24 @@ def test_read_adf04_transition_code_and_ityp(tmp_path):
         readqubdata.read_adf04(bad, io.StringIO(), 5000.0, 1, 1)
 
 
+def test_read_adf04_wide_level_ids(tmp_path):
+    """A file with 1000 or more levels gives the upper level id in columns 1 to 4, with no transition code."""
+    levels = "".join(f"{i:5d} 1S                 (2)0( 0.5) {i - 1:12d}.\n" for i in range(1, 1202))
+    text = (
+        "H+ 0         1         1  99999999.\n" + levels + "   -1\n"
+        " 1.00    3       5.80+03 1.16+04\n"
+        "1123   5 6.27+08 4.29-01 5.29-01\n"
+        "   7   5 6.27+08 3.00-01 5.29-01\n"
+        "  -1\n"
+        "  -1  -1\n"
+    )
+    filepath = tmp_path / "wide.adf04"
+    filepath.write_text(text, encoding="utf-8")
+    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)
+    assert len(energylevels) == 1201
+    assert upsilondict == {(4, 1122): pytest.approx(0.429), (4, 6): pytest.approx(0.3)}
+
+
 def test_standardise_config_converts_only_eissner_triples():
     """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
     assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
@@ -2246,6 +2265,7 @@ def test_standardise_config_converts_only_eissner_triples():
     assert readqubdata._standardise_config("1S2 2SA") == ("1s2 2s10", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("3D54P") == ("3d54p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("4FA(3H)") == ("4f10(3H)", False)  # ruff: ignore[private-member-access]
+    assert readqubdata._standardise_config("3S2  3PA (4F)") == ("3s2  3p10 (4F)", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("2P") == ("2p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("3S2 3P6 3D6 4S 4P") == ("3s2 3p6 3d6 4s 4p", False)  # ruff: ignore[private-member-access]
     assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]

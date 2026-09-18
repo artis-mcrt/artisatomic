@@ -139,7 +139,8 @@ def adf04_number(text: str) -> float:
     return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
 
 
-decimal_number_pattern = r"\d+\.\d*"
+# The specification writes each value with a decimal point. Some files omit it.
+decimal_number_pattern = r"\d+(?:\.\d*)?"
 
 # The specification lets a file omit the parent term after the ionisation potential. Some files
 # also leave the element symbol blank.
@@ -281,14 +282,18 @@ def read_adf04(
         # a collision strength. A blank line is not a bad row, so the counter skips it.
         collision_lines: list[str] = []
         skipped_rows = 0
+        # The columns a1,i3 hold an upper level id of 999 at most. A file with more levels gives
+        # the upper level id in columns 1 to 4.
+        wide_level_ids = len(energylevels) > 999
         for line in fleveltrans:
             if is_adf04_terminator(line):
                 break
             if not line.strip():
                 continue
             # Column 1 holds the transition code. A blank, "1", "2" or "3" is an electron impact
-            # excitation.
-            if line[0] not in " 123":
+            # excitation. A file with wide level ids has no code column, and a digit there is a
+            # part of the upper level id.
+            if line[0] not in (" 0123456789" if wide_level_ids else " 123"):
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
@@ -318,7 +323,7 @@ def read_adf04(
         # A cut of only the wanted fields needs about a third of the memory of a split of every
         # line into all of its columns.
         collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
-            adf04_column(1, 3).cast(pl.Int64, strict=False).alias("upper"),
+            (adf04_column(0, 4) if wide_level_ids else adf04_column(1, 3)).cast(pl.Int64, strict=False).alias("upper"),
             adf04_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
             adf04_float(8, 8).alias("avalue"),
             adf04_float(16 + 8 * nearest_index, 8).alias("upsilon"),
@@ -354,7 +359,9 @@ def read_adf04(
     log_and_print(flog, f"Read {len(energylevels):d} levels")
     log_and_print(flog, f"Read {len(upsilondict):d} effective collision strengths")
     if skipped_rows:
-        log_and_print(flog, f"Skipped rows without a numeric level id: {skipped_rows:d}")
+        log_and_print(
+            flog, f"Skipped rows with a transition code that is not an electron impact excitation: {skipped_rows:d}"
+        )
     if unreadable_rows:
         log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
 

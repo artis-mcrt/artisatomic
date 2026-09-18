@@ -352,17 +352,17 @@ standard_word_regex = re.compile(rf"([1-9a-z])([{lchars.lower()}])([1-9a-z])")
 def expand_standard_config(config: str) -> str:
     """Write n and q as decimal numbers if each word of the lower-case configuration is "nlq".
 
-    The word "3da" becomes "3d10". A configuration in a different form stays as it is.
+    The word "3da" becomes "3d10". A configuration in a different form stays as it is, and the
+    white space between the words stays as it is.
     """
     words = config.split()
-    matches = [standard_word_regex.fullmatch(word) for word in words]
-    if not words or not all(matches):
+    if not words or not all(standard_word_regex.fullmatch(word) for word in words):
         return config
 
     def decimal(char: str) -> str:
         return char if char.isdigit() else str(10 + ord(char) - ord("a"))
 
-    return " ".join(f"{decimal(m[1])}{m[2]}{decimal(m[3])}" for m in matches if m is not None)
+    return standard_word_regex.sub(lambda m: f"{decimal(m[1])}{m[2]}{decimal(m[3])}", config)
 
 
 def convert_eissner_to_standard(eissner_config: str) -> str:
