@@ -2190,6 +2190,8 @@ def test_convert_eissner_to_standard():
     # the collating sequence of the AUTOSTRUCTURE files: 9=4d, A=4f, B=5s. The first shell can give q alone.
     assert convert_eissner_to_standard("51951A51B") == "4d14f15s1"
     assert convert_eissner_to_standard("21522") == "1s22s2"
+    assert convert_eissner_to_standard("21") == "1s2"
+    assert convert_eissner_to_standard("3A52B") == "4f35s2"
     for malformed in ("521junk", "501", "651", "520"):
         with pytest.raises(ValueError, match="Not an Eissner configuration"):
             convert_eissner_to_standard(malformed)

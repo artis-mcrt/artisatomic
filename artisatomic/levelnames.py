@@ -330,11 +330,11 @@ eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
 def _full_eissner_config(config: str) -> str:
     """Return the configuration with a full first triple.
 
-    The specification lets the first shell give the occupation q in place of 50 + q. The function
-    needs a second triple to accept the short form, because a bare "2P" is a standard label. The
-    shell character of the short form must be a digit, because "3D54P" is the standard 3d5 4p.
+    The specification lets the first shell give the occupation q in place of 50 + q, as in "21522".
+    The shell character of the short form must not be an orbital letter in upper case or lower
+    case. A label such as "2P", and the compact "3D54P" (3d5 4p), are standard notation.
     """
-    if len(config) % 3 == 2 and len(config) >= 5 and config[0] in "123456789" and config[1] in "123456789":
+    if len(config) % 3 == 2 and config[0] in "123456789" and config[1].upper() not in lchars:
         return "5" + config
     return config
 
