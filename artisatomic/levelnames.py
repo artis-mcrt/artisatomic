@@ -313,21 +313,23 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
 
 # The Eissner collating sequence: 1=1s, 2=2s, 3=2p, ..., 9=4d, A=4f, B=5s, ..., Z, then a, b, ...
 # The shell character is case-sensitive. The ADAS adf04 specification (appxa-04) gives 0=4f and
-# A=5s. The adf04 files from AUTOSTRUCTURE do not follow it: in the Ca III file each "A" level has
-# a total L of 2, 3 or 4, and only 3p5 4f gives those terms. The reader follows the files.
-eissner_shell_chars = "123456789" + string.ascii_uppercase + string.ascii_lowercase
+# A=5s. The adf04 files from AUTOSTRUCTURE do not follow it. In the Ca III file, each "A" level
+# has a total L of 2, 3 or 4. Only 3p5 4f gives those terms. The reader follows the files.
+eissner_shell_chars = string.digits[1:] + string.ascii_uppercase + string.ascii_lowercase
 eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
-eissner_shell_label_by_char = dict(
+eissner_shell_label_by_char: dict[str, str] = dict(
     zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
 )
 
-# One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
-eissner_triple_pattern = r"(5[1-9]|6[0-4])([1-9A-Za-z])"
-eissner_triple_regex = re.compile(eissner_triple_pattern)
-eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
+# One Eissner triple is the occupation code (50 + the occupation, thus "51" to "64") and the shell character.
+eissner_config_regex = re.compile(r"(?:(?:5[1-9]|6[0-4])[1-9A-Za-z])+")
+
+# A string of this form is an Eissner configuration or a defective one. It is not standard
+# notation, because standard notation has an orbital letter as its second character.
+eissner_like_config_regex = re.compile(r"(?:[56][0-9][0-9A-Za-z])+")
 
 
-def _full_eissner_config(config: str) -> str:
+def _with_full_first_triple(config: str) -> str:
     """Return the configuration with a full first triple.
 
     The specification lets the first shell give the occupation q in place of 50 + q, as in "21522".
@@ -339,30 +341,57 @@ def _full_eissner_config(config: str) -> str:
     return config
 
 
+def _eissner_shells(config: str) -> list[tuple[str, int]] | None:
+    """Return the (shell label, occupation) pairs of an Eissner configuration, or None for a different string."""
+    config = _with_full_first_triple(config)
+    if eissner_config_regex.fullmatch(config) is None:
+        return None
+    shells = [
+        (eissner_shell_label_by_char[config[start + 2]], int(config[start : start + 2]) - 50)
+        for start in range(0, len(config), 3)
+    ]
+    # A shell holds 2(2l+1) electrons at most. A label such as "591" (1s9) is not a configuration.
+    if any(occupation > 4 * lchars.lower().index(label[-1]) + 2 for label, occupation in shells):
+        return None
+    return shells
+
+
 def is_eissner_config(config: str) -> bool:
-    """Return True if the full string is a sequence of Eissner triples. The bare "5s2" is not."""
-    return eissner_config_regex.fullmatch(_full_eissner_config(config)) is not None
+    """Return True if the string is an Eissner configuration.
+
+    The string is a sequence of Eissner triples, and the first triple can be short ("21522"). The
+    bare "5s2" is standard notation.
+    """
+    return _eissner_shells(config) is not None
+
+
+def looks_like_eissner_config(config: str) -> bool:
+    """Return True if the string has the form of an Eissner configuration, valid or defective."""
+    return eissner_like_config_regex.fullmatch(_with_full_first_triple(config)) is not None
 
 
 # One word of the standard form of the specification: n, the orbital letter, the occupation q.
 # n and q use the collating sequence 1 to 9, then a=10, b=11, ...
-standard_word_regex = re.compile(rf"([1-9a-z])([{lchars.lower()}])([1-9a-z])")
+standard_word_regex = re.compile(rf"(?<!\S)([1-9a-z])([{lchars.lower()}])([1-9a-z])(?!\S)")
+
+
+def _expand_standard_word(word: re.Match[str]) -> str:
+    n_char, orbital, q_char = word.groups()
+    n, l, q = int(n_char, 36), lchars.lower().index(orbital), int(q_char, 36)
+    # A word with no digit is a label. A subshell has n > l and holds 2(2l+1) electrons at most,
+    # so "4fo" (a term with its parity) and "4ff" are labels too.
+    if not (n_char.isdigit() or q_char.isdigit()) or n <= l or q > 4 * l + 2:
+        return word[0]
+    return f"{n}{orbital}{q}"
 
 
 def expand_standard_config(config: str) -> str:
-    """Write n and q as decimal numbers if each word of the lower-case configuration is "nlq".
+    """Write n and q as decimal numbers in each "nlq" word of the lower-case configuration.
 
-    The word "3da" becomes "3d10". A configuration in a different form stays as it is, and the
-    white space between the words stays as it is.
+    The word "3da" becomes "3d10". A word in a different form stays as it is, and the whitespace
+    between the words stays as it is.
     """
-    words = config.split()
-    if not words or not all(standard_word_regex.fullmatch(word) for word in words):
-        return config
-
-    def decimal(char: str) -> str:
-        return char if char.isdigit() else str(10 + ord(char) - ord("a"))
-
-    return standard_word_regex.sub(lambda m: f"{decimal(m[1])}{m[2]}{decimal(m[3])}", config)
+    return standard_word_regex.sub(_expand_standard_word, config)
 
 
 def convert_eissner_to_standard(eissner_config: str) -> str:
@@ -375,12 +404,8 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
     Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
     doi:10.1016/S0010-4655(98)00082-4.
     """
-    if not is_eissner_config(eissner_config):
+    shells = _eissner_shells(eissner_config)
+    if shells is None:
         msg = f"Not an Eissner configuration: {eissner_config!r}"
         raise ValueError(msg)
-    triples = eissner_triple_regex.findall(_full_eissner_config(eissner_config))
-
-    return "".join(
-        f"{eissner_shell_label_by_char[shell_char]}{int(occupation_code) % 50}"
-        for occupation_code, shell_char in triples
-    )
+    return "".join(f"{label}{occupation}" for label, occupation in shells)

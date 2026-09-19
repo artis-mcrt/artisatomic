@@ -42,9 +42,11 @@ from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
 from artisatomic.cli import build_parser
 from artisatomic.levelnames import convert_eissner_to_standard
+from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import interpret_configuration
+from artisatomic.levelnames import is_eissner_config
 from artisatomic.output import add_level_ids_forbidden
 from artisatomic.output import write_adata
 from artisatomic.output import write_phixs_data
@@ -2161,7 +2163,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    assert "Skipped rows with a transition code that is not an electron impact excitation: 1" in flog.getvalue()
+    assert "Skipped rows that are not an electron impact excitation: 1" in flog.getvalue()
     assert "Read 235 effective collision strengths" in flog.getvalue()
 
 
@@ -2192,84 +2194,182 @@ def test_convert_eissner_to_standard():
     assert convert_eissner_to_standard("21522") == "1s22s2"
     assert convert_eissner_to_standard("21") == "1s2"
     assert convert_eissner_to_standard("3A52B") == "4f35s2"
-    for malformed in ("521junk", "501", "651", "520"):
+    # "520" has the shell character of the specification that the files do not use. The last
+    # three give a shell more electrons than it holds (1s9, 1s14, 2s6).
+    for malformed in ("521junk", "501", "651", "520", "591", "641", "62"):
+        assert not is_eissner_config(malformed)
         with pytest.raises(ValueError, match="Not an Eissner configuration"):
             convert_eissner_to_standard(malformed)
 
 
+def test_expand_standard_config_expands_only_a_real_subshell():
+    """A letter is an occupation only in a word that can be a subshell: n > l and q <= 2(2l+1)."""
+    assert expand_standard_config("3p6 3da") == "3p6 3d10"
+    assert expand_standard_config("4fe") == "4f14"
+    assert expand_standard_config("as1") == "10s1"
+    # each word decides for itself, so a bare "4s" does not stop the expansion of "3da"
+    assert expand_standard_config("3s2 3p6 3da 4s") == "3s2 3p6 3d10 4s"
+    assert expand_standard_config("3s2  3p6 3da ") == "3s2  3p6 3d10 "
+    # a term with its parity, an occupation above the capacity of the shell, and a label with no digit
+    for label in ("3d7 4fo", "2po", "4ff", "3dd", "1ss", "3pa", "grd", "ion", "spd", "3da4p", ""):
+        assert expand_standard_config(label) == label
+
+
+def make_adf04(levels: t.Sequence[str], rows: t.Sequence[str], *, header: str, temperatures: str) -> str:
+    """Return the text of a minimal adf04 file: the header, the levels, the temperatures and the collision rows."""
+    return "\n".join([header, *levels, "   -1", temperatures, *rows, "  -1", "  -1  -1", ""])
+
+
+hydrogen_header = "H+ 0         1         1    109679."
+hydrogen_levels = ("    1 1S                 (2)0( 0.5)        0.", "    2 2P                 (2)1( 2.5)    82303.")
+two_temperatures = " 1.00    3       5.80+03 1.16+04"
+
+
+def read_hydrogen_adf04(
+    tmp_path: Path,
+    rows: t.Sequence[str],
+    *,
+    levels: t.Sequence[str] = hydrogen_levels,
+    header: str = hydrogen_header,
+    temperatures: str = two_temperatures,
+) -> dict[tuple[int, int], float]:
+    """Write a minimal H I adf04 file and return the upsilon values at 5000 K."""
+    filepath = tmp_path / "1_1.adf04"
+    filepath.write_text(make_adf04(levels, rows, header=header, temperatures=temperatures), encoding="utf-8")
+    return readqubdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]
+
+
 def test_read_adf04_header_accepts_the_forms_of_the_specification():
     """The parent term is optional, and a file can leave the element symbol blank."""
-    for line in (
-        "H+ 0         1         1    109679.\n",
-        "H+ 0         1         1    109679\n",
-        "HE+ 0         2         1    109679.0000\n",
-        "C + 3         6         4    109679.0(1S)  2931440.0(3S)\n",
-        "  + 2        26         3    109679.(6S)\n",
+    read_header = readqubdata._read_adf04_header  # ruff: ignore[private-member-access]
+    for line, atomic_number, ion_stage in (
+        ("H+ 0         1         1    109679.\n", 1, 1),
+        ("H+ 0         1         1    109679\n", 1, 1),
+        ("HE+ 0         2         1    109679.0000\n", 2, 1),
+        ("C + 3         6         4    109679.0(1S)  2931440.0(3S)\n", 6, 4),
+        ("  + 2        26         3    109679.(6S)\n", 26, 3),
     ):
-        z, stage = int(line.split("+")[1].split()[1]), int(line.split("+")[1].split()[2])
-        energy_ev = readqubdata._read_adf04_header(line, z, stage, "x.adf04")  # ruff: ignore[private-member-access]
-        assert energy_ev == pytest.approx(13.5984, abs=1e-3)
+        assert read_header(line, atomic_number, ion_stage, "x.adf04") == pytest.approx(13.5984, abs=1e-3)
     with pytest.raises(ValueError, match="Ion stage"):
-        readqubdata._read_adf04_header("H+ 0         1         1    109679.\n", 1, 2, "x.adf04")  # ruff: ignore[private-member-access]
+        read_header("H+ 0         1         1    109679.\n", 1, 2, "x.adf04")
+    # the header gives the ion charge and the ion stage, and they must agree
+    with pytest.raises(ValueError, match="ion charge 7"):
+        read_header("Sr+ 7        38         1     45932.2036(  )\n", 38, 1, "x.adf04")
+    # a number that is not a full fixed-point field must not give its first digits
+    for line in ("Ca+ 2        20         3    4.10+05(1s)\n", "Ca+ 2        20         3    1.0E+06(1s)\n"):
+        with pytest.raises(ValueError, match="Cannot read the adf04 header line"):
+            read_header(line, 20, 3, "x.adf04")
+    with pytest.raises(ValueError, match="Cannot read the adf04 header line"):
+        read_header("H+ 0         1         1    109,679.\n", 1, 1, "x.adf04")
 
 
-def test_read_adf04_transition_code_and_ityp(tmp_path):
-    """A row with the transition code "1" in column 1 is a collision row. ITYP must be 3."""
-    text = (
-        "H+ 0         1         1    109679.\n"
-        "    1 1S                 (2)0( 0.5)        0.\n"
-        "    2 2P                 (2)1( 2.5)    82303.\n"
-        "   -1\n"
-        " 1.00    {ityp}       5.80+03 1.16+04\n"
-        "1  2   1 6.27+08 4.29-01 5.29-01-3.01-02\n"
-        "  -1\n"
-        "  -1  -1\n"
+def test_adf04_level_regex_takes_the_first_term_group():
+    """Text after the energy can look like a second "(2S+1)L(J)" group, and the first group is the level."""
+    line = "    7 3D7 4S1            (5)2( 4.0)     439.0279  (3)1( 2) 12"
+    levelmatch = readqubdata.adf04_level_regex.match(line)
+    assert levelmatch is not None
+    assert levelmatch.groups() == ("7", "3D7 4S1", "5", "2", "4.0", "439.0279")
+    # an energy in exponent form must not give its first digits
+    assert readqubdata.adf04_level_regex.match("    2 3S2 3P6 3D6       (5)2( 3.0)      4.39+02") is None
+
+
+def test_read_adf04_process_code_and_touching_values(tmp_path):
+    """A row with the process code "1" in column 1 is a collision row, and fixed columns separate two values."""
+    rows = ["1  2   1 6.27+08 4.29-01 5.29-01-3.01-02"]
+    assert read_hydrogen_adf04(tmp_path, rows) == {(0, 1): pytest.approx(0.429)}
+    # the last upsilon touches the Born limit
+    filepath = tmp_path / "1_1.adf04"
+    assert readqubdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2] == {(0, 1): pytest.approx(0.529)}
+
+
+def test_read_adf04_temperature_line(tmp_path):
+    """The reader takes ITYP and the temperatures from the fixed columns, and it stops for a different layout."""
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01"]
+    # ZEFF can be blank, and ITYP is a number
+    for temperatures in ("         3       5.80+03 1.16+04", " 1.00   03       5.80+03 1.16+04"):
+        assert read_hydrogen_adf04(tmp_path, rows, temperatures=temperatures) == {(0, 1): pytest.approx(0.429)}
+    with pytest.raises(ValueError, match="ITYP field must be 3, and it is '1'"):
+        read_hydrogen_adf04(tmp_path, rows, temperatures=" 1.00    1       5.80+03 1.16+04")
+    with pytest.raises(ValueError, match="names no temperatures"):
+        read_hydrogen_adf04(tmp_path, rows, temperatures=" 1.00    3")
+    # free format, and values that are 9 columns wide: the rows of such a file are not in the fixed columns
+    for temperatures in (" 1.00    3   5.80+03  1.16+04", " 1.00    3        5.800+03 1.160+04"):
+        with pytest.raises(ValueError, match="fixed columns of the adf04 specification"):
+            read_hydrogen_adf04(tmp_path, rows, temperatures=temperatures)
+
+    truncated = tmp_path / "truncated.adf04"
+    truncated.write_text("\n".join([hydrogen_header, *hydrogen_levels, "   -1", ""]), encoding="utf-8")
+    with pytest.raises(ValueError, match="ends before the line that gives the temperatures"):
+        readqubdata.read_adf04(truncated, io.StringIO(), 5000.0, 1, 1)
+
+
+def test_read_adf04_upper_file_index_comes_from_the_row(tmp_path):
+    """Column 1 of a collision row holds a process code or a digit of the upper file index, and the row shows which."""
+    levels = [f"{i:5d} 1S                 (2)0( 0.5) {i - 1:12d}." for i in range(1, 1202)]
+    values = " 6.27+08 4.29-01 5.29-01"
+    # 1201 levels: "1123" is a level of the file. "3999" is not, so "3" is the process code of level 999.
+    rows = ["1123   5" + values, "3999   6" + values, "1 23   9" + values, "   7   5" + values]
+    upsilondict = read_hydrogen_adf04(tmp_path, rows, levels=levels, header="H+ 0         1         1  99999999.")
+    assert sorted(upsilondict) == [(4, 6), (4, 1122), (5, 998), (8, 22)]
+
+    # 200 levels: "1123" cannot be a level, so "1" is the process code of level 123. A left-aligned
+    # index is readable. "4" is not a process code, so the reader cannot parse the third row.
+    rows = ["1123   5" + values, "42     1" + values, "4 12   1" + values]
+    flog = io.StringIO()
+    filepath = tmp_path / "1_1.adf04"
+    filepath.write_text(
+        make_adf04(levels[:200], rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
     )
-    good = tmp_path / "good.adf04"
-    good.write_text(text.format(ityp=3), encoding="utf-8")
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(good, io.StringIO(), 5000.0, 1, 1)
-    assert len(energylevels) == 2
-    assert upsilondict == {(0, 1): pytest.approx(0.429)}
-    # the last upsilon touches the Born limit, and the fixed columns still separate them
-    _, _, upsilondict_hot, _ = readqubdata.read_adf04(good, io.StringIO(), 1e6, 1, 1)
-    assert upsilondict_hot == {(0, 1): pytest.approx(0.529)}
-
-    bad = tmp_path / "bad.adf04"
-    bad.write_text(text.format(ityp=1), encoding="utf-8")
-    with pytest.raises(ValueError, match="ITYP"):
-        readqubdata.read_adf04(bad, io.StringIO(), 5000.0, 1, 1)
+    assert sorted(readqubdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(0, 41), (4, 122)]
+    assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
 
 
-def test_read_adf04_wide_level_ids(tmp_path):
-    """A file with 1000 or more levels gives the upper level id in columns 1 to 4, with no transition code."""
-    levels = "".join(f"{i:5d} 1S                 (2)0( 0.5) {i - 1:12d}.\n" for i in range(1, 1202))
-    text = (
-        "H+ 0         1         1  99999999.\n" + levels + "   -1\n"
-        " 1.00    3       5.80+03 1.16+04\n"
-        "1123   5 6.27+08 4.29-01 5.29-01\n"
-        "   7   5 6.27+08 3.00-01 5.29-01\n"
-        "  -1\n"
-        "  -1  -1\n"
-    )
-    filepath = tmp_path / "wide.adf04"
-    filepath.write_text(text, encoding="utf-8")
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)
-    assert len(energylevels) == 1201
-    assert upsilondict == {(4, 1122): pytest.approx(0.429), (4, 6): pytest.approx(0.3)}
+def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
+    """Rows in free format give no value in the fixed columns. The ion must not lose each transition silently."""
+    with pytest.raises(ValueError, match="could not parse any of the 1 collision rows"):
+        read_hydrogen_adf04(tmp_path, ["   1    2  6.27+08  4.29-01  5.29-01"])
 
 
-def test_standardise_config_converts_only_eissner_triples():
-    """A bare configuration such as "5s2" starts with "5" but is not Eissner notation."""
-    assert readqubdata._standardise_config(" 522563524565 ") == ("2s22p63s23p6", True)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("522563524565606") == ("2s22p63s23p63d10", True)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("1S2 2SA") == ("1s2 2s10", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("3D54P") == ("3d54p", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("4FA(3H)") == ("4f10(3H)", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("3S2  3PA (4F)") == ("3s2  3p10 (4F)", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("2P") == ("2p", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("3S2 3P6 3D6 4S 4P") == ("3s2 3p6 3d6 4s 4p", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("5s2") == ("5s2", False)  # ruff: ignore[private-member-access]
-    assert readqubdata._standardise_config("4P65S2(1S)") == ("4p65s2(1S)", False)  # ruff: ignore[private-member-access]
+def test_append_qub_transition_rejects_equal_level_ids():
+    """A transition from a level to itself stops the run in the reader, and the message names the file."""
+    levels = [readqubdata.QUBEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
+    with pytest.raises(ValueError, match="same level id 2"):
+        readqubdata.append_qub_transition(levels, [], 2, 2, 1e8, "x.adf04")
+
+
+def test_standardise_config():
+    """The reader converts an Eissner configuration, and it writes standard notation in lower case."""
+    standardise = readqubdata._standardise_config  # ruff: ignore[private-member-access]
+    assert standardise(" 522563524565 ", uses_eissner_notation=True) == "2s22p63s23p6"
+    assert standardise("522563524565606", uses_eissner_notation=True) == "2s22p63s23p63d10"
+    for config, expected in (
+        ("3P6 3DA", "3p6 3d10"),
+        ("3D54P", "3d54p"),
+        ("4FA(3H)", "4f10(3H)"),
+        ("3S2  3DA (4F)", "3s2  3d10 (4F)"),
+        ("2P", "2p"),
+        ("3S2 3P6 3D6 4S 4P", "3s2 3p6 3d6 4s 4p"),
+        ("5s2", "5s2"),
+        ("4P65S2(1S)", "4p65s2(1S)"),
+        # in a file with standard notation, a label that is also a valid Eissner configuration stays as it is
+        ("21", "21"),
+    ):
+        assert standardise(config, uses_eissner_notation=False) == expected
+
+
+def test_file_uses_eissner_notation():
+    """The notation is a property of the file, so one level that looks like Eissner notation does not decide it."""
+    uses_eissner_notation = readqubdata._file_uses_eissner_notation  # ruff: ignore[private-member-access]
+    assert uses_eissner_notation(["522563524565", "522563524555516", "21"], "x.adf04")
+    assert not uses_eissner_notation(["3S2 3P6 3D6", "21", "3S2 3P6 3D5 4P1"], "x.adf04")
+    assert not uses_eissner_notation(["4p65s2(1S)", "5s2", "3D54P", "2P"], "x.adf04")
+    assert not uses_eissner_notation([], "x.adf04")
+    # "0" is the 4f shell of the specification. The files from AUTOSTRUCTURE do not use it, and the
+    # digits of such a level must not become its name.
+    with pytest.raises(ValueError, match="cannot read the configuration '522563524565510'"):
+        uses_eissner_notation(["522563524565", "522563524565510", "522563524555516"], "x.adf04")
+    with pytest.raises(ValueError, match="cannot read the configuration"):
+        uses_eissner_notation(["522563524565510", "522563524565520"], "x.adf04")
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
@@ -4345,14 +4445,14 @@ def test_read_qub_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypat
     """
     import contextlib
 
-    adf04 = (
-        "Xx+ 0        99         1     45932.2036(  )\n"
-        "    1          4p65s2(1S)   (1)0( 0.0)            0.0000\n"
-        "    2       4p65s15p1(3P)   (3)1( 0.0)        14317.5023\n"
-        "   -1\n"
-        " 1.00    3       1.00+03 1.00+04\n"
-        "   1   2 1.00+08 5.00-01 5.00-01\n"
-        "  -1\n"
+    adf04 = make_adf04(
+        [
+            "    1          4p65s2(1S)   (1)0( 0.0)            0.0000",
+            "    2       4p65s15p1(3P)   (3)1( 0.0)        14317.5023",
+        ],
+        ["   1   2 1.00+08 5.00-01 5.00-01"],
+        header="Xx+ 0        99         1     45932.2036(  )",
+        temperatures=" 1.00    3       1.00+03 1.00+04",
     )
     (tmp_path / "99_1.adf04").write_text(adf04, encoding="utf-8")
     monkeypatch.setattr(readqubdata, "qubpath", tmp_path)

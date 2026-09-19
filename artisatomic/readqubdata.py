@@ -38,6 +38,7 @@ from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import is_eissner_config
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import looks_like_eissner_config
 from artisatomic.levelnames import split_count_and_n
 from artisatomic.phixs import combine_phixs_routes
 from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
@@ -119,8 +120,18 @@ def is_adf04_terminator(line: str) -> bool:
     return adf04_first_field(line) == adf04_section_end
 
 
+# These values give the fixed columns of the specification. A collision row is a1,i3,i4,16e8.2.
+# The process code and the two file indices fill the first 8 columns, and each value has 8
+# columns. The line with the temperatures is f5.1,i5,6x,14e8.2: ZEFF, ITYP, and the temperatures
+# from column 17.
+adf04_row_prefix_width = 8
+adf04_value_width = 8
+adf04_ityp_columns = slice(5, 10)
+adf04_temperature_offset = 16
+
+
 def adf04_column(offset: int, length: int) -> pl.Expr:
-    """Return an expression for the fixed columns of the "line" column, with no white space at the ends."""
+    """Return an expression for the fixed columns of the "line" column, with no whitespace at the ends."""
     return pl.col("line").str.slice(offset, length).str.strip_chars()
 
 
@@ -134,6 +145,24 @@ def adf04_float(offset: int, length: int) -> pl.Expr:
     return adf04_column(offset, length).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
 
 
+def adf04_upper_file_index(levelcount: int) -> pl.Expr:
+    """Return an expression for the upper file index of a collision row.
+
+    The columns a1,i3 of the specification hold a file index of 999 at most, so a file with more
+    levels puts a digit of the index in column 1. The row gives the layout:
+    - Columns 1 to 4 hold only digits, and the number is a level of the file. It is the index.
+    - Column 1 holds the process code "1", "2" or "3", or a blank. Columns 2 to 4 hold the index.
+    Each other row gives a null.
+    """
+    first_columns = adf04_column(0, 4)
+    digits_index = first_columns.cast(pl.Int64, strict=False)
+    is_level = (first_columns.str.contains(r"^[0-9]+$") & (digits_index <= levelcount)).fill_null(value=False)
+    has_code_column = pl.col("line").str.slice(0, 1).is_in([" ", "1", "2", "3"])
+    return (
+        pl.when(is_level).then(digits_index).when(has_code_column).then(adf04_column(1, 3).cast(pl.Int64, strict=False))
+    )
+
+
 def adf04_number(text: str) -> float:
     """Convert a number in the ADAS form, where the exponent has a sign and no letter ("5.00+03")."""
     return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
@@ -142,14 +171,21 @@ def adf04_number(text: str) -> float:
 # The specification writes each value with a decimal point. Some files omit it.
 decimal_number_pattern = r"\d+(?:\.\d*)?"
 
-# The specification lets a file omit the parent term after the ionisation potential. Some files
-# also leave the element symbol blank.
-adf04_header_regex = re.compile(rf"\s*[A-Za-z]{{0,2}}\s*\+\s*\d+\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})")
+# The groups are: IZ (the ion charge), IZ0 (the atomic number), IZ1 (the ion stage) and the
+# ionisation potential. The specification lets a file omit the parent term after the ionisation
+# potential. Some files also leave the element symbol blank. The lookahead makes the number a
+# full field, so "4.10+05" does not give 4.10.
+adf04_header_regex = re.compile(
+    rf"\s*[A-Za-z]{{0,2}}\s*\+\s*(\d+)\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})(?=\s|\(|$)"
+)
 
-# The groups are: qub_id, config, multiplicity (2S+1), L as a hexadecimal digit, J, energy above the ground level.
-# The configuration column has no fixed width or format, so ".*" captures it.
+# The groups are: the file index, the configuration, the multiplicity (2S+1), L as a hexadecimal
+# digit, J, and the energy above the ground level. The configuration column has no fixed width
+# or format, so ".*?" captures it. It is not greedy, because the text after the energy can have
+# a second group of the form "(n)L(J)".
 adf04_level_regex = re.compile(
-    rf"\s*(\d+)\s+(.*)\s+\((\d+)\)([0-9A-Fa-f])\(\s*({decimal_number_pattern})\)\s+({decimal_number_pattern})"
+    rf"\s*(\d+)\s+(.*?)\s+\((\d+)\)([0-9A-Fa-f])\(\s*({decimal_number_pattern})\)"
+    rf"\s+({decimal_number_pattern})(?=\s|\{{|$)"
 )
 
 
@@ -159,9 +195,10 @@ def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: 
     if headermatch is None:
         msg = f"Cannot read the adf04 header line in {filepath}: {line.rstrip()!r}"
         raise ValueError(msg)
-    header_atomic_number = int(headermatch[1])
-    header_ion_stage = int(headermatch[2])
-    ionization_energy_percm = float(headermatch[3])
+    header_ion_charge = int(headermatch[1])
+    header_atomic_number = int(headermatch[2])
+    header_ion_stage = int(headermatch[3])
+    ionization_energy_percm = float(headermatch[4])
 
     if atomic_number != header_atomic_number:
         msg = f"Atomic number ({atomic_number}) does not match that read from {filepath} ({header_atomic_number})"
@@ -169,20 +206,80 @@ def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: 
     if ion_stage != header_ion_stage:
         msg = f"Ion stage ({ion_stage}) does not match that read from {filepath} ({header_ion_stage})"
         raise ValueError(msg)
+    if header_ion_charge + 1 != header_ion_stage:
+        msg = (
+            f"The header of {filepath} gives the ion charge {header_ion_charge} and the ion stage"
+            f" {header_ion_stage}. The ion stage must be the ion charge plus 1."
+        )
+        raise ValueError(msg)
 
     return ionization_energy_percm * hc_in_ev_cm
 
 
-def _standardise_config(config: str) -> tuple[str, bool]:
-    """Return the configuration in standard notation. The flag is True if the input was Eissner notation."""
-    config = config.strip()
+def _read_adf04_temperatures(line: str, filepath: str | Path) -> list[str]:
+    """Return the temperature fields of the line that holds ZEFF, ITYP and the temperatures.
 
-    if is_eissner_config(config):
-        return convert_eissner_to_standard(config), True
+    The fields must be in the fixed columns of the specification, because the reader takes each
+    collision row from the same columns. A file in a different layout stops here with an error.
+    Without this check, such a file gives rows with no value or with a wrong value.
+    """
+    line = line.rstrip()
+    if not line:
+        msg = f"{filepath} ends before the line that gives the temperatures of the collision strengths"
+        raise ValueError(msg)
+    # ITYP=3 gives an upsilon value for each electron temperature. ITYP=1 gives a collision
+    # strength for each value of a threshold parameter, and this reader cannot use them.
+    ityp_text = line[adf04_ityp_columns].strip()
+    if not ityp_text.isascii() or not ityp_text.isdigit() or int(ityp_text) != 3:
+        msg = (
+            f"{filepath} does not give an upsilon value for each electron temperature."
+            f" The adf04 ITYP field must be 3, and it is {ityp_text!r}"
+        )
+        raise ValueError(msg)
+
+    temperatures = [
+        line[start : start + adf04_value_width].strip()
+        for start in range(adf04_temperature_offset, len(line), adf04_value_width)
+    ]
+    # not an assert: input validation must survive python -O
+    if not temperatures:
+        msg = f"{filepath} names no temperatures for its collision strengths"
+        raise ValueError(msg)
+    if temperatures != line[adf04_ityp_columns.stop :].split():
+        msg = (
+            f"{filepath} does not give the temperatures in the fixed columns of the adf04 specification"
+            f" (f5.1,i5,6x,14e8.2): {line!r}"
+        )
+        raise ValueError(msg)
+    return temperatures
+
+
+def _file_uses_eissner_notation(configs: list[str], filepath: str | Path) -> bool:
+    """Decide the notation of the configurations for the full file.
+
+    The notation is a property of the file. A label such as "21" in a file with standard notation
+    is also a valid Eissner configuration, so a decision for each level gives wrong level names.
+    """
+    if configs and all(is_eissner_config(config) for config in configs):
+        return True
+    # A file that has the Eissner form in most levels is an Eissner file with a defect, for example
+    # the shell character "0" of the specification. The digits of such a level must not become its name.
+    if 2 * sum(looks_like_eissner_config(config) for config in configs) > len(configs):
+        defective = next(config for config in configs if not is_eissner_config(config))
+        msg = f"{filepath} uses Eissner notation, but the reader cannot read the configuration {defective!r}"
+        raise ValueError(msg)
+    return False
+
+
+def _standardise_config(config: str, *, uses_eissner_notation: bool) -> str:
+    """Return the configuration in standard notation."""
+    config = config.strip()
+    if uses_eissner_notation:
+        return convert_eissner_to_standard(config)
 
     # The term in parentheses stays in upper case, e.g. "4P65S2(1S)" becomes "4p65s2(1S)".
     head, sep, tail = config.partition("(")
-    return expand_standard_config(head.lower()) + sep + tail, False
+    return expand_standard_config(head.lower()) + sep + tail
 
 
 def read_adf04(
@@ -207,7 +304,6 @@ def read_adf04(
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
     log_and_print(flog, f"Reading {path_for_log(filepath)}")
-    uses_eissner_notation = False
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         ionization_energy_ev = _read_adf04_header(line, atomic_number, ion_stage, filepath)
@@ -215,6 +311,7 @@ def read_adf04(
         # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
         # collision block.
         atomic_group_note = False
+        levelrows: list[tuple[str, ...]] = []
         while True:
             line = fleveltrans.readline()
             if not line or is_adf04_terminator(line):
@@ -229,12 +326,14 @@ def read_adf04(
             if levelmatch is None:
                 msg = f"Cannot read the adf04 level line in {filepath}: {line.rstrip()!r}"
                 raise ValueError(msg)
-            qub_id, config, multiplicity, l_hex, j, energy_percm = levelmatch.groups()
-            config, was_eissner_notation = _standardise_config(config)
-            if not uses_eissner_notation and was_eissner_notation:
-                uses_eissner_notation = True
-                log_and_print(flog, "Eissner notation detected for electron configuration")
+            levelrows.append(levelmatch.groups())
 
+        uses_eissner_notation = _file_uses_eissner_notation([levelrow[1].strip() for levelrow in levelrows], filepath)
+        if uses_eissner_notation:
+            log_and_print(flog, "Eissner notation detected for electron configuration")
+
+        for qub_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
+            config = _standardise_config(config, uses_eissner_notation=uses_eissner_notation)
             energylevel = QUBEnergyLevel(
                 config, int(qub_id), int(multiplicity), int(l_hex, 16), float(j), float(energy_percm), 0.0, 0
             )
@@ -269,39 +368,26 @@ def read_adf04(
                 )
                 raise ValueError(msg)
 
-        upsilonheader = fleveltrans.readline().split()
-        # ITYP=3 gives upsilon values against the electron temperature. ITYP=1 gives collision
-        # strengths against a threshold parameter, and this reader cannot use them.
-        if len(upsilonheader) < 2 or upsilonheader[1] != "3":
-            msg = f"{filepath} does not give upsilon values against temperature (the adf04 ITYP field must be 3)"
-            raise ValueError(msg)
-        temperatures = upsilonheader[2:]
+        temperatures = _read_adf04_temperatures(fleveltrans.readline(), filepath)
 
-        # ADAS writes auxiliary rows with a process code in the first field: R for recombination,
-        # S and I for ionisation, P for proton impact. Only a row that starts with a level id is
-        # a collision strength. A blank line is not a bad row, so the counter skips it.
+        # Column 1 of a collision row holds the process code. A blank, "1", "2" or "3" is an
+        # electron impact excitation. ADAS writes the other processes with a letter: R for
+        # recombination, S and I for ionisation, P for proton impact. A digit in column 1 can also
+        # be a part of the upper file index (see adf04_upper_file_index()). A blank line is not a
+        # bad row, so the counter skips it.
         collision_lines: list[str] = []
         skipped_rows = 0
-        # The columns a1,i3 hold an upper level id of 999 at most. A file with more levels gives
-        # the upper level id in columns 1 to 4.
-        wide_level_ids = len(energylevels) > 999
         for line in fleveltrans:
-            if is_adf04_terminator(line):
+            firstfield = adf04_first_field(line)
+            if firstfield == adf04_section_end:
                 break
-            if not line.strip():
+            if not firstfield:
                 continue
-            # Column 1 holds the transition code. A blank, "1", "2" or "3" is an electron impact
-            # excitation. A file with wide level ids has no code column, and a digit there is a
-            # part of the upper level id.
-            if line[0] not in (" 0123456789" if wide_level_ids else " 123"):
+            if line[0] not in " 0123456789":
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
 
-        # not an assert: input validation must survive python -O
-        if not temperatures:
-            msg = f"{filepath} names no temperatures for its collision strengths"
-            raise ValueError(msg)
         temperature_values = [adf04_number(text) for text in temperatures]
         nearest_index = min(
             range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
@@ -313,25 +399,32 @@ def read_adf04(
         )
 
         # The specification gives each collision row in fixed columns (a1,i3,i4,16e8.2):
-        #  - the transition code,
-        #  - the upper level id,
-        #  - the lower level id,
+        #  - the process code,
+        #  - the upper file index,
+        #  - the lower file index,
         #  - the A-value,
         #  - one upsilon for each temperature,
         #  - the infinite-energy (Born) limit.
-        # A split at white space fails where two values touch, for example "2.81-01-3.01-02".
-        # A cut of only the wanted fields needs about a third of the memory of a split of every
+        # A split at whitespace fails where two values touch, for example "2.81-01-3.01-02".
+        # A cut of only the wanted fields needs about a third of the memory of a cut of every
         # line into all of its columns.
+        upsilon_offset = adf04_row_prefix_width + adf04_value_width * (1 + nearest_index)
         collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
-            (adf04_column(0, 4) if wide_level_ids else adf04_column(1, 3)).cast(pl.Int64, strict=False).alias("upper"),
+            adf04_upper_file_index(len(energylevels)).alias("upper"),
             adf04_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
-            adf04_float(8, 8).alias("avalue"),
-            adf04_float(16 + 8 * nearest_index, 8).alias("upsilon"),
+            adf04_float(adf04_row_prefix_width, adf04_value_width).alias("avalue"),
+            adf04_float(upsilon_offset, adf04_value_width).alias("upsilon"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null
         goodrows = collisiondf.drop_nulls(subset=["lower", "upper", "upsilon"])
         unreadable_rows = collisiondf.height - goodrows.height
+        if unreadable_rows and goodrows.is_empty():
+            msg = (
+                f"The reader could not parse any of the {unreadable_rows} collision rows of {filepath}."
+                " Each row must follow the fixed columns of the adf04 specification (a1,i3,i4,16e8.2)."
+            )
+            raise ValueError(msg)
 
         for lower, upper, upsilon in goodrows.select("lower", "upper", "upsilon").iter_rows():
             lower, upper = min(lower, upper), max(lower, upper)
@@ -359,9 +452,7 @@ def read_adf04(
     log_and_print(flog, f"Read {len(energylevels):d} levels")
     log_and_print(flog, f"Read {len(upsilondict):d} effective collision strengths")
     if skipped_rows:
-        log_and_print(
-            flog, f"Skipped rows with a transition code that is not an electron impact excitation: {skipped_rows:d}"
-        )
+        log_and_print(flog, f"Skipped rows that are not an electron impact excitation: {skipped_rows:d}")
     if unreadable_rows:
         log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
 
@@ -384,6 +475,11 @@ def append_qub_transition(qub_energylevels, qub_transitions, id_lower, id_upper,
             f"transition level ids {id_lower}, {id_upper} in {filepath} are outside"
             f" the file's {len(qub_energylevels)} levels"
         )
+        raise ValueError(msg)
+    # read_adf04() makes the same check for a collision pair. Without it, the failure comes from
+    # the writer, after adata.txt already holds the ion.
+    if id_lower == id_upper:
+        msg = f"transition in {filepath} has the same level id {id_lower} for the two levels"
         raise ValueError(msg)
     # the file numbers levels from one; level ids are zero-based in memory
     id_lower -= 1
