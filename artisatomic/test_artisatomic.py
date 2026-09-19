@@ -2151,7 +2151,7 @@ def read_adf04_sample_lines() -> list[str]:
 
 
 def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
-    """The reader stops at the "-1" row, and skips the ADAS rows that carry a process code."""
+    """The reader stops at the "-1" row, and skips the rows of a different process."""
     lines = read_adf04_sample_lines()
     # an ADAS process-code row sits inside the collision block; the trailer follows the terminator
     processrow = "R  1  +1" + " 3.24-13" * 22 + "\n"
@@ -2179,8 +2179,8 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     assert len(upsilondict) == 235
 
 
-def test_rename_old_data_directory(tmp_path):
-    """The reader renames atomic-data-qub, or it moves the files that the new directory does not have."""
+def test_rename_old_data_directory(tmp_path, capsys):
+    """The reader renames atomic-data-qub, or it merges its files into the new directory."""
     old, new = tmp_path / "atomic-data-qub", tmp_path / "atomic-data-adas"
     readadasdata.rename_old_data_directory(old, new)  # no old directory: nothing to do
     assert not new.exists()
@@ -2191,18 +2191,61 @@ def test_rename_old_data_directory(tmp_path):
     assert not old.exists()
     assert (new / "26_3.adf04").read_text(encoding="utf-8") == "a"
 
-    old.mkdir()
-    (old / "26_3.adf04").write_text("old", encoding="utf-8")
+    # After an update of the repository, the new directory holds the tracked files. The sample
+    # directory is then in the two directories, and the Finder writes .DS_Store into each.
+    (old / "co_tyndall_test_sample").mkdir(parents=True)
+    (old / "co_tyndall_test_sample" / "untracked.gz").write_text("untracked", encoding="utf-8")
     (old / "co_tyndall").mkdir()
+    (old / "26_3.adf04").write_text("old", encoding="utf-8")
+    (new / "co_tyndall_test_sample").mkdir()
+    (new / "co_tyndall_test_sample" / "adf04_v1.gz").write_text("tracked", encoding="utf-8")
+    for directory in (old, new):
+        (directory / ".DS_Store").write_text("", encoding="utf-8")
+    capsys.readouterr()
     readadasdata.rename_old_data_directory(old, new)
     assert (new / "co_tyndall").is_dir()
-    # a file with the same name in the two directories stays where it is
+    assert (new / "co_tyndall_test_sample" / "untracked.gz").read_text(encoding="utf-8") == "untracked"
+    assert (new / "co_tyndall_test_sample" / "adf04_v1.gz").read_text(encoding="utf-8") == "tracked"
+    # the function does not replace a file of the new directory, and it names the file that stays
     assert (new / "26_3.adf04").read_text(encoding="utf-8") == "a"
-    assert (old / "26_3.adf04").read_text(encoding="utf-8") == "old"
+    assert [path.name for path in old.rglob("*")] == ["26_3.adf04"]
+    output = capsys.readouterr().out
+    assert "keeps these files" in output
+    assert "26_3.adf04" in output
+
+
+def test_rename_old_data_directory_does_not_move_the_data_of_a_symbolic_link(tmp_path, capsys):
+    """A link to a shared directory keeps its data, and a failure of the rename does not stop the run."""
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    (shared / "26_3.adf04").write_text("a", encoding="utf-8")
+    old, new = tmp_path / "atomic-data-qub", tmp_path / "atomic-data-adas"
+    old.symlink_to(shared, target_is_directory=True)
+
+    new.mkdir()
+    readadasdata.rename_old_data_directory(old, new)
+    assert old.is_symlink()
+    assert (shared / "26_3.adf04").exists()
+    assert not list(new.iterdir())
+    assert "is a symbolic link" in capsys.readouterr().out
+
+    new.rmdir()
+    readadasdata.rename_old_data_directory(old, new)
+    assert new.is_symlink()
+    assert not old.is_symlink()
+    assert (shared / "26_3.adf04").exists()
+
+    # a file has the new name: the old directory keeps its files, and no exception comes out
+    old.mkdir()
+    (old / "27_3.adf04").write_text("b", encoding="utf-8")
+    new.unlink()
+    new.write_text("", encoding="utf-8")
+    readadasdata.rename_old_data_directory(old, new)
+    assert (old / "27_3.adf04").exists()
 
 
 def test_extend_ion_list_finds_a_compressed_adf04():
-    """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
+    """Ion discovery must find an adf04 file that is compressed."""
     assert (38, [(1, "adas")]) in readadasdata.extend_ion_list({})
     assert (20, [(3, "adas")]) in readadasdata.extend_ion_list({})
 
@@ -2211,13 +2254,15 @@ def test_convert_eissner_to_standard():
     """The converter gives the standard notation of the documented example and of a Ca III level."""
     assert convert_eissner_to_standard("521522563524565") == "1s22s22p63s23p6"
     assert convert_eissner_to_standard("522563524555516") == "2s22p63s23p53d1"
-    # the collating sequence of the AUTOSTRUCTURE files: 9=4d, A=4f, B=5s. The first shell can give q alone.
+    # the order of the AUTOSTRUCTURE files: 9=4d, A=4f, B=5s. The first shell can give q alone.
     assert convert_eissner_to_standard("51951A51B") == "4d14f15s1"
     assert convert_eissner_to_standard("21522") == "1s22s2"
     assert convert_eissner_to_standard("21") == "1s2"
     assert convert_eissner_to_standard("3A52B") == "4f35s2"
-    # "520" has the shell character of the specification that the files do not use. The last
-    # three give a shell more electrons than it holds (1s9, 1s14, 2s6).
+    # the order of the specification: 9=4d, 0=4f, A=5s
+    assert convert_eissner_to_standard("51951051A", "specification") == "4d14f15s1"
+    # "520" has the shell character that only the specification uses. The last three give a
+    # shell more electrons than it holds (1s9, 1s14, 2s6).
     for malformed in ("521junk", "501", "651", "520", "591", "641", "62"):
         assert not is_eissner_config(malformed)
         with pytest.raises(ValueError, match="Not an Eissner configuration"):
@@ -2225,22 +2270,21 @@ def test_convert_eissner_to_standard():
 
 
 def test_eissner_total_l_is_possible():
-    """The total L of a level shows a wrong order of the Eissner shell characters."""
+    """The total L of a level shows which order of the Eissner shell characters a file uses."""
     from artisatomic.levelnames import eissner_total_l_is_possible
 
     # 1s 4f has L = 3, and 1s 5s has L = 0 (the OPEN-ADAS file for He-like C)
     assert eissner_total_l_is_possible("51151A", 3)
     assert eissner_total_l_is_possible("51151B", 0)
     assert not eissner_total_l_is_possible("51151A", 0)
-    # 3p5 4f gives L = 2, 3 or 4 (the Ca III file), and 3p5 3d gives L = 1, 2 or 3
-    assert [eissner_total_l_is_possible("52256352455551A", total_l) for total_l in range(6)] == [
-        False,
-        False,
-        True,
-        True,
-        True,
-        False,
-    ]
+    assert eissner_total_l_is_possible("51151A", 0, "specification")
+    # 3p5 4f gives L = 2, 3 or 4 (the Ca III file). With the order of the specification it is 3p5 5s, with L = 1.
+    config = "52256352455551A"
+    assert [total_l for total_l in range(6) if eissner_total_l_is_possible(config, total_l)] == [2, 3, 4]
+    assert [total_l for total_l in range(6) if eissner_total_l_is_possible(config, total_l, "specification")] == [1]
+    # closed shells have L = 0, and one hole in a p shell has L = 1
+    assert [total_l for total_l in range(3) if eissner_total_l_is_possible("521522563", total_l)] == [0]
+    assert [total_l for total_l in range(3) if eissner_total_l_is_possible("521522553", total_l)] == [1]
     # for 3d3 the test is only an upper limit: 2 + 2 + 1
     assert eissner_total_l_is_possible("536", 5)
     assert not eissner_total_l_is_possible("536", 6)
@@ -2270,22 +2314,27 @@ hydrogen_levels = ("    1 1S                 (2)0( 0.5)        0.", "    2 2P   
 two_temperatures = " 1.00    3       5.80+03 1.16+04"
 
 
-def read_hydrogen_adf04(
+def write_hydrogen_adf04(
     tmp_path: Path,
     rows: t.Sequence[str],
     *,
     levels: t.Sequence[str] = hydrogen_levels,
     header: str = hydrogen_header,
     temperatures: str = two_temperatures,
-) -> dict[tuple[int, int], float]:
-    """Write a minimal H I adf04 file and return the upsilon values at 5000 K."""
+) -> Path:
+    """Write a minimal H I adf04 file and return its path."""
     filepath = tmp_path / "1_1.adf04"
     filepath.write_text(make_adf04(levels, rows, header=header, temperatures=temperatures), encoding="utf-8")
-    return readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]
+    return filepath
 
 
-def test_read_adf04_header_accepts_the_forms_of_the_specification():
-    """The parent term is optional, and a file can leave the element symbol blank."""
+def read_hydrogen_adf04(tmp_path: Path, rows: t.Sequence[str], **parts: t.Any) -> dict[tuple[int, int], float]:
+    """Write a minimal H I adf04 file and return the upsilon values at 5000 K."""
+    return readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows, **parts), io.StringIO(), 5000.0, 1, 1)[2]
+
+
+def test_read_adf04_header():
+    """The parent term and the element symbol are optional, and the numbers of the header must agree."""
     read_header = readadasdata._read_adf04_header  # ruff: ignore[private-member-access]
     for line, atomic_number, ion_stage in (
         ("H+ 0         1         1    109679.\n", 1, 1),
@@ -2300,47 +2349,59 @@ def test_read_adf04_header_accepts_the_forms_of_the_specification():
     # the header gives the ion charge and the ion stage, and they must agree
     with pytest.raises(ValueError, match="ion charge 7"):
         read_header("Sr+ 7        38         1     45932.2036(  )\n", 38, 1, "x.adf04")
-    # a number that is not a full fixed-point field must not give its first digits
-    for line in ("Ca+ 2        20         3    4.10+05(1s)\n", "Ca+ 2        20         3    1.0E+06(1s)\n"):
+    # a number in a different form must not give its first digits
+    for number in ("4.10+05(1s)", "1.0E+06(1s)", "1.43175D+04", "109,679."):
         with pytest.raises(ValueError, match="Cannot read the adf04 header line"):
-            read_header(line, 20, 3, "x.adf04")
-    with pytest.raises(ValueError, match="Cannot read the adf04 header line"):
-        read_header("H+ 0         1         1    109,679.\n", 1, 1, "x.adf04")
+            read_header(f"Ca+ 2        20         3    {number}\n", 20, 3, "x.adf04")
 
 
-def test_adf04_level_regex_takes_the_first_term_group():
-    """Text after the energy can look like a second "(2S+1)L(J)" group, and the first group is the level."""
+def test_adf04_level_regex():
+    """The regex takes the first "(2S+1)L(J)" group, and the energy must be a full number."""
+    level_regex = readadasdata.adf04_level_regex
     line = "    7 3D7 4S1            (5)2( 4.0)     439.0279  (3)1( 2) 12"
-    levelmatch = readadasdata.adf04_level_regex.match(line)
+    levelmatch = level_regex.match(line)
     assert levelmatch is not None
     assert levelmatch.groups() == ("7", "3D7 4S1", "5", "2", "4.0", "439.0279")
+    # the free text of the specification can start directly after the energy
+    for tail, energy in (("0.0(3P)", "0.0"), ("439.0279X", "439.0279"), ("0.0{1}1.000", "0.0"), ("82303.", "82303.")):
+        levelmatch = level_regex.match(f"    1 1S2 2S1            (2)0( 0.5)        {tail}")
+        assert levelmatch is not None
+        assert levelmatch[6] == energy
     # an energy in exponent form must not give its first digits
-    assert readadasdata.adf04_level_regex.match("    2 3S2 3P6 3D6       (5)2( 3.0)      4.39+02") is None
+    for energy in ("4.39+02", "1.43175+04", "1.0E+03"):
+        assert level_regex.match(f"    2 3S2 3P6 3D6       (5)2( 3.0)      {energy}") is None
 
 
 def test_read_adf04_process_code_and_touching_values(tmp_path):
     """A row with the process code "1" in column 1 is a collision row, and fixed columns separate two values."""
-    rows = ["1  2   1 6.27+08 4.29-01 5.29-01-3.01-02"]
-    assert read_hydrogen_adf04(tmp_path, rows) == {(0, 1): pytest.approx(0.429)}
+    filepath = write_hydrogen_adf04(tmp_path, ["1  2   1 6.27+08 4.29-01 5.29-01-3.01-02"])
+    assert readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2] == {(0, 1): pytest.approx(0.429)}
     # the last upsilon touches the Born limit
-    filepath = tmp_path / "1_1.adf04"
     assert readadasdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2] == {(0, 1): pytest.approx(0.529)}
 
 
 def test_read_adf04_temperature_line(tmp_path):
     """The reader takes ITYP and the temperatures from the fixed columns, and it stops for a different layout."""
     rows = ["   2   1 6.27+08 4.29-01 5.29-01"]
-    # ZEFF can be blank, and ITYP is a number
-    for temperatures in ("         3       5.80+03 1.16+04", " 1.00   03       5.80+03 1.16+04"):
+    # ZEFF can be blank, ITYP is a number, and the 6 columns before the temperatures have no use
+    for temperatures in (
+        "         3       5.80+03 1.16+04",
+        " 1.00   03       5.80+03 1.16+04",
+        " 1.00    3 zz    5.80+03 1.16+04",
+    ):
         assert read_hydrogen_adf04(tmp_path, rows, temperatures=temperatures) == {(0, 1): pytest.approx(0.429)}
-    with pytest.raises(ValueError, match="ITYP field must be 3, and it is '1'"):
-        read_hydrogen_adf04(tmp_path, rows, temperatures=" 1.00    1       5.80+03 1.16+04")
-    with pytest.raises(ValueError, match="names no temperatures"):
-        read_hydrogen_adf04(tmp_path, rows, temperatures=" 1.00    3")
-    # free format, and values that are 9 columns wide: the rows of such a file are not in the fixed columns
-    for temperatures in (" 1.00    3   5.80+03  1.16+04", " 1.00    3        5.800+03 1.160+04"):
-        with pytest.raises(ValueError, match="fixed columns of the adf04 specification"):
+    for temperatures, message in (
+        (" 1.00    1       5.80+03 1.16+04", "ITYP field must be 3, and it is '1'"),
+        (" 1.00    3", "names no temperatures"),
+        # free format, and values that are 9 columns wide: the rows of such a file are not in the fixed columns
+        (" 1.00    3   5.80+03  1.16+04", "fixed columns of the adf04 specification"),
+        (" 1.00    3        5.800+03 1.160+04", "fixed columns of the adf04 specification"),
+        (" 1.00    3       5.80+03 1.16+04       X", "temperature that is not a number"),
+        (" 1.00    3       1.0D+03 1.16+04", "temperature that is not a number"),
+    ):
+        with pytest.raises(ValueError, match=message) as excinfo:
             read_hydrogen_adf04(tmp_path, rows, temperatures=temperatures)
+        assert "1_1.adf04" in str(excinfo.value)
 
     truncated = tmp_path / "truncated.adf04"
     truncated.write_text("\n".join([hydrogen_header, *hydrogen_levels, "   -1", ""]), encoding="utf-8")
@@ -2348,49 +2409,77 @@ def test_read_adf04_temperature_line(tmp_path):
         readadasdata.read_adf04(truncated, io.StringIO(), 5000.0, 1, 1)
 
 
-def test_read_adf04_upper_file_index_comes_from_the_row(tmp_path):
-    """Column 1 of a collision row holds a process code or a digit of the upper file index, and the row shows which."""
+def test_read_adf04_file_index_columns(tmp_path):
+    """A file index is a Fortran integer at the right of its columns, and the level count decides the use of column 1."""
     levels = [f"{i:5d} 1S                 (2)0( 0.5) {i - 1:12d}." for i in range(1, 1202)]
+    wide_header = "H+ 0         1         1  99999999."
     values = " 6.27+08 4.29-01 5.29-01"
-    # 1201 levels: "1123" is a level of the file. "3999" is not, so "3" is the process code of level 999.
-    rows = ["1123   5" + values, "3999   6" + values, "1 23   9" + values, "   7   5" + values]
-    upsilondict = read_hydrogen_adf04(tmp_path, rows, levels=levels, header="H+ 0         1         1  99999999.")
-    assert sorted(upsilondict) == [(4, 6), (4, 1122), (5, 998), (8, 22)]
+    # more than 999 levels: columns 1 to 4 are the file index, and "1 23" is a process code and a file index
+    rows = ["1123   5 6.27+08 1.00-01 9.00-01", "1 23   9 6.27+08 2.00-01 9.00-01", "   7   5 6.27+08 3.00-01 9.00-01"]
+    upsilondict = read_hydrogen_adf04(tmp_path, rows, levels=levels, header=wide_header)
+    assert upsilondict == {(4, 1122): pytest.approx(0.1), (8, 22): pytest.approx(0.2), (4, 6): pytest.approx(0.3)}
+    # a file index above the number of levels stops the run. It is not a process code and a smaller file index.
+    with pytest.raises(ValueError, match="file indices 6, 3999"):
+        read_hydrogen_adf04(tmp_path, ["3999   6" + values], levels=levels, header=wide_header)
 
-    # 200 levels: "1123" cannot be a level, so "1" is the process code of level 123. A left-aligned
-    # index is readable. "4" is not a process code, so the reader cannot parse the third row.
-    rows = ["1123   5" + values, "42     1" + values, "4 12   1" + values]
+    # 200 levels: column 1 is the process code, so "1123" is level 123. The reader cannot parse the
+    # other rows. They have a zero at the left, an integer at the left of its columns, the process
+    # code "4", and a sign.
+    rows = ["1123   5", "2005   1", "42     1", "4 12   1", "   9  +1"]
+    filepath = write_hydrogen_adf04(tmp_path, [row + values for row in rows], levels=levels[:200])
     flog = io.StringIO()
-    filepath = tmp_path / "1_1.adf04"
-    filepath.write_text(
-        make_adf04(levels[:200], rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
-    )
-    assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(0, 41), (4, 122)]
-    assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
+    assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(4, 122)]
+    assert "Skipped collision rows that the reader could not parse: 4" in flog.getvalue()
 
 
-def test_read_adf04_counts_a_short_row_apart_from_an_unreadable_row(tmp_path):
-    """A row that stops before the selected temperature keeps its A-value, and the log does not call it unreadable."""
-    filepath = tmp_path / "1_1.adf04"
-    rows = ["   2   1 6.27+08 4.29-01", "   2   1 6.27+08 4.29-01 5.29-01"]
-    filepath.write_text(
-        make_adf04(hydrogen_levels, rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
-    )
+def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
+    """The first field of a row shows a different process or a comment, also if it is not in column 1."""
+    rows = [
+        "   2   1 6.27+08 4.29-01 5.29-01",
+        " P  2   1 1.00-10 1.00-10 1.00-10",
+        "R  1  +1         3.24-13 3.24-13",
+        "C a comment",
+    ]
     flog = io.StringIO()
-    _, _, upsilondict, collisiondf = readadasdata.read_adf04(filepath, flog, 1e6, 1, 1)
-    assert upsilondict == {(0, 1): pytest.approx(0.529)}
-    assert collisiondf["avalue"].to_list() == [6.27e8, 6.27e8]
-    assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
+    upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
+    assert upsilondict == {(0, 1): pytest.approx(0.429)}
+    assert "Skipped rows that are not an electron impact excitation: 3" in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
 
+def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
+    """The caller makes a transition from each returned row, so a row with values in the wrong columns must not be there."""
+    rows = [
+        "   2   1 1.00+08 5.00-01 5.00-01",
+        "   2   1 1.234+05 1.000-01 2.000-01",  # 9 columns for each value: the A-value reads as 1.234
+        "   2   1 6.27+08 4.29-01",  # no upsilon at the second temperature
+    ]
+    flog = io.StringIO()
+    _, _, upsilondict, collisiondf = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 1e6, 1, 1)
+    assert upsilondict == {(0, 1): pytest.approx(0.5)}
+    assert collisiondf.columns == ["upper", "lower", "avalue", "upsilon"]
+    assert collisiondf["avalue"].to_list() == [1e8, 6.27e8]
+    assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
+    assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
+    assert "WARNING" not in flog.getvalue()
+
+
 def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
-    """Rows in free format give no value in the fixed columns. The ion must not lose each transition silently."""
-    with pytest.raises(ValueError, match="could not parse any of the 1 collision rows"):
-        read_hydrogen_adf04(tmp_path, ["   1    2  6.27+08  4.29-01  5.29-01"])
+    """Rows that are not in the fixed columns give no value. The ion must not lose each transition silently."""
+    for row in ("   1    2  6.27+08  4.29-01  5.29-01", "\t  2   1 6.27+08 4.29-01 5.29-01"):
+        with pytest.raises(ValueError, match="could not parse any of the 1 collision rows"):
+            read_hydrogen_adf04(tmp_path, [row])
+
+    # A row that stops before the selected temperature is readable, so the reader does not stop. It gives a warning.
+    rows = ["   2   1 6.27+08 4.29-01", "   1    2  6.27+08  4.29-01  5.29-01"]
+    filepath = write_hydrogen_adf04(tmp_path, rows)
+    assert readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2] == {(0, 1): pytest.approx(0.429)}
+    flog = io.StringIO()
+    assert readadasdata.read_adf04(filepath, flog, 1e6, 1, 1)[2] == {}
+    assert "WARNING: no collision row has an upsilon at the selected temperature" in flog.getvalue()
 
 
-def test_append_adas_transition_rejects_equal_level_ids():
+def test_append_adas_transition_rejects_equal_file_indices():
     """A transition from a level to itself stops the run in the reader, and the message names the file."""
     levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
     with pytest.raises(ValueError, match="same file index 2"):
@@ -2400,8 +2489,11 @@ def test_append_adas_transition_rejects_equal_level_ids():
 def test_standardise_config():
     """The reader converts an Eissner configuration, and it writes standard notation in lower case."""
     standardise = readadasdata._standardise_config  # ruff: ignore[private-member-access]
-    assert standardise(" 522563524565 ", uses_eissner_notation=True) == "2s22p63s23p6"
-    assert standardise("522563524565606", uses_eissner_notation=True) == "2s22p63s23p63d10"
+    assert standardise(" 522563524565 ", eissner_order="AUTOSTRUCTURE") == "2s22p63s23p6"
+    assert standardise("522563524565606", eissner_order="AUTOSTRUCTURE") == "2s22p63s23p63d10"
+    assert standardise("51151A", eissner_order="specification") == "1s15s1"
+    # a label in a file with Eissner notation keeps its text
+    assert standardise("2P", eissner_order="AUTOSTRUCTURE") == "2p"
     for config, expected in (
         ("3P6 3DA", "3p6 3d10"),
         ("3D54P", "3d54p"),
@@ -2414,25 +2506,60 @@ def test_standardise_config():
         # the text after a parent term gets the same steps as the text before it
         ("3D6(5D)4DA", "3d6(5D)4d10"),
         ("(5D)4S", "(5D)4s"),
+        # the column has 18 characters, so a term can have no closing parenthesis. A term can hold a term.
+        ("3P63D5(4P)4S(5P", "3p63d5(4P)4s(5P"),
+        ("3D6(5D", "3d6(5D"),
+        ("((3P)4D)5S", "((3P)4D)5s"),
         # in a file with standard notation, a label that is also a valid Eissner configuration stays as it is
         ("21", "21"),
     ):
-        assert standardise(config, uses_eissner_notation=False) == expected
+        assert standardise(config, eissner_order=None) == expected
 
 
-def test_file_uses_eissner_notation():
-    """The notation is a property of the file, so one level that looks like Eissner notation does not decide it."""
-    uses_eissner_notation = readadasdata._file_uses_eissner_notation  # ruff: ignore[private-member-access]
-    assert uses_eissner_notation(["522563524565", "522563524555516", "21"], "x.adf04")
-    assert not uses_eissner_notation(["3S2 3P6 3D6", "21", "3S2 3P6 3D5 4P1"], "x.adf04")
-    assert not uses_eissner_notation(["4p65s2(1S)", "5s2", "3D54P", "2P"], "x.adf04")
-    assert not uses_eissner_notation([], "x.adf04")
-    # "0" is the 4f shell of the specification. The files from AUTOSTRUCTURE do not use it, and the
-    # digits of such a level must not become its name.
-    with pytest.raises(ValueError, match="cannot read the configuration '522563524565510'"):
-        uses_eissner_notation(["522563524565", "522563524565510", "522563524555516"], "x.adf04")
-    with pytest.raises(ValueError, match="cannot read the configuration"):
-        uses_eissner_notation(["522563524565510", "522563524565520"], "x.adf04")
+def test_eissner_order_of_file():
+    """The notation and the order of the shell characters are properties of the file, not of one level."""
+    order_of_file = readadasdata._eissner_order_of_file  # ruff: ignore[private-member-access]
+    flog = io.StringIO()
+    # each level is its configuration and its total L
+    assert order_of_file([("522563524565", 0), ("522563524555516", 1), ("21", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
+    assert order_of_file([("3S2 3P6 3D6", 2), ("21", 0), ("3S2 3P6 3D5 4P1", 1)], "x.adf04", flog) is None
+    assert order_of_file([("4p65s2(1S)", 0), ("5s2", 0), ("3D54P", 1), ("2P", 1)], "x.adf04", flog) is None
+    assert order_of_file([], "x.adf04", flog) is None
+    assert "WARNING" not in flog.getvalue()
+
+    # 1s 4f has L = 3 and 1s 5s has L = 0, so the total L shows which shell "A" is
+    assert order_of_file([("521", 0), ("51151A", 3), ("51151B", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
+    assert order_of_file([("521", 0), ("51151A", 0), ("511510", 3)], "x.adf04", flog) == "specification"
+    assert "1 of 3 levels agree with the AUTOSTRUCTURE order, 3 of 3 levels agree with the specification order" in (
+        flog.getvalue()
+    )
+
+    # one level with a wrong L in the file does not stop the run
+    flog = io.StringIO()
+    levels = [("521", 0), ("51151A", 3), ("51151B", 0), ("51151B", 4)]
+    assert order_of_file(levels, "x.adf04", flog) == "AUTOSTRUCTURE"
+    assert "WARNING: levels whose shells cannot give their total L: 1." in flog.getvalue()
+
+    # a blank field or a label is not a defective Eissner configuration
+    flog = io.StringIO()
+    assert order_of_file([("521", 0), ("51151A", 3), ("", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
+    assert "WARNING: levels with no Eissner configuration: 1, for example ''" in flog.getvalue()
+
+    # The digits of a defective Eissner configuration must not become the name of a level. "591" is 1s9.
+    with pytest.raises(ValueError, match="cannot read the configuration '591'"):
+        order_of_file([("521", 0), ("51151A", 3), ("591", 0)], "x.adf04", io.StringIO())
+
+
+def test_read_adf04_uses_the_shell_order_of_the_file(tmp_path):
+    """A file that follows the order of the specification (0=4f, A=5s) gets the level names of that order."""
+    levels = [
+        "    1 521                (1)0( 0.0)        0.",
+        "    2 51151A             (1)0( 0.0)    82303.",
+        "    3 511510             (1)3( 3.0)    92303.",
+    ]
+    filepath = write_hydrogen_adf04(tmp_path, ["   2   1 6.27+08 4.29-01 5.29-01"], levels=levels)
+    energylevels = readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[1]
+    assert [level.levelname.split("_")[0] for level in energylevels] == ["1s2", "1s15s1", "1s14f1"]
 
 
 def test_parse_ion_handlers_accepts_a_renamed_handler():
@@ -2443,7 +2570,7 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
 
     assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "adas")])]
     assert parse_ion_handlers([[27, [[2, "qub_cobalt"], [3, "qub"]]]]) == [(27, [(2, "adas_cobalt"), (3, "adas")])]
-    # a name that was never renamed passes through unchanged
+    # a current name passes through unchanged
     assert parse_ion_handlers([[27, [[2, "adas_cobalt"]]]]) == [(27, [(2, "adas_cobalt")])]
     # every alias must point at a handler that read_ion_data() can dispatch
     assert set(renamed_handlers.values()) <= set(handlers)

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import argcomplete
 
+from artisatomic import readadasdata
 from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
@@ -16,9 +17,6 @@ from artisatomic.ionhandlers import inputhandlersfile
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
-from artisatomic.readadasdata import adaspath
-from artisatomic.readadasdata import old_adaspath
-from artisatomic.readadasdata import rename_old_data_directory
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,7 +123,8 @@ def main() -> None:
         raise ValueError(msg)
 
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
-    rename_old_data_directory(old_adaspath, adaspath)
+    # the two paths come from the module at this time, so a test can set them
+    readadasdata.rename_old_data_directory(readadasdata.old_adaspath, readadasdata.adaspath)
     ion_handlers = get_ion_handlers(
         minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
     )

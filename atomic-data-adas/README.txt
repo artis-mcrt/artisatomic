@@ -1,4 +1,6 @@
 Atomic data in the ADAS adf04 format. This directory had the name atomic-data-qub before.
+makeartisatomicfiles moves the files of an atomic-data-qub directory into this directory. It does
+not replace a file, and it does not move the data of a symbolic link.
 
 The data has two origins:
 - Authors at QUB (Queen's University Belfast) made the Co files (co_tyndall), the Sr I file and the

@@ -13,6 +13,7 @@ communication (see atomic-data-adas/README.txt).
 import re
 import string
 import typing as t
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -39,6 +40,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
+from artisatomic.levelnames import eissner_shell_orders
 from artisatomic.levelnames import eissner_total_l_is_possible
 from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
@@ -53,28 +55,59 @@ from artisatomic.phixs import reduce_phixs_tables
 adaspath = (PYDIR / ".." / "atomic-data-adas").resolve()
 
 
+def _move_into(source: Path, target: Path) -> list[Path]:
+    """Move source to target, and merge two directories. Return each path that stays at the source."""
+    if not target.exists() and not target.is_symlink():
+        source.rename(target)
+        return []
+    if source.is_dir() and not source.is_symlink() and target.is_dir():
+        staying = [path for entry in sorted(source.iterdir()) for path in _move_into(entry, target / entry.name)]
+        if not staying:
+            source.rmdir()
+        return staying
+    if source.name == ".DS_Store":
+        # the Finder writes this file into each directory, so the target always has one
+        source.unlink()
+        return []
+    return [source]
+
+
+def _move_old_data_directory(oldpath: Path, newpath: Path) -> None:
+    if oldpath.is_symlink():
+        if newpath.exists() or newpath.is_symlink():
+            print(f"WARNING: {oldpath} is a symbolic link. Move its files to {newpath}, then remove the link.")
+        else:
+            oldpath.rename(newpath)
+            print(f"Renamed the symbolic link {oldpath} to {newpath}")
+        return
+    if not oldpath.is_dir():
+        return
+    staying = _move_into(oldpath, newpath)
+    print(f"Moved the files of {oldpath} to {newpath}")
+    if staying:
+        names = ", ".join(str(path.relative_to(oldpath)) if path != oldpath else "." for path in staying[:5])
+        more = f" and {len(staying) - 5} more" if len(staying) > 5 else ""
+        print(f"WARNING: {oldpath} keeps these files, because {newpath} has files with the same names: {names}{more}")
+
+
 def rename_old_data_directory(oldpath: Path, newpath: Path) -> None:
     """Rename the data directory from its old name, atomic-data-qub, to the new name.
 
     After an update of the repository, the new directory holds the tracked files, and the old
-    directory holds the files that Git does not track. The function then moves each of those files.
-    It keeps a file of the old directory that has the same name as a file of the new directory.
+    directory holds the files that Git does not track. The function then moves each of those
+    files. It does not replace a file of the new directory, and it gives a warning for each file
+    that stays. The data of a symbolic link is in a different place, so the function renames the
+    link and does not move that data. A failure gives a warning, because the conversion can
+    continue without the old directory.
     """
-    if not oldpath.is_dir():
-        return
-    if not newpath.exists():
-        oldpath.rename(newpath)
-        print(f"Renamed {oldpath} to {newpath}")
-        return
-    for entry in oldpath.iterdir():
-        if not (newpath / entry.name).exists():
-            entry.rename(newpath / entry.name)
-            print(f"Moved {entry} to {newpath}")
-    if not any(oldpath.iterdir()):
-        oldpath.rmdir()
+    try:
+        _move_old_data_directory(oldpath, newpath)
+    except OSError as error:
+        print(f"WARNING: could not move the files of {oldpath} to {newpath}: {error}")
 
 
-old_adaspath = (PYDIR / ".." / "atomic-data-qub").resolve()
+# not resolved: a symbolic link must stay a link, so that the function above can find it
+old_adaspath = (PYDIR / "..").resolve() / "atomic-data-qub"
 tyndall_co3_path = (adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
 
 # the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
@@ -145,79 +178,82 @@ def is_adf04_terminator(line: str) -> bool:
     """Report whether the line is the row that ends an adf04 section.
 
     The level block and the collision block each end with such a row. Writers pad it
-    differently, so the test is on the first field and not on a fixed column.
+    differently, so the test is on the first field and not on a fixed column. The loop over the
+    collision rows makes the same test on the first field, which it needs for a second test.
     """
     return adf04_first_field(line) == adf04_section_end
 
 
 # These values give the fixed columns of the specification. A collision row is a1,i3,i4,16e8.2.
 # The process code and the two file indices fill the first 8 columns, and each value has 8
-# columns. The line with the temperatures is f5.1,i5,6x,14e8.2: ZEFF, ITYP, and the temperatures
-# from column 17.
+# columns. The line with the temperatures is f5.1,i5,6x,14e8.2: ZEFF (the effective charge), ITYP
+# (the type of the collision data), and the temperatures from column 17.
 adf04_row_prefix_width = 8
 adf04_value_width = 8
 adf04_ityp_columns = slice(5, 10)
 adf04_temperature_offset = 16
+# the columns a1,i3 of a collision row hold an upper file index of 999 at most
+adf04_largest_i3 = 999
+
+# adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The "E" goes only after a digit
+# or a point. A leading sign and a number that already has an "E" stay as they are.
+adf04_exponent_pattern = r"([0-9.])([-+])"
 
 
 def adf04_float(offset: int, length: int) -> pl.Expr:
-    """Return an expression for the fixed columns as a float.
-
-    adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The replacement puts the "E"
-    only after a digit or a point. A leading sign and a field that already has an "E" stay as
-    they are.
-    """
+    """Return an expression for the fixed columns as a float. A blank or unreadable field gives a null."""
     return (
         fixed_width_column(offset, length)
-        .str.replace_all(r"([0-9.])([-+])", "${1}E${2}")
+        .str.replace_all(adf04_exponent_pattern, "${1}E${2}")
         .cast(pl.Float64, strict=False)
-    )
-
-
-def adf04_upper_file_index(levelcount: int) -> pl.Expr:
-    """Return an expression for the upper file index of a collision row.
-
-    The columns a1,i3 of the specification hold a file index of 999 at most, so a file with more
-    levels puts a digit of the index in column 1. The row gives the layout:
-    - Columns 1 to 4 hold only digits, and the number is a level of the file. It is the index.
-    - Column 1 holds the process code "1", "2" or "3", or a blank. Columns 2 to 4 hold the index.
-    Each other row gives a null.
-    """
-    first_columns = fixed_width_column(0, 4)
-    digits_index = first_columns.cast(pl.Int64, strict=False)
-    is_level = (first_columns.str.contains(r"^[0-9]+$") & (digits_index <= levelcount)).fill_null(value=False)
-    has_code_column = pl.col("line").str.slice(0, 1).is_in([" ", "1", "2", "3"])
-    return (
-        pl.when(is_level)
-        .then(digits_index)
-        .when(has_code_column)
-        .then(fixed_width_column(1, 3).cast(pl.Int64, strict=False))
     )
 
 
 def adf04_number(text: str) -> float:
     """Convert a number in the ADAS form, where the exponent has a sign and no letter ("5.00+03")."""
-    return float(re.sub(r"(?<=[0-9.])([-+])", r"E\1", text))
+    return float(re.sub(adf04_exponent_pattern, r"\1E\2", text))
 
 
-# The specification writes each value with a decimal point. Some files omit it.
-decimal_number_pattern = r"\d+(?:\.\d*)?"
+def adf04_file_index(offset: int, length: int, prefix: str = "") -> pl.Expr:
+    """Return an expression for a file index in the fixed columns. Other text gives a null.
+
+    Fortran writes an integer at the right of its columns, with no sign and no zero at the left.
+    A different text, for example "005" or "12 ", shows that the columns hold something else.
+    The prefix is a pattern for the characters that come before the integer.
+    """
+    pattern = rf"^{prefix} *([1-9][0-9]*)$"
+    return pl.col("line").str.slice(offset, length).str.extract(pattern, 1).cast(pl.Int64, strict=False)
+
+
+def adf04_upper_file_index(levelcount: int) -> pl.Expr:
+    """Return an expression for the upper file index of a collision row.
+
+    Columns 1 to 4 hold the process code (a blank, "1", "2" or "3") and the file index. These
+    columns cannot hold a file index above 999. A file with more levels thus has no column for the
+    process code, and columns 1 to 4 are the file index. A text such as "1 23" is a process code
+    and a file index in each file.
+    """
+    index_after_code = adf04_file_index(0, 4, prefix="[ 123]")
+    if levelcount <= adf04_largest_i3:
+        return index_after_code
+    return pl.coalesce(adf04_file_index(0, 4), index_after_code)
+
+
+# The specification writes each value with a decimal point. Some files omit it. The lookahead
+# stops a match in the middle of a number, so "4.10+05" does not give 4.10.
+decimal_number_pattern = r"\d+(?:\.\d*)?(?![0-9.,+\-EeDd])"
 
 # The groups are: IZ (the ion charge), IZ0 (the atomic number), IZ1 (the ion stage) and the
 # ionisation potential. The specification lets a file omit the parent term after the ionisation
-# potential. Some files also leave the element symbol blank. The lookahead makes the number a
-# full field, so "4.10+05" does not give 4.10.
-adf04_header_regex = re.compile(
-    rf"\s*[A-Za-z]{{0,2}}\s*\+\s*(\d+)\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})(?=\s|\(|$)"
-)
+# potential. Some files also leave the element symbol blank.
+adf04_header_regex = re.compile(rf"\s*[A-Za-z]{{0,2}}\s*\+\s*(\d+)\s+(\d+)\s+(\d+)\s+({decimal_number_pattern})")
 
 # The groups are: the file index, the configuration, the multiplicity (2S+1), L as a hexadecimal
 # digit, J, and the energy above the ground level. The configuration column has no fixed width
 # or format, so ".*?" captures it. It is not greedy, because the text after the energy can have
 # a second group of the form "(n)L(J)".
 adf04_level_regex = re.compile(
-    rf"\s*(\d+)\s+(.*?)\s+\((\d+)\)([0-9A-Fa-f])\(\s*({decimal_number_pattern})\)"
-    rf"\s+({decimal_number_pattern})(?=\s|\{{|$)"
+    rf"\s*(\d+)\s+(.*?)\s+\((\d+)\)([0-9A-Fa-f])\(\s*({decimal_number_pattern})\)\s+({decimal_number_pattern})"
 )
 
 
@@ -248,8 +284,8 @@ def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: 
     return ionization_energy_percm * hc_in_ev_cm
 
 
-def _read_adf04_temperatures(line: str, filepath: str | Path) -> list[str]:
-    """Return the temperature fields of the line that holds ZEFF, ITYP and the temperatures.
+def _read_adf04_temperatures(line: str, filepath: str | Path) -> tuple[list[str], list[float]]:
+    """Return the temperature fields of the line that holds ZEFF, ITYP and the temperatures, as text and as numbers.
 
     The fields must be in the fixed columns of the specification, because the reader takes each
     collision row from the same columns. A file in a different layout stops here with an error.
@@ -277,44 +313,94 @@ def _read_adf04_temperatures(line: str, filepath: str | Path) -> list[str]:
     if not temperatures:
         msg = f"{filepath} names no temperatures for its collision strengths"
         raise ValueError(msg)
-    if temperatures != line[adf04_ityp_columns.stop :].split():
+    if temperatures != line[adf04_temperature_offset:].split():
         msg = (
             f"{filepath} does not give the temperatures in the fixed columns of the adf04 specification"
             f" (f5.1,i5,6x,14e8.2): {line!r}"
         )
         raise ValueError(msg)
-    return temperatures
+    try:
+        return temperatures, [adf04_number(text) for text in temperatures]
+    except ValueError:
+        msg = f"{filepath} has a temperature that is not a number: {line!r}"
+        raise ValueError(msg) from None
 
 
-def _file_uses_eissner_notation(configs: list[str], filepath: str | Path) -> bool:
-    """Decide the notation of the configurations for the full file.
+def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, flog) -> str | None:
+    """Return the order of the Eissner shell characters of a file, or None for a file in standard notation.
 
-    The notation is a property of the file. A label such as "21" in a file with standard notation
-    is also a valid Eissner configuration, so a decision for each level gives wrong level names.
+    Each level is its configuration and its total L. The notation is a property of the file. A
+    label such as "21" in a file with standard notation is also a valid Eissner configuration.
+    A decision for each level therefore gives wrong level names.
     """
-    if configs and all(is_eissner_config(config) for config in configs):
-        return True
-    # A file that has the Eissner form in most levels is an Eissner file with a defect, for example
-    # the shell character "0" of the specification. The digits of such a level must not become its name.
-    if 2 * sum(looks_like_eissner_config(config) for config in configs) > len(configs):
-        defective = next(config for config in configs if not is_eissner_config(config))
-        msg = f"{filepath} uses Eissner notation, but the reader cannot read the configuration {defective!r}"
-        raise ValueError(msg)
-    return False
+    configs = [config for config, _total_l in levels]
+    if 2 * sum(looks_like_eissner_config(config) for config in configs) <= len(configs):
+        return None
+
+    # The total L of a level shows the order. The count of all levels decides, because one level
+    # with a wrong L in the file must not stop the run.
+    agreement = {
+        order: sum(
+            is_eissner_config(config, order) and eissner_total_l_is_possible(config, total_l, order)
+            for config, total_l in levels
+        )
+        for order in eissner_shell_orders
+    }
+    order = max(agreement, key=lambda name: agreement[name])
+    counts = ", ".join(
+        f"{count} of {len(levels)} levels agree with the {name} order" for name, count in agreement.items()
+    )
+    log_and_print(flog, f"Eissner notation detected for electron configuration ({counts})")
+
+    # The digits of a defective Eissner configuration must not become the name of a level. A
+    # blank field or a label is not an Eissner configuration, and the reader keeps its text.
+    for config in configs:
+        if looks_like_eissner_config(config) and not is_eissner_config(config, order):
+            msg = f"{filepath} uses Eissner notation, but the reader cannot read the configuration {config!r}"
+            raise ValueError(msg)
+    labels = [config for config in configs if not looks_like_eissner_config(config)]
+    if labels:
+        log_and_print(flog, f"WARNING: levels with no Eissner configuration: {len(labels)}, for example {labels[0]!r}")
+    if agreement[order] < len(levels) - len(labels):
+        log_and_print(
+            flog,
+            f"WARNING: levels whose shells cannot give their total L: {len(levels) - len(labels) - agreement[order]}."
+            " The file possibly uses a different order of the Eissner shell characters.",
+        )
+    return order
 
 
-parenthesised_term_regex = re.compile(r"(\([^)]*\))")
+def _split_at_terms(config: str) -> Iterator[tuple[str, bool]]:
+    """Yield each part of a configuration, and True if the part is a term in parentheses.
+
+    The column of the configuration has 18 characters, so a term can have no closing parenthesis.
+    """
+    depth = 0
+    start = 0
+    for position, char in enumerate(config):
+        if char == "(":
+            if depth == 0:
+                yield config[start:position], False
+                start = position
+            depth += 1
+        elif char == ")" and depth > 0:
+            depth -= 1
+            if depth == 0:
+                yield config[start : position + 1], True
+                start = position + 1
+    yield config[start:], depth > 0
 
 
-def _standardise_config(config: str, *, uses_eissner_notation: bool) -> str:
-    """Return the configuration in standard notation."""
+def _standardise_config(config: str, *, eissner_order: str | None) -> str:
+    """Return the configuration in standard notation. eissner_order is None for a file in standard notation."""
     config = config.strip()
-    if uses_eissner_notation:
-        return convert_eissner_to_standard(config)
+    if eissner_order is not None and is_eissner_config(config, eissner_order):
+        return convert_eissner_to_standard(config, eissner_order)
 
     # Each term in parentheses stays in upper case, e.g. "3D6(5D)4DA" becomes "3d6(5D)4d10".
-    parts = parenthesised_term_regex.split(config)
-    return "".join(part if index % 2 else expand_standard_config(part.lower()) for index, part in enumerate(parts))
+    return "".join(
+        part if is_term else expand_standard_config(part.lower()) for part, is_term in _split_at_terms(config)
+    )
 
 
 def read_adf04(
@@ -363,18 +449,14 @@ def read_adf04(
                 raise ValueError(msg)
             levelrows.append(levelmatch.groups())
 
-        uses_eissner_notation = _file_uses_eissner_notation([levelrow[1].strip() for levelrow in levelrows], filepath)
-        if uses_eissner_notation:
-            log_and_print(flog, "Eissner notation detected for electron configuration")
+        eissner_order = _eissner_order_of_file(
+            [(config, int(l_hex, 16)) for _index, config, _multiplicity, l_hex, _j, _energy in levelrows],
+            filepath,
+            flog,
+        )
 
         for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
-            if uses_eissner_notation and not eissner_total_l_is_possible(config.strip(), int(l_hex, 16)):
-                msg = (
-                    f"The shells of the configuration {config.strip()!r} in {filepath} cannot give L = {int(l_hex, 16)}"
-                    f" (file index {adas_id}). The file possibly uses a different order of the Eissner shell characters."
-                )
-                raise ValueError(msg)
-            config = _standardise_config(config, uses_eissner_notation=uses_eissner_notation)
+            config = _standardise_config(config, eissner_order=eissner_order)
             energylevel = ADASEnergyLevel(
                 config, int(adas_id), int(multiplicity), int(l_hex, 16), float(j), float(energy_percm), 0.0, 0
             )
@@ -409,13 +491,11 @@ def read_adf04(
                 )
                 raise ValueError(msg)
 
-        temperatures = _read_adf04_temperatures(fleveltrans.readline(), filepath)
+        temperatures, temperature_values = _read_adf04_temperatures(fleveltrans.readline(), filepath)
 
-        # Column 1 of a collision row holds the process code. A blank, "1", "2" or "3" is an
-        # electron impact excitation. ADAS writes the other processes with a letter: R for
-        # recombination, S and I for ionisation, P for proton impact. A digit in column 1 can also
-        # be a part of the upper file index (see adf04_upper_file_index()). A blank line is not a
-        # bad row, so the counter skips it.
+        # ADAS writes the other processes with a letter in column 1: R for recombination, S and I
+        # for ionisation, P for proton impact. A comment line starts with a letter too. A blank
+        # line is not a bad row, so the counter skips it.
         collision_lines: list[str] = []
         skipped_rows = 0
         for line in fleveltrans:
@@ -424,12 +504,11 @@ def read_adf04(
                 break
             if not firstfield:
                 continue
-            if line[0] not in " 0123456789":
+            if firstfield[0].isalpha():
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
 
-        temperature_values = [adf04_number(text) for text in temperatures]
         nearest_index = min(
             range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
         )
@@ -439,37 +518,36 @@ def read_adf04(
             f" {', '.join(temperatures)}",
         )
 
-        # The specification gives each collision row in fixed columns (a1,i3,i4,16e8.2):
-        #  - the process code,
-        #  - the upper file index,
-        #  - the lower file index,
-        #  - the A-value,
-        #  - one upsilon for each temperature,
-        #  - the infinite-energy (Born) limit.
         # A split at whitespace fails where two values touch, for example "2.81-01-3.01-02".
         # A cut of only the wanted fields needs about a third of the memory of a cut of every
         # line into all of its columns.
         upsilon_offset = adf04_row_prefix_width + adf04_value_width * (1 + nearest_index)
-        collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
-            adf04_upper_file_index(len(energylevels)).alias("upper"),
-            fixed_width_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
-            adf04_float(adf04_row_prefix_width, adf04_value_width).alias("avalue"),
-            adf04_float(upsilon_offset, adf04_value_width).alias("upsilon"),
-            (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0).alias("upsilon_is_blank"),
+        has_indices = pl.col("upper").is_not_null() & pl.col("lower").is_not_null()
+        # A row that stops before the selected temperature has no upsilon there. It is a good
+        # row, and the caller takes its A-value.
+        is_short = has_indices & (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0)
+        rowcount = len(collision_lines)
+        collisiondf = (
+            pl.DataFrame({"line": collision_lines}, schema={"line": pl.String})
+            .with_columns(
+                adf04_upper_file_index(len(energylevels)).alias("upper"),
+                adf04_file_index(4, 4).alias("lower"),
+                adf04_float(adf04_row_prefix_width, adf04_value_width).alias("avalue"),
+                adf04_float(upsilon_offset, adf04_value_width).alias("upsilon"),
+            )
+            # The caller makes a transition from each row of this frame, so a row that the reader
+            # cannot parse must not be in it.
+            .filter(is_short | (has_indices & pl.col("upsilon").is_not_null()))
+            .select("upper", "lower", "avalue", "upsilon")
         )
-
-        # a row that is too short, or that holds a value this cannot read, gives a null
-        goodrows = collisiondf.drop_nulls(subset=["lower", "upper", "upsilon"])
-        # A row that stops before the selected temperature is a good row with no upsilon there.
-        # The caller still takes its A-value.
-        short_rows = collisiondf.filter(
-            pl.col("lower").is_not_null(), pl.col("upper").is_not_null(), pl.col("upsilon_is_blank")
-        ).height
-        unreadable_rows = collisiondf.height - goodrows.height - short_rows
-        if unreadable_rows and goodrows.is_empty():
+        goodrows = collisiondf.drop_nulls(subset=["upsilon"])
+        short_rows = collisiondf.height - goodrows.height
+        unreadable_rows = rowcount - collisiondf.height
+        if rowcount and collisiondf.is_empty():
             msg = (
-                f"The reader could not parse any of the {unreadable_rows} collision rows of {filepath}."
-                " Each row must follow the fixed columns of the adf04 specification (a1,i3,i4,16e8.2)."
+                f"The reader could not parse any of the {rowcount} collision rows of {filepath}. Each row must have"
+                ' the process code " ", "1", "2" or "3" and the fixed columns of the adf04 specification'
+                " (a1,i3,i4,16e8.2)."
             )
             raise ValueError(msg)
 
@@ -503,7 +581,8 @@ def read_adf04(
     if unreadable_rows:
         log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
     if short_rows:
-        log_and_print(flog, f"Collision rows with no upsilon at the selected temperature: {short_rows:d}")
+        warning = "" if upsilondict else "WARNING: no collision row has an upsilon at the selected temperature. "
+        log_and_print(flog, f"{warning}Collision rows with no upsilon at the selected temperature: {short_rows:d}")
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
@@ -550,16 +629,16 @@ def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upp
     adas_transitions.append(transition)
 
 
-# the ion stages that the ADAS Co data covers: the Co III adf04 files and the single-level
-# Co IV. For the other stages of a "adas_cobalt" ion, read_cobalt_levels_and_transitions() below
+# the ion stages that the QUB Co data covers: the Co III adf04 files and the single-level
+# Co IV. For the other stages of an "adas_cobalt" ion, read_cobalt_levels_and_transitions() below
 # takes the CMFGEN reader. read_adas_levels_and_transitions() has one branch for each stage in
 # this set, so a new stage needs an entry here and a branch there.
-adas_cobalt_stages: frozenset[int] = frozenset({3, 4})
+qub_cobalt_stages: frozenset[int] = frozenset({3, 4})
 
 # the ions whose photoionisation cross sections the QUB Co data covers, one branch each in
 # read_adas_photoionizations(). read_cobalt_photoionizations() takes the CMFGEN phot files for
-# every other stage of a "adas_cobalt" ion that has CMFGEN levels.
-adas_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
+# every other stage of an "adas_cobalt" ion that has CMFGEN levels.
+qub_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
 
 
 def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
@@ -568,7 +647,7 @@ def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
     Returns the same four values as read_adas_levels_and_transitions(). The CMFGEN collision
     strengths of a CMFGEN stage are the fourth value, as the QUB ones are for a QUB stage.
     """
-    if ion_stage in adas_cobalt_stages:
+    if ion_stage in qub_cobalt_stages:
         return read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args)
     ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(
         atomic_number, ion_stage, flog
@@ -578,12 +657,12 @@ def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
 
 def read_cobalt_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
-    """Read the cross sections of a "adas_cobalt" ion: from the QUB data where it has them, else from CMFGEN.
+    """Read the cross sections of an "adas_cobalt" ion: from the QUB data where it has them, else from CMFGEN.
 
     A stage with QUB levels stays on the QUB path even without QUB cross sections. Its levels
     carry no threshold wavelengths, so the CMFGEN phot files cannot apply to them.
     """
-    if ion_stage in adas_cobalt_stages or (atomic_number, ion_stage) in adas_phixs_ions:
+    if ion_stage in qub_cobalt_stages or (atomic_number, ion_stage) in qub_phixs_ions:
         return read_adas_photoionizations(
             atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog
         )
@@ -674,7 +753,9 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
 
 def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
-    """Read the QUB photoionisation cross sections for one ion, downsampled onto the output grid.
+    """Read the photoionisation cross sections for one ion, downsampled onto the output grid.
+
+    Only the QUB Co data has cross sections.
 
     Returns the cross sections, the threshold energies and the upper-ion target fractions per
     level, all indexed by zero-based level id. Levels with no data keep an empty target list,
@@ -731,7 +812,7 @@ def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, 
                 args.optimaltemperature,
                 args.nphixspoints,
                 args.phixsnuincrement,
-                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} ADAS level id {lowerlevelid}",
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
             )
             combined = combine_phixs_routes(
                 [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
@@ -872,7 +953,7 @@ def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, 
                 args.optimaltemperature,
                 args.nphixspoints,
                 args.phixsnuincrement,
-                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} ADAS constant table",
+                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
             )["gs"]
 
         # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
