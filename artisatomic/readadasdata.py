@@ -46,6 +46,7 @@ from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import is_eissner_config
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import lchars_lower
 from artisatomic.levelnames import looks_like_eissner_config
 from artisatomic.levelnames import split_count_and_n
 from artisatomic.phixs import combine_phixs_routes
@@ -108,6 +109,13 @@ def rename_old_data_directory(oldpath: Path, newpath: Path) -> None:
 
 # not resolved: a symbolic link must stay a link, so that the function above can find it
 old_adaspath = (PYDIR / "..").resolve() / "atomic-data-qub"
+
+
+def rename_old_adas_directory() -> None:
+    """Rename the old data directory of this reader. The two paths come from the module at this time, so a test can set them."""
+    rename_old_data_directory(old_adaspath, adaspath)
+
+
 tyndall_co3_path = (adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
 
 # the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
@@ -188,12 +196,13 @@ def is_adf04_terminator(line: str) -> bool:
 # The process code and the two file indices fill the first 8 columns, and each value has 8
 # columns. The line with the temperatures is f5.1,i5,6x,14e8.2: ZEFF (the effective charge), ITYP
 # (the type of the collision data), and the temperatures from column 17.
-adf04_row_prefix_width = 8
+adf04_index_width = 4
+adf04_row_prefix_width = 2 * adf04_index_width
 adf04_value_width = 8
 adf04_ityp_columns = slice(5, 10)
 adf04_temperature_offset = 16
 # the columns a1,i3 of a collision row hold an upper file index of 999 at most
-adf04_largest_i3 = 999
+adf04_largest_i3 = 10 ** (adf04_index_width - 1) - 1
 
 # adf04 writes the exponent with no "E": 1.23-04 means 1.23e-04. The "E" goes only after a digit
 # or a point. A leading sign and a number that already has an "E" stay as they are.
@@ -233,10 +242,10 @@ def adf04_upper_file_index(levelcount: int) -> pl.Expr:
     process code, and columns 1 to 4 are the file index. A text such as "1 23" is a process code
     and a file index in each file.
     """
-    index_after_code = adf04_file_index(0, 4, prefix="[ 123]")
+    index_after_code = adf04_file_index(0, adf04_index_width, prefix="[ 123]")
     if levelcount <= adf04_largest_i3:
         return index_after_code
-    return pl.coalesce(adf04_file_index(0, 4), index_after_code)
+    return pl.coalesce(adf04_file_index(0, adf04_index_width), index_after_code)
 
 
 # The specification writes each value with a decimal point. Some files omit it. The lookahead
@@ -532,7 +541,7 @@ def read_adf04(
             pl.DataFrame({"line": collision_lines}, schema={"line": pl.String})
             .with_columns(
                 adf04_upper_file_index(len(energylevels)).alias("upper"),
-                adf04_file_index(4, 4).alias("lower"),
+                adf04_file_index(adf04_index_width, adf04_index_width).alias("lower"),
                 adf04_float(adf04_row_prefix_width, adf04_value_width).alias("avalue"),
                 adf04_float(upsilon_offset, adf04_value_width).alias("upsilon"),
             )
@@ -631,10 +640,9 @@ def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upp
 
 
 def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
-    """Read the cross sections of an ion of the "adas" handler. An ion with no data gets empty arrays."""
-    return read_adas_photoionizations(
-        atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog, cmfgen_levels=False
-    )
+    """Read the cross sections of an ion of the "adas" handler. Only Co III, with its QUB levels, has data."""
+    fill_arrays = _fill_co3_phixs if (atomic_number, ion_stage) == (27, 3) else None
+    return _read_qub_phixs(fill_arrays, atomic_number, ion_stage, dfenergylevels.height, args, flog)
 
 
 def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
@@ -644,9 +652,7 @@ def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergyleve
     other ion takes the CMFGEN phot files.
     """
     if (atomic_number, ion_stage) == (27, 2):
-        return read_adas_photoionizations(
-            atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog, cmfgen_levels=True
-        )
+        return _read_qub_phixs(_fill_co2_phixs, atomic_number, ion_stage, dfenergylevels.height, args, flog)
     return readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfenergylevels, args, flog)
 
 
@@ -733,229 +739,252 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
 
 
-def read_adas_photoionizations(
-    atomic_number, ion_stage, levelcount: int, args, flog, *, cmfgen_levels: bool = False
-) -> PhixsData:
-    """Read the photoionisation cross sections for one ion, downsampled onto the output grid.
+def _fill_co2_phixs(
+    atomic_number,
+    ion_stage,
+    _levelcount: int,
+    args,
+    flog,
+    photoionization_crosssections,
+    photoionization_thresholds_ev,
+    photoionization_targetfractions,
+) -> None:
+    """Fill the arrays with the QUB cross sections of Co II. The tables are for the CMFGEN levels of Co II."""
+    for lowerlevelid in range(8):
+        # the name of a cross section file is the level's number in the source data, which
+        # counts from one
+        filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
+        log_and_print(flog, f"Reading {path_for_log(filename)}")
+        ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
+        # One space separates the columns, and every field is a number. So a null means that
+        # the columns are not where the read expects them. A read of the first five columns
+        # of the 41 costs a third of the time of a cut of every line into its parts.
+        columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
+        photdata = (
+            pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+            .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
+            .collect()
+        )
+        if photdata.null_count().sum_horizontal().item() > 0:
+            msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
+            raise ValueError(msg)
+        phixstables = {}
 
-    Only the QUB Co data has cross sections. The Co II tables are for the CMFGEN levels of Co II, and
-    the Co III table is for the QUB levels. cmfgen_levels says which levels the caller has, so that
-    a table does not go to the levels of a different source.
+        # column n of the file holds the cross section to the upper ion's level id n - 1
+        for targetcolumn in range(1, ntargets + 1):
+            targetname = f"target{targetcolumn}"
+            phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
+            if len(phixstable) == 0:
+                # nothing positive in this column, so there is no table to downsample. A skip
+                # here leaves the target out of the fractions below, which is what a zero cross
+                # section means. reduce_phixs_tables() would index an empty array and fail.
+                log_and_print(
+                    flog,
+                    f"WARNING: level {lowerlevelid} has no positive cross section to target"
+                    f" {targetcolumn - 1}, so the reader drops that target",
+                )
+                continue
+            phixstables[targetcolumn] = phixstable
+
+        reduced_phixs_dict = reduce_phixs_tables(
+            phixstables,
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
+        )
+        combined = combine_phixs_routes(
+            [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
+        )
+        if not combined.fractions:
+            # the code assigns nothing for this level, so write_phixs_data() will skip it
+            log_and_print(
+                flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
+            )
+            continue
+        for target, factor in combined.dropped:
+            log_and_print(
+                flog,
+                f"level {lowerlevelid}: target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut"
+                f" with {factor:.4e} Mb, so its route drops out",
+            )
+
+        # NaN, the arrays' initial value, says: the threshold energy comes from the level
+        # energies, not from the first energy point of the cross section table
+        photoionization_thresholds_ev[lowerlevelid] = np.nan
+        photoionization_targetfractions[lowerlevelid] = combined.fractions
+        photoionization_crosssections[lowerlevelid] = combined.table
+
+
+def _fill_co3_phixs(
+    atomic_number,
+    ion_stage,
+    levelcount: int,
+    args,
+    _flog,
+    photoionization_crosssections,
+    photoionization_thresholds_ev,
+    photoionization_targetfractions,
+) -> None:
+    """Fill the arrays with the QUB cross sections of Co III. The table is for the QUB levels of Co III."""
+    # photoionize to a single level ion
+
+    phixsvalues_const = [
+        9.3380692,
+        7.015829602,
+        5.403975231,
+        4.250372872,
+        3.403086443,
+        2.766835319,
+        2.279802051,
+        1.900685772,
+        1.601177846,
+        1.361433037,
+        1.16725865,
+        1.008321909,
+        0.8769787,
+        0.76749151,
+        0.675496904,
+        0.597636429,
+        0.531296609,
+        0.474423066,
+        0.425385805,
+        0.382880364,
+        0.345854415,
+        0.313452694,
+        0.284975256,
+        0.259845541,
+        0.237585722,
+        0.217797532,
+        0.200147231,
+        0.184353724,
+        0.17017913,
+        0.157421217,
+        0.145907331,
+        0.135489462,
+        0.126040239,
+        0.117449648,
+        0.109622338,
+        0.102475382,
+        0.095936439,
+        0.089942202,
+        0.084437113,
+        0.079372279,
+        0.074704554,
+        0.070395769,
+        0.066412076,
+        0.062723384,
+        0.059302883,
+        0.056126637,
+        0.053173226,
+        0.050423446,
+        0.047860046,
+        0.045467498,
+        0.043231802,
+        0.041140312,
+        0.039181587,
+        0.037345256,
+        0.035621907,
+        0.034002983,
+        0.032480693,
+        0.031047932,
+        0.029698215,
+        0.028425611,
+        0.027224692,
+        0.026090478,
+        0.025018404,
+        0.02400427,
+        0.023044216,
+        0.022134683,
+        0.021272391,
+        0.020454314,
+        0.019677652,
+        0.018939819,
+        0.018238416,
+        0.017571225,
+        0.016936183,
+        0.016331377,
+        0.01575503,
+        0.015205486,
+        0.014681206,
+        0.014180754,
+        0.013702792,
+        0.013246071,
+        0.012809423,
+        0.012391758,
+        0.011992055,
+        0.011609359,
+        0.011242775,
+        0.010891464,
+        0.010554639,
+        0.010231561,
+        0.009921535,
+        0.009623909,
+        0.009338069,
+        0.009063438,
+        0.008799471,
+        0.008545656,
+        0.00830151,
+        0.008066575,
+        0.007840423,
+        0.007622646,
+        0.00741286,
+        0.007210703,
+    ]
+
+    if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
+        phixsvalues = np.array(phixsvalues_const)
+    else:
+        # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9. A stop
+        # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
+        dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
+        phixsvalues = reduce_phixs_tables(
+            dict_phixstable,
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
+        )["gs"]
+
+    # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
+    # quartet gets the tabulated cross section, and the higher levels get an explicit
+    # all-zero table.
+    for levelid in range(levelcount):
+        photoionization_thresholds_ev[levelid] = np.nan
+        photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
+        if levelid < 4:
+            photoionization_crosssections[levelid] = phixsvalues
+
+
+def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
+    """Read the photoionisation cross sections for one ion, downsampled onto the output grid.
 
     Returns the cross sections, the threshold energies and the upper-ion target fractions per
     level, all indexed by zero-based level id. Levels with no data keep an empty target list,
     which is how write_phixs_data() knows to skip them.
 
-    An ion that this function has no data for gets the empty arrays, not zero-filled ones. The
-    caller reads an empty cross section array as "no data", and then applies the hydrogenic
-    estimate. A zero-filled array would pass as data and leave the ion with no cross sections.
+    fill_arrays is None for an ion with no QUB data. Such an ion gets the empty arrays, not
+    zero-filled ones. The caller reads an empty cross section array as "no data", and then applies
+    the hydrogenic estimate.
     """
-    photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
-    # levels stay empty (write_phixs_data() skips them) unless the code below assigns real data
-    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
-    photoionization_thresholds_ev = np.full(levelcount, np.nan)
-
-    if (atomic_number, ion_stage) == (27, 2) and cmfgen_levels:
-        for lowerlevelid in range(8):
-            # the name of a cross section file is the level's number in the source data, which
-            # counts from one
-            filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
-            log_and_print(flog, f"Reading {path_for_log(filename)}")
-            ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
-            # One space separates the columns, and every field is a number. So a null means that
-            # the columns are not where the read expects them. A read of the first five columns
-            # of the 41 costs a third of the time of a cut of every line into its parts.
-            columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
-            photdata = (
-                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
-                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
-                .collect()
-            )
-            if photdata.null_count().sum_horizontal().item() > 0:
-                msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
-                raise ValueError(msg)
-            phixstables = {}
-
-            # column n of the file holds the cross section to the upper ion's level id n - 1
-            for targetcolumn in range(1, ntargets + 1):
-                targetname = f"target{targetcolumn}"
-                phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
-                if len(phixstable) == 0:
-                    # nothing positive in this column, so there is no table to downsample. A skip
-                    # here leaves the target out of the fractions below, which is what a zero cross
-                    # section means. reduce_phixs_tables() would index an empty array and fail.
-                    log_and_print(
-                        flog,
-                        f"WARNING: level {lowerlevelid} has no positive cross section to target"
-                        f" {targetcolumn - 1}, so the reader drops that target",
-                    )
-                    continue
-                phixstables[targetcolumn] = phixstable
-
-            reduced_phixs_dict = reduce_phixs_tables(
-                phixstables,
-                args.optimaltemperature,
-                args.nphixspoints,
-                args.phixsnuincrement,
-                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
-            )
-            combined = combine_phixs_routes(
-                [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
-            )
-            if not combined.fractions:
-                # the code assigns nothing for this level, so write_phixs_data() will skip it
-                log_and_print(
-                    flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
-                )
-                continue
-            for target, factor in combined.dropped:
-                log_and_print(
-                    flog,
-                    f"level {lowerlevelid}: target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut"
-                    f" with {factor:.4e} Mb, so its route drops out",
-                )
-
-            # NaN, the arrays' initial value, says: the threshold energy comes from the level
-            # energies, not from the first energy point of the cross section table
-            photoionization_thresholds_ev[lowerlevelid] = np.nan
-            photoionization_targetfractions[lowerlevelid] = combined.fractions
-            photoionization_crosssections[lowerlevelid] = combined.table
-
-    elif (atomic_number, ion_stage) == (27, 3) and not cmfgen_levels:
-        # photoionize to a single level ion
-
-        phixsvalues_const = [
-            9.3380692,
-            7.015829602,
-            5.403975231,
-            4.250372872,
-            3.403086443,
-            2.766835319,
-            2.279802051,
-            1.900685772,
-            1.601177846,
-            1.361433037,
-            1.16725865,
-            1.008321909,
-            0.8769787,
-            0.76749151,
-            0.675496904,
-            0.597636429,
-            0.531296609,
-            0.474423066,
-            0.425385805,
-            0.382880364,
-            0.345854415,
-            0.313452694,
-            0.284975256,
-            0.259845541,
-            0.237585722,
-            0.217797532,
-            0.200147231,
-            0.184353724,
-            0.17017913,
-            0.157421217,
-            0.145907331,
-            0.135489462,
-            0.126040239,
-            0.117449648,
-            0.109622338,
-            0.102475382,
-            0.095936439,
-            0.089942202,
-            0.084437113,
-            0.079372279,
-            0.074704554,
-            0.070395769,
-            0.066412076,
-            0.062723384,
-            0.059302883,
-            0.056126637,
-            0.053173226,
-            0.050423446,
-            0.047860046,
-            0.045467498,
-            0.043231802,
-            0.041140312,
-            0.039181587,
-            0.037345256,
-            0.035621907,
-            0.034002983,
-            0.032480693,
-            0.031047932,
-            0.029698215,
-            0.028425611,
-            0.027224692,
-            0.026090478,
-            0.025018404,
-            0.02400427,
-            0.023044216,
-            0.022134683,
-            0.021272391,
-            0.020454314,
-            0.019677652,
-            0.018939819,
-            0.018238416,
-            0.017571225,
-            0.016936183,
-            0.016331377,
-            0.01575503,
-            0.015205486,
-            0.014681206,
-            0.014180754,
-            0.013702792,
-            0.013246071,
-            0.012809423,
-            0.012391758,
-            0.011992055,
-            0.011609359,
-            0.011242775,
-            0.010891464,
-            0.010554639,
-            0.010231561,
-            0.009921535,
-            0.009623909,
-            0.009338069,
-            0.009063438,
-            0.008799471,
-            0.008545656,
-            0.00830151,
-            0.008066575,
-            0.007840423,
-            0.007622646,
-            0.00741286,
-            0.007210703,
-        ]
-
-        if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
-            phixsvalues = np.array(phixsvalues_const)
-        else:
-            # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9. A stop
-            # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
-            dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
-            phixsvalues = reduce_phixs_tables(
-                dict_phixstable,
-                args.optimaltemperature,
-                args.nphixspoints,
-                args.phixsnuincrement,
-                label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
-            )["gs"]
-
-        # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
-        # quartet gets the tabulated cross section, and the higher levels get an explicit
-        # all-zero table.
-        for levelid in range(levelcount):
-            photoionization_thresholds_ev[levelid] = np.nan
-            photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
-            if levelid < 4:
-                photoionization_crosssections[levelid] = phixsvalues
-
-    else:
+    if fill_arrays is None:
         log_and_print(
             flog, f"WARNING: no photoionisation data in atomic-data-adas for Z={atomic_number} ion_stage {ion_stage}"
         )
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
-
+    photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
+    photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
+    photoionization_thresholds_ev = np.full(levelcount, np.nan)
+    fill_arrays(
+        atomic_number,
+        ion_stage,
+        levelcount,
+        args,
+        flog,
+        photoionization_crosssections,
+        photoionization_thresholds_ev,
+        photoionization_targetfractions,
+    )
     return PhixsData(
         photoionization_crosssections, photoionization_thresholds_ev, targetfractions=photoionization_targetfractions
     )
@@ -985,7 +1014,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     if not part:
         return None
 
-    if part[-1] not in lchars.lower():
+    if part[-1] not in lchars_lower:
         # the last character must be the number of electrons in the orbital: remove it
         if not part[-1].isdigit():
             return None
@@ -993,7 +1022,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     if not part:
         return None
     valenceorbital = part[-1]
-    part = part.strip(lchars.lower())
+    part = part.strip(lchars_lower)
 
     # the last run of digits of the label, with the character in front of it. The pattern
     # matches digits only, which split_count_and_n() requires.
@@ -1005,7 +1034,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     # of the previous orbital, then n. For example, the '24' in '3d24s' is two electrons and
     # n=4. The same rule as readkuruczdata applies, and it also reads '5s111s1' (5s1 11s1) as
     # n = 11. A space in front of the run separates two shells, so the run holds n alone
-    if nmatch[1] and nmatch[1] in lchars.lower():
+    if nmatch[1] and nmatch[1] in lchars_lower:
         return split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
 
     return int(nmatch[2])

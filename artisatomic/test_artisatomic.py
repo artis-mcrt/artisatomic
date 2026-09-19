@@ -2486,17 +2486,6 @@ def test_append_adas_transition_rejects_equal_file_indices():
         readadasdata.append_adas_transition(levels, [], 2, 2, 1e8, "x.adf04")
 
 
-def test_qub_cross_sections_go_only_to_the_levels_of_their_source():
-    """The Co II tables are for CMFGEN levels and the Co III table is for QUB levels."""
-    args = phixs_args()
-    # Co II through the "adas" handler has ADAS levels, and Co III through CMFGEN levels has no QUB table
-    for ion_stage, cmfgen_levels in ((2, False), (3, True)):
-        flog = io.StringIO()
-        phixs = readadasdata.read_adas_photoionizations(27, ion_stage, 5, args, flog, cmfgen_levels=cmfgen_levels)
-        assert "no photoionisation data" in flog.getvalue()
-        assert phixs.crosssections.size == 0
-
-
 def test_standardise_config():
     """The reader converts an Eissner configuration, and it writes standard notation in lower case."""
     standardise = readadasdata._standardise_config  # ruff: ignore[private-member-access]
@@ -2583,12 +2572,12 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
 
     assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "adas")])]
     # the ion stage gives the new name of the old cobalt handler
-    old_cobalt = [[27, [[1, "qub_cobalt"], [2, "qub_cobalt"], [3, "adas_cobalt"], [4, "qub_cobalt"]]]]
+    old_cobalt = [[27, [[1, "qub_cobalt"], [2, "qub_cobalt"], [3, "qub_cobalt"], [4, "qub_cobalt"]]]]
     assert parse_ion_handlers(old_cobalt) == [(27, [(1, "cmfgen"), (2, "cmfgen_qubphixs"), (3, "adas"), (4, "adas")])]
     # a current name passes through unchanged
     assert parse_ion_handlers([[27, [[2, "cmfgen_qubphixs"]]]]) == [(27, [(2, "cmfgen_qubphixs")])]
     # every alias must point at a handler that read_ion_data() can dispatch
-    assert set(renamed_handlers.values()) <= set(handlers)
+    assert {newname for newnames in renamed_handlers.values() for newname in newnames.values()} <= set(handlers)
 
 
 def test_read_adas_sr1():
@@ -3606,19 +3595,25 @@ def test_log_degenerate_transitions():
     assert not flog.getvalue()
 
 
-def test_read_adas_photoionizations_without_data_gives_empty_arrays():
+def test_read_photoionizations_without_data_gives_empty_arrays():
     """An ion with no QUB cross sections must give the empty arrays, not zero-filled ones.
 
     iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
     estimate. The output would then hold the ion with no cross sections at all.
     """
     args = phixs_args()
-    phixs = readadasdata.read_adas_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
+    dfenergylevels = pl.DataFrame({"levelname": ["a"] * 5})
+    phixs = readadasdata.read_photoionizations(38, 1, dfenergylevels, args, io.StringIO())
     crosssections, targetfractions, thresholds = phixs.crosssections, phixs.targetfractions, phixs.thresholds_ev
     assert targetfractions is not None
     assert crosssections.shape == (0, 100)
     assert targetfractions == []
     assert thresholds.shape == (0,)
+
+    # The QUB Co II tables are for CMFGEN levels. Co II through the "adas" handler has ADAS levels.
+    flog = io.StringIO()
+    assert readadasdata.read_photoionizations(27, 2, dfenergylevels, args, flog).crosssections.size == 0
+    assert "no photoionisation data" in flog.getvalue()
 
 
 def test_fill_missing_phixs_thresholds():

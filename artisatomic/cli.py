@@ -123,8 +123,7 @@ def main() -> None:
         raise ValueError(msg)
 
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
-    # the two paths come from the module at this time, so a test can set them
-    readadasdata.rename_old_data_directory(readadasdata.old_adaspath, readadasdata.adaspath)
+    readadasdata.rename_old_adas_directory()
     ion_handlers = get_ion_handlers(
         minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
     )
