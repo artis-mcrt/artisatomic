@@ -128,7 +128,7 @@ def match_hydrogenic_phixs(
 
 
 # a target below this share of the level's total drops out of the target list, with its route.
-# Every multi-route target of the CMFGEN test sets is above 3%, so the value only acts on QUB data.
+# Every multi-route target of the CMFGEN test sets is above 3%, so the value only acts on the QUB Co data.
 PHIXS_TARGET_FRACTION_CUT = 0.02
 
 

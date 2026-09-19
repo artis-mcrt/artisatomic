@@ -129,7 +129,7 @@ def interpret_configuration(
     else:
         term_parity = [0, 1][(instr[-1] == "o")]
         if all(char not in lchars for char in instr):
-            # a name with no term letter. The QUB reader passes hasterm=False and never reaches this.
+            # a name with no term letter. The ADAS reader passes hasterm=False and never reaches this.
             if warn:
                 print(f"WARNING: the level name '{instr_orig}' has no term letter")
         else:

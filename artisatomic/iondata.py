@@ -14,6 +14,7 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic import groundstatesonlynist
+from artisatomic import readadasdata
 from artisatomic import readboyledata
 from artisatomic import readdreamdata
 from artisatomic import readfacdata
@@ -22,7 +23,6 @@ from artisatomic import readhillierdata
 from artisatomic import readkuruczdata
 from artisatomic import readlisbondata
 from artisatomic import readmonsdata
-from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
 from artisatomic.base import ion_log_path
@@ -126,9 +126,9 @@ handlers: dict[str, Handler] = {
     "gsnist": Handler(groundstatesonlynist.read_ground_levels),
     # The adf04 files tabulate the collision strengths at several temperatures, and
     # -electrontemperature picks one, so the reader takes args.
-    "qub": Handler(
-        readqubdata.read_qub_levels_and_transitions,
-        readqubdata.get_level_valence_n,
+    "adas": Handler(
+        readadasdata.read_adas_levels_and_transitions,
+        readadasdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
     ),
@@ -145,12 +145,12 @@ handlers: dict[str, Handler] = {
     # The parser is the CMFGEN one. Co III takes the QUB cross sections. Co IV has QUB levels and
     # no QUB cross sections, so the hydrogenic estimate parses its QUB level names with the CMFGEN
     # parser when Co IV is not the top ion.
-    "qub_cobalt": Handler(
-        readqubdata.read_cobalt_levels_and_transitions,
+    "adas_cobalt": Handler(
+        readadasdata.read_cobalt_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
-        read_phixs=readqubdata.read_cobalt_photoionizations,
+        read_phixs=readadasdata.read_cobalt_photoionizations,
     ),
 }
 

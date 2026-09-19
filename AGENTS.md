@@ -23,7 +23,7 @@ Use these terms and spellings in the prose. Identifiers, output-file formats and
 
 ## What this project is
 
-artisatomic converts published atomic data (for example CMFGEN, Kurucz, JPLT, DREAM, Floers+25, QUB, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an ion handlers JSON file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers JSON file, because that file selects the ions itself.
+artisatomic converts published atomic data (for example CMFGEN, Kurucz, JPLT, DREAM, Floers+25, ADAS, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an ion handlers JSON file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers JSON file, because that file selects the ions itself.
 
 The command-line scripts (`makeartisatomicfiles`, `makeartisrecombratefile`, `makeartischargetransferfile`, and `makeartisgammaspecfiles`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
 
@@ -40,7 +40,7 @@ extra. The command `uv sync --frozen --extra chianti` adds ChiantiPy, matplotlib
 `makeartisrecombratefile` needs for an ion with no Nahar file. The type checkers pass without the
 extra, because `makerecombratefile.py` imports ChiantiPy through `importlib.import_module()`.
 
-Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, QUB, MONS and Floers+25 tests read committed samples. The full test suite therefore needs the CMFGEN download and the extracted Floers+25 sample (`tar -xJf testdata.tar.xz` in `atomic-data-floers25`). The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
+Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, ADAS, MONS and Floers+25 tests read committed samples. The full test suite therefore needs the CMFGEN download and the extracted Floers+25 sample (`tar -xJf testdata.tar.xz` in `atomic-data-floers25`). The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
 
 ## Commands
 
@@ -58,14 +58,14 @@ CI (`.github/workflows/test.yml`) runs the lint check, the format check, both ty
 
 The output files must stay byte-identical unless the change intends a different output. Each directory in `tests/` (except `chargetransfer`) holds an ion handlers file and the MD5 checksums of the four output files. [tests/README.md](tests/README.md) gives the recipe to regenerate a set and explains which ions each set covers. Two rules from it matter for every run:
 
-- Set `ARTISATOMIC_TESTMODE=1`. It redirects the Kurucz, QUB, MONS and Floers+25 readers to their committed samples.
+- Set `ARTISATOMIC_TESTMODE=1`. It redirects the Kurucz, ADAS, MONS and Floers+25 readers to their committed samples.
 - Remove `artisatomicionhandlers.json` from the repository root after the run. A copy left there silently overrides the ion selection of every later run.
 
 When a change alters the output on purpose, verify the new values, then regenerate every set that the change touches.
 
 ## Code layout
 
-- `artisatomic/__init__.py` re-exports nothing. The package has no public API. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readqubdata` needs no line in `__init__.py`.
+- `artisatomic/__init__.py` re-exports nothing. The package has no public API. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readadasdata` needs no line in `__init__.py`.
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionisation cross sections.

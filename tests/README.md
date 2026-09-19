@@ -18,7 +18,7 @@ rm artisatomicionhandlers.json
 (cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
 ```
 
-`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, QUB, MONS and Floers+25 readers to their
+`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
 `test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
 `test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
 `OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:
@@ -28,7 +28,7 @@ gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an error i
 
 **Every** set needs the CMFGEN corpus, not just the `cmfgen` ones, which is why the workflow's
 CMFGEN setup step is the one not gated on `matrix.testname` (the comment there says why). `jplt`
-downloads its own corpus on top; Kurucz, QUB, MONS and Floers+25 come from committed samples. When a set
+downloads its own corpus on top; Kurucz, ADAS, MONS and Floers+25 come from committed samples. When a set
 needs a new ion, prefer adding it to a committed sample over introducing another download: the
 published Floers+25 corpus is 5.5 GiB, but `testdata.tar.xz` carries only the ions the tests name.
 
@@ -45,7 +45,7 @@ trimming a set for speed can silently delete coverage while looking like a routi
 | `jplt` | Se I–IV + Se V, Nb I–IV | **Se II and III** are the only ions in the matrix using the v2.1 LS-term level-name format; Se I, Se IV and all of Nb use the older format. This matters beyond level names: JPLT supplies no photoionisation data, so `get_level_valence_n()` feeds the hydrogenic estimate written to `phixsdata_v2.txt`. **Se V** is read by `gsnist`, which is both that handler's only coverage and the only element read by two handlers. |
 | `kurucz` | Sr I–II, Y I–II | The Kurucz gfall reader, from the committed `test_sample/`. |
 | `mons` | Ce V–VI | The MONS lanthanide reader, from the committed `test_sample/`. `atomic-data-mons/make_test_sample.py` cut the sample from the 21.7 GB archive. It holds the lowest 450 levels of Ce V and 400 of Ce VI. It also holds every transition between two of those levels. The set has two ions, so Ce VI is the top ion. The level names carry no configuration, so artisatomic writes no hydrogenic phixs estimate. |
-| `qub` | Ca III, Co II–IV, Sr I | The `qub_cobalt` handler, from the committed `co_tyndall_test_sample/`. Co II comes from CMFGEN, Co III–IV from the QUB adf04 files. **Sr I** uses the `qub` handler on the committed `38_1.adf04.zst`. That file is complete, so it carries the `-1` row that ends the collision block, and the Co sample stops before that row. The Sr I file and the Ca III file use zstd compression. The Co sample files are gzip compressed. Sr I is the top ion, so it writes no phixs block. Every one of its 1596 output transitions carries a collision strength, and 224 of them come from an upsilon value with no A-value. **Ca III** uses the `qub` handler on the committed `20_3.adf04.zst`, an ADAS file in LS coupling. It is the only file that gives the configurations in Eissner notation, so it tests the conversion to standard notation. Each of its 86 levels is an LS term. It writes 3164 transitions, and 1824 of them come from an upsilon value with no A-value. |
+| `adas` | Ca III, Co II–IV, Sr I | The `adas_cobalt` handler, from the committed `co_tyndall_test_sample/`. Co II comes from CMFGEN, Co III–IV from the QUB adf04 files. **Sr I** uses the `adas` handler on the committed `38_1.adf04.zst`. That file is complete, so it carries the `-1` row that ends the collision block, and the Co sample stops before that row. The Sr I file and the Ca III file use zstd compression. The Co sample files are gzip compressed. Sr I is the top ion, so it writes no phixs block. Every one of its 1596 output transitions carries a collision strength, and 224 of them come from an upsilon value with no A-value. **Ca III** uses the `adas` handler on the committed `20_3.adf04.zst`, a file from OPEN-ADAS in LS coupling. It is the only file that gives the configurations in Eissner notation, so it tests the conversion to standard notation. Each of its 86 levels is an LS term. It writes 3164 transitions, and 1824 of them come from an upsilon value with no A-value. |
 
 ## Adding a set
 

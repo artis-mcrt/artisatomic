@@ -17,13 +17,13 @@ import polars as pl
 import pytest
 from xopen import xopen
 
+from artisatomic import readadasdata
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
 from artisatomic import readhillierdata as rhd
 from artisatomic import readkuruczdata
 from artisatomic import readmonsdata
-from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import drop_transitions_of_levels
@@ -1102,7 +1102,7 @@ def test_log_deltaj_contradictions_judges_f_and_a_separately():
     # ...and the quiet case is the one the rule now marks forbidden, so the two agree
     assert not warnings_for(pl.DataFrame({**breaksrule, "A": [4.1], "f": [2.7e-10]}))
 
-    # A, where a forbidden line reaches 14 s-1 in QUB's Co III and must stay quiet
+    # A, where a forbidden line reaches 14 s-1 in the QUB Co III data and must stay quiet
     assert "WARNING" in warnings_for(pl.DataFrame({**breaksrule, "A": [1.9e8]}))
     assert not warnings_for(pl.DataFrame({**breaksrule, "A": [14.0]}))
 
@@ -1738,7 +1738,7 @@ extend_ion_list_modules = [
     "readfloers25data",
     "readhillierdata",
     "readmonsdata",
-    "readqubdata",
+    "readadasdata",
     "readtanakajpltdata",
 ]
 
@@ -2114,14 +2114,14 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
 
 
 def adf04_sample_path() -> Path:
-    """Return the path of the committed QUB adf04 sample."""
-    return (PYDIR / ".." / "atomic-data-qub" / "co_tyndall_test_sample" / "adf04_v1").resolve()
+    """Return the path of the committed ADAS adf04 sample."""
+    return (PYDIR / ".." / "atomic-data-adas" / "co_tyndall_test_sample" / "adf04_v1").resolve()
 
 
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict, _ = readqubdata.read_adf04(
+    ionization_energy_ev, energylevels, upsilondict, _ = readadasdata.read_adf04(
         adf04_sample_path(), flog, 5010.0, 27, 3
     )
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
@@ -2138,10 +2138,10 @@ def test_read_adf04():
 def test_is_adf04_terminator():
     """The terminator test reads the first field, so padding and negative values do not confuse it."""
     for line in ("   -1\n", "  -1\n", "-1\n", "\t-1\n", "  -1  -1\n"):
-        assert readqubdata.is_adf04_terminator(line)
+        assert readadasdata.is_adf04_terminator(line)
 
     for line in ("  -1.0E+00 no data for this pair\n", "  -10  3 1.0\n", "\n", "   1   2 1.0+00\n"):
-        assert not readqubdata.is_adf04_terminator(line)
+        assert not readadasdata.is_adf04_terminator(line)
 
 
 def read_adf04_sample_lines() -> list[str]:
@@ -2160,7 +2160,7 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
+    _, energylevels, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "Skipped rows that are not an electron impact excitation: 1" in flog.getvalue()
@@ -2175,14 +2175,36 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readqubdata.read_adf04(filepath, flog, 5010.0, 27, 3)
+    _, _, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(upsilondict) == 235
+
+
+def test_rename_old_data_directory(tmp_path):
+    """The reader renames atomic-data-qub, or it moves the files that the new directory does not have."""
+    old, new = tmp_path / "atomic-data-qub", tmp_path / "atomic-data-adas"
+    readadasdata.rename_old_data_directory(old, new)  # no old directory: nothing to do
+    assert not new.exists()
+
+    old.mkdir()
+    (old / "26_3.adf04").write_text("a", encoding="utf-8")
+    readadasdata.rename_old_data_directory(old, new)
+    assert not old.exists()
+    assert (new / "26_3.adf04").read_text(encoding="utf-8") == "a"
+
+    old.mkdir()
+    (old / "26_3.adf04").write_text("old", encoding="utf-8")
+    (old / "co_tyndall").mkdir()
+    readadasdata.rename_old_data_directory(old, new)
+    assert (new / "co_tyndall").is_dir()
+    # a file with the same name in the two directories stays where it is
+    assert (new / "26_3.adf04").read_text(encoding="utf-8") == "a"
+    assert (old / "26_3.adf04").read_text(encoding="utf-8") == "old"
 
 
 def test_extend_ion_list_finds_a_compressed_adf04():
     """The adf04 files ship compressed or plain, so ion discovery must accept both forms."""
-    assert (38, [(1, "qub")]) in readqubdata.extend_ion_list({})
-    assert (20, [(3, "qub")]) in readqubdata.extend_ion_list({})
+    assert (38, [(1, "adas")]) in readadasdata.extend_ion_list({})
+    assert (20, [(3, "adas")]) in readadasdata.extend_ion_list({})
 
 
 def test_convert_eissner_to_standard():
@@ -2236,12 +2258,12 @@ def read_hydrogen_adf04(
     """Write a minimal H I adf04 file and return the upsilon values at 5000 K."""
     filepath = tmp_path / "1_1.adf04"
     filepath.write_text(make_adf04(levels, rows, header=header, temperatures=temperatures), encoding="utf-8")
-    return readqubdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]
+    return readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]
 
 
 def test_read_adf04_header_accepts_the_forms_of_the_specification():
     """The parent term is optional, and a file can leave the element symbol blank."""
-    read_header = readqubdata._read_adf04_header  # ruff: ignore[private-member-access]
+    read_header = readadasdata._read_adf04_header  # ruff: ignore[private-member-access]
     for line, atomic_number, ion_stage in (
         ("H+ 0         1         1    109679.\n", 1, 1),
         ("H+ 0         1         1    109679\n", 1, 1),
@@ -2266,11 +2288,11 @@ def test_read_adf04_header_accepts_the_forms_of_the_specification():
 def test_adf04_level_regex_takes_the_first_term_group():
     """Text after the energy can look like a second "(2S+1)L(J)" group, and the first group is the level."""
     line = "    7 3D7 4S1            (5)2( 4.0)     439.0279  (3)1( 2) 12"
-    levelmatch = readqubdata.adf04_level_regex.match(line)
+    levelmatch = readadasdata.adf04_level_regex.match(line)
     assert levelmatch is not None
     assert levelmatch.groups() == ("7", "3D7 4S1", "5", "2", "4.0", "439.0279")
     # an energy in exponent form must not give its first digits
-    assert readqubdata.adf04_level_regex.match("    2 3S2 3P6 3D6       (5)2( 3.0)      4.39+02") is None
+    assert readadasdata.adf04_level_regex.match("    2 3S2 3P6 3D6       (5)2( 3.0)      4.39+02") is None
 
 
 def test_read_adf04_process_code_and_touching_values(tmp_path):
@@ -2279,7 +2301,7 @@ def test_read_adf04_process_code_and_touching_values(tmp_path):
     assert read_hydrogen_adf04(tmp_path, rows) == {(0, 1): pytest.approx(0.429)}
     # the last upsilon touches the Born limit
     filepath = tmp_path / "1_1.adf04"
-    assert readqubdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2] == {(0, 1): pytest.approx(0.529)}
+    assert readadasdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2] == {(0, 1): pytest.approx(0.529)}
 
 
 def test_read_adf04_temperature_line(tmp_path):
@@ -2300,7 +2322,7 @@ def test_read_adf04_temperature_line(tmp_path):
     truncated = tmp_path / "truncated.adf04"
     truncated.write_text("\n".join([hydrogen_header, *hydrogen_levels, "   -1", ""]), encoding="utf-8")
     with pytest.raises(ValueError, match="ends before the line that gives the temperatures"):
-        readqubdata.read_adf04(truncated, io.StringIO(), 5000.0, 1, 1)
+        readadasdata.read_adf04(truncated, io.StringIO(), 5000.0, 1, 1)
 
 
 def test_read_adf04_upper_file_index_comes_from_the_row(tmp_path):
@@ -2320,7 +2342,7 @@ def test_read_adf04_upper_file_index_comes_from_the_row(tmp_path):
     filepath.write_text(
         make_adf04(levels[:200], rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
     )
-    assert sorted(readqubdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(0, 41), (4, 122)]
+    assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(0, 41), (4, 122)]
     assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
 
 
@@ -2332,7 +2354,7 @@ def test_read_adf04_counts_a_short_row_apart_from_an_unreadable_row(tmp_path):
         make_adf04(hydrogen_levels, rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
     )
     flog = io.StringIO()
-    _, _, upsilondict, collisiondf = readqubdata.read_adf04(filepath, flog, 1e6, 1, 1)
+    _, _, upsilondict, collisiondf = readadasdata.read_adf04(filepath, flog, 1e6, 1, 1)
     assert upsilondict == {(0, 1): pytest.approx(0.529)}
     assert collisiondf["avalue"].to_list() == [6.27e8, 6.27e8]
     assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
@@ -2345,16 +2367,16 @@ def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
         read_hydrogen_adf04(tmp_path, ["   1    2  6.27+08  4.29-01  5.29-01"])
 
 
-def test_append_qub_transition_rejects_equal_level_ids():
+def test_append_adas_transition_rejects_equal_level_ids():
     """A transition from a level to itself stops the run in the reader, and the message names the file."""
-    levels = [readqubdata.QUBEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
+    levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
     with pytest.raises(ValueError, match="same level id 2"):
-        readqubdata.append_qub_transition(levels, [], 2, 2, 1e8, "x.adf04")
+        readadasdata.append_adas_transition(levels, [], 2, 2, 1e8, "x.adf04")
 
 
 def test_standardise_config():
     """The reader converts an Eissner configuration, and it writes standard notation in lower case."""
-    standardise = readqubdata._standardise_config  # ruff: ignore[private-member-access]
+    standardise = readadasdata._standardise_config  # ruff: ignore[private-member-access]
     assert standardise(" 522563524565 ", uses_eissner_notation=True) == "2s22p63s23p6"
     assert standardise("522563524565606", uses_eissner_notation=True) == "2s22p63s23p63d10"
     for config, expected in (
@@ -2377,7 +2399,7 @@ def test_standardise_config():
 
 def test_file_uses_eissner_notation():
     """The notation is a property of the file, so one level that looks like Eissner notation does not decide it."""
-    uses_eissner_notation = readqubdata._file_uses_eissner_notation  # ruff: ignore[private-member-access]
+    uses_eissner_notation = readadasdata._file_uses_eissner_notation  # ruff: ignore[private-member-access]
     assert uses_eissner_notation(["522563524565", "522563524555516", "21"], "x.adf04")
     assert not uses_eissner_notation(["3S2 3P6 3D6", "21", "3S2 3P6 3D5 4P1"], "x.adf04")
     assert not uses_eissner_notation(["4p65s2(1S)", "5s2", "3D54P", "2P"], "x.adf04")
@@ -2396,17 +2418,18 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
     from artisatomic.ionhandlers import parse_ion_handlers
     from artisatomic.ionhandlers import renamed_handlers
 
-    assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "qub")])]
+    assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "adas")])]
+    assert parse_ion_handlers([[27, [[2, "qub_cobalt"], [3, "qub"]]]]) == [(27, [(2, "adas_cobalt"), (3, "adas")])]
     # a name that was never renamed passes through unchanged
-    assert parse_ion_handlers([[27, [[2, "qub_cobalt"]]]]) == [(27, [(2, "qub_cobalt")])]
+    assert parse_ion_handlers([[27, [[2, "adas_cobalt"]]]]) == [(27, [(2, "adas_cobalt")])]
     # every alias must point at a handler that read_ion_data() can dispatch
     assert set(renamed_handlers.values()) <= set(handlers)
 
 
-def test_read_qub_sr1():
+def test_read_adas_sr1():
     """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, transitions, upsilondict = readqubdata.read_qub_levels_and_transitions(
+    ionization_energy_ev, energylevels, transitions, upsilondict = readadasdata.read_adas_levels_and_transitions(
         38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
     )
     assert abs(ionization_energy_ev - 5.694867) < 1e-5
@@ -2941,13 +2964,13 @@ def test_get_level_valence_n():
     assert readfloers25data.get_level_valence_n("5s2.5p5 J=3/2 index=2") == 5
     assert readfacdata.get_level_valence_n("4f9 6s1 Ilev=42") == 6
     assert readfacdata.get_level_valence_n("4f10 Ilev=0") == 4
-    assert readqubdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
-    assert readqubdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
+    assert readadasdata.get_level_valence_n("3d7_4Fe[9/2]_id=1") == 3
+    assert readadasdata.get_level_valence_n("5s2_1Se[0/2]_id=1") == 5
     # the count of the previous orbital and a two-digit n: 5s1 11s1, not 5s11 1s
-    assert readqubdata.get_level_valence_n("5s111s1_2Se[1/2]_id=1") == 11
-    assert readqubdata.get_level_valence_n("3d24s_2Se[1/2]_id=1") == 4
+    assert readadasdata.get_level_valence_n("5s111s1_2Se[1/2]_id=1") == 11
+    assert readadasdata.get_level_valence_n("3d24s_2Se[1/2]_id=1") == 4
     # an adf04 label separates its shells with a space, so the last run holds n alone
-    assert readqubdata.get_level_valence_n("3S2 3P6 3D6 4S 4P_5D0[8]_id=1") == 4
+    assert readadasdata.get_level_valence_n("3S2 3P6 3D6 4S 4P_5D0[8]_id=1") == 4
 
     # a Kurucz label can end in a parent term and an odd-parity mark after the valence orbital
     assert readkuruczdata.get_level_valence_n("4f3(4I*)6s6p*(3P*) 5I,enpercm=12345.0,j=2.5") == 6
@@ -2966,8 +2989,8 @@ def test_get_level_valence_n():
     # skips the level and logs it. A guess would give a cross section of the wrong size
     assert readkuruczdata.get_level_valence_n(",enpercm=12345.0,j=2.5") is None
     assert readkuruczdata.get_level_valence_n("N(1S)2H 1,enpercm=76765.9,j=4.5") is None
-    assert readqubdata.get_level_valence_n("_id=1") is None
-    assert readqubdata.get_level_valence_n("(3P)_1Se[0/2]_id=1") is None
+    assert readadasdata.get_level_valence_n("_id=1") is None
+    assert readadasdata.get_level_valence_n("(3P)_1Se[0/2]_id=1") is None
     assert readtanakajpltdata.get_level_valence_n("1,even,{  6h+ 1 }") == 6
     assert readtanakajpltdata.get_level_valence_n("1,even,{  h+ 1 }") is None
 
@@ -2981,7 +3004,7 @@ def test_get_level_valence_n():
 def test_adf04_float_reads_every_exponent_form():
     """adf04 writes 1.23-04 for 1.23e-04, and the reader must not break a sign or an E that is there."""
     lines = pl.DataFrame({"line": ["1.23-04", "4.66+04", "-1.23-04", "1.23E-04", "1.23", "-2.5"]})
-    values = lines.select(readqubdata.adf04_float(0, 8)).to_series().to_list()
+    values = lines.select(readadasdata.adf04_float(0, 8)).to_series().to_list()
     assert values == [1.23e-4, 4.66e4, -1.23e-4, 1.23e-4, 1.23, -2.5]
 
 
@@ -3418,14 +3441,14 @@ def test_log_degenerate_transitions():
     assert not flog.getvalue()
 
 
-def test_read_qub_photoionizations_without_data_gives_empty_arrays():
+def test_read_adas_photoionizations_without_data_gives_empty_arrays():
     """An ion with no QUB cross sections must give the empty arrays, not zero-filled ones.
 
     iondata.read_ion_data() reads a zero-filled array as data and then skips the hydrogenic
     estimate. The output would then hold the ion with no cross sections at all.
     """
     args = phixs_args()
-    phixs = readqubdata.read_qub_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
+    phixs = readadasdata.read_adas_photoionizations(38, 1, levelcount=5, args=args, flog=io.StringIO())
     crosssections, targetfractions, thresholds = phixs.crosssections, phixs.targetfractions, phixs.thresholds_ev
     assert targetfractions is not None
     assert crosssections.shape == (0, 100)
@@ -3524,7 +3547,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
     """A reader marks a threshold it does not have in two ways, and both have to count.
 
     The arrays start as NaN. threshold_is_known() also counts a value at or below zero as missing.
-    readqubdata wrote -1.0 at one time, and only NaN counted then. That left every QUB level with
+    readadasdata wrote -1.0 at one time, and only NaN counted then. That left every ADAS level with
     its -1 and made the calculation dead code for the one reader that asks for it.
     """
     from artisatomic.iondata import IonData
@@ -3546,7 +3569,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
         )
 
     upperion = makeion(2, 25.0, [0.0], [], [])
-    # the two marks for "no value": NaN and readqubdata's -1
+    # the two marks for "no value": NaN and readadasdata's -1
     ion = makeion(1, 17.084, [0.0, 0.0], [[(0, 1.0)], [(0, 1.0)]], [np.nan, -1.0])
 
     filled = fill_missing_phixs_thresholds(ion, upperion, io.StringIO())
@@ -3785,14 +3808,14 @@ def test_iondata_handlers_registry():
 
     expected_parsers = {
         "cmfgen": readhillierdata.get_level_valence_n,
-        "qub_cobalt": readhillierdata.get_level_valence_n,
+        "adas_cobalt": readhillierdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
         "floers25calib": readfloers25data.get_level_valence_n,
         "floers25uncalib": readfloers25data.get_level_valence_n,
         "tanakajplt": readtanakajpltdata.get_level_valence_n,
-        "qub": readqubdata.get_level_valence_n,
+        "adas": readadasdata.get_level_valence_n,
     }
     assert {
         name: handler.get_level_valence_n for name, handler in handlers.items() if handler.get_level_valence_n
@@ -3808,25 +3831,25 @@ def test_iondata_handlers_registry():
         "gsnist",
     }
 
-    # only the QUB readers return collision strengths beside the levels and the transitions. Only
+    # only the ADAS readers return collision strengths beside the levels and the transitions. Only
     # they take args, for the temperature that selects the tabulated collision strengths
-    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"qub", "qub_cobalt"}
-    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"qub", "qub_cobalt"}
+    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"adas", "adas_cobalt"}
+    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"adas", "adas_cobalt"}
 
     # cmfgen is the one data source with collision strengths in its own file. cmfgen and
-    # qub_cobalt are the two with cross sections.
+    # adas_cobalt are the two with cross sections.
     assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
         "cmfgen": readhillierdata.read_coldata,
     }
     assert {name: handler.read_phixs for name, handler in handlers.items() if handler.read_phixs} == {
         "cmfgen": readhillierdata.read_phixs_tables,
-        "qub_cobalt": readqubdata.read_cobalt_photoionizations,
+        "adas_cobalt": readadasdata.read_cobalt_photoionizations,
     }
 
     # the readers that the registry calls with (atomic_number, ion_stage, flog[, args])
     expected_readers = {
         "cmfgen": readhillierdata.read_levels_and_transitions,
-        "qub_cobalt": readqubdata.read_cobalt_levels_and_transitions,
+        "adas_cobalt": readadasdata.read_cobalt_levels_and_transitions,
         "kurucz": readkuruczdata.read_levels_and_transitions,
         "dream": readdreamdata.read_levels_and_transitions,
         "lisbon": readlisbondata.read_levels_and_transitions,
@@ -3834,7 +3857,7 @@ def test_iondata_handlers_registry():
         "mons": readmonsdata.read_levels_and_transitions,
         "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
         "gsnist": groundstatesonlynist.read_ground_levels,
-        "qub": readqubdata.read_qub_levels_and_transitions,
+        "adas": readadasdata.read_adas_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
         assert handlers[name].read_levels_and_transitions is reader, name
@@ -3931,7 +3954,7 @@ def test_parse_ion_handlers_rejects_unknown_handlers_and_bad_entries():
     from artisatomic.ionhandlers import parse_ion_handlers
 
     # the renamed handler is still accepted under its old name
-    assert parse_ion_handlers([[26, [[2, "cmfgen"], [3, "qub_data"]]]]) == [(26, [(2, "cmfgen"), (3, "qub")])]
+    assert parse_ion_handlers([[26, [[2, "cmfgen"], [3, "qub_data"]]]]) == [(26, [(2, "cmfgen"), (3, "adas")])]
 
     with pytest.raises(ValueError, match="unknown handler 'cmfgne'"):
         parse_ion_handlers([[26, [[2, "cmfgne"]]]])
@@ -4009,16 +4032,16 @@ def test_get_level_valence_n_glued_digit_runs():
 
     The count must fit the shell before it, the n must not start with 0, and the valence orbital
     must have l < n. A two-digit run that fails the rule is a two-digit n. A three-digit run
-    tries a two-digit count first and a one-digit count second. The QUB parser took the first digit alone as the
+    tries a two-digit count first and a one-digit count second. The ADAS parser took the first digit alone as the
     count, so 4f145d gave n = 45. The Kurucz parser always split a three-digit run as 2 + 1, so
     s210d gave n = 0.
     """
-    assert readqubdata.get_level_valence_n("4f145d_2De[3/2]_id=1") == 5
-    assert readqubdata.get_level_valence_n("4f146s_2Se[1/2]_id=2") == 6
-    assert readqubdata.get_level_valence_n("5s210d_2De[3/2]_id=3") == 10
-    assert readqubdata.get_level_valence_n("3d104s_2Se[1/2]_id=4") == 4
-    assert readqubdata.get_level_valence_n("3d24s_x") == 4
-    assert readqubdata.get_level_valence_n("5s10d_x") == 10
+    assert readadasdata.get_level_valence_n("4f145d_2De[3/2]_id=1") == 5
+    assert readadasdata.get_level_valence_n("4f146s_2Se[1/2]_id=2") == 6
+    assert readadasdata.get_level_valence_n("5s210d_2De[3/2]_id=3") == 10
+    assert readadasdata.get_level_valence_n("3d104s_2Se[1/2]_id=4") == 4
+    assert readadasdata.get_level_valence_n("3d24s_x") == 4
+    assert readadasdata.get_level_valence_n("5s10d_x") == 10
 
     assert readkuruczdata.get_level_valence_n("s210d 2D,enpercm=1.0,j=0.5") == 10
     assert readkuruczdata.get_level_valence_n("f125d 2D,enpercm=1.0,j=0.5") == 5
@@ -4329,18 +4352,18 @@ def test_read_adf04_selects_the_nearest_temperature():
     per element chose 5010 K before, whatever the command line said.
     """
     flog = io.StringIO()
-    _, _, upsilons_6000, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
+    _, _, upsilons_6000, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
     assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
 
     flog = io.StringIO()
-    _, _, upsilons_low, _ = readqubdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
+    _, _, upsilons_low, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
     assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)
     assert any(upsilons_6000[key] != upsilons_low[key] for key in upsilons_6000)
 
-    assert readqubdata.adf04_number("5.01+03") == 5010.0
-    assert readqubdata.adf04_number("1.00-02") == 0.01
+    assert readadasdata.adf04_number("5.01+03") == 5010.0
+    assert readadasdata.adf04_number("1.00-02") == 0.01
 
 
 def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypatch, tmp_path):
@@ -4430,7 +4453,7 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
     ("modulename", "pathname", "handler", "dataname", "strayname"),
     [
         ("readtanakajpltdata", "jpltpath", "tanakajplt", "26_1.txt.zst", "26_1 2.txt.zst"),
-        ("readqubdata", "qubpath", "qub", "38_1.adf04.zst", "38_1 2.adf04.zst"),
+        ("readadasdata", "adaspath", "adas", "38_1.adf04.zst", "38_1 2.adf04.zst"),
     ],
 )
 def test_extend_ion_list_skips_a_file_name_that_names_no_ion(
@@ -4454,7 +4477,7 @@ def test_extend_ion_list_skips_a_file_name_that_names_no_ion(
     assert strayname in capsys.readouterr().out
 
 
-def test_read_qub_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypatch):
+def test_read_adas_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypatch):
     """A collision row that gives the lower level first still gives a transition with the lower id first.
 
     read_adf04() sorts each collision pair, so a reversed transition pair matches no upsilon. The
@@ -4473,17 +4496,17 @@ def test_read_qub_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypat
         temperatures=" 1.00    3       1.00+03 1.00+04",
     )
     (tmp_path / "99_1.adf04").write_text(adf04, encoding="utf-8")
-    monkeypatch.setattr(readqubdata, "qubpath", tmp_path)
+    monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        _, _, qub_transitions, upsilondict = readqubdata.read_qub_levels_and_transitions(
+        _, _, adas_transitions, upsilondict = readadasdata.read_adas_levels_and_transitions(
             99, 1, io.StringIO(), phixs_args()
         )
 
     # the ids are zero-based in memory, and both the transition and the upsilon name the same pair
     assert list(upsilondict) == [(0, 1)]
-    assert not isinstance(qub_transitions, pl.DataFrame)  # this reader returns a list of rows
-    assert [(tr.lowerlevel, tr.upperlevel) for tr in qub_transitions] == [(0, 1)]
+    assert not isinstance(adas_transitions, pl.DataFrame)  # this reader returns a list of rows
+    assert [(tr.lowerlevel, tr.upperlevel) for tr in adas_transitions] == [(0, 1)]
 
 
 def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
