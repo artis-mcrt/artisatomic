@@ -334,7 +334,8 @@ def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, 
     A decision for each level therefore gives wrong level names.
     """
     configs = [config for config, _total_l in levels]
-    if 2 * sum(looks_like_eissner_config(config) for config in configs) <= len(configs):
+    # A blank field has no notation, so it does not count.
+    if 2 * sum(looks_like_eissner_config(config) for config in configs) <= sum(bool(config) for config in configs):
         return None
 
     # The total L of a level shows the order. The count of all levels decides, because one level
@@ -629,14 +630,11 @@ def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upp
     adas_transitions.append(transition)
 
 
-# the ions whose photoionisation cross sections the QUB Co data covers. The function
-# read_adas_photoionizations() has one branch for each.
-qub_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
-
-
 def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
     """Read the cross sections of an ion of the "adas" handler. An ion with no data gets empty arrays."""
-    return read_adas_photoionizations(atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog)
+    return read_adas_photoionizations(
+        atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog, cmfgen_levels=False
+    )
 
 
 def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
@@ -645,8 +643,10 @@ def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergyleve
     The levels of such an ion come from CMFGEN. Co II has QUB cross sections for those levels. Each
     other ion takes the CMFGEN phot files.
     """
-    if (atomic_number, ion_stage) in qub_phixs_ions:
-        return read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog)
+    if (atomic_number, ion_stage) == (27, 2):
+        return read_adas_photoionizations(
+            atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog, cmfgen_levels=True
+        )
     return readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfenergylevels, args, flog)
 
 
@@ -733,10 +733,14 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
 
 
-def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
+def read_adas_photoionizations(
+    atomic_number, ion_stage, levelcount: int, args, flog, *, cmfgen_levels: bool = False
+) -> PhixsData:
     """Read the photoionisation cross sections for one ion, downsampled onto the output grid.
 
-    Only the QUB Co data has cross sections.
+    Only the QUB Co data has cross sections. The Co II tables are for the CMFGEN levels of Co II, and
+    the Co III table is for the QUB levels. cmfgen_levels says which levels the caller has, so that
+    a table does not go to the levels of a different source.
 
     Returns the cross sections, the threshold energies and the upper-ion target fractions per
     level, all indexed by zero-based level id. Levels with no data keep an empty target list,
@@ -751,7 +755,7 @@ def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, 
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
     photoionization_thresholds_ev = np.full(levelcount, np.nan)
 
-    if atomic_number == 27 and ion_stage == 2:
+    if (atomic_number, ion_stage) == (27, 2) and cmfgen_levels:
         for lowerlevelid in range(8):
             # the name of a cross section file is the level's number in the source data, which
             # counts from one
@@ -817,7 +821,7 @@ def read_adas_photoionizations(atomic_number, ion_stage, levelcount: int, args, 
             photoionization_targetfractions[lowerlevelid] = combined.fractions
             photoionization_crosssections[lowerlevelid] = combined.table
 
-    elif atomic_number == 27 and ion_stage == 3:
+    elif (atomic_number, ion_stage) == (27, 3) and not cmfgen_levels:
         # photoionize to a single level ion
 
         phixsvalues_const = [

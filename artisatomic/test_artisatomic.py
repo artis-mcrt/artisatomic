@@ -2486,6 +2486,17 @@ def test_append_adas_transition_rejects_equal_file_indices():
         readadasdata.append_adas_transition(levels, [], 2, 2, 1e8, "x.adf04")
 
 
+def test_qub_cross_sections_go_only_to_the_levels_of_their_source():
+    """The Co II tables are for CMFGEN levels and the Co III table is for QUB levels."""
+    args = phixs_args()
+    # Co II through the "adas" handler has ADAS levels, and Co III through CMFGEN levels has no QUB table
+    for ion_stage, cmfgen_levels in ((2, False), (3, True)):
+        flog = io.StringIO()
+        phixs = readadasdata.read_adas_photoionizations(27, ion_stage, 5, args, flog, cmfgen_levels=cmfgen_levels)
+        assert "no photoionisation data" in flog.getvalue()
+        assert phixs.crosssections.size == 0
+
+
 def test_standardise_config():
     """The reader converts an Eissner configuration, and it writes standard notation in lower case."""
     standardise = readadasdata._standardise_config  # ruff: ignore[private-member-access]
@@ -2540,6 +2551,8 @@ def test_eissner_order_of_file():
     assert order_of_file(levels, "x.adf04", flog) == "AUTOSTRUCTURE"
     assert "WARNING: levels whose shells cannot give their total L: 1." in flog.getvalue()
 
+    # a blank field has no notation, so it does not count in the decision
+    assert order_of_file([("521", 0), ("", 0), ("", 0)], "x.adf04", io.StringIO()) == "AUTOSTRUCTURE"
     # a blank field or a label is not a defective Eissner configuration
     flog = io.StringIO()
     assert order_of_file([("521", 0), ("51151A", 3), ("", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
