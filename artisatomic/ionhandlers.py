@@ -86,7 +86,11 @@ def get_ion_handlers(
 
 # Old handler names and their new names. A file from before the rename still names the old one,
 # so this map keeps those files readable.
-renamed_handlers = {"qub_data": "adas", "qub": "adas", "qub_cobalt": "adas_cobalt"}
+renamed_handlers = {"qub_data": "adas", "qub": "adas"}
+# The old cobalt handler read QUB levels for stages 3 and 4, CMFGEN levels with QUB cross sections
+# for stage 2, and CMFGEN data for each other stage. The ion stage thus gives its new name.
+old_cobalt_handlers = frozenset({"qub_cobalt", "adas_cobalt"})
+new_cobalt_handler_of_stage = {2: "cmfgen_qubphixs", 3: "adas", 4: "adas"}
 
 
 def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]:
@@ -118,6 +122,8 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
                 )
                 raise TypeError(msg) from None
             handlername = renamed_handlers.get(str(handler), str(handler))
+            if handlername in old_cobalt_handlers:
+                handlername = new_cobalt_handler_of_stage.get(int(ion_stage), "cmfgen")
             if handlername not in known_handlers:
                 msg = (
                     f"Z={atomic_number} ion stage {ion_stage} in artisatomicionhandlers.json names the unknown"

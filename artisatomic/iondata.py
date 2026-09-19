@@ -126,11 +126,13 @@ handlers: dict[str, Handler] = {
     "gsnist": Handler(groundstatesonlynist.read_ground_levels),
     # The adf04 files tabulate the collision strengths at several temperatures, and
     # -electrontemperature picks one, so the reader takes args.
+    # Only the QUB Co III data has cross sections. An ion with none gets the hydrogenic estimate.
     "adas": Handler(
         readadasdata.read_adas_levels_and_transitions,
         readadasdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
+        read_phixs=readadasdata.read_photoionizations,
     ),
     # the CMFGEN model atoms of Hillier: levels, collision strengths and cross sections. Hillier &
     # Miller (1998), ApJ, 496, 407-427, doi:10.1086/305350
@@ -140,17 +142,13 @@ handlers: dict[str, Handler] = {
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
     ),
-    # The QUB Co III and Co IV level lists and the QUB Co II and Co III cross sections. The CMFGEN
-    # files supply every other stage of the ion.
-    # The parser is the CMFGEN one. Co III takes the QUB cross sections. Co IV has QUB levels and
-    # no QUB cross sections, so the hydrogenic estimate parses its QUB level names with the CMFGEN
-    # parser when Co IV is not the top ion.
-    "adas_cobalt": Handler(
-        readadasdata.read_cobalt_levels_and_transitions,
+    # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
+    # The QUB Co II tables are for the CMFGEN levels of Co II.
+    "cmfgen_qubphixs": Handler(
+        readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
-        returns_upsilondict=True,
-        reader_takes_args=True,
-        read_phixs=readadasdata.read_cobalt_photoionizations,
+        read_coldata=readhillierdata.read_coldata,
+        read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
     ),
 }
 

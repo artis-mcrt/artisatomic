@@ -2569,9 +2569,11 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
     from artisatomic.ionhandlers import renamed_handlers
 
     assert parse_ion_handlers([[38, [[1, "qub_data"]]]]) == [(38, [(1, "adas")])]
-    assert parse_ion_handlers([[27, [[2, "qub_cobalt"], [3, "qub"]]]]) == [(27, [(2, "adas_cobalt"), (3, "adas")])]
+    # the ion stage gives the new name of the old cobalt handler
+    old_cobalt = [[27, [[1, "qub_cobalt"], [2, "qub_cobalt"], [3, "adas_cobalt"], [4, "qub_cobalt"]]]]
+    assert parse_ion_handlers(old_cobalt) == [(27, [(1, "cmfgen"), (2, "cmfgen_qubphixs"), (3, "adas"), (4, "adas")])]
     # a current name passes through unchanged
-    assert parse_ion_handlers([[27, [[2, "adas_cobalt"]]]]) == [(27, [(2, "adas_cobalt")])]
+    assert parse_ion_handlers([[27, [[2, "cmfgen_qubphixs"]]]]) == [(27, [(2, "cmfgen_qubphixs")])]
     # every alias must point at a handler that read_ion_data() can dispatch
     assert set(renamed_handlers.values()) <= set(handlers)
 
@@ -3958,7 +3960,7 @@ def test_iondata_handlers_registry():
 
     expected_parsers = {
         "cmfgen": readhillierdata.get_level_valence_n,
-        "adas_cobalt": readhillierdata.get_level_valence_n,
+        "cmfgen_qubphixs": readhillierdata.get_level_valence_n,
         "kurucz": readkuruczdata.get_level_valence_n,
         "fac": readfacdata.get_level_valence_n,
         "floers25calibwithforbidden": readfloers25data.get_level_valence_n,
@@ -3981,25 +3983,27 @@ def test_iondata_handlers_registry():
         "gsnist",
     }
 
-    # only the ADAS readers return collision strengths beside the levels and the transitions. Only
-    # they take args, for the temperature that selects the tabulated collision strengths
-    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"adas", "adas_cobalt"}
-    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"adas", "adas_cobalt"}
+    # only the ADAS reader returns collision strengths beside the levels and the transitions. Only
+    # it takes args, for the temperature that selects the tabulated collision strengths
+    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"adas"}
+    assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"adas"}
 
-    # cmfgen is the one data source with collision strengths in its own file. cmfgen and
-    # adas_cobalt are the two with cross sections.
+    # CMFGEN is the one data source with collision strengths in its own file. CMFGEN and the QUB
+    # Co data are the two with cross sections.
     assert {name: handler.read_coldata for name, handler in handlers.items() if handler.read_coldata} == {
         "cmfgen": readhillierdata.read_coldata,
+        "cmfgen_qubphixs": readhillierdata.read_coldata,
     }
     assert {name: handler.read_phixs for name, handler in handlers.items() if handler.read_phixs} == {
         "cmfgen": readhillierdata.read_phixs_tables,
-        "adas_cobalt": readadasdata.read_cobalt_photoionizations,
+        "cmfgen_qubphixs": readadasdata.read_cmfgen_qubphixs_photoionizations,
+        "adas": readadasdata.read_photoionizations,
     }
 
     # the readers that the registry calls with (atomic_number, ion_stage, flog[, args])
     expected_readers = {
         "cmfgen": readhillierdata.read_levels_and_transitions,
-        "adas_cobalt": readadasdata.read_cobalt_levels_and_transitions,
+        "cmfgen_qubphixs": readhillierdata.read_levels_and_transitions,
         "kurucz": readkuruczdata.read_levels_and_transitions,
         "dream": readdreamdata.read_levels_and_transitions,
         "lisbon": readlisbondata.read_levels_and_transitions,

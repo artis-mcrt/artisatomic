@@ -3,7 +3,7 @@
 
 Authors at QUB (Queen's University Belfast) made the Co, Sr I and Fe files. The Ca III file comes
 from OPEN-ADAS (https://open.adas.ac.uk). The reader had the name readqubdata before, and the
-handlers had the names "qub" and "qub_cobalt".
+handlers had the names "qub" and "qub_cobalt" (see ionhandlers.renamed_handlers).
 
 The Sr I file comes from Dougan, D. J., McElroy, N. E., Ballance, C. P., Ramsbottom, C. A. (2025),
 MNRAS, 541, 367-383, doi:10.1093/mnras/staf1013. The Co data in co_tyndall comes from a private
@@ -19,8 +19,8 @@ from pathlib import Path
 import numpy as np
 import polars as pl
 
-# the "adas_cobalt" handler reads the stages that the QUB Co data does not cover from the CMFGEN
-# files. readhillierdata imports nothing from this module, so the import is not circular.
+# the "cmfgen_qubphixs" handler takes the CMFGEN phot files for an ion with no QUB cross sections.
+# readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
@@ -629,43 +629,24 @@ def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upp
     adas_transitions.append(transition)
 
 
-# the ion stages that the QUB Co data covers: the Co III adf04 files and the single-level
-# Co IV. For the other stages of an "adas_cobalt" ion, read_cobalt_levels_and_transitions() below
-# takes the CMFGEN reader. read_adas_levels_and_transitions() has one branch for each stage in
-# this set, so a new stage needs an entry here and a branch there.
-qub_cobalt_stages: frozenset[int] = frozenset({3, 4})
-
-# the ions whose photoionisation cross sections the QUB Co data covers, one branch each in
-# read_adas_photoionizations(). read_cobalt_photoionizations() takes the CMFGEN phot files for
-# every other stage of an "adas_cobalt" ion that has CMFGEN levels.
+# the ions whose photoionisation cross sections the QUB Co data covers. The function
+# read_adas_photoionizations() has one branch for each.
 qub_phixs_ions: frozenset[tuple[int, int]] = frozenset({(27, 2), (27, 3)})
 
 
-def read_cobalt_levels_and_transitions(atomic_number, ion_stage, flog, args):
-    """Read one ion of the "adas_cobalt" handler: the QUB lists for its stages, the CMFGEN lists otherwise.
+def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
+    """Read the cross sections of an ion of the "adas" handler. An ion with no data gets empty arrays."""
+    return read_adas_photoionizations(atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog)
 
-    Returns the same four values as read_adas_levels_and_transitions(). The CMFGEN collision
-    strengths of a CMFGEN stage are the fourth value, as the QUB ones are for a QUB stage.
+
+def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
+    """Read the cross sections of an ion of the "cmfgen_qubphixs" handler.
+
+    The levels of such an ion come from CMFGEN. Co II has QUB cross sections for those levels. Each
+    other ion takes the CMFGEN phot files.
     """
-    if ion_stage in qub_cobalt_stages:
-        return read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args)
-    ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(
-        atomic_number, ion_stage, flog
-    )
-    upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog)
-    return ionization_energy_ev, dflevels, dftransitions, upsilondict
-
-
-def read_cobalt_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
-    """Read the cross sections of an "adas_cobalt" ion: from the QUB data where it has them, else from CMFGEN.
-
-    A stage with QUB levels stays on the QUB path even without QUB cross sections. Its levels
-    carry no threshold wavelengths, so the CMFGEN phot files cannot apply to them.
-    """
-    if ion_stage in qub_cobalt_stages or (atomic_number, ion_stage) in qub_phixs_ions:
-        return read_adas_photoionizations(
-            atomic_number, ion_stage, levelcount=dfenergylevels.height, args=args, flog=flog
-        )
+    if (atomic_number, ion_stage) in qub_phixs_ions:
+        return read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog)
     return readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfenergylevels, args, flog)
 
 
