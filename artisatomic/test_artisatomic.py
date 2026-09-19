@@ -2224,6 +2224,29 @@ def test_convert_eissner_to_standard():
             convert_eissner_to_standard(malformed)
 
 
+def test_eissner_total_l_is_possible():
+    """The total L of a level shows a wrong order of the Eissner shell characters."""
+    from artisatomic.levelnames import eissner_total_l_is_possible
+
+    # 1s 4f has L = 3, and 1s 5s has L = 0 (the OPEN-ADAS file for He-like C)
+    assert eissner_total_l_is_possible("51151A", 3)
+    assert eissner_total_l_is_possible("51151B", 0)
+    assert not eissner_total_l_is_possible("51151A", 0)
+    # 3p5 4f gives L = 2, 3 or 4 (the Ca III file), and 3p5 3d gives L = 1, 2 or 3
+    assert [eissner_total_l_is_possible("52256352455551A", total_l) for total_l in range(6)] == [
+        False,
+        False,
+        True,
+        True,
+        True,
+        False,
+    ]
+    # for 3d3 the test is only an upper limit: 2 + 2 + 1
+    assert eissner_total_l_is_possible("536", 5)
+    assert not eissner_total_l_is_possible("536", 6)
+    assert eissner_total_l_is_possible("4p65s2", 0)  # not Eissner notation: no test
+
+
 def test_expand_standard_config_expands_only_a_real_subshell():
     """A letter is an occupation only in a word that can be a subshell: n > l and q <= 2(2l+1)."""
     assert expand_standard_config("3p6 3da") == "3p6 3d10"
@@ -2370,7 +2393,7 @@ def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
 def test_append_adas_transition_rejects_equal_level_ids():
     """A transition from a level to itself stops the run in the reader, and the message names the file."""
     levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
-    with pytest.raises(ValueError, match="same level id 2"):
+    with pytest.raises(ValueError, match="same file index 2"):
         readadasdata.append_adas_transition(levels, [], 2, 2, 1e8, "x.adf04")
 
 

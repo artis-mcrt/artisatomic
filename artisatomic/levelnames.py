@@ -3,6 +3,7 @@
 import re
 import string
 from collections.abc import Iterator
+from itertools import starmap
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
@@ -313,8 +314,11 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
 
 # The Eissner collating sequence: 1=1s, 2=2s, 3=2p, ..., 9=4d, A=4f, B=5s, ..., Z, then a, b, ...
 # The shell character is case-sensitive. The ADAS adf04 specification (appxa-04) gives 0=4f and
-# A=5s. The adf04 files from AUTOSTRUCTURE do not follow it. In the Ca III file, each "A" level
-# has a total L of 2, 3 or 4. Only 3p5 4f gives those terms. The reader follows the files.
+# A=5s. The adf04 files from AUTOSTRUCTURE do not follow it, and the reader follows the files. In
+# the OPEN-ADAS file for He-like C (cophps][he/dw/ls][c4.dat), each level is 1s nl, so its total L
+# is the l of the outer shell. The shells "A" to "F" have L = 3, 0, 1, 2, 3, 4, thus 4f, 5s, 5p, 5d,
+# 5f, 5g. No file gives evidence for the shells after "F". eissner_total_l_is_possible() finds a
+# file that uses a different order.
 eissner_shell_chars = string.digits[1:] + string.ascii_uppercase + string.ascii_lowercase
 eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
 eissner_shell_label_by_char: dict[str, str] = dict(
@@ -354,6 +358,35 @@ def _eissner_shells(config: str) -> list[tuple[str, int]] | None:
     if any(occupation > 4 * lchars.lower().index(label[-1]) + 2 for label, occupation in shells):
         return None
     return shells
+
+
+def _max_total_l(l: int, occupation: int) -> int:
+    """Return the largest total L of a shell. Each m_l value from l down holds two electrons."""
+    electrons = min(occupation, 4 * l + 2 - occupation)
+    return sum(l - index // 2 for index in range(electrons))
+
+
+def eissner_total_l_is_possible(config: str, total_l: int) -> bool:
+    """Return False if the shells of an Eissner configuration cannot give the total L of the level.
+
+    A False result shows a wrong shell order, for example a file that follows the specification
+    (A=5s) and not the AUTOSTRUCTURE files (A=4f). The test is exact for a maximum of two open
+    shells that each have one electron or one hole. For other levels, it is only an upper limit.
+    """
+    shells = _eissner_shells(config)
+    if shells is None:
+        return True
+    open_shells = [
+        (lchars.lower().index(label[-1]), occupation)
+        for label, occupation in shells
+        if occupation < 4 * lchars.lower().index(label[-1]) + 2
+    ]
+    if total_l > sum(starmap(_max_total_l, open_shells)):
+        return False
+    single = [l for l, occupation in open_shells if occupation in {1, 4 * l + 1}]
+    if len(single) == len(open_shells) and len(open_shells) in {1, 2}:
+        return abs(single[0] - single[-1]) <= total_l if len(single) == 2 else total_l == single[0]
+    return True
 
 
 def is_eissner_config(config: str) -> bool:

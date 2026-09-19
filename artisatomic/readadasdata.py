@@ -39,6 +39,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
+from artisatomic.levelnames import eissner_total_l_is_possible
 from artisatomic.levelnames import expand_standard_config
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import is_eissner_config
@@ -73,7 +74,7 @@ def rename_old_data_directory(oldpath: Path, newpath: Path) -> None:
         oldpath.rmdir()
 
 
-rename_old_data_directory((PYDIR / ".." / "atomic-data-qub").resolve(), adaspath)
+old_adaspath = (PYDIR / ".." / "atomic-data-qub").resolve()
 tyndall_co3_path = (adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
 
 # the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
@@ -332,7 +333,7 @@ def read_adf04(
 
     The caller takes the A-values from that frame, which saves a second read and a second parse
     of the file. The file numbers levels from one, and the rest of the code looks up id n at
-    list index n - 1. The reader therefore checks that the level ids are contiguous and 1-based.
+    list index n - 1. The reader therefore checks that the file indices are contiguous and 1-based.
     """
     energylevels: list[ADASEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
@@ -367,6 +368,12 @@ def read_adf04(
             log_and_print(flog, "Eissner notation detected for electron configuration")
 
         for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
+            if uses_eissner_notation and not eissner_total_l_is_possible(config.strip(), int(l_hex, 16)):
+                msg = (
+                    f"The shells of the configuration {config.strip()!r} in {filepath} cannot give L = {int(l_hex, 16)}"
+                    f" (file index {adas_id}). The file possibly uses a different order of the Eissner shell characters."
+                )
+                raise ValueError(msg)
             config = _standardise_config(config, uses_eissner_notation=uses_eissner_notation)
             energylevel = ADASEnergyLevel(
                 config, int(adas_id), int(multiplicity), int(l_hex, 16), float(j), float(energy_percm), 0.0, 0
@@ -392,13 +399,13 @@ def read_adf04(
             energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
             energylevels.append(energylevel)
 
-            # the transition and upsilon tables use these 1-based ids and the rest of the code
+            # the transition and upsilon tables use these file indices and the rest of the code
             # looks up id n at index n - 1. A non-contiguous file would therefore misattach every
             # transition. Not an assert: input validation must survive python -O.
             if energylevel.adas_id != len(energylevels):
                 msg = (
-                    f"adf04 level id {energylevel.adas_id} found at position {len(energylevels)} in {filepath}."
-                    " Level ids must be contiguous and start at 1."
+                    f"adf04 file index {energylevel.adas_id} found at position {len(energylevels)} in {filepath}."
+                    " The file indices must be contiguous and start at 1."
                 )
                 raise ValueError(msg)
 
@@ -472,13 +479,13 @@ def read_adf04(
             # must survive python -O. Equal ids would store a self-transition.
             if not 1 <= lower < upper <= len(energylevels):
                 msg = (
-                    f"collision strength level ids {lower}, {upper} in {filepath} are outside"
+                    f"collision strength file indices {lower}, {upper} in {filepath} are outside"
                     f" the file's {len(energylevels)} levels"
                 )
                 raise ValueError(msg)
 
-            # the file numbers levels from one; level ids are zero-based in memory. The log
-            # messages keep the file's ids, because they are about the file's contents.
+            # the file index starts at one; level ids are zero-based in memory. The log
+            # messages keep the file indices, because they are about the file's contents.
             levelidpair = (lower - 1, upper - 1)
             if levelidpair not in upsilondict:
                 upsilondict[levelidpair] = upsilon
@@ -504,7 +511,7 @@ def read_adf04(
 def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upper, A, filepath) -> None:
     """Validate one radiative transition row and append it to the transition list.
 
-    The ids are the file's 1-based level ids. The columns of a file do not always give the lower
+    The ids are the file indices, which start at 1. The columns of a file do not always give the lower
     level first, so the function sorts the pair. read_adf04() sorts each collision pair the same
     way. A reversed pair would give a transition that the upsilon join misses.
     """
@@ -514,14 +521,14 @@ def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upp
     # end would raise a bare IndexError that names neither the file nor the transition.
     if not 1 <= id_lower <= len(adas_energylevels) or not 1 <= id_upper <= len(adas_energylevels):
         msg = (
-            f"transition level ids {id_lower}, {id_upper} in {filepath} are outside"
+            f"transition file indices {id_lower}, {id_upper} in {filepath} are outside"
             f" the file's {len(adas_energylevels)} levels"
         )
         raise ValueError(msg)
     # read_adf04() makes the same check for a collision pair. Without it, the failure comes from
     # the writer, after adata.txt already holds the ion.
     if id_lower == id_upper:
-        msg = f"transition in {filepath} has the same level id {id_lower} for the two levels"
+        msg = f"transition in {filepath} has the same file index {id_lower} for the two levels"
         raise ValueError(msg)
     # the file numbers levels from one; level ids are zero-based in memory
     id_lower -= 1
@@ -638,14 +645,14 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
         adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
 
-        # a radiative transition is a collision row with both level ids and an A-value. The width
+        # a radiative transition is a collision row with both file indices and an A-value. The width
         # of a line does not identify such a row, because a row can be one character shorter than
         # the widest.
         transitiondf = collisiondf.filter(
             pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
         )
 
-        # append_adas_transition() sorts each pair of level ids. So a file that gives the two
+        # append_adas_transition() sorts each pair of file indices. So a file that gives the two
         # columns in the opposite order needs no special case here. The W II file does that.
         for id_upper, id_lower, A in transitiondf.select("upper", "lower", "avalue").iter_rows():
             append_adas_transition(

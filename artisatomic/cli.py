@@ -16,6 +16,9 @@ from artisatomic.ionhandlers import inputhandlersfile
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
+from artisatomic.readadasdata import adaspath
+from artisatomic.readadasdata import old_adaspath
+from artisatomic.readadasdata import rename_old_data_directory
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -121,6 +124,8 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
+    # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
+    rename_old_data_directory(old_adaspath, adaspath)
     ion_handlers = get_ion_handlers(
         minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
     )
