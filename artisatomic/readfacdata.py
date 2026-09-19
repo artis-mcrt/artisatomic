@@ -19,6 +19,7 @@ from artisatomic.base import check_row_count
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
 from artisatomic.base import EnergyLevel
+from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
@@ -70,7 +71,7 @@ def parse_fixed_width(
         .slice(skip_lines)
         .select(
             # a blank field, and a line too short to reach the field, both give a null
-            pl.col("line").str.slice(start, end - start).str.strip_chars().replace("", None).cast(dtype).alias(name)
+            fixed_width_column(start, end - start).replace("", None).cast(dtype).alias(name)
             for name, start, end, dtype in columns
         )
         .collect()

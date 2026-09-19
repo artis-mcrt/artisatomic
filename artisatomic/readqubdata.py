@@ -22,6 +22,7 @@ from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
+from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
@@ -130,11 +131,6 @@ adf04_ityp_columns = slice(5, 10)
 adf04_temperature_offset = 16
 
 
-def adf04_column(offset: int, length: int) -> pl.Expr:
-    """Return an expression for the fixed columns of the "line" column, with no whitespace at the ends."""
-    return pl.col("line").str.slice(offset, length).str.strip_chars()
-
-
 def adf04_float(offset: int, length: int) -> pl.Expr:
     """Return an expression for the fixed columns as a float.
 
@@ -142,7 +138,11 @@ def adf04_float(offset: int, length: int) -> pl.Expr:
     only after a digit or a point. A leading sign and a field that already has an "E" stay as
     they are.
     """
-    return adf04_column(offset, length).str.replace_all(r"([0-9.])([-+])", "${1}E${2}").cast(pl.Float64, strict=False)
+    return (
+        fixed_width_column(offset, length)
+        .str.replace_all(r"([0-9.])([-+])", "${1}E${2}")
+        .cast(pl.Float64, strict=False)
+    )
 
 
 def adf04_upper_file_index(levelcount: int) -> pl.Expr:
@@ -154,12 +154,15 @@ def adf04_upper_file_index(levelcount: int) -> pl.Expr:
     - Column 1 holds the process code "1", "2" or "3", or a blank. Columns 2 to 4 hold the index.
     Each other row gives a null.
     """
-    first_columns = adf04_column(0, 4)
+    first_columns = fixed_width_column(0, 4)
     digits_index = first_columns.cast(pl.Int64, strict=False)
     is_level = (first_columns.str.contains(r"^[0-9]+$") & (digits_index <= levelcount)).fill_null(value=False)
     has_code_column = pl.col("line").str.slice(0, 1).is_in([" ", "1", "2", "3"])
     return (
-        pl.when(is_level).then(digits_index).when(has_code_column).then(adf04_column(1, 3).cast(pl.Int64, strict=False))
+        pl.when(is_level)
+        .then(digits_index)
+        .when(has_code_column)
+        .then(fixed_width_column(1, 3).cast(pl.Int64, strict=False))
     )
 
 
@@ -271,15 +274,18 @@ def _file_uses_eissner_notation(configs: list[str], filepath: str | Path) -> boo
     return False
 
 
+parenthesised_term_regex = re.compile(r"(\([^)]*\))")
+
+
 def _standardise_config(config: str, *, uses_eissner_notation: bool) -> str:
     """Return the configuration in standard notation."""
     config = config.strip()
     if uses_eissner_notation:
         return convert_eissner_to_standard(config)
 
-    # The term in parentheses stays in upper case, e.g. "4P65S2(1S)" becomes "4p65s2(1S)".
-    head, sep, tail = config.partition("(")
-    return expand_standard_config(head.lower()) + sep + tail
+    # Each term in parentheses stays in upper case, e.g. "3D6(5D)4DA" becomes "3d6(5D)4d10".
+    parts = parenthesised_term_regex.split(config)
+    return "".join(part if index % 2 else expand_standard_config(part.lower()) for index, part in enumerate(parts))
 
 
 def read_adf04(
@@ -411,14 +417,20 @@ def read_adf04(
         upsilon_offset = adf04_row_prefix_width + adf04_value_width * (1 + nearest_index)
         collisiondf = pl.DataFrame({"line": collision_lines}, schema={"line": pl.String}).select(
             adf04_upper_file_index(len(energylevels)).alias("upper"),
-            adf04_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
+            fixed_width_column(4, 4).cast(pl.Int64, strict=False).alias("lower"),
             adf04_float(adf04_row_prefix_width, adf04_value_width).alias("avalue"),
             adf04_float(upsilon_offset, adf04_value_width).alias("upsilon"),
+            (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0).alias("upsilon_is_blank"),
         )
 
         # a row that is too short, or that holds a value this cannot read, gives a null
         goodrows = collisiondf.drop_nulls(subset=["lower", "upper", "upsilon"])
-        unreadable_rows = collisiondf.height - goodrows.height
+        # A row that stops before the selected temperature is a good row with no upsilon there.
+        # The caller still takes its A-value.
+        short_rows = collisiondf.filter(
+            pl.col("lower").is_not_null(), pl.col("upper").is_not_null(), pl.col("upsilon_is_blank")
+        ).height
+        unreadable_rows = collisiondf.height - goodrows.height - short_rows
         if unreadable_rows and goodrows.is_empty():
             msg = (
                 f"The reader could not parse any of the {unreadable_rows} collision rows of {filepath}."
@@ -455,6 +467,8 @@ def read_adf04(
         log_and_print(flog, f"Skipped rows that are not an electron impact excitation: {skipped_rows:d}")
     if unreadable_rows:
         log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
+    if short_rows:
+        log_and_print(flog, f"Collision rows with no upsilon at the selected temperature: {short_rows:d}")
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 

@@ -550,6 +550,15 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     return True
 
 
+def fixed_width_column(offset: int, width: int | None = None) -> pl.Expr:
+    """Return an expression for the fixed columns of the "line" column, with no whitespace at the ends.
+
+    With no width, the columns go to the end of the line. A blank field, and a line too short to
+    reach the field, both give "". A cast with strict=False, or replace("", None), makes that a null.
+    """
+    return pl.col("line").str.slice(offset, width).str.strip_chars()
+
+
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     """Read a text file into a lazy frame that holds one line in each row of a "line" column.
 

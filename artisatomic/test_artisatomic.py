@@ -2324,6 +2324,21 @@ def test_read_adf04_upper_file_index_comes_from_the_row(tmp_path):
     assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
 
 
+def test_read_adf04_counts_a_short_row_apart_from_an_unreadable_row(tmp_path):
+    """A row that stops before the selected temperature keeps its A-value, and the log does not call it unreadable."""
+    filepath = tmp_path / "1_1.adf04"
+    rows = ["   2   1 6.27+08 4.29-01", "   2   1 6.27+08 4.29-01 5.29-01"]
+    filepath.write_text(
+        make_adf04(hydrogen_levels, rows, header=hydrogen_header, temperatures=two_temperatures), encoding="utf-8"
+    )
+    flog = io.StringIO()
+    _, _, upsilondict, collisiondf = readqubdata.read_adf04(filepath, flog, 1e6, 1, 1)
+    assert upsilondict == {(0, 1): pytest.approx(0.529)}
+    assert collisiondf["avalue"].to_list() == [6.27e8, 6.27e8]
+    assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
+    assert "could not parse" not in flog.getvalue()
+
+
 def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
     """Rows in free format give no value in the fixed columns. The ion must not lose each transition silently."""
     with pytest.raises(ValueError, match="could not parse any of the 1 collision rows"):
@@ -2351,6 +2366,9 @@ def test_standardise_config():
         ("3S2 3P6 3D6 4S 4P", "3s2 3p6 3d6 4s 4p"),
         ("5s2", "5s2"),
         ("4P65S2(1S)", "4p65s2(1S)"),
+        # the text after a parent term gets the same steps as the text before it
+        ("3D6(5D)4DA", "3d6(5D)4d10"),
+        ("(5D)4S", "(5D)4s"),
         # in a file with standard notation, a label that is also a valid Eissner configuration stays as it is
         ("21", "21"),
     ):

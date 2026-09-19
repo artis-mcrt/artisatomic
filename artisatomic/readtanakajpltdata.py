@@ -11,6 +11,7 @@ import re
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
@@ -108,11 +109,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         # line falls inside the section rather than after it.
         .filter(pl.col("line").str.strip_chars().str.len_chars() > 0)
         .select(
-            levelid=pl.col("line").str.slice(0, 7).str.strip_chars(),
-            g=pl.col("line").str.slice(7, 8).str.strip_chars(),
-            parity=pl.col("line").str.slice(15, 4).str.strip_chars(),
-            energy_ev=pl.col("line").str.slice(19, 15).str.strip_chars(),
-            configuration=pl.col("line").str.slice(34).str.strip_chars(),
+            levelid=fixed_width_column(0, 7),
+            g=fixed_width_column(7, 8),
+            parity=fixed_width_column(15, 4),
+            energy_ev=fixed_width_column(19, 15),
+            configuration=fixed_width_column(34),
         )
         .select(
             energyabovegsinpercm=pl.col("energy_ev").cast(pl.Float64) / hc_in_ev_cm,

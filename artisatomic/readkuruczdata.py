@@ -8,6 +8,7 @@ from pathlib import Path
 import polars as pl
 
 from artisatomic.base import find_file_check_extension
+from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
@@ -87,7 +88,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # read each line whole, then cut the fixed-width fields out of it
     gfall = scan_file_lines(fname).select(
         # a blank field, and a line too short to reach the field, both give a null
-        pl.col("line").str.slice(offset, width).str.strip_chars().replace("", None).cast(dtype).alias(name)
+        fixed_width_column(offset, width).replace("", None).cast(dtype).alias(name)
         for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
     )
 
