@@ -169,7 +169,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons, qub]
+                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons, adas]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45

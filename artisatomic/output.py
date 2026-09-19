@@ -52,7 +52,7 @@ def clear_files(args: argparse.Namespace) -> None:
 # line in a highly charged ion can lie above the A cut.
 #
 # The cuts lie where the two populations separate in these data sets. Forbidden lines end near
-# f ~ 1e-6 and A ~ 1e2 (QUB's Co III peaks at 14 s-1). The lines that contradict their own J
+# f ~ 1e-6 and A ~ 1e2 (the QUB Co III data peaks at 14 s-1). The lines that contradict their own J
 # labels start at f = 7.8e-4 (F III's smallest), only eight times above the cut. A mislabelled
 # line weaker than that falls on the wrong side, and that is the accepted cost.
 min_f_asserts_e1 = 1e-4

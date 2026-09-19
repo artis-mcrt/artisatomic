@@ -9,9 +9,9 @@ import json
 import typing as t
 from pathlib import Path
 
+from artisatomic import readadasdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
-from artisatomic import readqubdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import sort_ion_handlers
@@ -60,7 +60,7 @@ def get_ion_handlers(
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
     # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
     # whose files start above the default -maxionstage needs a higher value.
-    ion_handlers = readqubdata.extend_ion_list(
+    ion_handlers = readadasdata.extend_ion_list(
         ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
     )
     ion_handlers = readhillierdata.extend_ion_list(
@@ -86,7 +86,11 @@ def get_ion_handlers(
 
 # Old handler names and their new names. A file from before the rename still names the old one,
 # so this map keeps those files readable.
-renamed_handlers = {"qub_data": "qub"}
+renamed_handlers = {"qub_data": "adas", "qub": "adas"}
+# The old cobalt handler read QUB levels for stages 3 and 4, CMFGEN levels with QUB cross sections
+# for stage 2, and CMFGEN data for each other stage. The ion stage thus gives its new name.
+old_cobalt_handlers = frozenset({"qub_cobalt", "adas_cobalt"})
+new_cobalt_handler_of_stage = {2: "cmfgen_qubphixs", 3: "adas", 4: "adas"}
 
 
 def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]:
@@ -118,6 +122,8 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
                 )
                 raise TypeError(msg) from None
             handlername = renamed_handlers.get(str(handler), str(handler))
+            if handlername in old_cobalt_handlers:
+                handlername = new_cobalt_handler_of_stage.get(int(ion_stage), "cmfgen")
             if handlername not in known_handlers:
                 msg = (
                     f"Z={atomic_number} ion stage {ion_stage} in artisatomicionhandlers.json names the unknown"

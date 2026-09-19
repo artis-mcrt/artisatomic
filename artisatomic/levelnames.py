@@ -3,12 +3,20 @@
 import re
 import string
 from collections.abc import Iterator
+from itertools import starmap
 
 alphabets = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ "
 reversedalphabets = "zyxwvutsrqponmlkjihgfedcbaZYXWVUTSRQPONMLKJIHGFEDCBA "
 # the orbital letters in order of l. The sequence skips J, and it skips P and S at l = 12 and
 # l = 14, because those letters are l = 1 and l = 0.
 lchars = "SPDFGHIKLMNOQRTUVWXYZ"
+lchars_lower = lchars.lower()
+
+
+def subshell_capacity(l: int) -> int:
+    """Return the largest number of electrons of a subshell, 2(2l+1)."""
+    return 4 * l + 2
+
 
 # CMFGEN names a level that merges the high-l orbitals of one n with one of these letters, whatever
 # the n. '3s2_18w_2W' has g = 648 = 2 x 18^2, the whole n = 18 shell, and '3s2_7z_2Z' merges the
@@ -25,7 +33,7 @@ def parse_orbital_n(orbital: str) -> int | None:
     than guess.
     """
     part = orbital.rstrip(string.digits)
-    if len(part) < 2 or part[-1] not in lchars.lower():
+    if len(part) < 2 or part[-1] not in lchars_lower:
         return None
     n_text = part[:-1]
     return int(n_text) if n_text.isdigit() else None
@@ -129,7 +137,7 @@ def interpret_configuration(
     else:
         term_parity = [0, 1][(instr[-1] == "o")]
         if all(char not in lchars for char in instr):
-            # a name with no term letter. The QUB reader passes hasterm=False and never reaches this.
+            # a name with no term letter. The ADAS reader passes hasterm=False and never reaches this.
             if warn:
                 print(f"WARNING: the level name '{instr_orig}' has no term letter")
         else:
@@ -179,7 +187,7 @@ def interpret_configuration(
 
 def _last_letter_is_index(instr: str) -> bool:
     """Whether the last letter of the configuration is an index in the symmetry, not an orbital."""
-    return len(instr) < 3 or not str.isdigit(instr[-2]) or instr[-3] in lchars.lower()
+    return len(instr) < 3 or not str.isdigit(instr[-2]) or instr[-3] in lchars_lower
 
 
 def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator[tuple[int, int, bool]]:
@@ -197,7 +205,6 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
     shared principal quantum number. The walk therefore takes each letter in turn, with the
     digits that follow it as its occupation and 1 where it has none.
     """
-    lchars_lower = lchars.lower()
     for orbitalstr in interpret_configuration(instr, warn=warn, hasterm=hasterm)[0]:
         if orbitalstr.startswith("("):
             continue  # a parent term such as '(5D)', not an occupied orbital
@@ -287,14 +294,13 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     """
     if not previousorbital:
         return int(digits)
-    lchars_lower = lchars.lower()
     l_previous = lchars_lower.find(previousorbital)
     l_valence = lchars_lower.find(orbital)
 
     def physical(count: str, n: str) -> bool:
         return (
             n[0] != "0"
-            and (l_previous < 0 or int(count) <= 2 * (2 * l_previous + 1))
+            and (l_previous < 0 or int(count) <= subshell_capacity(l_previous))
             and (l_valence < 0 or l_valence < int(n))
         )
 
@@ -311,25 +317,127 @@ def split_count_and_n(previousorbital: str, digits: str, orbital: str) -> int | 
     return None
 
 
-# An Eissner shell character gives the shell in the order 1s, 2s, 2p, 3s, ...: "1" to "9", then "A" to "T".
-eissner_shell_chars = string.digits[1:] + string.ascii_uppercase[:20]
-eissner_shell_labels = [f"{n}{lchars[l].lower()}" for n in range(1, len(lchars) + 1) for l in range(n)]
-eissner_shell_label_by_char = dict(
-    zip(eissner_shell_chars, eissner_shell_labels[: len(eissner_shell_chars)], strict=True)
-)
+# The order of the Eissner shell characters. The shell character is case-sensitive, and the lower
+# case letters come after "Z".
+#
+# The ADAS adf04 specification (appxa-04) gives 9=4d, 0=4f, A=5s. The adf04 files from
+# AUTOSTRUCTURE give 9=4d, A=4f, B=5s and have no "0". In the OPEN-ADAS file for He-like C
+# (cophps][he/dw/ls][c4.dat), each level is 1s nl, so its total L is the l of the outer shell. The
+# shells "A" to "F" of that file have L = 3, 0, 1, 2, 3, 4, thus 4f, 5s, 5p, 5d, 5f, 5g. No file
+# gives evidence for the shells after "F".
+eissner_shell_orders = {
+    "AUTOSTRUCTURE": string.digits[1:] + string.ascii_uppercase + string.ascii_lowercase,
+    "specification": string.digits[1:] + "0" + string.ascii_uppercase + string.ascii_lowercase,
+}
+default_eissner_order = "AUTOSTRUCTURE"
+# each shell is (n, l), in the order 1s, 2s, 2p, 3s, ...
+eissner_shell_by_char: dict[str, dict[str, tuple[int, int]]] = {
+    order: dict(zip(chars, ((n, l) for n in range(1, len(chars)) for l in range(n)), strict=False))
+    for order, chars in eissner_shell_orders.items()
+}
 
-# One Eissner triple: the occupation code (50 + the occupation, thus "51" to "64"), then the shell character.
-eissner_triple_pattern = r"(5[1-9]|6[0-4])([0-9A-Za-z])"
-eissner_triple_regex = re.compile(eissner_triple_pattern)
-eissner_config_regex = re.compile(rf"(?:{eissner_triple_pattern})+")
+# One Eissner triple is the occupation code (50 + the occupation) and the shell character. A
+# string of this form is an Eissner configuration or a defective one. It is not standard notation,
+# because standard notation has an orbital letter as its second character.
+eissner_like_config_regex = re.compile(r"(?:[56][0-9][0-9A-Za-z])+")
+# an f shell holds the largest number of electrons of the shells in use
+eissner_largest_occupation = 14
 
 
-def is_eissner_config(config: str) -> bool:
-    """Return True if the full string is a sequence of Eissner triples. The bare "5s2" is not."""
-    return eissner_config_regex.fullmatch(config) is not None
+def _with_full_first_triple(config: str) -> str:
+    """Return the configuration with a full first triple.
+
+    The specification lets the first shell give the occupation q in place of 50 + q, as in "21522".
+    The shell character of the short form must not be an orbital letter in upper case or lower
+    case. A label such as "2P", and the compact "3D54P" (3d5 4p), are standard notation.
+    """
+    if len(config) % 3 == 2 and config[0] in "123456789" and config[1].upper() not in lchars:
+        return "5" + config
+    return config
 
 
-def convert_eissner_to_standard(eissner_config: str) -> str:
+def _eissner_shells(config: str, order: str = default_eissner_order) -> list[tuple[int, int, int]] | None:
+    """Return the (n, l, occupation) of each shell of an Eissner configuration, or None for a different string."""
+    config = _with_full_first_triple(config)
+    if eissner_like_config_regex.fullmatch(config) is None:
+        return None
+    shells = []
+    for start in range(0, len(config), 3):
+        shell = eissner_shell_by_char[order].get(config[start + 2])
+        occupation = int(config[start : start + 2]) - 50
+        # A label such as "591" (1s9) is not a configuration.
+        if shell is None or not 1 <= occupation <= min(subshell_capacity(shell[1]), eissner_largest_occupation):
+            return None
+        shells.append((*shell, occupation))
+    return shells
+
+
+def _max_total_l(l: int, occupation: int) -> int:
+    """Return the largest total L of a shell. Each m_l value from l down holds two electrons."""
+    electrons = min(occupation, subshell_capacity(l) - occupation)
+    return sum(l - index // 2 for index in range(electrons))
+
+
+def eissner_total_l_is_possible(config: str, total_l: int, order: str = default_eissner_order) -> bool:
+    """Return False if the shells of an Eissner configuration cannot give the total L of the level.
+
+    A False result for many levels shows a wrong order of the shell characters. The test is exact
+    for a maximum of two open shells that each have one electron or one hole. For other levels, it
+    is only an upper limit.
+    """
+    shells = _eissner_shells(config, order)
+    if shells is None:
+        return True
+    open_shells = [(l, occupation) for _n, l, occupation in shells if occupation < subshell_capacity(l)]
+    if total_l > sum(starmap(_max_total_l, open_shells)):
+        return False
+    if len(open_shells) <= 2 and all(occupation in {1, subshell_capacity(l) - 1} for l, occupation in open_shells):
+        # Two such shells give each L from |l_a - l_b| to l_a + l_b, and the test above made the upper limit.
+        l_a, l_b = [*(l for l, _occupation in open_shells), 0, 0][:2]
+        return abs(l_a - l_b) <= total_l
+    return True
+
+
+def is_eissner_config(config: str, order: str = default_eissner_order) -> bool:
+    """Return True if the string is an Eissner configuration.
+
+    The string is a sequence of Eissner triples, and the first triple can be short ("21522"). The
+    bare "5s2" is standard notation.
+    """
+    return _eissner_shells(config, order) is not None
+
+
+def looks_like_eissner_config(config: str) -> bool:
+    """Return True if the string has the form of an Eissner configuration, valid or defective."""
+    return eissner_like_config_regex.fullmatch(_with_full_first_triple(config)) is not None
+
+
+# One word of the standard form of the specification: n, the orbital letter, the occupation q.
+# n and q use the order 1 to 9, then a=10, b=11, ...
+standard_word_regex = re.compile(rf"(?<!\S)([1-9a-z])([{lchars_lower}])([1-9a-z])(?!\S)")
+
+
+def _expand_standard_word(word: re.Match[str]) -> str:
+    n_char, orbital, q_char = word.groups()
+    n, l, q = int(n_char, 36), lchars_lower.index(orbital), int(q_char, 36)
+    # A word with no digit is a label. A subshell has n > l and holds 2(2l+1) electrons at most,
+    # so "4fo" (a term with its parity) and "4ff" are labels too.
+    if not (n_char.isdigit() or q_char.isdigit()) or n <= l or q > subshell_capacity(l):
+        return word[0]
+    return f"{n}{orbital}{q}"
+
+
+def expand_standard_config(config: str) -> str:
+    """Write n and q as decimal numbers in each "nlq" word of the lower-case configuration.
+
+    The word "3da" becomes "3d10". A word in a different form stays as it is, and the whitespace
+    between the words stays as it is. The word "4fe" is the 4f14 of the specification. The
+    function cannot know if a file uses that word as the label of an even 4F term.
+    """
+    return standard_word_regex.sub(_expand_standard_word, config)
+
+
+def convert_eissner_to_standard(eissner_config: str, order: str = default_eissner_order) -> str:
     """Convert an electron configuration from Eissner notation to standard notation.
 
     The configuration "521522563524565" becomes "1s22s22p63s23p6".
@@ -339,17 +447,8 @@ def convert_eissner_to_standard(eissner_config: str) -> str:
     Eissner, W. (1998), Computer Physics Communications, 114, 295-341, page 323,
     doi:10.1016/S0010-4655(98)00082-4.
     """
-    if not is_eissner_config(eissner_config):
+    shells = _eissner_shells(eissner_config, order)
+    if shells is None:
         msg = f"Not an Eissner configuration: {eissner_config!r}"
         raise ValueError(msg)
-    triples = eissner_triple_regex.findall(eissner_config)
-
-    shell_parts: list[str] = []
-    for occupation_code, shell_char in triples:
-        shell_label = eissner_shell_label_by_char.get(shell_char.upper())
-        if shell_label is None:
-            msg = f"Unknown shell character {shell_char!r} in config: {eissner_config!r}"
-            raise ValueError(msg)
-        shell_parts.append(f"{shell_label}{int(occupation_code) % 50}")
-
-    return "".join(shell_parts)
+    return "".join(f"{n}{lchars_lower[l]}{occupation}" for n, l, occupation in shells)

@@ -1,7 +1,7 @@
 # artisatomic
 [![Build and test](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml/badge.svg)](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml)
 
->The Python package converts atomic data from several sources (for example CMFGEN, Kurucz, JPLT, QUB) into the ARTIS format.
+>The Python package converts atomic data from several sources (for example CMFGEN, Kurucz, JPLT, ADAS) into the ARTIS format.
 
 ## Installation and Development
 First clone the repository, for example:

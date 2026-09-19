@@ -135,7 +135,7 @@ class PhixsData(t.NamedTuple):
     function iondata.read_ion_data() reads an empty cross section array as "no data" and applies the
     hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
     the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
-    names after the run reads the upper ion. QUB gives the upper ion's level ids with their
+    names after the run reads the upper ion. The ADAS reader gives the upper ion's level ids with their
     fractions.
     """
 
@@ -550,6 +550,15 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     return True
 
 
+def fixed_width_column(offset: int, width: int | None = None) -> pl.Expr:
+    """Return an expression for the fixed columns of the "line" column, with no whitespace at the ends.
+
+    With no width, the columns go to the end of the line. A blank field, and a line too short to
+    reach the field, both give "". A cast with strict=False, or replace("", None), makes that a null.
+    """
+    return pl.col("line").str.slice(offset, width).str.strip_chars()
+
+
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
     """Read a text file into a lazy frame that holds one line in each row of a "line" column.
 
@@ -699,7 +708,7 @@ def parallel_map[ResultType](
     nitems = lengths[0] if lengths else 0
 
     # Even with the pool already up, a handful of items costs more in IPC than the work itself.
-    # This path does them here (readqubdata reduces four cross section tables at a time).
+    # This path does them here (readadasdata reduces four cross section tables at a time).
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 
