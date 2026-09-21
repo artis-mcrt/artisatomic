@@ -4577,7 +4577,14 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
         assert lines
         assert all(line.startswith("#") for line in lines)
         assert "an earlier run" not in lines
-    assert "6000 K (option -electrontemperature)" in (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    transitioncomment = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert "temperature closest to 6000 K" in transitioncomment
+    # each file comment explains each field of its file
+    for field in ("Z", "ion_stage", "ntransitions", "lower, upper", "A", "coll_str", "forbidden"):
+        assert f"\n# {field} " in transitioncomment, field
+    adatacomment = (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    for field in ("Z", "ion_stage", "nlevels", "ionisation_energy", "level_number", "energy", "g", "level_name"):
+        assert f"\n# {field} " in adatacomment, field
     # a folder with no phixsdata_v2.txt is fine too
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
     assert not phixspath.exists()

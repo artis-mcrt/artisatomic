@@ -24,8 +24,88 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
 
-generator_comment = "artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file."
-ion_comment = "A comment block before the data of each ion gives the handler and the source of the data."
+# The file comments. Each one must explain the format of its file to a reader who has only that
+# file. A blank line here gives a line with only a # in the file. {} takes an option of the run.
+file_comment_end = """
+COMMENTS
+A line that starts with # is a comment. ARTIS skips a comment only before a header line.
+A comment block before {} of each ion gives the handler, the source of the data and its
+source files.
+"""
+
+adata_file_comment = """\
+adata.txt: the energy levels of each ion, for the radiative transfer code ARTIS.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+
+FORMAT
+The file has one block for each ion. A blank line ends each block.
+  header line:  Z  ion_stage  nlevels  ionisation_energy
+  level line:   level_number  energy  g  ntransitions  level_name    (nlevels lines)
+
+Z                  atomic number
+ion_stage          1 for the neutral atom, 2 for the first ion, and so on
+nlevels            count of the level lines of the block
+ionisation_energy  energy from the ground level of this ion to the ground level of the next ion [eV]
+level_number       position of the level line in its block, from 1. transitiondata.txt and phixsdata_v2.txt
+                   name a level by this number.
+energy             energy above the ground level of the ion [eV]
+g                  statistical weight
+ntransitions       count of the lines of transitiondata.txt that name this level as lower or upper level
+level_name         free text to the end of the line. ARTIS does not read it.
+""" + file_comment_end.format("the header line")
+
+transitiondata_file_comment = """\
+transitiondata.txt: the bound-bound transitions of each ion, for the radiative transfer code ARTIS.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+
+FORMAT
+The file has one block for each ion, in the order of adata.txt. A blank line ends each block.
+  header line:      Z  ion_stage  ntransitions
+  transition line:  lower  upper  A  coll_str  forbidden    (ntransitions lines)
+
+Z             atomic number
+ion_stage     1 for the neutral atom, 2 for the first ion, and so on
+ntransitions  count of the transition lines of the block
+lower, upper  level_number of the lower level and of the upper level in adata.txt
+A             Einstein A coefficient of the spontaneous decay [s^-1]
+coll_str      effective collision strength (upsilon) at the temperature closest to {electrontemperature} K
+              (option -electrontemperature).
+              -1: no value for a permitted transition. ARTIS then uses the formula of van Regemorter.
+              -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod.
+forbidden     1 for a forbidden transition, 0 for a permitted transition
+""" + file_comment_end.format("the header line")
+
+phixsdata_file_comment = """\
+phixsdata_v2.txt: the photoionisation cross sections of each level, for the radiative transfer code ARTIS.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+
+FORMAT
+line 1:  npoints, the count of points of each table (option -nphixspoints)
+line 2:  step, the distance between two points as a fraction of the threshold frequency
+         (option -phixsnuincrement)
+Then the file has one table for each level that has a cross section.
+  header line:  Z  upper_ion_stage  upper_level  lower_ion_stage  lower_level  threshold_energy
+  target list:  only if upper_level is -1. One line with ntargets, then ntargets lines:
+                upper_level  fraction
+  table:        npoints lines with one cross section each
+
+Z                 atomic number
+lower_ion_stage   ion stage of the ion that absorbs the photon (1 for the neutral atom)
+lower_level       level_number of that level in adata.txt
+upper_ion_stage   lower_ion_stage + 1
+upper_level       level_number in adata.txt of the level of the upper ion that the photoionisation
+                  goes to. -1 means more than one such level, and the target list then comes next.
+fraction          fraction of the cross section that goes to this upper_level. The fractions of a
+                  target list sum to 1.
+threshold_energy  [eV]. ARTIS does not use it. It takes the threshold from the level energies.
+cross section     [Mb] at the frequency nu_threshold * (1 + i * step), for line i = 0 to npoints - 1
+
+OPTIONS OF THIS RUN
+artisatomic downsamples each table of its data source to the grid of this file. It keeps the
+recombination rate constant at T={optimaltemperature} K (option -optimaltemperature).
+An ion whose handler gives no cross section gets a hydrogenic estimate for its lowest
+{nlevels_hydrogenic} levels (option -nlevels_hydrogenic_for_unknown_phixs).
+""" + file_comment_end.format("the first table")
 
 
 def write_ascii_comments(fout, lines: Iterable[str]) -> None:
@@ -54,39 +134,12 @@ def clear_files(args: argparse.Namespace) -> None:
     """
     outdir = Path(args.output_folder)
     with (outdir / "adata.txt").open("w", encoding="utf-8") as fatommodels:
-        write_ascii_comments(
-            fatommodels,
-            [
-                generator_comment,
-                "Header line of an ion: atomic number, ion stage, count of levels, ionisation energy [eV].",
-                (
-                    "Level line: level number, energy above the ground level [eV], statistical weight, count of transitions,"
-                    " level name."
-                ),
-                ion_comment,
-            ],
-        )
+        write_ascii_comments(fatommodels, adata_file_comment.splitlines())
 
     with (outdir / "transitiondata.txt").open("w", encoding="utf-8") as ftransitiondata:
         write_ascii_comments(
             ftransitiondata,
-            [
-                generator_comment,
-                "Header line of an ion: atomic number, ion stage, count of transitions.",
-                (
-                    "Transition line: lower level number, upper level number, A [s^-1], effective collision strength,"
-                    " forbidden flag (1 for a forbidden transition)."
-                ),
-                (
-                    "A collision strength of -1 means no value for a permitted transition. A value of -2 means no value for"
-                    " a forbidden transition."
-                ),
-                (
-                    "The effective collision strengths are the values at the tabulated temperature closest to"
-                    f" {args.electrontemperature} K (option -electrontemperature)."
-                ),
-                ion_comment,
-            ],
+            transitiondata_file_comment.format(electrontemperature=args.electrontemperature).splitlines(),
         )
 
     if args.nophixs:
@@ -98,32 +151,10 @@ def clear_files(args: argparse.Namespace) -> None:
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
         write_ascii_comments(
             fphixs,
-            [
-                generator_comment,
-                (
-                    "Line 1: count of points of each cross section table (option -nphixspoints). Line 2: step between two"
-                    " points, as a fraction of the threshold frequency (option -phixsnuincrement)."
-                ),
-                (
-                    "Header line of a table: atomic number, upper ion stage, upper level number, lower ion stage, lower level"
-                    " number, threshold energy [eV]. An upper level number of -1 means that a list of the target levels"
-                    " and their fractions comes next."
-                ),
-                "ARTIS does not use the threshold energy of a table. It takes the threshold from the level energies.",
-                (
-                    "Table: cross section [Mb] at the frequencies nu_edge * (1 + i * step), for i = 0 to the count of points"
-                    " less 1."
-                ),
-                (
-                    "artisatomic downsamples each table to this grid. It keeps the recombination rate constant at"
-                    f" T={args.optimaltemperature} K (option -optimaltemperature)."
-                ),
-                (
-                    "An ion whose handler gives no cross section gets the hydrogenic estimate for its lowest"
-                    f" {args.nlevels_hydrogenic_for_unknown_phixs} levels (option -nlevels_hydrogenic_for_unknown_phixs)."
-                ),
-                "A comment block before the first table of each ion gives the handler and the source of the data.",
-            ],
+            phixsdata_file_comment.format(
+                optimaltemperature=args.optimaltemperature,
+                nlevels_hydrogenic=args.nlevels_hydrogenic_for_unknown_phixs,
+            ).splitlines(),
         )
 
 
