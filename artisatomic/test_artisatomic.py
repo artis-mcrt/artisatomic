@@ -5017,3 +5017,30 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
 
     # no folder is fine too
     remove_old_log_folder(tmp_path / "artis_files")
+
+
+def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
+    """Each output file names its creation time, and SOURCE_DATE_EPOCH makes that time the same for each run."""
+    import datetime
+    import re
+
+    from artisatomic import base
+    from artisatomic.output import clear_files
+
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    clear_files(phixs_args(output_folder=str(tmp_path)))
+    for filename in ("adata.txt", "transitiondata.txt", "phixsdata_v2.txt"):
+        assert "wrote this file at 2026-09-21T14:13:20Z (UTC)." in (tmp_path / filename).read_text(encoding="utf-8")
+
+    # the test mode gives a time of zero, so the checksum recipe needs no other variable
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
+    monkeypatch.setattr(base, "TESTMODE", True)
+    assert base.creation_time_utc() == "1970-01-01T00:00:00Z"
+
+    # a normal run gives the time of the run
+    monkeypatch.setattr(base, "TESTMODE", False)
+    now = datetime.datetime.now(datetime.UTC)
+    creationtime = base.creation_time_utc()
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", creationtime)
+    parsed = datetime.datetime.strptime(creationtime, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.UTC)
+    assert abs((parsed - now).total_seconds()) < 5

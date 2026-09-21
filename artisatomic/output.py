@@ -13,6 +13,7 @@ import polars as pl
 from artisatomic.base import atomic_weights
 from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.base import comment_lines
+from artisatomic.base import creation_time_utc
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
@@ -25,17 +26,18 @@ from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
 
 # The file comments. Each one must explain the format of its file to a reader who has only that
-# file. A blank line here gives a line with only a # in the file. {} takes an option of the run.
+# file. A blank line here gives a line with only a # in the file. A name in braces takes a value
+# of the run.
 file_comment_end = """
 COMMENTS
 A line that starts with # is a comment. ARTIS skips a comment only before a header line.
-A comment block before {} of each ion gives the handler, the source of the data and its
+A comment block before {blockposition} of each ion gives the handler, the source of the data and its
 source files.
 """
 
 adata_file_comment = """\
 adata.txt: the energy levels of each ion, for the radiative transfer code ARTIS.
-artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
 FORMAT
 The file has one block for each ion. A blank line ends each block.
@@ -52,11 +54,11 @@ energy             energy above the ground level of the ion [eV]
 g                  statistical weight
 ntransitions       count of the lines of transitiondata.txt that name this level as lower or upper level
 level_name         free text to the end of the line. ARTIS does not read it.
-""" + file_comment_end.format("the header line")
+""" + file_comment_end.replace("{blockposition}", "the header line")
 
 transitiondata_file_comment = """\
 transitiondata.txt: the bound-bound transitions of each ion, for the radiative transfer code ARTIS.
-artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
 FORMAT
 The file has one block for each ion, in the order of adata.txt. A blank line ends each block.
@@ -73,11 +75,11 @@ coll_str      effective collision strength (upsilon) at the temperature closest 
               -1: no value for a permitted transition. ARTIS then uses the formula of van Regemorter.
               -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod.
 forbidden     1 for a forbidden transition, 0 for a permitted transition
-""" + file_comment_end.format("the header line")
+""" + file_comment_end.replace("{blockposition}", "the header line")
 
 phixsdata_file_comment = """\
 phixsdata_v2.txt: the photoionisation cross sections of each level, for the radiative transfer code ARTIS.
-artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file.
+artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
 FORMAT
 line 1:  npoints, the count of points of each table (option -nphixspoints)
@@ -105,7 +107,7 @@ artisatomic downsamples each table of its data source to the grid of this file. 
 recombination rate constant at T={optimaltemperature} K (option -optimaltemperature).
 An ion whose handler gives no cross section gets a hydrogenic estimate for its lowest
 {nlevels_hydrogenic} levels (option -nlevels_hydrogenic_for_unknown_phixs).
-""" + file_comment_end.format("the first table")
+""" + file_comment_end.replace("{blockposition}", "the first table")
 
 
 def write_ascii_comments(fout, lines: Iterable[str]) -> None:
@@ -124,8 +126,9 @@ def write_ascii_comments(fout, lines: Iterable[str]) -> None:
 def clear_files(args: argparse.Namespace) -> None:
     """Start the output files again, each with its file comment. The writer appends the ions after it.
 
-    The file comment gives the format of the file and the options of the run that apply to all
-    ions of the file. ARTIS skips a comment line before the first header line of an ion in
+    The file comment gives the format of the file, the creation time in UTC, and the options of
+    the run that apply to all ions of the file. The three files of a run get the same time (see
+    base.creation_time_utc() for the time of a checksum run). ARTIS skips a comment line before the first header line of an ion in
     adata.txt and transitiondata.txt. It reads the first two numbers of phixsdata_v2.txt with no
     comment skip, so the file comment of that file comes after them.
 
@@ -133,13 +136,17 @@ def clear_files(args: argparse.Namespace) -> None:
     the same folder, because its level ids belong to that run's adata.txt.
     """
     outdir = Path(args.output_folder)
+    # one time for the three files of the run
+    creationtime = creation_time_utc()
     with (outdir / "adata.txt").open("w", encoding="utf-8") as fatommodels:
-        write_ascii_comments(fatommodels, adata_file_comment.splitlines())
+        write_ascii_comments(fatommodels, adata_file_comment.format(creationtime=creationtime).splitlines())
 
     with (outdir / "transitiondata.txt").open("w", encoding="utf-8") as ftransitiondata:
         write_ascii_comments(
             ftransitiondata,
-            transitiondata_file_comment.format(electrontemperature=args.electrontemperature).splitlines(),
+            transitiondata_file_comment.format(
+                creationtime=creationtime, electrontemperature=args.electrontemperature
+            ).splitlines(),
         )
 
     if args.nophixs:
@@ -152,6 +159,7 @@ def clear_files(args: argparse.Namespace) -> None:
         write_ascii_comments(
             fphixs,
             phixsdata_file_comment.format(
+                creationtime=creationtime,
                 optimaltemperature=args.optimaltemperature,
                 nlevels_hydrogenic=args.nlevels_hydrogenic_for_unknown_phixs,
             ).splitlines(),

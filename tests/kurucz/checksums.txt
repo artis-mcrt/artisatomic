@@ -1,4 +1,4 @@
-8fbd15cf94adcbbb5748d8507be082ba  adata.txt
+aa527531fa9a40669e83523aa8e75db7  adata.txt
 628baa697db7a5044ce19088e9000efc  compositiondata.txt
-7e46eac36c43c38954b908bd171bcb73  phixsdata_v2.txt
-f0029d312eddaab67e154464159cd954  transitiondata.txt
+ae4dd46f1a3c5c39774fab4fbcd0e6a5  phixsdata_v2.txt
+afe9f8594a57fb27d21242d9e0fe1dc7  transitiondata.txt

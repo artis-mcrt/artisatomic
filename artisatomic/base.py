@@ -1,6 +1,7 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
+import datetime
 import io
 import itertools
 import math
@@ -264,6 +265,25 @@ def resolve_transition_levelids(
     # The reader re-sorted the levels by energy, so a transition can name them in either order.
     # transitiondata.txt lists the lower id first.
     return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
+
+
+def creation_time_utc() -> str:
+    """Give the time of the run for the file comments, in UTC, for example 2026-09-21T12:34:56Z.
+
+    The output checksums need files that are the same for each run. SOURCE_DATE_EPOCH, the
+    variable of the reproducible builds project (https://reproducible-builds.org/specs/source-date-epoch/),
+    gives the time in seconds since 1970 then. ARTISATOMIC_TESTMODE=1 gives a time of zero when
+    that variable has no value, because the checksum recipe sets the test mode already.
+    """
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch is None and TESTMODE:
+        epoch = "0"
+    time = (
+        datetime.datetime.now(datetime.UTC)
+        if epoch is None
+        else datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
+    )
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def log_path(output_folder: str | Path) -> Path:
