@@ -302,12 +302,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_folder = get_basepath() / ionstr
     levels_file = ion_folder / f"{ionstr}.lev.asc"
     lines_file = ion_folder / f"{ionstr}.tr.asc"
+    # The comment lines give the folder of the ion relative to this folder. A user sets the path
+    # of the data with ARTISATOMIC_FAC_PATH, so no part of that path must go into an output file.
+    logged_root = get_basepath()
 
     if atomic_number == 92 and ion_stage in {2, 3}:
         # U II and U III come from a separate convergence study. Its folder Paper_Nd_U sits beside
         # the OptimizedFACdata directory, two levels above the OptimizedFAC_lanthanides folder.
         ionstr = f"{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
         ion_folder = get_basepath().parent.parent / "Paper_Nd_U" / "FAC" / ionstr
+        logged_root = get_basepath().parent.parent
         levels_file = ion_folder / f"{ionstr}.lev.asc"
         lines_file = ion_folder / f"{ionstr}.tr.asc"
 
@@ -315,7 +319,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         flog,
         ("adata", "transitiondata"),
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {path_for_log(ion_folder, relative_to=get_basepath().parent.parent)}",
+        f" {path_for_log(ion_folder, relative_to=logged_root)}",
     )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]

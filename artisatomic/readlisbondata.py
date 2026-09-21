@@ -207,7 +207,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     levelsfile = iondir / f"{elsym}{ion_stage_roman}_Levels.csv"
-    log_comment(flog, ("adata",), f"Reading {path_for_log(levelsfile, relative_to=lisbonpath.parent)}")
+    log_comment(flog, ("adata",), f"Reading {path_for_log(levelsfile, relative_to=lisbonpath)}")
     dfalllevels = read_levels_csv(levelsfile)
     # not an assert: an empty frame would write an ion with no levels
     if dfalllevels.is_empty():
@@ -232,7 +232,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     linesfile = iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"
-    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(linesfile, relative_to=lisbonpath.parent)}")
+    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(linesfile, relative_to=lisbonpath)}")
     dfalllines = read_lines_csv(linesfile)
 
     # a line that names a dropped level goes with it, because that level has no level id

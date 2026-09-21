@@ -146,6 +146,7 @@ def main() -> None:
 
     # this empties the log of the last run. The passes of each ion append to the file.
     log_path(args.output_folder).write_text("", encoding="utf-8")
+    remove_old_log_folder(Path(args.output_folder))
 
     # A record of what this run used, beside the output files. It is NOT the file
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
@@ -162,6 +163,24 @@ def main() -> None:
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
+
+
+def remove_old_log_folder(output_folder: Path) -> None:
+    """Remove the log files that an earlier release wrote to the folder atomic_data_logs.
+
+    That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
+    A user could take such a file for a record of the new run. The function removes those files
+    only, and then the folder if it is empty.
+    """
+    old_log_folder = output_folder / "atomic_data_logs"
+    if not old_log_folder.is_dir():
+        return
+    for oldfile in sorted([*old_log_folder.glob("*.txt"), old_log_folder / "artisatomicionhandlers.json"]):
+        if oldfile.is_file():
+            print("deleting", oldfile)
+            oldfile.unlink()
+    if not any(old_log_folder.iterdir()):
+        old_log_folder.rmdir()
 
 
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

@@ -4995,3 +4995,25 @@ def test_main_writes_no_handlers_record_into_the_working_directory(tmp_path, mon
 
     assert (tmp_path / "artisatomiclog.txt").exists()
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
+
+
+def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
+    """The per-ion logs of an earlier release must not stay beside the log file of a new run."""
+    from artisatomic.cli import remove_old_log_folder
+
+    oldfolder = tmp_path / "atomic_data_logs"
+    oldfolder.mkdir()
+    (oldfolder / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    (oldfolder / "artisatomicionhandlers.json").write_text("[]", encoding="utf-8")
+    remove_old_log_folder(tmp_path)
+    assert not oldfolder.exists()
+
+    # a file that the earlier release did not write stays, and so does its folder
+    oldfolder.mkdir()
+    (oldfolder / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    (oldfolder / "notes.md").write_text("my notes\n", encoding="utf-8")
+    remove_old_log_folder(tmp_path)
+    assert [path.name for path in oldfolder.iterdir()] == ["notes.md"]
+
+    # no folder is fine too
+    remove_old_log_folder(tmp_path / "artis_files")
