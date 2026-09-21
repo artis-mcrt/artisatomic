@@ -17,11 +17,12 @@ from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
-jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
+jpltfolder = PYDIR / ".." / "atomic-data-tanaka-jplt"
+jpltpath = (jpltfolder / "data_v2.1").resolve()
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -64,11 +65,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     Self-transitions (equal upper and lower level) appear in some files. The reader drops them
     with a warning.
     """
+    # the plain name, also for a compressed file, so the output files do not depend on the compression
     filename = f"{atomic_number}_{ion_stage}.txt"
     log_comment(
         flog,
         ("adata", "transitiondata"),
-        f"Reading {path_for_log(jpltpath / filename, relative_to=jpltpath.parent.parent)}",
+        f"Reading {path_in_data_folder(jpltpath / filename, jpltfolder)}",
     )
 
     def require(condition: bool, message: str) -> None:

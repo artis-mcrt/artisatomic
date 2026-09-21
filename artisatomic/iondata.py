@@ -25,15 +25,14 @@ from artisatomic import readkuruczdata
 from artisatomic import readlisbondata
 from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
-from artisatomic.base import elsymbols
 from artisatomic.base import empty_comments
+from artisatomic.base import ion_label
 from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_path
 from artisatomic.base import PhixsData
-from artisatomic.base import roman_numerals
 from artisatomic.phixs import match_hydrogenic_phixs
 
 
@@ -62,8 +61,8 @@ class IonData:
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
     photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
     photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
-    # The lines for the comment block of each output file (see base.IonLog). The read pass fills
-    # them, and the resolve pass and the write pass add to them.
+    # The lines for the comment block of each output file (see base.IonLog). Each pass records
+    # into the same lists: the read pass first, then the resolve pass, then the write pass.
     comments: dict[str, list[str]] = field(default_factory=empty_comments)
 
 
@@ -119,17 +118,17 @@ handlers: dict[str, Handler] = {
     ),
     "lisbon": Handler(readlisbondata.description, readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
-        readfloers25data.description + " (calibrated, with the forbidden lines)",
+        readfloers25data.description_withforbidden,
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25calib": Handler(
-        readfloers25data.description + " (calibrated)",
+        readfloers25data.description.format(variant="calibrated"),
         partial(readfloers25data.read_levels_and_transitions, calibrated=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25uncalib": Handler(
-        readfloers25data.description + " (uncalibrated)",
+        readfloers25data.description.format(variant="uncalibrated"),
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
     ),
@@ -208,10 +207,7 @@ def read_ion_data(
 
     with log_path(args.output_folder).open("a", encoding="utf-8") as logstream:
         flog = IonLog(logstream)
-        log_and_print(
-            flog,
-            f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
-        )
+        log_and_print(flog, f"\n===========> {ion_label(atomic_number, ion_stage)} input:")
         log_and_print(flog, f"Source handler: {handler}")
         log_comment(flog, ("adata", "transitiondata"), f"source: {handlerspec.description}")
         result = (
@@ -307,7 +303,7 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # The IonLog adds to the comment lists of the read pass.
+            # the IonLog records into the comment lists of the read pass
             logcontext = (
                 Path(logpath).open("a", encoding="utf-8")  # ruff: ignore[open-file-with-context-handler]
                 if logpath is not None and atomic_number is not None
@@ -315,9 +311,10 @@ def resolve_photoion_targetfractions(
             )
             with logcontext as logstream:
                 flog = None if logstream is None else IonLog(logstream, iondata.comments)
-                if flog is not None and atomic_number is not None:
-                    ionstr = f"{elsymbols[atomic_number]} {roman_numerals[iondata.ion_stage]}"
-                    log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} photoionisation targets:")
+                # an ion with no target names has nothing to resolve, so its section would be empty
+                if flog is not None and atomic_number is not None and iondata.photoion_targetconfigs is not None:
+                    ionlabel = ion_label(atomic_number, iondata.ion_stage)
+                    log_and_print(flog, f"\n===========> {ionlabel} photoionisation targets:")
                 iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
                     iondata.dfenergylevels,
                     upperiondata.dfenergylevels,

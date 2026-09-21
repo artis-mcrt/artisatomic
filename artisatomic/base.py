@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import typing as t
+import unicodedata
 from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
@@ -268,22 +269,37 @@ def resolve_transition_levelids(
 
 
 def creation_time_utc() -> str:
-    """Give the time of the run for the file comments, in UTC, for example 2026-09-21T12:34:56Z.
+    """Give the creation time for the file comments, in UTC, for example 2026-09-21T12:34:56Z.
 
-    The output checksums need files that are the same for each run. SOURCE_DATE_EPOCH, the
-    variable of the reproducible builds project (https://reproducible-builds.org/specs/source-date-epoch/),
-    gives the time in seconds since 1970 then. ARTISATOMIC_TESTMODE=1 gives a time of zero when
-    that variable has no value, because the checksum recipe sets the test mode already.
+    The output checksums need files that are the same for each run. ARTISATOMIC_TESTMODE=1
+    therefore gives a time of zero, because the checksum recipe sets the test mode. The test mode
+    comes first: a build environment can set SOURCE_DATE_EPOCH for its own use.
+
+    Without the test mode, SOURCE_DATE_EPOCH gives the time in seconds since 1970. It is the
+    variable of the reproducible builds project
+    (https://reproducible-builds.org/specs/source-date-epoch/).
     """
-    epoch = os.environ.get("SOURCE_DATE_EPOCH")
-    if epoch is None and TESTMODE:
-        epoch = "0"
-    time = (
-        datetime.datetime.now(datetime.UTC)
-        if epoch is None
-        else datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
-    )
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    epoch = "0" if TESTMODE else os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch is None:
+        creationtime = datetime.datetime.now(datetime.UTC)
+    else:
+        try:
+            if int(epoch) < 0:
+                raise ValueError(epoch)  # ruff: ignore[raise-within-try]
+            creationtime = datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
+        except (ValueError, OverflowError, OSError) as exc:
+            msg = f"SOURCE_DATE_EPOCH must be a count of seconds since 1970 as a whole number, not {epoch!r}"
+            raise ValueError(msg) from exc
+    return creationtime.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ion_label(atomic_number: int, ion_stage: int) -> str:
+    """Give the label of an ion for the log file and the comment blocks, for example Z=26 Fe II.
+
+    The comment block of an ion and the lines of that ion in the log file use the same label, so
+    a user can find one from the other.
+    """
+    return f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
 
 def log_path(output_folder: str | Path) -> Path:
@@ -308,8 +324,7 @@ COMMENT_TABLES = ("adata", "transitiondata", "phixsdata")
 
 def empty_comments() -> dict[str, list[str]]:
     """Return an empty list of comment lines for each name in COMMENT_TABLES."""
-    comments: dict[str, list[str]] = {table: [] for table in COMMENT_TABLES}
-    return comments
+    return {table: [] for table in COMMENT_TABLES}
 
 
 class IonLog:
@@ -323,8 +338,6 @@ class IonLog:
         """Wrap the stream of the log file. Give comments to add to the lists of an earlier pass."""
         self.stream = stream
         self.comments = empty_comments() if comments is None else comments
-        for table in COMMENT_TABLES:
-            self.comments.setdefault(table, [])
 
     def add_comment(self, tables: Iterable[str], text: str) -> None:
         """Record a comment line for each named output file, with no entry in the log file."""
@@ -357,25 +370,101 @@ class IonLog:
 def log_comment(flog, tables: Iterable[str], strout: str) -> None:
     """Log a line, and record it as a comment line for each named output file.
 
-    A log that is not an IonLog records nothing, so a caller can give a plain stream. Do not
-    record a line that only repeats a number of the header line of the ion, for example the count
-    of levels, the count of transitions, or the ionisation energy.
+    A log that is not an IonLog records nothing, so a caller can give a plain stream.
+
+    Do not record a line that only repeats a number of the header line of the ion. Examples are
+    the count of levels, the count of transitions, and the ionisation energy.
     """
     log_and_print(flog, strout)
     if isinstance(flog, IonLog):
         flog.add_comment(tables, strout)
 
 
+# NFKD keeps the letter of an accented character. It has no ASCII form for these characters, so
+# each one gets its own replacement. A reference can hold a dash in a range of elements or pages.
+ascii_replacements = str.maketrans(
+    {
+        "\u2010": "-",  # hyphen
+        "\u2011": "-",  # hyphen with no break
+        "\u2012": "-",  # figure dash
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2212": "-",  # minus sign
+        "\u00d7": "x",  # multiplication sign
+        "\u00b0": " deg",  # degree sign
+        "\u00b5": "u",  # micro sign
+        "\u03bc": "u",  # Greek letter mu
+        "\u2264": "<=",
+        "\u2265": ">=",
+        "\u2192": "->",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u00df": "ss",
+        "\u00f8": "o",
+        "\u00d8": "O",
+        "\u00e6": "ae",
+        "\u00c6": "AE",
+        "\u0142": "l",
+        "\u0141": "L",
+    }
+)
+
+
+def to_ascii(text: str) -> str:
+    """Give the text in ASCII characters only, for a comment line of an output file.
+
+    A program that opens an output file with the encoding of an ASCII locale stops on the first
+    other character, and an author name such as Flörs has one. NFKD (the Unicode compatibility
+    decomposition) splits an accent from its letter, so the letter stays. A character with no
+    ASCII form becomes a question mark. It must not go away, because the text on its two sides
+    would then join, for example the two elements of a range.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.translate(ascii_replacements))
+    return "".join(
+        character if character.isascii() else "?" for character in decomposed if not unicodedata.combining(character)
+    )
+
+
 def comment_lines(lines: Iterable[str]) -> Iterator[str]:
-    """Turn text lines into the comment lines of an ARTIS input file, each with its line end.
+    """Turn text lines into the comment lines of an ARTIS input file, in ASCII, each with its line end.
 
     ARTIS takes a line as a comment only when its first character that is not a space is a #.
     A text line can hold a line break, so each part gets its own #. A part that starts with a #
     is a comment already, for example a header line that a reader copied from its source file.
+
+    The three writers of output.py and the writer of chargetransfer.txt use this function, and a
+    checksum test covers each of those files. A change here can therefore change all of them.
     """
     for line in lines:
-        for part in line.splitlines() or [""]:
+        for part in to_ascii(line).splitlines() or [""]:
             yield (part if part.startswith("#") else f"# {part}").rstrip() + "\n"
+
+
+def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
+    """Render the path of a file in a data folder of the repository, for a comment line.
+
+    datafolder is the path of the data folder before resolve(), for example
+    PYDIR / ".." / "atomic-data-adas". The result starts with the name of that folder in the
+    repository. A data folder can be a symbolic link to a different disk. The name of the link
+    target depends on the machine, so it must not go into an output file.
+    """
+    resolvedfolder = datafolder.resolve()
+    # the lexical form first and then the form with each link followed, as path_for_log() does
+    for normalise in (os.path.abspath, os.path.realpath):
+        try:
+            return f"{datafolder.name}/{Path(normalise(filepath)).relative_to(normalise(resolvedfolder))}"
+        except ValueError:
+            continue
+    # a file outside the data folder keeps its own path
+    return path_for_log(filepath)
+
+
+nist_ionization_energy_comment = (
+    "The ionisation energy comes from the NIST Atomic Spectra Database, https://physics.nist.gov/asd,"
+    " doi:10.18434/T4W30F, and not from the data set of the levels."
+)
 
 
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:

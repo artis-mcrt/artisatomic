@@ -1,7 +1,6 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
-import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -17,6 +16,7 @@ from artisatomic.base import creation_time_utc
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_label
 from artisatomic.base import IonLog
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
@@ -24,23 +24,27 @@ from artisatomic.base import log_path
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
+from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
 
 # The file comments. Each one must explain the format of its file to a reader who has only that
-# file. A blank line here gives a line with only a # in the file. A name in braces takes a value
-# of the run.
+# file. A blank line here gives a line with only a # in the file. clear_files() gives each name in
+# braces its value.
 file_comment_end = """
 COMMENTS
-A line that starts with # is a comment. ARTIS skips a comment only before a header line.
-A comment block before {blockposition} of each ion gives the handler, the source of the data and its
+A line that starts with # is a comment. ARTIS skips a comment only directly before a header line.
+{commentrule}A comment block before {blockposition} of each ion gives the handler, the source of the data and its
 source files.
 """
 
-adata_file_comment = """\
+adata_file_comment = (
+    """\
 adata.txt: the energy levels of each ion, for the radiative transfer code ARTIS.
 artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
 FORMAT
-The file has one block for each ion. A blank line ends each block.
+The file has one block for each ion. A blank line ends each block. ARTIS reads the file from the top
+to the bottom one time. The blocks must therefore be in the order of compositiondata.txt: the elements
+in the order of that file, and the ion stages of an element from the lowest to the highest.
   header line:  Z  ion_stage  nlevels  ionisation_energy
   level line:   level_number  energy  g  ntransitions  level_name    (nlevels lines)
 
@@ -48,15 +52,21 @@ Z                  atomic number
 ion_stage          1 for the neutral atom, 2 for the first ion, and so on
 nlevels            count of the level lines of the block
 ionisation_energy  energy from the ground level of this ion to the ground level of the next ion [eV]
-level_number       position of the level line in its block, from 1. transitiondata.txt and phixsdata_v2.txt
-                   name a level by this number.
+level_number       position of the level line in its block. The first level of each ion has the number 1
+                   (not 0). transitiondata.txt and phixsdata_v2.txt name a level by this number.
 energy             energy above the ground level of the ion [eV]
 g                  statistical weight
 ntransitions       count of the lines of transitiondata.txt that name this level as lower or upper level
 level_name         free text to the end of the line. ARTIS does not read it.
-""" + file_comment_end.replace("{blockposition}", "the header line")
 
-transitiondata_file_comment = """\
+NUMBERS START AT 1
+ion_stage and level_number start at 1, and not at 0. The level numbers start again at 1 for each ion.
+"""
+    + file_comment_end
+)
+
+transitiondata_file_comment = (
+    """\
 transitiondata.txt: the bound-bound transitions of each ion, for the radiative transfer code ARTIS.
 artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
@@ -68,16 +78,23 @@ The file has one block for each ion, in the order of adata.txt. A blank line end
 Z             atomic number
 ion_stage     1 for the neutral atom, 2 for the first ion, and so on
 ntransitions  count of the transition lines of the block
-lower, upper  level_number of the lower level and of the upper level in adata.txt
+lower, upper  level_number of the lower level and of the upper level in adata.txt. The first level of
+              an ion has the number 1 (not 0).
 A             Einstein A coefficient of the spontaneous decay [s^-1]
 coll_str      effective collision strength (upsilon) at the temperature closest to {electrontemperature} K
               (option -electrontemperature).
               -1: no value for a permitted transition. ARTIS then uses the formula of van Regemorter.
               -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod.
 forbidden     1 for a forbidden transition, 0 for a permitted transition
-""" + file_comment_end.replace("{blockposition}", "the header line")
 
-phixsdata_file_comment = """\
+NUMBERS START AT 1
+ion_stage, lower and upper start at 1, and not at 0. The numbers -1 and -2 in coll_str are not level numbers.
+"""
+    + file_comment_end
+)
+
+phixsdata_file_comment = (
+    """\
 phixsdata_v2.txt: the photoionisation cross sections of each level, for the radiative transfer code ARTIS.
 artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {creationtime} (UTC).
 
@@ -93,44 +110,42 @@ Then the file has one table for each level that has a cross section.
 
 Z                 atomic number
 lower_ion_stage   ion stage of the ion that absorbs the photon (1 for the neutral atom)
-lower_level       level_number of that level in adata.txt
+lower_level       level_number of that level in adata.txt. The first level of an ion has the number 1 (not 0).
 upper_ion_stage   lower_ion_stage + 1
 upper_level       level_number in adata.txt of the level of the upper ion that the photoionisation
                   goes to. -1 means more than one such level, and the target list then comes next.
 fraction          fraction of the cross section that goes to this upper_level. The fractions of a
-                  target list sum to 1.
+                  target list sum to 1 (see the target cut in OPTIONS OF THIS RUN).
 threshold_energy  [eV]. ARTIS does not use it. It takes the threshold from the level energies.
-cross section     [Mb] at the frequency nu_threshold * (1 + i * step), for line i = 0 to npoints - 1
+cross section     [Mb] for the frequency nu_threshold * (1 + i * step). The first line of a table is
+                  i = 0, and the last line is i = npoints - 1. Each value is an average over the
+                  frequency bin around its frequency. The bin of i = 0 starts at the threshold.
+
+NUMBERS START AT 1
+lower_ion_stage, upper_ion_stage, lower_level and upper_level start at 1, and not at 0. An upper_level
+of -1 is not a level number. Only the point number i of a table starts at 0.
 
 OPTIONS OF THIS RUN
 artisatomic downsamples each table of its data source to the grid of this file. It keeps the
 recombination rate constant at T={optimaltemperature} K (option -optimaltemperature).
-An ion whose handler gives no cross section gets a hydrogenic estimate for its lowest
-{nlevels_hydrogenic} levels (option -nlevels_hydrogenic_for_unknown_phixs).
-""" + file_comment_end.replace("{blockposition}", "the first table")
-
-
-def write_ascii_comments(fout, lines: Iterable[str]) -> None:
-    """Write text lines as comment lines of an output file, in ASCII characters only.
-
-    A program that opens the file with the encoding of an ASCII locale stops on the first other
-    character, and an author name such as Flörs has one. NFKD splits the accent from its letter,
-    so the letter stays.
-    """
-    fout.writelines(
-        unicodedata.normalize("NFKD", commentline).encode("ascii", "ignore").decode("ascii")
-        for commentline in comment_lines(lines)
-    )
+{hydrogenicrule}
+A target level with less than {targetcut:.0%} of the cross section of a level is not in the target list of that
+level. The fractions of the other target levels then sum to 1.
+"""
+    + file_comment_end
+)
 
 
 def clear_files(args: argparse.Namespace) -> None:
     """Start the output files again, each with its file comment. The writer appends the ions after it.
 
-    The file comment gives the format of the file, the creation time in UTC, and the options of
-    the run that apply to all ions of the file. The three files of a run get the same time (see
-    base.creation_time_utc() for the time of a checksum run). ARTIS skips a comment line before the first header line of an ion in
-    adata.txt and transitiondata.txt. It reads the first two numbers of phixsdata_v2.txt with no
-    comment skip, so the file comment of that file comes after them.
+    The file comment gives the format of the file and the creation time in UTC. It also gives the
+    options of the run that apply to all ions of the file. The three files of a run get the same
+    time (see base.creation_time_utc() for the time of a checksum run).
+
+    ARTIS skips a comment line before the first header line of an ion in adata.txt and
+    transitiondata.txt. It reads the first two numbers of phixsdata_v2.txt with no comment skip,
+    so the file comment of that file comes after them.
 
     The option --nophixs writes no phixsdata_v2.txt. The run removes the file of an earlier run in
     the same folder, because its level ids belong to that run's adata.txt.
@@ -139,14 +154,24 @@ def clear_files(args: argparse.Namespace) -> None:
     # one time for the three files of the run
     creationtime = creation_time_utc()
     with (outdir / "adata.txt").open("w", encoding="utf-8") as fatommodels:
-        write_ascii_comments(fatommodels, adata_file_comment.format(creationtime=creationtime).splitlines())
+        fatommodels.writelines(
+            comment_lines(
+                adata_file_comment.format(
+                    creationtime=creationtime, commentrule="", blockposition="the header line"
+                ).splitlines()
+            )
+        )
 
     with (outdir / "transitiondata.txt").open("w", encoding="utf-8") as ftransitiondata:
-        write_ascii_comments(
-            ftransitiondata,
-            transitiondata_file_comment.format(
-                creationtime=creationtime, electrontemperature=args.electrontemperature
-            ).splitlines(),
+        ftransitiondata.writelines(
+            comment_lines(
+                transitiondata_file_comment.format(
+                    creationtime=creationtime,
+                    electrontemperature=args.electrontemperature,
+                    commentrule="",
+                    blockposition="the header line",
+                ).splitlines()
+            )
         )
 
     if args.nophixs:
@@ -156,13 +181,31 @@ def clear_files(args: argparse.Namespace) -> None:
     with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
-        write_ascii_comments(
-            fphixs,
-            phixsdata_file_comment.format(
-                creationtime=creationtime,
-                optimaltemperature=args.optimaltemperature,
-                nlevels_hydrogenic=args.nlevels_hydrogenic_for_unknown_phixs,
-            ).splitlines(),
+        if args.nlevels_hydrogenic_for_unknown_phixs > 0:
+            hydrogenicrule = (
+                "An ion whose handler gives no cross section can get a hydrogenic estimate for its lowest\n"
+                f"{args.nlevels_hydrogenic_for_unknown_phixs} levels (option -nlevels_hydrogenic_for_unknown_phixs)."
+                " The comment block of such an ion\n"
+                "names the estimate as its source. The top ion of an element gets no table. An ion of a handler\n"
+                "whose level names give no principal quantum number gets no table also."
+            )
+        else:
+            hydrogenicrule = (
+                "The hydrogenic estimate is off (option -nlevels_hydrogenic_for_unknown_phixs 0). An ion whose\n"
+                "handler gives no cross section has no table."
+            )
+        fphixs.writelines(
+            comment_lines(
+                phixsdata_file_comment.format(
+                    creationtime=creationtime,
+                    optimaltemperature=args.optimaltemperature,
+                    hydrogenicrule=hydrogenicrule,
+                    targetcut=PHIXS_TARGET_FRACTION_CUT,
+                    commentrule="No comment can come before line 1 or line 2, because ARTIS reads those two"
+                    " numbers with no comment skip.\n",
+                    blockposition="the first table",
+                ).splitlines()
+            )
         )
 
 
@@ -398,14 +441,15 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         ion_stage = iondata.ion_stage
         upsilondict = iondata.upsilondict
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
+        ionlabel = ion_label(atomic_number, ion_stage)
 
         # the "source:" line is one of the recorded comment lines, because a reader knows its source
-        commentheader = (f"Z={atomic_number} {ionstr}", f"handler: {iondata.handler}")
+        titlelines = (ionlabel, f"handler: {iondata.handler}")
 
         with log_path(outdir).open("a", encoding="utf-8") as logstream:
             # the comment lines of the read pass, so the lines of this pass go to the same lists
             flog = IonLog(logstream, iondata.comments)
-            log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
+            log_and_print(flog, f"\n===========> {ionlabel} output:")
 
             dfenergylevels_ion = iondata.dfenergylevels
             dftransitions_ion = iondata.dftransitions
@@ -468,7 +512,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     iondata.ionization_energy_ev,
                     transition_counts,
                     flog,
-                    commentheader,
+                    titlelines,
                 )
 
             # maintain_order: a reader can give one level pair several rows with different A
@@ -488,7 +532,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     ion_stage,
                     dftransitions_ion,
                     flog,
-                    commentheader,
+                    titlelines,
                 )
 
             if not iondata.is_top_ion and not args.nophixs:
@@ -512,22 +556,38 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         fill_missing_phixs_thresholds(iondata, iondata_of_ion_stage.get(ion_stage + 1), flog),
                         args,
                         flog,
-                        commentheader,
+                        titlelines,
                     )
 
 
-def write_comment_block(fout, table: str, commentheader: Iterable[str], flog) -> None:
-    """Write the comment block of one ion: the header lines, then the lines that the log holds for this file.
+def write_comment_block(fout, table: str, titlelines: Iterable[str], flog) -> None:
+    """Write the comment block of one ion: the title lines, the source line, then the other recorded lines.
 
-    ARTIS skips a comment line only directly before the header line of an ion in adata.txt and
-    transitiondata.txt. In phixsdata_v2.txt it skips one only directly before the header line of
-    a table (get_noncommentline() in input.h). Inside a block ARTIS counts the lines, so a
-    comment there would move every later line. A writer must therefore call this function
-    directly before it writes such a header line, and at no other position.
+    titlelines name the ion and the handler. The other lines are the lines that the log holds for
+    this file (see base.log_comment()). One of them must start with "source:", and no more than
+    one. A function that gives data records that line, so a block with no such line means that a
+    reader does not state its source.
 
-    The function writes nothing for an empty header and a log that is not an IonLog.
+    ARTIS skips a comment line only directly before the data header line of an ion in adata.txt
+    and transitiondata.txt. In phixsdata_v2.txt it skips one only directly before the data header
+    line of a table (get_noncommentline() in input.h). Inside the data of an ion ARTIS counts the
+    lines, so a comment there would move every later line. A writer must therefore call this
+    function directly before it writes such a data header line, and at no other position.
+
+    The function writes only the title lines for a log that is not an IonLog.
     """
-    write_ascii_comments(fout, [*commentheader, *(flog.comments[table] if isinstance(flog, IonLog) else ())])
+    if not isinstance(flog, IonLog):
+        fout.writelines(comment_lines(titlelines))
+        return
+
+    recorded = flog.comments[table]
+    sourcelines = [line for line in recorded if line.startswith("source:")]
+    # not an assert: this guards written output and must survive python -O
+    if len(sourcelines) != 1:
+        msg = f"The {table} comment block of {' '.join(titlelines)} needs one source line but has {len(sourcelines)}"
+        raise ValueError(msg)
+    otherlines = [line for line in recorded if not line.startswith("source:")]
+    fout.writelines(comment_lines([*titlelines, *sourcelines, *otherlines]))
 
 
 def write_adata(
@@ -538,7 +598,7 @@ def write_adata(
     ionization_energy: float,
     transition_counts: list[int],
     flog,
-    commentheader: Iterable[str] = (),
+    titlelines: Iterable[str] = (),
 ) -> None:
     """Append one ion's level list to adata.txt.
 
@@ -549,7 +609,7 @@ def write_adata(
     write_comment_block()).
     """
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
-    write_comment_block(fatommodels, "adata", commentheader, flog)
+    write_comment_block(fatommodels, "adata", titlelines, flog)
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
     # the level name is the whole free text of the level line. A frame with no levelname column
@@ -629,7 +689,7 @@ def write_transition_data(
     ion_stage: int,
     dftransitions_ion: pl.DataFrame,
     flog,
-    commentheader: Iterable[str] = (),
+    titlelines: Iterable[str] = (),
 ) -> None:
     """Append one ion's transitions to transitiondata.txt.
 
@@ -665,15 +725,18 @@ def write_transition_data(
         f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
         f" {num_collision_strengths_applied:d} have collision strengths",
     )
-    # the header line gives the count of transitions, so the comment block gives the other two
-    if isinstance(flog, IonLog):
-        flog.add_comment(
+    # The data header line gives the count of transitions, so the comment block gives the other
+    # two. Two counts of zero tell nothing about the data. log_comment() and not add_comment(),
+    # so a user finds each line of a comment block in the log file also.
+    if num_forbidden_transitions or num_collision_strengths_applied:
+        log_comment(
+            flog,
             ("transitiondata",),
             f"{num_forbidden_transitions:d} transitions are forbidden, and {num_collision_strengths_applied:d}"
             " transitions have collision strengths",
         )
 
-    write_comment_block(ftransitiondata, "transitiondata", commentheader, flog)
+    write_comment_block(ftransitiondata, "transitiondata", titlelines, flog)
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
@@ -770,7 +833,7 @@ def write_phixs_data(
     photoionization_thresholds_ev: npt.NDArray[np.float64],
     args,
     flog,
-    commentheader: Iterable[str] = (),
+    titlelines: Iterable[str] = (),
 ) -> None:
     """Append one ion's photoionisation cross sections to phixsdata_v2.txt.
 
@@ -804,7 +867,7 @@ def write_phixs_data(
         log_comment(
             flog,
             ("phixsdata",),
-            f"{nothreshold} of them have no threshold energy, so the output gives them a threshold of"
+            f"{nothreshold} tables have no threshold energy, so the output gives them a threshold of"
             " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
             " in full.",
         )
@@ -850,7 +913,7 @@ def write_phixs_data(
 
     # An ion with no table gets no block. A block must come directly before a table header line.
     if levelids_to_write:
-        write_comment_block(fphixs, "phixsdata", commentheader, flog)
+        write_comment_block(fphixs, "phixsdata", titlelines, flog)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one

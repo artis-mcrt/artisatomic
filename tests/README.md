@@ -22,7 +22,7 @@ rm artisatomicionhandlers.json
 
 Name the four files. The output folder holds the log file `artisatomiclog.txt` also, and `*.txt` would put it into `checksums.txt`.
 
-`ARTISATOMIC_TESTMODE=1` also gives the file comments a creation time of 1970-01-01T00:00:00Z, so the checksums do not depend on the time of the run. It is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
+`ARTISATOMIC_TESTMODE=1` also gives the file comments a creation time of 1970-01-01T00:00:00Z, so the checksums do not depend on the time of the run. The test mode comes before `SOURCE_DATE_EPOCH`, which a build environment can set for its own use. It is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
 `test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
 `test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
 `OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:

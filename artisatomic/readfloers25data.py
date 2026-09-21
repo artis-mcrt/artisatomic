@@ -17,6 +17,7 @@ from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
@@ -31,7 +32,11 @@ reference = (
     " 063041, doi:10.1103/jxqw-7ynk"
 )
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
-description = f"the Floers+25 data set. {reference}. Data set: doi:10.5281/zenodo.15835360"
+description = f"the Floers+25 data set, {{variant}}. {reference}. Data set: doi:10.5281/zenodo.15835360"
+# OutputFiles_withforbidden holds a later version of the data, which the Zenodo record does not have
+description_withforbidden = (
+    f"a later version of the calibrated Floers+25 data set, with forbidden lines. It is not public. {reference}"
+)
 
 
 def get_basepath(withforbidden: bool) -> Path:
@@ -304,6 +309,7 @@ def read_levels_and_transitions(
     )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
     # the levels files of the data sets do not all carry the same columns, so name the ones used.
     # J keeps its "5/2" form as a string, which the g column below reads.

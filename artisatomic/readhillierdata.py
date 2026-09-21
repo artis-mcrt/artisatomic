@@ -24,7 +24,7 @@ from artisatomic.base import IonLog
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
@@ -239,11 +239,13 @@ max_hyd_l_n, max_hyd_gaunt_n = -1, -1
 
 
 # the root of the CMFGEN data. The log file names each file relative to this folder
-hillier_datadir = (PYDIR / ".." / "atomic-data-hillier").resolve()
+hillier_folder = PYDIR / ".." / "atomic-data-hillier"
+hillier_datadir = hillier_folder.resolve()
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
-    "the CMFGEN model atoms of Hillier. Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427, doi:10.1086/305350"
+    "the CMFGEN atomic data compilation of Hillier. Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427,"
+    " doi:10.1086/305350"
 )
 
 
@@ -479,7 +481,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             raise
         # The second read records each comment line again. Without this, the output files of
         # the run that converts the file would differ from those of each later run.
-        if isinstance(flog, IonLog) and commentcounts is not None:
+        if commentcounts is not None:
             flog.drop_comments_after(commentcounts)
 
     return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
@@ -534,7 +536,7 @@ def read_levels_and_transitions_from_file(
 
     filename = hillier_osc_filename(atomic_number, ion_stage)
 
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_in_data_folder(filename, hillier_folder)}")
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
@@ -1467,7 +1469,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
-        log_comment(flog, ("phixsdata",), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+        log_comment(flog, ("phixsdata",), f"Reading {path_in_data_folder(filename, hillier_folder)}")
         reader.read_file(filenum, filename, photfilename)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
@@ -1695,15 +1697,15 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     return phixstable
 
 
-# test: hydrogen n = 1: 13.606 eV threshold cross section is near 6.3029 Mb
-# test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb. The source of this value is unknown.
-# gives nearly the same threshold value as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1),
-# on a different grid
 def hyd_gaunt_filename() -> str:
     """Path of the CMFGEN file of the bound-free Gaunt factors of hydrogen, for each n."""
     return hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
 
 
+# test: hydrogen n = 1: 13.606 eV threshold cross section is near 6.3029 Mb
+# test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb. The source of this value is unknown.
+# gives nearly the same threshold value as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1),
+# on a different grid
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
 
@@ -1896,7 +1898,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         / ions_data[atomic_number, ion_stage].folder
         / coldatafilename
     )
-    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+    log_comment(flog, ("transitiondata",), f"Reading {path_in_data_folder(filename, hillier_folder)}")
     coll_lines_in = 0
     number_expected_transitions = -1
     # the within-term pair loops below insert all of a name's pairs at its first mention, so
@@ -2191,10 +2193,16 @@ def get_photoiontargetfractions(
                             " with the name separators removed"
                         )
                 if not upperionlevelids:
-                    logprint(
+                    # This choice sets the upper_level of each table of this target. The loop comes
+                    # here one time for each target name, so the comment block gets the line also.
+                    fallbackwarning = (
                         f"WARNING: photoionisation target '{targetconfig}' matched no level of the upper ion,"
                         " so the upper ion's ground state is the target"
                     )
+                    if flog is None:
+                        print(fallbackwarning)
+                    else:
+                        log_comment(flog, ("phixsdata",), fallbackwarning)
                     upperionlevelids = [0]  # the upper ion's ground state
 
                 summed_statistical_weights = sum(

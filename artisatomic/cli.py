@@ -10,6 +10,7 @@ import argcomplete
 
 from artisatomic import readadasdata
 from artisatomic.base import check_ion_stages_contiguous
+from artisatomic.base import log_and_print
 from artisatomic.base import log_path
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
@@ -152,11 +153,17 @@ def main() -> None:
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
     # directory. Copy this one there to repeat a run exactly, as the CI workflow does. The copy
     # holds the ions that the limits kept, so the repeat run must not give a limit again.
-    handlersrecord = Path(args.output_folder, "artisatomicionhandlers.json")
-    if handlersrecord.resolve() == Path("artisatomicionhandlers.json").resolve():
+    handlersrecord = Path(args.output_folder, inputhandlersfile.name)
+    if handlersrecord.resolve() == inputhandlersfile.resolve():
         # With the working directory as the output folder, the record would be the file that
-        # get_ion_handlers() reads. It would then select the ions of each later run.
-        print(f"The output folder is the working directory, so the run does not write {handlersrecord.name}")
+        # get_ion_handlers() reads. It would then select the ions of each later run. The log file
+        # gets the record, so the run can still be repeated.
+        with log_path(args.output_folder).open("a", encoding="utf-8") as flog:
+            log_and_print(
+                flog,
+                f"The output folder is the working directory, so the run does not write {handlersrecord.name}."
+                f" The ion handlers of this run: {json.dumps(ion_handlers)}",
+            )
     else:
         with handlersrecord.open("w", encoding="utf-8") as f:
             json.dump(obj=ion_handlers, fp=f)
@@ -169,8 +176,9 @@ def remove_old_log_folder(output_folder: Path) -> None:
     """Remove the log files that an earlier release wrote to the folder atomic_data_logs.
 
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
-    A user could take such a file for a record of the new run. The function removes those files
-    only, and then the folder if it is empty.
+    A user could take such a file for a record of the new run. The function removes each .txt
+    file of the folder and the copy of the ion handlers, as that release did at the start of each
+    run. It then removes the folder if the folder is empty.
     """
     old_log_folder = output_folder / "atomic_data_logs"
     if not old_log_folder.is_dir():

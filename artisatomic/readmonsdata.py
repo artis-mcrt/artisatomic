@@ -17,13 +17,14 @@ from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 
-monsbasepath = (PYDIR / ".." / "atomic-data-mons").resolve()
-datafilepath = monsbasepath
+monsfolder = PYDIR / ".." / "atomic-data-mons"
+datafilepath = monsfolder.resolve()
 if TESTMODE:
     # a reduced Ce V and Ce VI sample cut from the full archives (see tests/README.md)
     datafilepath /= "test_sample"
@@ -134,7 +135,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("adata",),
-        f"Reading {levels_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / levels_archive, relative_to=monsbasepath.parent)}",
+        f"Reading {levels_member(atomic_number, ion_stage)} in {path_in_data_folder(datafilepath / levels_archive, monsfolder)}",
     )
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
@@ -157,7 +158,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("transitiondata",),
-        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / transitions_archive, relative_to=monsbasepath.parent)}",
+        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_in_data_folder(datafilepath / transitions_archive, monsfolder)}",
     )
     transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3
@@ -200,6 +201,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
     log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of

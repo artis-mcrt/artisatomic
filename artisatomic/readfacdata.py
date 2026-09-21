@@ -25,6 +25,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
@@ -323,6 +324,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
     if not levels_file.is_file():
         msg = f"FAC levels file {levels_file} not found"

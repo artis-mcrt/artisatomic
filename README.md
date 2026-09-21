@@ -30,7 +30,9 @@ prek install
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an `artisatomicionhandlers.json` file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection.
 
 ### Comments in the output files
-adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. It gives the creation time in UTC, and it explains each field of the file. Set `SOURCE_DATE_EPOCH` for a run whose files must be the same as the files of an earlier run. It also gives the options of the run that apply to all ions. Two examples are the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
+adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. The file comment explains each field of the file. It says that level numbers and ion stages start at 1, and not at 0. It also gives the options of the run that apply to all ions. Two examples are the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
+
+The file comment gives the creation time in UTC. Set `SOURCE_DATE_EPOCH` for a run whose files must be the same as the files of an earlier run. `ARTISATOMIC_TESTMODE=1` gives a fixed time of 1970-01-01T00:00:00Z, and the test mode comes before `SOURCE_DATE_EPOCH`.
 
 adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before the data of each ion. Each line of a comment block starts with `#`. A comment block gives:
 
@@ -41,7 +43,7 @@ adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before t
 
 A comment block does not repeat a number of the header line of the ion, for example the count of levels or the ionisation energy.
 
-In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines and more detail for all ions. It is in the output folder, beside `artisatomicionhandlers.json`, which records the ions and the handlers of the run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
+In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines and more detail for all ions. The log file is in the output folder, beside `artisatomicionhandlers.json`, which records the ions and the handlers of the run. If the output folder is the working directory, the run writes that record into the log file only. A file of that name in the working directory selects the ions of a run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
 
 ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment blocks.
 

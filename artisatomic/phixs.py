@@ -18,7 +18,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import ryd_to_hz
 
@@ -84,12 +84,17 @@ def match_hydrogenic_phixs(
         .sort("energyabovegsinpercm", maintain_order=True)
         .head(args.nlevels_hydrogenic_for_unknown_phixs)
     )
+    # the counts of the levels that get no table, for one summary line in the comment block
+    levels_above_ionization = 0
+    levels_without_n = 0
+    levels_outside_tables = 0
     for level in lowest_levels.iter_rows(named=True):
         levelindex = level["levelid"]
         en_ev = hc_in_ev_cm * level["energyabovegsinpercm"]
         threshold_ev = ionization_energy_ev - en_ev
         if threshold_ev <= 0.0:
             # level lies above the ionisation energy, so there is nothing to ionise from
+            levels_above_ionization += 1
             continue
 
         n = get_level_valence_n(level["levelname"])
@@ -99,6 +104,7 @@ def match_hydrogenic_phixs(
                 f"WARNING: level name '{level['levelname']}' has no principal quantum number, so the level"
                 " gets no hydrogenic cross section",
             )
+            levels_without_n += 1
             continue
         if n < 1 or n > readhillierdata.max_hyd_gaunt_n:
             log_and_print(
@@ -106,6 +112,7 @@ def match_hydrogenic_phixs(
                 f"WARNING: n={n} of level '{level['levelname']}' is outside the hydrogenic tables"
                 f" (1 to {readhillierdata.max_hyd_gaunt_n}), so the level gets no hydrogenic cross section",
             )
+            levels_outside_tables += 1
             continue
 
         photoionization_thresholds_ev[levelindex] = threshold_ev
@@ -128,7 +135,7 @@ def match_hydrogenic_phixs(
 
     # only an ion that got a table names the estimate as its source
     if reduced_phixs_dict:
-        gauntpath = path_for_log(readhillierdata.hyd_gaunt_filename(), relative_to=readhillierdata.hillier_datadir)
+        gauntpath = path_in_data_folder(readhillierdata.hyd_gaunt_filename(), readhillierdata.hillier_folder)
         log_comment(
             flog,
             ("phixsdata",),
@@ -136,6 +143,17 @@ def match_hydrogenic_phixs(
             " Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244, with the Gaunt factors of CMFGEN in"
             f" {gauntpath}",
         )
+
+        skipped = levels_above_ionization + levels_without_n + levels_outside_tables
+        if skipped:
+            log_comment(
+                flog,
+                ("phixsdata",),
+                f"{skipped} of the lowest {lowest_levels.height} levels got no hydrogenic table:"
+                f" {levels_above_ionization} are at or above the ionisation energy, {levels_without_n} have a level"
+                f" name with no principal quantum number, and {levels_outside_tables} have an n outside the"
+                " hydrogenic tables.",
+            )
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 

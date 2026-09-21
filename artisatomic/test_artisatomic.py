@@ -565,10 +565,12 @@ def test_write_phixs_data_with_no_phixs_arrays():
 
 
 def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
-    """Build a minimal single-level IonData for the target-fraction resolver tests."""
+    """Build a minimal single-level IonData, with the source line that each comment block needs."""
+    from artisatomic.base import COMMENT_TABLES
     from artisatomic.iondata import IonData
 
     return IonData(
+        comments={table: [f"source: the source of the {table} test data"] for table in COMMENT_TABLES},
         ion_stage=ion_stage,
         handler="cmfgen",
         is_top_ion=is_top_ion,
@@ -4583,6 +4585,10 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
     for field in ("Z", "ion_stage", "ntransitions", "lower, upper", "A", "coll_str", "forbidden"):
         assert f"\n# {field} " in transitioncomment, field
     adatacomment = (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    # each file comment says that its level numbers and ion stages start at 1 and not at 0
+    for filecomment in (transitioncomment, adatacomment):
+        assert "\n# NUMBERS START AT 1\n" in filecomment
+        assert "start at 1, and not at 0" in filecomment
     for field in ("Z", "ion_stage", "nlevels", "ionisation_energy", "level_number", "energy", "g", "level_name"):
         assert f"\n# {field} " in adatacomment, field
     # a folder with no phixsdata_v2.txt is fine too
@@ -4597,6 +4603,8 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
     assert len(lines) > 2
     assert all(line.startswith("#") for line in lines[2:])
     assert any("T=5500 K (option -optimaltemperature)" in line for line in lines)
+    assert "# NUMBERS START AT 1" in lines
+    assert any("Only the point number i of a table starts at 0" in line for line in lines)
     assert phixspath.read_text(encoding="utf-8").isascii()
 
 
@@ -4723,15 +4731,35 @@ def test_write_comment_block_gives_every_part_of_a_line_a_hash():
     from artisatomic.output import write_comment_block
 
     flog = IonLog(io.StringIO())
-    flog.comments["transitiondata"].extend(["Temperatures:\n0.1, 0.2", "# a header line of the source file"])
+    flog.comments["transitiondata"].extend(
+        ["Temperatures:\n0.1, 0.2", "# a header line of the source file", "source: a data set"]
+    )
     out = io.StringIO()
     write_comment_block(out, "transitiondata", ("Z=26 Fe II",), flog)
-    assert out.getvalue() == "# Z=26 Fe II\n# Temperatures:\n# 0.1, 0.2\n# a header line of the source file\n"
+    # the source line comes directly after the title lines, wherever a reader recorded it
+    assert out.getvalue() == (
+        "# Z=26 Fe II\n# source: a data set\n# Temperatures:\n# 0.1, 0.2\n# a header line of the source file\n"
+    )
 
-    # no header and a plain stream: the writer tests that pin the whole output depend on this
+    # no title line and a plain stream: the writer tests that pin the whole output depend on this
     out = io.StringIO()
     write_comment_block(out, "transitiondata", (), io.StringIO())
     assert not out.getvalue()
+
+
+def test_write_comment_block_needs_exactly_one_source_line():
+    """A block with no source line means that a reader does not state its source, so the run must stop."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["phixsdata"].append("Reading a file")
+    with pytest.raises(ValueError, match="needs one source line but has 0"):
+        write_comment_block(io.StringIO(), "phixsdata", ("Z=26 Fe II", "handler: cmfgen"), flog)
+
+    flog.comments["phixsdata"] += ["source: a data set", "source: a second data set"]
+    with pytest.raises(ValueError, match="needs one source line but has 2"):
+        write_comment_block(io.StringIO(), "phixsdata", ("Z=26 Fe II", "handler: cmfgen"), flog)
 
 
 def artis_noncommentline(lines: list[str], pos: int) -> int:
@@ -4748,7 +4776,8 @@ def two_level_iondata(ion_stage: int, nphixspoints: int, *, has_phixs: bool, is_
     from artisatomic.base import empty_comments
 
     comments = empty_comments()
-    comments["adata"] += ["source: the source of the levels", "Reading osc_data"]
+    # the source line is not the first line here, and the writer must put it first
+    comments["adata"] += ["Reading osc_data", "source: the source of the levels"]
     comments["transitiondata"] += ["source: the source of the levels", "Temperatures:\n0.1, 0.2"]
     comments["phixsdata"] += ["source: the source of the cross sections"]
     return dataclasses.replace(
@@ -4949,12 +4978,17 @@ def test_hydrogenic_estimate_records_its_source_only_with_a_table():
     assert "/Users/" not in sourceline
 
 
-def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_files(tmp_path, monkeypatch):
-    """The log of all ions is artisatomiclog.txt, and it sits with artisatomicionhandlers.json beside adata.txt."""
-    import sys
-
+def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
+    """Run cli.main() with no read of an ion. The read needs the data sets, and the callers test the files of the run only."""
     from artisatomic import cli
 
+    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
+    cli.main()
+
+
+def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_files(tmp_path, monkeypatch):
+    """The log of all ions is artisatomiclog.txt, and it sits with artisatomicionhandlers.json beside adata.txt."""
     handlers = [[38, [[1, "kurucz"], [2, "kurucz"]]]]
     (tmp_path / "artisatomicionhandlers.json").write_text(json.dumps(handlers), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -4962,11 +4996,7 @@ def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_file
     outputfolder.mkdir()
     # a log of an earlier run must not stay in the file
     (outputfolder / "artisatomiclog.txt").write_text("the log of an earlier run\n", encoding="utf-8")
-    # the read of the ions needs the data sets, and this test is about the files of the run only
-    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
-    monkeypatch.setattr(sys, "argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
-
-    cli.main()
+    run_main_with_no_ion_read(monkeypatch, outputfolder)
 
     assert {path.name for path in outputfolder.iterdir()} == {
         "adata.txt",
@@ -4981,20 +5011,17 @@ def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_file
 
 
 def test_main_writes_no_handlers_record_into_the_working_directory(tmp_path, monkeypatch):
-    """get_ion_handlers() reads ./artisatomicionhandlers.json, so a record there would select the ions of each later run."""
-    import sys
-
+    """A record in the working directory would select the ions of each later run, so the log file gets it."""
     from artisatomic import cli
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
-    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
-    monkeypatch.setattr(sys, "argv", ["makeartisatomicfiles", "-output_folder", "."])
+    run_main_with_no_ion_read(monkeypatch, ".")
 
-    cli.main()
-
-    assert (tmp_path / "artisatomiclog.txt").exists()
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
+    # the run can still be repeated, because the log file holds the ion handlers
+    logtext = (tmp_path / "artisatomiclog.txt").read_text(encoding="utf-8")
+    assert 'The ion handlers of this run: [[38, [[1, "kurucz"], [2, "kurucz"]]]]' in logtext
 
 
 def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
@@ -5017,30 +5044,132 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
 
     # no folder is fine too
     remove_old_log_folder(tmp_path / "artis_files")
+    assert not (tmp_path / "artis_files").exists()
 
 
 def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
-    """Each output file names its creation time, and SOURCE_DATE_EPOCH makes that time the same for each run."""
-    import datetime
+    """Each output file names its creation time, and the time of a checksum run is the same for each run."""
     import re
 
     from artisatomic import base
     from artisatomic.output import clear_files
 
+    # CI sets the test mode for all tests, and the test mode comes before SOURCE_DATE_EPOCH
+    monkeypatch.setattr(base, "TESTMODE", False)
     monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
     clear_files(phixs_args(output_folder=str(tmp_path)))
     for filename in ("adata.txt", "transitiondata.txt", "phixsdata_v2.txt"):
         assert "wrote this file at 2026-09-21T14:13:20Z (UTC)." in (tmp_path / filename).read_text(encoding="utf-8")
 
-    # the test mode gives a time of zero, so the checksum recipe needs no other variable
-    monkeypatch.delenv("SOURCE_DATE_EPOCH")
+    for badvalue in ("", "abc", "1e9", "-1", "99999999999999999999"):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", badvalue)
+        with pytest.raises(ValueError, match="SOURCE_DATE_EPOCH must be a count of seconds"):
+            base.creation_time_utc()
+
+    # The test mode gives a time of zero, so the checksum recipe needs no other variable. A build
+    # environment can set SOURCE_DATE_EPOCH for its own use, and that must not change the checksums.
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
     monkeypatch.setattr(base, "TESTMODE", True)
     assert base.creation_time_utc() == "1970-01-01T00:00:00Z"
 
     # a normal run gives the time of the run
     monkeypatch.setattr(base, "TESTMODE", False)
-    now = datetime.datetime.now(datetime.UTC)
-    creationtime = base.creation_time_utc()
-    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", creationtime)
-    parsed = datetime.datetime.strptime(creationtime, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.UTC)
-    assert abs((parsed - now).total_seconds()) < 5
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
+    assert re.fullmatch(r"20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", base.creation_time_utc())
+
+
+def test_to_ascii_keeps_a_dash_and_the_letter_of_an_accent():
+    """A character with no ASCII form must not go away, because the text on its two sides would then join."""
+    from artisatomic.base import comment_lines
+    from artisatomic.base import to_ascii
+
+    # chr() and not the characters, because ruff rejects a string with a character that looks like an ASCII one
+    endash, minussign, timessign, greaterequal, alpha, lineseparator = (
+        chr(0x2013),
+        chr(0x2212),
+        chr(0x00D7),
+        chr(0x2265),
+        chr(0x03B1),
+        chr(0x2028),
+    )
+    # the JPLT files of Pr II and Tb II name these two ranges of elements, with an en dash and a minus sign
+    assert to_ascii(f"Elements. I. Pr{endash}Gd") == "Elements. I. Pr-Gd"
+    assert to_ascii(f"Elements. II. Tb{minussign}Yb") == "Elements. II. Tb-Yb"
+    assert to_ascii("Flörs, Martínez-Pinedo, Kitovienė") == "Flors, Martinez-Pinedo, Kitoviene"
+    assert to_ascii(f"1{timessign}10 and {greaterequal}5 and {alpha}") == "1x10 and >=5 and ?"
+    for text in (f"Pr{endash}Gd", f"a{lineseparator}b", alpha, ""):
+        for commentline in comment_lines([text]):
+            assert commentline.startswith("#")
+            assert commentline.endswith("\n")
+            assert commentline.count("\n") == 1
+            assert commentline.isascii()
+
+
+def test_path_in_data_folder_starts_with_the_repository_name_of_the_folder(tmp_path):
+    """A data folder can be a symbolic link, and the name of the link target must not go into an output file."""
+    from artisatomic.base import path_in_data_folder
+
+    target = tmp_path / "bulk_disk" / "kurucz_2024"
+    (target / "zztar").mkdir(parents=True)
+    datafolder = tmp_path / "repository" / "atomic-data-kurucz"
+    datafolder.parent.mkdir()
+    datafolder.symlink_to(target, target_is_directory=True)
+
+    # a reader has the path of the file after resolve(), so it holds the name of the link target
+    resolvedfile = (datafolder / "zztar" / "gf3800.all").resolve()
+    assert "kurucz_2024" in str(resolvedfile)
+    assert path_in_data_folder(resolvedfile, datafolder) == "atomic-data-kurucz/zztar/gf3800.all"
+
+    # a file that is not in the data folder keeps its own path, with no folder name before it
+    otherfile = tmp_path / "repository" / "other.txt"
+    assert path_in_data_folder(otherfile, datafolder) == str(otherfile)
+
+
+def test_ion_label():
+    """The comment blocks and the log file name an ion in the same way."""
+    from artisatomic.base import ion_label
+
+    assert ion_label(26, 2) == "Z=26 Fe II"
+
+
+def test_resolve_pass_records_a_target_that_matches_no_level(tmp_path):
+    """The fallback to the ground state sets the upper level of the tables, so the comment block must show it."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("no such level", 1.0)]])
+    logpath = tmp_path / "artisatomiclog.txt"
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)], 26, logpath)
+
+    assert lower.photoionization_targetfractions == [[(0, 1.0)]]
+    warning = "WARNING: photoionisation target 'no such level' matched no level of the upper ion"
+    assert [line for line in lower.comments["phixsdata"] if line.startswith(warning)]
+    logtext = logpath.read_text(encoding="utf-8")
+    assert "Z=26 Fe I photoionisation targets:" in logtext
+    assert warning in logtext
+
+    # an ion with no target names has nothing to resolve, so the log file gets no empty section
+    logpath.write_text("", encoding="utf-8")
+    resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=True)], 26, logpath)
+    assert not logpath.read_text(encoding="utf-8")
+
+
+def test_hydrogenic_estimate_gives_one_summary_of_the_levels_with_no_table():
+    """The log file gets a warning for each such level, and the comment block gets one count line."""
+    from artisatomic.base import IonLog
+
+    levels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "energyabovegsinpercm": [0.0, 1000.0, 1.0e6],
+            "g": [2.0, 2.0, 2.0],
+            "levelname": ["3s_2Se", "a name with no quantum number", "9s_2Se"],
+        }
+    )
+    flog = IonLog(io.StringIO())
+    match_hydrogenic_phixs(11, levels, 5.139, "cmfgen", readhillierdata.get_level_valence_n, phixs_args(), flog)
+    summaries = [line for line in flog.comments["phixsdata"] if "got no hydrogenic table" in line]
+    expected = (
+        "2 of the lowest 3 levels got no hydrogenic table: 1 are at or above the ionisation energy, 1 have a level"
+        " name with no principal quantum number, and 0 have an n outside the hydrogenic tables."
+    )
+    assert summaries == [expected]

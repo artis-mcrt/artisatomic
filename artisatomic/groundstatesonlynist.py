@@ -37,7 +37,8 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     This handler supplies a single level per ion and never any transitions. An ion that uses it
     contributes only its ground state and ionisation energy to the output.
     """
-    log_comment(flog, ("adata",), f"Reading {path_for_log(datafilepath)}")
+    # the transitiondata.txt block needs its source file also, although this handler gives no transition
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(datafilepath)}")
     groundstatesdata = read_groundstates_table()
 
     this_ion = groundstatesdata.filter(

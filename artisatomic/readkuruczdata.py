@@ -14,14 +14,15 @@ from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
 from artisatomic.levelnames import split_count_and_n
 
-kuruczbasepath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
-kuruczdatapath = kuruczbasepath
+kuruczfolder = PYDIR / ".." / "atomic-data-kurucz"
+kuruczdatapath = kuruczfolder.resolve()
 if TESTMODE:
     kuruczdatapath /= "test_sample"
 
@@ -175,9 +176,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     path_gfall = find_gfall(atomic_number, ion_charge)
-    log_comment(
-        flog, ("adata", "transitiondata"), f"Reading {path_for_log(path_gfall, relative_to=kuruczbasepath.parent)}"
-    )
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_in_data_folder(path_gfall, kuruczfolder)}")
 
     gfall = parse_gfall(fname=str(path_gfall))
     column_renames = {
@@ -349,6 +348,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
     log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions

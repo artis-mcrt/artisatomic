@@ -16,6 +16,7 @@ from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelids
@@ -203,6 +204,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # from NIST, as every other reader whose data set carries no ionisation energy does
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
     log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
