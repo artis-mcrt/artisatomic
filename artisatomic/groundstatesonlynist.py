@@ -11,7 +11,8 @@ import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import EnergyLevel
-from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 
 datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
@@ -29,7 +30,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     This handler supplies a single level per ion and never any transitions. An ion that uses it
     contributes only its ground state and ionisation energy to the output.
     """
-    print(f"Reading NIST ground state data for Z={atomic_number} ion_stage {ion_stage} from groundstates.dat")
+    log_comment(flog, ("adata",), f"Reading {path_for_log(datafilepath)}")
     groundstatesdata = read_groundstates_table()
 
     this_ion = groundstatesdata.filter(
@@ -41,7 +42,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
         msg = f"groundstates.dat has no row for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
     ionization_energy_in_ev = this_ion["IonizationEnergy"].item(0)
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
     energy_levels = [
         EnergyLevel(
             levelname=this_ion["config"].item(0),

@@ -13,6 +13,7 @@ from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
@@ -170,7 +171,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     path_gfall = find_gfall(atomic_number, ion_charge)
-    log_and_print(flog, f"Reading {path_for_log(path_gfall)}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(path_gfall)}")
 
     gfall = parse_gfall(fname=str(path_gfall))
     column_renames = {
@@ -248,7 +249,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         # add_level_ids_forbidden() leaves every transition permitted
         parity=pl.lit(None, dtype=pl.Int64)
     )
-    log_and_print(flog, f"Read {len(dflevels):d} levels")
+    log_comment(flog, ("adata",), f"Read {len(dflevels):d} levels")
 
     transitions = (
         gfall.select(transition_columns)
@@ -325,7 +326,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         maintain_order=True,
     )
     if transitions.height < transitions_in:
-        log_and_print(flog, f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"Dropped {transitions_in - transitions.height:d} lines that gfall lists more than once",
+        )
 
     # the level ids follow a sort on (energy, J), but the file ordered its pair by energy alone.
     # So two levels of one energy can come out with the higher id first: order the ids.
@@ -335,10 +340,10 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         A=pl.col("A"),
     )
 
-    log_and_print(flog, f"Read {len(transitions):d} transitions")
+    log_comment(flog, ("transitiondata",), f"Read {len(transitions):d} transitions")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
 
     return ionization_energy_in_ev, dflevels, transitions
 

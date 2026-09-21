@@ -2,6 +2,7 @@
 
 import argparse
 from collections import Counter
+from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
@@ -14,10 +15,13 @@ from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_log_path
+from artisatomic.base import IonLog
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
+from artisatomic.iondata import source_description
 
 
 def clear_files(args: argparse.Namespace) -> None:
@@ -214,8 +218,9 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
         return
 
     largest = contradictions[strengthcol].abs().max()
-    log_and_print(
+    log_comment(
         flog,
+        ("transitiondata",),
         f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
         f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
         f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
@@ -272,7 +277,16 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         upsilondict = iondata.upsilondict
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
-        with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as flog:
+        def commentheader(table: str, iondata: IonData = iondata, ionstr: str = ionstr) -> tuple[str, ...]:
+            return (
+                f"Z={atomic_number} {ionstr}",
+                f"handler: {iondata.handler}",
+                f"source: {source_description(iondata, table)}",
+            )
+
+        with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as logstream:
+            # the comment lines of the read pass, so the lines of this pass go to the same lists
+            flog = IonLog(logstream, iondata.comments)
             log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
 
             dfenergylevels_ion = iondata.dfenergylevels
@@ -302,8 +316,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
                 )
 
-            log_and_print(
+            log_comment(
                 flog,
+                ("transitiondata",),
                 f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values",
             )
 
@@ -334,6 +349,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     iondata.ionization_energy_ev,
                     transition_counts,
                     flog,
+                    commentheader("adata"),
                 )
 
             # maintain_order: a reader can give one level pair several rows with different A
@@ -353,6 +369,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     ion_stage,
                     dftransitions_ion,
                     flog,
+                    commentheader("transitiondata"),
                 )
 
             if not iondata.is_top_ion and not args.nophixs:
@@ -376,7 +393,27 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         fill_missing_phixs_thresholds(iondata, iondata_of_ion_stage.get(ion_stage + 1), flog),
                         args,
                         flog,
+                        commentheader("phixsdata"),
                     )
+
+
+def write_comment_block(fout, table: str, commentheader: Iterable[str], flog) -> None:
+    """Write the comment block of one ion: the header lines, then the lines that the log holds for this file.
+
+    ARTIS skips a comment line only where it reads the header of an ion in adata.txt and
+    transitiondata.txt, and the header of a table in phixsdata_v2.txt (get_noncommentline() in
+    input.cc). Inside a block it counts the lines, so a comment there would move every later
+    line. A writer must therefore call this function directly before it writes such a header, and
+    not at any other position.
+
+    The function writes nothing for an empty header and a log that is not an IonLog.
+    """
+    lines = [*commentheader, *(flog.comments[table] if isinstance(flog, IonLog) else ())]
+    # A line of the log can hold a line break. ARTIS would read a part with no # as data. A header
+    # line that a reader copied from its source file has a # already.
+    fout.writelines(
+        f"{part}\n" if part.startswith("#") else f"# {part}\n" for line in lines for part in line.splitlines()
+    )
 
 
 def write_adata(
@@ -387,19 +424,22 @@ def write_adata(
     ionization_energy: float,
     transition_counts: list[int],
     flog,
+    commentheader: Iterable[str] = (),
 ) -> None:
     """Append one ion's level list to adata.txt.
 
     Level ids are zero-based in memory but numbered from one in the output. transition_counts has
-    one entry for each level id, in id order. Each level line ends with the level's name as a
-    free-text comment. The artistools package reads it back as everything after the fourth field,
-    so the writer must not pad it.
+    one entry for each level id, in id order. Each level line ends with the level's name as free
+    text. The artistools package reads it back as everything after the fourth field, so the writer
+    must not pad it. The comment block of the ion comes before the header line (see
+    write_comment_block()).
     """
     log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
+    write_comment_block(fatommodels, "adata", commentheader, flog)
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
-    # the level name is the whole level comment. A frame with no levelname column gets an empty
-    # comment.
+    # the level name is the whole free text of the level line. A frame with no levelname column
+    # gets an empty text.
     dfout = (
         dfenergylevels if "levelname" in dfenergylevels.columns else dfenergylevels.with_columns(levelname=pl.lit(""))
     )
@@ -449,8 +489,9 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
     degenerate = notabove.filter(pl.col("e_lower") == pl.col("e_upper"))
     if not degenerate.is_empty():
         withcollstr = degenerate.filter(pl.col("coll_str") > 0.0).height if "coll_str" in degenerate.columns else 0
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
             f" ({withcollstr:d} of them with a collision strength). ARTIS computes the frequency of"
             " each transition from the level energies and drops a transition with a frequency of zero."
@@ -459,8 +500,9 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
 
     inverted = notabove.height - degenerate.height
     if inverted:
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"WARNING: {inverted:d} transitions have a lower level id whose energy is above the upper"
             " level's. The level list is not in energy order. ARTIS drops a transition with a"
             " negative frequency. The output file has these transitions, but ARTIS does not use them.",
@@ -473,11 +515,13 @@ def write_transition_data(
     ion_stage: int,
     dftransitions_ion: pl.DataFrame,
     flog,
+    commentheader: Iterable[str] = (),
 ) -> None:
     """Append one ion's transitions to transitiondata.txt.
 
     Level ids are zero-based in memory but numbered from one in the output. The writer lists the
-    lower id of every transition first.
+    lower id of every transition first. The comment block of the ion comes before the header line
+    (see write_comment_block()).
     """
     log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
 
@@ -495,6 +539,23 @@ def write_transition_data(
             )
             raise ValueError(msg)
 
+    num_forbidden_transitions = (
+        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("forbidden")).height
+    )
+
+    num_collision_strengths_applied = (
+        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("coll_str") > 0).height
+    )
+
+    # before the header, because the comment block takes this line
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
+        f" {num_collision_strengths_applied:d} have collision strengths",
+    )
+
+    write_comment_block(ftransitiondata, "transitiondata", commentheader, flog)
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
@@ -512,20 +573,6 @@ def write_transition_data(
         ftransitiondata.writelines(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*columns, strict=True)))
 
     ftransitiondata.write("\n")
-
-    num_forbidden_transitions = (
-        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("forbidden")).height
-    )
-
-    num_collision_strengths_applied = (
-        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("coll_str") > 0).height
-    )
-
-    log_and_print(
-        flog,
-        f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
-        f" {num_collision_strengths_applied:d} have collision strengths",
-    )
 
 
 def threshold_is_known(threshold_ev: float) -> bool:
@@ -587,8 +634,9 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
             filled += 1
 
     if filled:
-        log_and_print(
+        log_comment(
             flog,
+            ("phixsdata",),
             f"Computed a photoionisation threshold for {filled} levels whose reader gave none."
             " The threshold comes from the ionisation energy and the two level energies, as in ARTIS.",
         )
@@ -604,8 +652,12 @@ def write_phixs_data(
     photoionization_thresholds_ev: npt.NDArray[np.float64],
     args,
     flog,
+    commentheader: Iterable[str] = (),
 ) -> None:
     """Append one ion's photoionisation cross sections to phixsdata_v2.txt.
+
+    The comment block of the ion comes before the header line of its first table (see
+    write_comment_block()).
 
     The writer writes every level with targets. Level ids, of this ion and of the upper ion's
     targets, are zero-based in memory but numbered from one in the output.
@@ -629,17 +681,21 @@ def write_phixs_data(
         1 for levelid in levelids_to_write if not threshold_is_known(photoionization_thresholds_ev[levelid])
     )
 
-    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
+    log_comment(flog, ("phixsdata",), f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
     if nothreshold:
-        log_and_print(
+        log_comment(
             flog,
+            ("phixsdata",),
             f"{nothreshold} of them have no threshold energy, so the output gives them a threshold of"
             " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
             " in full.",
         )
-    flog.write(
+    log_comment(
+        flog,
+        ("phixsdata",),
         f"Downsample of the cross sections with T={args.optimaltemperature} Kelvin, "
-        f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
+        f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}",
+        echo=False,
     )
 
     # Only for a ground state that the writer writes. The writer skips a level with no targets on
@@ -676,6 +732,8 @@ def write_phixs_data(
             )
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
+
+    write_comment_block(fphixs, "phixsdata", commentheader, flog)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one

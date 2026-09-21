@@ -276,6 +276,53 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
+# the output files that take a comment block. compositiondata.txt is absent, because ARTIS reads
+# it with no comment skip.
+COMMENT_TABLES = ("adata", "transitiondata", "phixsdata")
+
+
+def empty_comments() -> dict[str, list[str]]:
+    """Return an empty list of comment lines for each name in COMMENT_TABLES."""
+    comments: dict[str, list[str]] = {table: [] for table in COMMENT_TABLES}
+    return comments
+
+
+class IonLog:
+    """The log file of one ion, and the lines that go into the output files as comments.
+
+    comments has one list of lines for each name in COMMENT_TABLES. The write pass gives the
+    dictionary of the read pass, so the two passes fill the same lists.
+    """
+
+    def __init__(self, stream: t.TextIO, comments: dict[str, list[str]] | None = None) -> None:
+        """Wrap the stream of the log file. Give comments to add to the lists of an earlier pass."""
+        self.stream = stream
+        self.comments = empty_comments() if comments is None else comments
+
+    def write(self, text: str) -> int:
+        """Write text to the log file."""
+        return self.stream.write(text)
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        """Write lines to the log file."""
+        self.stream.writelines(lines)
+
+
+def log_comment(flog, tables: Iterable[str], strout: str, *, echo: bool = True) -> None:
+    """Log a line, and record it as a comment line for each named output file.
+
+    A log that is not an IonLog records nothing, so a caller can give a plain stream. echo=False
+    keeps the line away from stdout.
+    """
+    if echo:
+        log_and_print(flog, strout)
+    else:
+        flog.write(strout + "\n")
+    if isinstance(flog, IonLog):
+        for table in tables:
+            flog.comments[table].append(strout)
+
+
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     """Render an input data path for a log file, relative to a directory.
 
@@ -354,8 +401,10 @@ def split_levels_above_ionization(
     above_ionization = (pl.col(energycolumn) > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
     fileindices_above_ionization = {int(fileindex) for fileindex in dflevels.filter(above_ionization)[indexcolumn]}
     if fileindices_above_ionization:
-        log_and_print(
-            flog, f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy"
+        log_comment(
+            flog,
+            ("adata",),
+            f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy",
         )
 
     dfboundlevels = dflevels.filter(~above_ionization)
@@ -438,14 +487,17 @@ def drop_transitions_of_levels(
     skipped_count = dflines.height - dfkeptlines.height
     if dfkeptlines.is_empty() and skipped_count > 0:
         # the writer accepts an ion with no transition, and 66DyIII_calib is such an ion
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"WARNING: skipped every one of the {skipped_count:d} transitions, because each one references a level"
             " above the ionisation energy. The ion goes to the output with no transitions.",
         )
     elif skipped_count > 0:
-        log_and_print(
-            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy",
         )
 
     return dfkeptlines

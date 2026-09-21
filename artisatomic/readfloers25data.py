@@ -15,7 +15,7 @@ from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
-from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
@@ -281,8 +281,9 @@ def read_levels_and_transitions(
         msg = f"Found no Floers+25 transitions files for {ionstr} ({calibstr}) in {basepath}"
         raise FileNotFoundError(msg)
 
-    log_and_print(
+    log_comment(
         flog,
+        ("adata", "transitiondata"),
         f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transitions files",
     )
 
@@ -325,7 +326,7 @@ def read_levels_and_transitions(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
 
-    log_and_print(flog, f"Read {dflevels.height:d} levels")
+    log_comment(flog, ("adata",), f"Read {dflevels.height:d} levels")
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
@@ -333,7 +334,7 @@ def read_levels_and_transitions(
         [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
-    log_and_print(flog, f"Read {dftransitions.height} transitions")
+    log_comment(flog, ("transitiondata",), f"Read {dftransitions.height} transitions")
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.
@@ -342,8 +343,9 @@ def read_levels_and_transitions(
     )
     ndiscarded = dftransitions.filter(~inrange).height
     if ndiscarded > 0:
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"WARNING: Discarded {ndiscarded} transitions of {ionstr} that reference levels outside"
             f" 0..{dflevels.height - 1}",
         )
@@ -353,7 +355,7 @@ def read_levels_and_transitions(
     # column. Swap those rows into energy order: the merge and the output want lowerlevel first.
     nreversed = dftransitions.filter(pl.col("lowerlevel") > pl.col("upperlevel")).height
     if nreversed > 0:
-        log_and_print(flog, f"Swapped the level order of {nreversed} reversed transitions")
+        log_comment(flog, ("transitiondata",), f"Swapped the level order of {nreversed} reversed transitions")
         dftransitions = dftransitions.with_columns(
             lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
             upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
@@ -378,7 +380,11 @@ def read_levels_and_transitions(
         parity_of_index.gather(dfallowed["lowerlevel"]) == parity_of_index.gather(dfallowed["upperlevel"])
     ).sum()
     if n_paritymatch > 0:
-        log_and_print(flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity",
+        )
 
     # use standard artisatomic column names. The forbidden flag comes from the Type column
     # above, so add_level_ids_forbidden() does not derive it from the parity.

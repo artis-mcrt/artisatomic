@@ -16,7 +16,8 @@ import polars as pl
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
-from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import Transition
 
@@ -235,7 +236,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     if dfiondata.is_empty():
         msg = f"The DREAM database has no lines for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
-    print(f"Reading DREAM database for Z={atomic_number} ion_stage {ion_stage}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(dreamdatapath)}")
 
     energy_levels = read_levels_data(dfiondata)
 
@@ -265,8 +266,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # DREAM has no ionisation energies, so take them from NIST as the other handlers do
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
 
-    log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_comment(flog, ("adata",), f"Read {len(energy_levels):d} levels")
 
     return ionization_energy_in_ev, energy_levels, transitions

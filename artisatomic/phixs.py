@@ -15,6 +15,7 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
 from artisatomic.base import phixs_nu_cubed_tail
@@ -58,14 +59,18 @@ def match_hydrogenic_phixs(
     # stdout only: the warning concerns the whole ion, and the ion log holds the messages about
     # single levels. A skipped level below goes to the log.
     if get_level_valence_n is None:
-        print(
+        log_comment(
+            flog,
+            ("phixsdata",),
             f"WARNING: no hydrogenic photoionisation cross sections, because no parser gives the principal"
-            f" quantum number of a {ion_handler} level"
+            f" quantum number of a {ion_handler} level",
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
-    print(
-        f"artisatomic uses hydrogenic photoionisation cross sections for Z={atomic_number} {elsymbols[atomic_number]}"
+    log_comment(
+        flog,
+        ("phixsdata",),
+        f"artisatomic uses hydrogenic photoionisation cross sections for Z={atomic_number} {elsymbols[atomic_number]}",
     )
     # This loads the tables on the first call. The range test below reads max_hyd_gaunt_n, which
     # is -1 before the load, and the loop would then skip every level as out of range.

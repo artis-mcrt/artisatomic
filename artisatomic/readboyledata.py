@@ -8,6 +8,8 @@ import typing as t
 from functools import cache
 
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import log_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 
 datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
@@ -171,9 +173,10 @@ def read_lines_data(atomic_number, ion_stage):
     return transitions
 
 
-def read_levels_and_transitions(atomic_number, ion_stage):
+def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(datafilepath)}")
     transitions = read_lines_data(atomic_number, ion_stage)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)

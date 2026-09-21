@@ -3962,6 +3962,7 @@ def test_iondata_handlers_registry():
     run.
     """
     from artisatomic import groundstatesonlynist
+    from artisatomic import readboyledata
     from artisatomic import readdreamdata
     from artisatomic import readlisbondata
     from artisatomic.iondata import handlers
@@ -4020,6 +4021,7 @@ def test_iondata_handlers_registry():
         "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
         "gsnist": groundstatesonlynist.read_ground_levels,
         "adas": readadasdata.read_adas_levels_and_transitions,
+        "boyle": readboyledata.read_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
         assert handlers[name].read_levels_and_transitions is reader, name
@@ -4036,26 +4038,6 @@ def test_iondata_handlers_registry():
         assert isinstance(reader, functools.partial)
         assert reader.func is readfloers25data.read_levels_and_transitions
         assert reader.keywords == keywords
-
-
-def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
-    """The boyle entry is the one adapter that drops an argument, so it needs its own check.
-
-    Its reader takes no flog, and the registry calls every reader with one, so the entry has to
-    drop it. A comparison of the callables cannot catch a mis-wired adapter here.
-    """
-    from artisatomic import readboyledata
-    from artisatomic.iondata import handlers
-
-    calls = []
-    monkeypatch.setattr(
-        readboyledata,
-        "read_levels_and_transitions",
-        lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
-    )
-    handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
-
-    assert calls == [(2, 1)]
 
 
 def test_console_script_entry_points_resolve():
@@ -4706,3 +4688,165 @@ def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
     ions = {(atomic_number, ion) for atomic_number, listions in ion_handlers for ion in listions}
     ions_unlimited = {(atomic_number, ion) for atomic_number, listions in unlimited for ion in listions}
     assert ions <= ions_unlimited
+
+
+def test_log_comment_records_for_an_ionlog_only():
+    """A plain stream gets the log line and records nothing, so the older callers stay valid."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_comment(flog, ("adata", "phixsdata"), "Reading a file")
+    assert stream.getvalue() == "Reading a file\n"
+    assert flog.comments == {"adata": ["Reading a file"], "transitiondata": [], "phixsdata": ["Reading a file"]}
+
+    # a second IonLog with the same dictionary adds to the same lists, as the write pass does
+    log_comment(IonLog(io.StringIO(), flog.comments), ("adata",), "second pass")
+    assert flog.comments["adata"] == ["Reading a file", "second pass"]
+
+    plainstream = io.StringIO()
+    log_comment(plainstream, ("adata",), "Reading a file")
+    assert plainstream.getvalue() == "Reading a file\n"
+
+
+def test_log_comment_without_echo_keeps_the_line_off_stdout(capsys):
+    """The line goes to the log file and to the comment list only."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_comment(flog, ("phixsdata",), "quiet line", echo=False)
+    assert not capsys.readouterr().out
+    assert stream.getvalue() == "quiet line\n"
+    assert flog.comments["phixsdata"] == ["quiet line"]
+
+
+def test_write_comment_block_gives_every_part_of_a_line_a_hash():
+    """ARTIS reads a line with no # as data, so a line break in a log line must not end the comment."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["transitiondata"].extend(["Temperatures:\n0.1, 0.2", "# a header line of the source file"])
+    out = io.StringIO()
+    write_comment_block(out, "transitiondata", ("Z=26 Fe II",), flog)
+    assert out.getvalue() == "# Z=26 Fe II\n# Temperatures:\n# 0.1, 0.2\n# a header line of the source file\n"
+
+    # no header and a plain stream: the writer tests that pin the whole output depend on this
+    out = io.StringIO()
+    write_comment_block(out, "transitiondata", (), io.StringIO())
+    assert not out.getvalue()
+
+
+def artis_noncommentline(lines: list[str], pos: int) -> int:
+    """Return the index of the next line that get_noncommentline() of ARTIS (input.h) returns."""
+    while not lines[pos].strip() or lines[pos].lstrip().startswith("#"):
+        pos += 1
+    return pos
+
+
+def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
+    """Read the output files as ARTIS does (input.cc), so a comment at a wrong position fails here.
+
+    ARTIS skips a comment line only before the header of an ion or of a cross section table.
+    Inside a block it takes a fixed count of lines, whatever they hold.
+    """
+    from artisatomic.iondata import IonData
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    nphixspoints = 3
+    (tmp_path / "logs").mkdir()
+    tmpargs = argparse.Namespace(
+        output_folder=str(tmp_path),
+        output_folder_logs="logs",
+        nophixs=False,
+        nphixspoints=nphixspoints,
+        phixsnuincrement=0.1,
+        optimaltemperature=6000,
+    )
+
+    def iondata(ion_stage: int, is_top_ion: bool) -> IonData:
+        return IonData(
+            ion_stage=ion_stage,
+            handler="cmfgen_qubphixs",
+            is_top_ion=is_top_ion,
+            ionization_energy_ev=10.0,
+            dfenergylevels=pl.DataFrame(
+                {
+                    "levelid": [0, 1],
+                    "energyabovegsinpercm": [0.0, 1000.0],
+                    "g": [9.0, 7.0],
+                    "parity": [0, 1],
+                    "levelname": [f"gs{ion_stage}", f"excited{ion_stage} # not a comment"],
+                }
+            ),
+            dftransitions=pl.DataFrame(),
+            upsilondict={(0, 1): 0.5},
+            photoion_targetconfigs=None,
+            photoionization_crosssections=np.empty((0, nphixspoints)) if is_top_ion else np.ones((2, nphixspoints)),
+            # one target for level id 0 and two targets for level id 1, so both table forms occur
+            photoionization_targetfractions=[] if is_top_ion else [[(0, 1.0)], [(0, 0.25), (1, 0.75)]],
+            photoionization_thresholds_ev=np.empty(0) if is_top_ion else np.array([10.0, 9.0]),
+            comments={"adata": ["Reading osc_data"], "transitiondata": ["Temperatures:\n0.1, 0.2"], "phixsdata": []},
+        )
+
+    ionstages = [1, 2, 3]
+    clear_files(tmpargs)
+    write_output_files(26, [iondata(ion_stage, is_top_ion=ion_stage == 3) for ion_stage in ionstages], tmpargs)
+
+    adatatext = (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    assert "# Z=26 Fe II\n# handler: cmfgen_qubphixs\n# source: the CMFGEN model atoms" in adatatext
+    assert "# Reading osc_data\n" in adatatext
+    lines = adatatext.splitlines()
+    pos = 0
+    for ion_stage in ionstages:
+        pos = artis_noncommentline(lines, pos)
+        atomic_number, ion_stage_in, nlevels, _ionpot = lines[pos].split()
+        assert (int(atomic_number), int(ion_stage_in), int(nlevels)) == (26, ion_stage, 2)
+        for levelline in lines[pos + 1 : pos + 1 + 2]:
+            levelindex, energy, g, ntransitions = levelline.split()[:4]
+            assert (int(levelindex), float(energy), float(g), int(ntransitions)) is not None
+        pos += 1 + 2
+
+    transitiontext = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert "# Temperatures:\n# 0.1, 0.2\n" in transitiontext
+    assert "# source: the CMFGEN model atoms" in transitiontext
+    lines = transitiontext.splitlines()
+    pos = 0
+    for ion_stage in ionstages:
+        pos = artis_noncommentline(lines, pos)
+        assert [int(field) for field in lines[pos].split()] == [26, ion_stage, 1]
+        # ARTIS counts the columns of the first row, so the row must hold five numbers and no more
+        assert [float(field) for field in lines[pos + 1].split()] == [1.0, 2.0, 0.0, 0.5, 0.0]
+        pos += 1 + 1
+
+    phixstext = (tmp_path / "phixsdata_v2.txt").read_text(encoding="utf-8")
+    assert "# source: the Co data of Queen's University Belfast" in phixstext
+    assert "# Downsample of the cross sections" in phixstext
+    lines = phixstext.splitlines()
+    # ARTIS reads the first two numbers with no comment skip
+    assert int(lines[0]) == nphixspoints
+    assert float(lines[1]) == 0.1
+    pos = 2
+    tables = []
+    while any(line.strip() and not line.lstrip().startswith("#") for line in lines[pos:]):
+        pos = artis_noncommentline(lines, pos)
+        _, upperionstage, targetlevel, lowerionstage, lowerlevel, _threshold = lines[pos].split()
+        assert int(upperionstage) == int(lowerionstage) + 1
+        pos += 1
+        if int(targetlevel) == -1:
+            pos = artis_noncommentline(lines, pos)
+            ntargets = int(lines[pos])
+            pos += 1
+            for _ in range(ntargets):
+                pos = artis_noncommentline(lines, pos)
+                assert len(lines[pos].split()) == 2
+                pos += 1
+        # ARTIS reads the points with >>, which stops at a #
+        assert [float(line) for line in lines[pos : pos + nphixspoints]] == [1.0] * nphixspoints
+        pos += nphixspoints
+        tables.append((int(lowerionstage), int(lowerlevel)))
+    assert tables == [(1, 1), (1, 2), (2, 1), (2, 2)]

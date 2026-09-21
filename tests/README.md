@@ -8,7 +8,9 @@ Each directory here is one entry of the `tests` matrix in
 recipe below reproduces it.
 
 Verification is whole-file MD5, so **any** change to level naming, sorting, phixs downsampling or a
-default argument invalidates every checksum at once. Regenerate a set with:
+default argument invalidates every checksum at once. A change to a log line that goes into a comment block
+(`log_comment()`) or to a `Handler` description changes the checksums too. Such a change must leave the files the
+same after `grep -v '^#'`. Regenerate a set with:
 
 ```bash
 export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"

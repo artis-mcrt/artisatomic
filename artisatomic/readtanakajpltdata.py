@@ -15,7 +15,8 @@ from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
-from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
@@ -56,7 +57,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     with a warning.
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
-    print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(jpltpath / filename)}")
 
     def require(condition: bool, message: str) -> None:
         # not an assert: input validation must survive python -O
@@ -70,18 +71,18 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     for linenumber, readlinein in enumerate(headerlines[:7]):
         if linenumber < 3:
-            log_and_print(flog, readlinein)
+            log_comment(flog, ("adata", "transitiondata"), readlinein)
 
         if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
             break
     require(readlinein == f"# {atomic_number} {ion_stage}", f"no '# {atomic_number} {ion_stage}' line in the header")
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
-    log_and_print(flog, f"levels: {levelcount}")
-    log_and_print(flog, f"transitions: {transitioncount}")
+    log_comment(flog, ("adata",), f"levels: {levelcount}")
+    log_comment(flog, ("transitiondata",), f"transitions: {transitioncount}")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
     require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
@@ -189,7 +190,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
-        log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        log_comment(flog, ("transitiondata",), "WARNING: dropped rows where upper and lower levels are equal")
         dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions

@@ -29,6 +29,11 @@ prek install
 ## Usage
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an `artisatomicionhandlers.json` file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection.
 
+### Comment blocks in the output files
+adata.txt, transitiondata.txt and phixsdata_v2.txt have a block of `#` comment lines before the data of each ion. The block gives the handler, the data source with its reference, the source files, and the counts and warnings for that file. The log files in `atomic_data_logs` hold the same lines and more detail. compositiondata.txt has no comment, because ARTIS reads it with no comment skip.
+
+ARTIS v2023.10 and later skip these comment lines. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment lines.
+
 The package installs three more commands:
 
 - `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).

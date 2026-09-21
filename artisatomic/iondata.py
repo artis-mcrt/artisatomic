@@ -6,6 +6,7 @@ import itertools
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from functools import partial
 from pathlib import Path
 
@@ -25,7 +26,9 @@ from artisatomic import readlisbondata
 from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
+from artisatomic.base import empty_comments
 from artisatomic.base import ion_log_path
+from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import PhixsData
@@ -58,6 +61,11 @@ class IonData:
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
     photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
     photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
+    # The lines for the comment block of each output file (see base.IonLog). The read pass fills
+    # them, and the write pass adds to them.
+    # true when match_hydrogenic_phixs() gave the cross sections, and not the handler
+    uses_hydrogenic_phixs: bool = False
+    comments: dict[str, list[str]] = field(default_factory=empty_comments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,63 +88,110 @@ class Handler:
 
     read_phixs, when set, takes the same arguments and returns the PhixsData of the ion. Without
     it, the hydrogenic estimate is the only source of cross sections.
+
+    description is the name of the data source and its reference. The writer puts it into the
+    comment block of each output file. phixs_description replaces it in phixsdata_v2.txt, for a
+    handler that takes its cross sections from a different source.
     """
 
+    description: str
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
     get_level_valence_n: Callable[[str], int | None] | None = None
     returns_upsilondict: bool = False
     reader_takes_args: bool = False
     read_coldata: Callable[..., dict[tuple[int, int], float]] | None = None
     read_phixs: Callable[..., PhixsData] | None = None
+    phixs_description: str | None = None
 
+
+cmfgen_description = (
+    "the CMFGEN model atoms of Hillier. Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427, doi:10.1086/305350"
+)
+floers25_description = (
+    "the Floers+25 data set. Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G."
+    " (2026), Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. Data set: doi:10.5281/zenodo.15835360"
+)
+qub_cobalt_description = "the Co data of Queen's University Belfast (private communication)"
+# match_hydrogenic_phixs() gives these tables to an ion whose handler read no cross section
+hydrogenic_phixs_description = (
+    "the hydrogenic estimate of artisatomic, which scales the hydrogenic tables of CMFGEN with the result of"
+    " Kramers, H. A. (1923), Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244"
+)
 
 handlers: dict[str, Handler] = {
     "boyle": Handler(
-        lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
+        "the AOIFE helium data set. Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W. (2017), A&A, 599, A46,"
+        " doi:10.1051/0004-6361/201629712",
+        readboyledata.read_levels_and_transitions,
     ),
-    "kurucz": Handler(readkuruczdata.read_levels_and_transitions, readkuruczdata.get_level_valence_n),
-    # the DREAM database of Z >= 57: Quinet & Palmeri (2020), Atoms, 8, 18, doi:10.3390/atoms8020018
-    "dream": Handler(readdreamdata.read_levels_and_transitions),
-    "lisbon": Handler(readlisbondata.read_levels_and_transitions),
+    "kurucz": Handler(
+        "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/",
+        readkuruczdata.read_levels_and_transitions,
+        readkuruczdata.get_level_valence_n,
+    ),
+    "dream": Handler(
+        "the DREAM database (Database on Rare Earths At Mons university) of Z >= 57. Quinet, P., Palmeri, P."
+        " (2020), Atoms, 8, 18, doi:10.3390/atoms8020018",
+        readdreamdata.read_levels_and_transitions,
+    ),
+    "lisbon": Handler("the Lisbon Atomic Group data set", readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
+        floers25_description + " (calibrated, with the forbidden lines)",
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25calib": Handler(
+        floers25_description + " (calibrated)",
         partial(readfloers25data.read_levels_and_transitions, calibrated=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25uncalib": Handler(
+        floers25_description + " (uncalibrated)",
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
     ),
-    # fac reads an early version of the floers25 calib data
-    "fac": Handler(readfacdata.read_levels_and_transitions, readfacdata.get_level_valence_n),
-    # the University of Mons lanthanides V-VII: Carvajal Gallego, Deprince, Maison, Palmeri & Quinet
-    # (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723
-    "mons": Handler(readmonsdata.read_levels_and_transitions),
-    # the Japan-Lithuania database of 26 <= Z <= 88: Tanaka, Kato, Gaigalas & Kawaguchi (2020),
-    # MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576
+    "fac": Handler(
+        "FAC and cFAC output, an early version of the calibrated Floers+25 data. Flörs, A., da Silva, R. F.,"
+        " Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026), Phys. Rev. D, 113, 063041,"
+        " doi:10.1103/jxqw-7ynk. FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197",
+        readfacdata.read_levels_and_transitions,
+        readfacdata.get_level_valence_n,
+    ),
+    "mons": Handler(
+        "the University of Mons data set of the lanthanides V-VII. Carvajal Gallego, H., Deprince, J., Maison, L.,"
+        " Palmeri, P., Quinet, P. (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723. Data set:"
+        " doi:10.5281/zenodo.10635803",
+        readmonsdata.read_levels_and_transitions,
+    ),
     "tanakajplt": Handler(
+        "the Japan-Lithuania opacity database for kilonovae. Tanaka, M., Kato, D., Gaigalas, G., Kawaguchi, K. (2020),"
+        " MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576 (version 1), and Kato, D., Tanaka, M., Gaigalas, G.,"
+        " Kitovienė, L., Rynkun, P. (2024), MNRAS, 535, 2670-2686, doi:10.1093/mnras/stae2504 (version 2)",
         readtanakajpltdata.read_levels_and_transitions,
         readtanakajpltdata.get_level_valence_n,
     ),
-    # ground states from the NIST Atomic Spectra Database: Kramida, Ralchenko, Reader & NIST ASD Team,
-    # https://physics.nist.gov/asd, doi:10.18434/T4W30F
-    "gsnist": Handler(groundstatesonlynist.read_ground_levels),
+    "gsnist": Handler(
+        "ground states only, from the NIST Atomic Spectra Database. Kramida, A., Ralchenko, Yu., Reader, J. and NIST"
+        " ASD Team, https://physics.nist.gov/asd, doi:10.18434/T4W30F",
+        groundstatesonlynist.read_ground_levels,
+    ),
     # The adf04 files tabulate the collision strengths at several temperatures, and
     # -electrontemperature picks one, so the reader takes args.
     # Only the QUB Co III data has cross sections. An ion with none gets the hydrogenic estimate.
     "adas": Handler(
+        "files in the ADAS adf04 format. Authors at Queen's University Belfast made the Co, Sr I and Fe files. The"
+        " Sr I file: Dougan, D. J., McElroy, N. E., Ballance, C. P., Ramsbottom, C. A. (2025), MNRAS, 541, 367-383,"
+        " doi:10.1093/mnras/staf1013. The Ca III file comes from OPEN-ADAS, https://open.adas.ac.uk",
         readadasdata.read_adas_levels_and_transitions,
         readadasdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
         read_phixs=readadasdata.read_photoionizations,
+        phixs_description=qub_cobalt_description,
     ),
-    # the CMFGEN model atoms of Hillier: levels, collision strengths and cross sections. Hillier &
-    # Miller (1998), ApJ, 496, 407-427, doi:10.1086/305350
+    # levels, collision strengths and cross sections
     "cmfgen": Handler(
+        cmfgen_description,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
@@ -145,16 +200,28 @@ handlers: dict[str, Handler] = {
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.
     "cmfgen_qubphixs": Handler(
+        cmfgen_description,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
+        phixs_description=qub_cobalt_description,
     ),
 }
 
 # every handler name that read_ion_data() dispatches. parse_ion_handlers() checks a JSON file
 # against this before the run writes any output file.
 known_handlers: frozenset[str] = frozenset(handlers)
+
+
+def source_description(iondata: IonData, table: str) -> str:
+    """Name and reference of the data source of one output file of an ion, for the comment block."""
+    handlerspec = handlers[iondata.handler]
+    if table != "phixsdata":
+        return handlerspec.description
+    if iondata.uses_hydrogenic_phixs:
+        return hydrogenic_phixs_description
+    return handlerspec.phixs_description or handlerspec.description
 
 
 def read_ion_data(
@@ -176,9 +243,11 @@ def read_ion_data(
     photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
+    uses_hydrogenic_phixs = False
 
     logfilepath = ion_log_path(Path(args.output_folder, args.output_folder_logs), atomic_number, ion_stage)
-    with logfilepath.open("w", encoding="utf-8") as flog:
+    with logfilepath.open("w", encoding="utf-8") as logstream:
+        flog = IonLog(logstream)
         log_and_print(
             flog,
             f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
@@ -216,6 +285,7 @@ def read_ion_data(
             and len(photoionization_crosssections) == 0
             and args.nlevels_hydrogenic_for_unknown_phixs > 0
         ):
+            uses_hydrogenic_phixs = True
             get_level_valence_n = handlerspec.get_level_valence_n
             (
                 photoionization_crosssections,
@@ -239,6 +309,8 @@ def read_ion_data(
         photoionization_crosssections=photoionization_crosssections,
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
+        comments=flog.comments,
+        uses_hydrogenic_phixs=uses_hydrogenic_phixs,
     )
 
 

@@ -22,6 +22,7 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -522,7 +523,7 @@ def read_levels_and_transitions_from_file(
 
     filename = hillier_osc_filename(atomic_number, ion_stage)
 
-    log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
 
     levelrows: list[HillierEnergyLevel] = []
     levels_without_parity: list[str] = []
@@ -561,15 +562,15 @@ def read_levels_and_transitions_from_file(
                 print(f"  {row_format_energy_level}")
             elif line.rstrip().endswith("!Number of energy levels"):
                 expected_energy_levels = int(row[0])
-                log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
+                log_comment(flog, ("adata",), f"File specifies {expected_energy_levels:d} levels")
             elif line.rstrip().endswith("!Number of transitions"):
                 expected_transitions = int(row[0])
-                log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
+                log_comment(flog, ("transitiondata",), f"File specifies {expected_transitions:d} transitions")
             elif line.rstrip().endswith("!Ionization energy"):
                 # the header gives the value in cm^-1 to the full precision of the file. The Lam(A)
                 # column of the level table has four significant figures only.
                 hillier_ionization_energy_ev = fortran_float(row[0]) * hc_in_ev_cm
-                log_and_print(flog, f"File specifies an ionisation energy of {row[0]} cm^-1")
+                log_comment(flog, ("adata",), f"File specifies an ionisation energy of {row[0]} cm^-1")
             elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
                 format_date = row[0]
                 print(f"Format date: {format_date}")
@@ -622,8 +623,9 @@ def read_levels_and_transitions_from_file(
                     ionization_energy_from_lambda_ev = hc_in_ev_angstrom / abs(lambdaangstrom)
                     relative_difference = abs(ionization_energy_from_lambda_ev / hillier_ionization_energy_ev - 1.0)
                     if relative_difference > 1e-3:
-                        log_and_print(
+                        log_comment(
                             flog,
+                            ("adata",),
                             f"WARNING: the ground level Lam(A) {lambdaangstrom} gives an ionisation energy of"
                             f" {ionization_energy_from_lambda_ev:.5f} eV, but the header gives"
                             f" {hillier_ionization_energy_ev:.5f} eV",
@@ -666,12 +668,13 @@ def read_levels_and_transitions_from_file(
             if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
                 break
 
-    log_and_print(flog, f"Read {len(levelrows):d} levels")
+    log_comment(flog, ("adata",), f"Read {len(levelrows):d} levels")
     if levels_without_parity:
         # This is normal for ions with merged levels, so the log gets a count and a sample and
         # not a warning per level. H I and He II have only merged levels.
-        log_and_print(
+        log_comment(
             flog,
+            ("adata", "transitiondata"),
             f"{len(levels_without_parity):d} of {len(levelrows):d} levels have no definite parity, e.g."
             f" {', '.join(levels_without_parity[:5])}. Every transition of such a level counts as"
             " permitted.",
@@ -690,7 +693,7 @@ def read_levels_and_transitions_from_file(
     # half a million of them
     dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
 
-    log_and_print(flog, f"Read {dftransitions.height:d} transitions")
+    log_comment(flog, ("transitiondata",), f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
         msg = f"{filename} declares {expected_transitions} transitions but has {dftransitions.height}"
         raise ValueError(msg)
@@ -966,8 +969,9 @@ class PhotFileReader:
             if upperion_known
             else "CMFGEN has no oscillator file for the ion above"
         )
-        log_and_print(
+        log_comment(
             self.flog,
+            ("phixsdata",),
             f"WARNING: {reason}, so the reader takes the excitation energy from the {self.photfilename} header",
         )
         return self.excitation_energy_ev
@@ -1036,16 +1040,18 @@ class PhotFileReader:
 
         # one summary for the file, and not one line for each level or each row
         if self.levels_without_edge:
-            log_and_print(
+            log_comment(
                 self.flog,
+                ("phixsdata",),
                 f"WARNING: {len(self.levels_without_edge)} level names of {photfilename} have a threshold energy of"
                 f" zero or below, so they get no cross section."
                 f" The first is {next(iter(self.levels_without_edge))}.",
             )
         if self.duplicate_energy_first is not None:
             duplicate_levelname, duplicate_energy = self.duplicate_energy_first
-            log_and_print(
+            log_comment(
                 self.flog,
+                ("phixsdata",),
                 f"WARNING: the first column of the photoionisation tables of {photfilename} repeats an energy on"
                 f" {self.duplicate_energy_rows} rows. The first is the energy {duplicate_energy} of"
                 f" {duplicate_levelname}.",
@@ -1070,7 +1076,7 @@ class PhotFileReader:
 
         if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
             self.targetlevelname = row[0]
-            log_and_print(self.flog, "Photoionisation target: " + self.targetlevelname)
+            log_comment(self.flog, ("phixsdata",), "Photoionisation target: " + self.targetlevelname)
             if "[" in self.targetlevelname:
                 msg = f"target level {self.targetlevelname} contains a bracket (is J-split?)"
                 raise ValueError(msg)
@@ -1088,7 +1094,7 @@ class PhotFileReader:
                 self.j_splitting_seen = new_j_splitting_on
                 self.j_splitting_on = new_j_splitting_on
                 if self.j_splitting_on:
-                    log_and_print(self.flog, "File specifies J-splitting = true")
+                    log_comment(self.flog, ("phixsdata",), "File specifies J-splitting = true")
             else:
                 msg = f'J-splitting is not "true" or "false": "{row[0]}"'
                 raise ValueError(msg)
@@ -1097,8 +1103,10 @@ class PhotFileReader:
             row[-3:]
         ) == "!Configuration name [*]":
             if not self.in_header:
-                log_and_print(
-                    self.flog, f"WARNING: no photoionisation target ({line.strip()}). The reader skips to the next line"
+                log_comment(
+                    self.flog,
+                    ("phixsdata",),
+                    f"WARNING: no photoionisation target ({line.strip()}). The reader skips to the next line",
                 )
                 # Fe VIII and Ni X phot_data_A have lines before the header that end in
                 # "!Configuration name" and are not level blocks
@@ -1138,8 +1146,9 @@ class PhotFileReader:
             # ion_stage (which matches the oscillator value for every ion in ions_data) and report it.
             zion_from_photfile = int(fortran_float(row[0]))
             if zion_from_photfile != self.ion_stage:
-                log_and_print(
+                log_comment(
                     self.flog,
+                    ("phixsdata",),
                     f"WARNING: the screened nuclear charge {zion_from_photfile} in {self.photfilename}"
                     f" disagrees with ion_stage {self.ion_stage}. The reader ignores it.",
                 )
@@ -1389,7 +1398,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     if not photfilenames:
         # empty arrays, not zero-filled ones: read_ion_data() reads an empty cross section array
         # as "no data" and applies the hydrogenic estimate. A zero-filled array would pass as data.
-        log_and_print(flog, "No photoionisation files for this ion")
+        log_comment(flog, ("phixsdata",), "No photoionisation files for this ion")
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetconfigs=[None] * levelcount)
 
     # the type 2, 3 and 8 fits interpolate the hydrogenic tables
@@ -1436,7 +1445,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             hillier_ion_folder(atomic_number, ion_stage), ions_data[atomic_number, ion_stage].folder, photfilename
         )
 
-        log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+        log_comment(flog, ("phixsdata",), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
         reader.read_file(filenum, filename, photfilename)
 
         reduced_phixstables_onetarget = reduce_phixs_tables(
@@ -1495,22 +1504,25 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # report.
         typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
         if crosssectiontype in reader.unknown_phixs_types:
-            log_and_print(
+            log_comment(
                 flog,
+                ("phixsdata",),
                 f"WARNING {len(reader.phixs_type_levels[crosssectiontype])} level names with UNKNOWN cross section type"
                 f" {crosssectiontype}: {typelabel}",
             )
         else:
-            log_and_print(
+            log_comment(
                 flog,
+                ("phixsdata",),
                 f"{len(reader.phixs_type_levels[crosssectiontype])} level names with cross section type"
                 f" {crosssectiontype}:"
                 f" {typelabel}",
             )
 
     if num_levelnames_with_zero_crosssection > 0:
-        log_and_print(
+        log_comment(
             flog,
+            ("phixsdata",),
             f"WARNING: {num_levelnames_with_zero_crosssection} level names have a cross section that is zero"
             " everywhere on the output energy grid, so those levels get no photoionisation",
         )
@@ -1825,7 +1837,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
-        log_and_print(flog, "The ion has no collisional data file")
+        log_comment(flog, ("transitiondata",), "The ion has no collisional data file")
         return upsilondict
 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
@@ -1857,7 +1869,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         / ions_data[atomic_number, ion_stage].folder
         / coldatafilename
     )
-    log_and_print(flog, f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
+    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(filename, relative_to=hillier_datadir)}")
     coll_lines_in = 0
     number_expected_transitions = -1
     # the within-term pair loops below insert all of a name's pairs at its first mention, so
@@ -1878,8 +1890,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 and num_expected_t_values != -1
                 and re.match(r"^\*{5,}+", line.strip())
             ):
-                log_and_print(
-                    flog, "WARNING: Found a line of *'s after the header. The reader assumes that the table ends there."
+                log_comment(
+                    flog,
+                    ("transitiondata",),
+                    "WARNING: Found a line of *'s after the header. The reader assumes that the table ends there.",
                 )
                 break  # some files have lines of stars at the end, e.g. Na VI and Ne V. Stop at the first one.
 
@@ -1890,8 +1904,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
             if line.lstrip().startswith(r"Transition\T"):  # found the header row
                 header_row = row
                 if len(header_row) != num_expected_t_values + 1:
-                    log_and_print(
+                    log_comment(
                         flog,
+                        ("transitiondata",),
                         f"WARNING: the file declares {num_expected_t_values:d} temperature values, but the header"
                         f" has {len(header_row):d} columns",
                     )
@@ -1901,15 +1916,17 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     # catch a commented header with len(header_row) == num_expected_t_values + 1.
                     # No known file has one.
                     if "!" in header_row:
-                        log_and_print(
+                        log_comment(
                             flog,
+                            ("transitiondata",),
                             "The header comments out some temperatures. The reader assumes that the header is"
                             f" correct, num_expected_t_values={num_expected_t_values:d}",
                         )
                     else:
                         num_expected_t_values = len(header_row) - 1
-                        log_and_print(
+                        log_comment(
                             flog,
+                            ("transitiondata",),
                             "The reader assumes that the header is incorrect and sets"
                             f" num_expected_t_values={num_expected_t_values:d}",
                         )
@@ -1921,8 +1938,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 # whether "!" is a token of its own or the start of a token ("!0.5").
                 row = row[: next((i for i, token in enumerate(row) if token.startswith("!")), len(row))]
                 temperatures = row[-num_expected_t_values:]
-                log_and_print(
+                log_comment(
                     flog,
+                    ("transitiondata",),
                     "Temperatures available for effective collision strengths (units of"
                     f" {t_scale_factor:.1e} K):\n{', '.join(temperatures)}",
                 )
@@ -1931,7 +1949,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     key=lambda t: abs(fortran_float(t) * t_scale_factor - args.electrontemperature),
                 )
                 temperature_index = temperatures.index(best_temperature)
-                log_and_print(flog, f"Selecting {fortran_float(best_temperature) * t_scale_factor:.3f} K")
+                log_comment(
+                    flog, ("transitiondata",), f"Selecting {fortran_float(best_temperature) * t_scale_factor:.3f} K"
+                )
                 continue
 
             if len(row) >= 2:
@@ -2020,18 +2040,19 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                             upsilondict[key] = upsilonscaled
 
     if number_expected_transitions < 0:
-        log_and_print(flog, "WARNING: the collision data file has no '!Number of transitions' line")
+        log_comment(flog, ("transitiondata",), "WARNING: the collision data file has no '!Number of transitions' line")
     elif coll_lines_in < number_expected_transitions:
         msg = f"the file declares {number_expected_transitions:d} transitions but has only {coll_lines_in:d}"
         raise ValueError(msg)
     elif coll_lines_in > number_expected_transitions:
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"WARNING: the file declares {number_expected_transitions:d} transitions but has {coll_lines_in:d}",
         )
     else:
-        log_and_print(flog, f"Read {coll_lines_in} effective collision strengths")
-        log_and_print(flog, f"Output {len(upsilondict)} effective collision strengths")
+        log_comment(flog, ("transitiondata",), f"Read {coll_lines_in} effective collision strengths")
+        log_comment(flog, ("transitiondata",), f"Output {len(upsilondict)} effective collision strengths")
 
     return upsilondict
 

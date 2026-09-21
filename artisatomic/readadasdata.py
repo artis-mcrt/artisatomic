@@ -33,6 +33,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -360,7 +361,7 @@ def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, 
     counts = ", ".join(
         f"{count} of {len(levels)} levels agree with the {name} order" for name, count in agreement.items()
     )
-    log_and_print(flog, f"Eissner notation detected for electron configuration ({counts})")
+    log_comment(flog, ("adata",), f"Eissner notation detected for electron configuration ({counts})")
 
     # The digits of a defective Eissner configuration must not become the name of a level. A
     # blank field or a label is not an Eissner configuration, and the reader keeps its text.
@@ -370,10 +371,13 @@ def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, 
             raise ValueError(msg)
     labels = [config for config in configs if not looks_like_eissner_config(config)]
     if labels:
-        log_and_print(flog, f"WARNING: levels with no Eissner configuration: {len(labels)}, for example {labels[0]!r}")
+        log_comment(
+            flog, ("adata",), f"WARNING: levels with no Eissner configuration: {len(labels)}, for example {labels[0]!r}"
+        )
     if agreement[order] < len(levels) - len(labels):
-        log_and_print(
+        log_comment(
             flog,
+            ("adata",),
             f"WARNING: levels whose shells cannot give their total L: {len(levels) - len(labels) - agreement[order]}."
             " The file possibly uses a different order of the Eissner shell characters.",
         )
@@ -434,7 +438,7 @@ def read_adf04(
     energylevels: list[ADASEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
-    log_and_print(flog, f"Reading {path_for_log(filepath)}")
+    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(filepath)}")
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         ionization_energy_ev = _read_adf04_header(line, atomic_number, ion_stage, filepath)
@@ -522,8 +526,9 @@ def read_adf04(
         nearest_index = min(
             range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
         )
-        log_and_print(
+        log_comment(
             flog,
+            ("transitiondata",),
             f"Selecting {temperature_values[nearest_index]:.0f} K for the collision strengths from"
             f" {', '.join(temperatures)}",
         )
@@ -584,15 +589,23 @@ def read_adf04(
                     f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
 
-    log_and_print(flog, f"Read {len(energylevels):d} levels")
-    log_and_print(flog, f"Read {len(upsilondict):d} effective collision strengths")
+    log_comment(flog, ("adata",), f"Read {len(energylevels):d} levels")
+    log_comment(flog, ("transitiondata",), f"Read {len(upsilondict):d} effective collision strengths")
     if skipped_rows:
-        log_and_print(flog, f"Skipped rows that are not an electron impact excitation: {skipped_rows:d}")
+        log_comment(
+            flog, ("transitiondata",), f"Skipped rows that are not an electron impact excitation: {skipped_rows:d}"
+        )
     if unreadable_rows:
-        log_and_print(flog, f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}")
+        log_comment(
+            flog, ("transitiondata",), f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}"
+        )
     if short_rows:
         warning = "" if upsilondict else "WARNING: no collision row has an upsilon at the selected temperature. "
-        log_and_print(flog, f"{warning}Collision rows with no upsilon at the selected temperature: {short_rows:d}")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"{warning}Collision rows with no upsilon at the selected temperature: {short_rows:d}",
+        )
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
 
@@ -678,6 +691,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
         adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
         transitionfile = tyndall_co3_path / "adf04rad_v1"
+        log_comment(flog, ("transitiondata",), f"Reading {path_for_log(transitionfile)}")
         with xopen_check_extension(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
@@ -700,7 +714,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_and_print(flog, f"ionisation energy: {ionization_energy_ev} eV (NIST)")
+        log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_ev} eV (NIST)")
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
@@ -734,7 +748,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         msg = f"No ADAS data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
         raise ValueError(msg)
 
-    log_and_print(flog, f"Read {len(adas_transitions):d} transitions")
+    log_comment(flog, ("transitiondata",), f"Read {len(adas_transitions):d} transitions")
 
     return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
 
@@ -750,6 +764,7 @@ def _fill_co2_phixs(
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co II. The tables are for the CMFGEN levels of Co II."""
+    log_comment(flog, ("phixsdata",), f"Reading the cross section files 1 to 8 in {path_for_log(tyndall_co3_path)}")
     for lowerlevelid in range(8):
         # the name of a cross section file is the level's number in the source data, which
         # counts from one
@@ -821,7 +836,7 @@ def _fill_co3_phixs(
     ion_stage,
     levelcount: int,
     args,
-    _flog,
+    flog,
     photoionization_crosssections,
     photoionization_thresholds_ev,
     photoionization_targetfractions,
@@ -946,6 +961,12 @@ def _fill_co3_phixs(
             label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
         )["gs"]
 
+    log_comment(
+        flog,
+        ("phixsdata",),
+        "The reader holds one cross section table for the ground quartet of Co III. Each higher level gets a table"
+        " of zeros.",
+    )
     # unlike the Co II branch above, every level deliberately gets a phixs entry. The ground
     # quartet gets the tabulated cross section, and the higher levels get an explicit
     # all-zero table.
@@ -968,8 +989,10 @@ def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args
     the hydrogenic estimate.
     """
     if fill_arrays is None:
-        log_and_print(
-            flog, f"WARNING: no photoionisation data in atomic-data-adas for Z={atomic_number} ion_stage {ion_stage}"
+        log_comment(
+            flog,
+            ("phixsdata",),
+            f"WARNING: no photoionisation data in atomic-data-adas for Z={atomic_number} ion_stage {ion_stage}",
         )
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))

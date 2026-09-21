@@ -15,7 +15,8 @@ from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
-from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
@@ -121,8 +122,13 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     the energy plus the zero-based level id, so two levels with one energy keep separate names.
     NIST supplies the ionisation energy.
     """
+    log_comment(
+        flog,
+        ("adata",),
+        f"Reading {levels_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / levels_archive)}",
+    )
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
-    log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
+    log_comment(flog, ("adata",), f"levels: {len(energy_levels1000percm)}")
 
     sortorder = np.argsort(energy_levels1000percm, kind="stable")
     energiesabovegsinpercm = energy_levels1000percm[sortorder] * 1000
@@ -139,10 +145,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         }
     ).with_columns(parity=pl.lit(None, dtype=pl.Int64))
 
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / transitions_archive)}",
+    )
     transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3
     )
-    log_and_print(flog, f"transitions: {len(energy_levels_lower_1000percm)}")
+    log_comment(flog, ("transitiondata",), f"transitions: {len(energy_levels_lower_1000percm)}")
 
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
     energy_levels_upper_percm = energy_levels_lower_percm + 1e8 / transition_wavelength_A
@@ -153,7 +164,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         np.abs(energiesabovegsinpercm[lowerlevels] - energy_levels_lower_percm).max(),
         np.abs(energiesabovegsinpercm[upperlevels] - energy_levels_upper_percm).max(),
     )
-    log_and_print(flog, f"largest difference between a transition energy and its level: {maxmismatch_percm:.3g} cm^-1")
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"largest difference between a transition energy and its level: {maxmismatch_percm:.3g} cm^-1",
+    )
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
         msg = (
             f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
@@ -171,10 +186,12 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         ).sum()
     )
     if ambiguouscount > 0:
-        log_and_print(flog, f"WARNING: {ambiguouscount} level matches have a second level equally close")
+        log_comment(
+            flog, ("transitiondata",), f"WARNING: {ambiguouscount} level matches have a second level equally close"
+        )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
+    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
     # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
