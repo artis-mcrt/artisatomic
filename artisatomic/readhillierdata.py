@@ -1102,6 +1102,12 @@ class PhotFileReader:
             if "[" in self.targetlevelname:
                 msg = f"target level {self.targetlevelname} contains a bracket (is J-split?)"
                 raise ValueError(msg)
+            # phixstargets is a list with the target name of each phot file of the ion, in file
+            # order. Each file has one target. A second target line in one file would give the
+            # tables before that line to the wrong target.
+            if self.phixstargets[self.filenum]:
+                msg = f"{self.photfilename} has more than one '!Final state in ion' line"
+                raise ValueError(msg)
             if self.targetlevelname in self.phixstargets:
                 msg = f"Multiple phixs files for the same target configuration {self.targetlevelname}"
                 raise ValueError(msg)

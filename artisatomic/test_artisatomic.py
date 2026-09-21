@@ -5173,3 +5173,43 @@ def test_hydrogenic_estimate_gives_one_summary_of_the_levels_with_no_table():
         " name with no principal quantum number, and 0 have an n outside the hydrogenic tables."
     )
     assert summaries == [expected]
+
+
+def test_phot_file_reader_rejects_a_target_that_a_second_file_or_line_repeats(tmp_path):
+    """Each phot file of an ion has one target, and two files of an ion must not name the same target.
+
+    combine_phixs_routes() takes each file as one route to its target. Two routes to one target,
+    or a file with two targets, would give cross sections to the wrong target with no message.
+    """
+    from artisatomic.readhillierdata import PhotFileReader
+
+    def phot_text(targetlines: str) -> str:
+        return (
+            "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+            "1                                       !Number of energy levels\n"
+            "2.0D0                                   !Screened nuclear charge\n"
+            f"{targetlines}"
+            "Megabarns                               !Cross-section unit\n"
+            "False                                   !Split J levels\n"
+            "A                                       !Configuration name\n"
+            "20                                      !Type of cross-section\n"
+            "2                                       !Number of cross-section points\n"
+            "1.0 4.0\n2.0 1.0\n\n"
+        )
+
+    onetarget = "5s2_5p6_1Se                             !Final state in ion\n"
+    othertarget = "5s2_5p5_2Po                             !Final state in ion\n"
+    for name, targetlines in (("phot_A", onetarget), ("phot_B", onetarget), ("phot_C", onetarget + othertarget)):
+        (tmp_path / name).write_text(phot_text(targetlines), encoding="utf-8")
+
+    # the second file of the ion names the target of the first file
+    reader = PhotFileReader(56, 2, 2, [911.0], {"A": 0}, {"A": 0}, io.StringIO())
+    reader.read_file(0, tmp_path / "phot_A", "phot_A")
+    assert reader.phixstargets == ["5s2_5p6_1Se", ""]
+    with pytest.raises(ValueError, match="Multiple phixs files for the same target configuration 5s2_5p6_1Se"):
+        reader.read_file(1, tmp_path / "phot_B", "phot_B")
+
+    # one file with two target lines
+    reader = PhotFileReader(56, 2, 1, [911.0], {"A": 0}, {"A": 0}, io.StringIO())
+    with pytest.raises(ValueError, match="phot_C has more than one '!Final state in ion' line"):
+        reader.read_file(0, tmp_path / "phot_C", "phot_C")
