@@ -10,7 +10,6 @@ import argcomplete
 
 from artisatomic import readadasdata
 from artisatomic.base import check_ion_stages_contiguous
-from artisatomic.base import log_and_print
 from artisatomic.base import log_path
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
@@ -19,6 +18,9 @@ from artisatomic.ionhandlers import inputhandlersfile
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
+
+# the record of the ions and the handlers of a run, in the output folder
+handlersrecordname = "artisatomicionhandlers_used.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -149,24 +151,14 @@ def main() -> None:
     log_path(args.output_folder).write_text("", encoding="utf-8")
     remove_old_log_folder(Path(args.output_folder))
 
-    # A record of what this run used, beside the output files. It is NOT the file
-    # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
-    # directory. Copy this one there to repeat a run exactly, as the CI workflow does. The copy
-    # holds the ions that the limits kept, so the repeat run must not give a limit again.
-    handlersrecord = Path(args.output_folder, inputhandlersfile.name)
-    if handlersrecord.resolve() == inputhandlersfile.resolve():
-        # With the working directory as the output folder, the record would be the file that
-        # get_ion_handlers() reads. It would then select the ions of each later run. The log file
-        # gets the record, so the run can still be repeated.
-        with log_path(args.output_folder).open("a", encoding="utf-8") as flog:
-            log_and_print(
-                flog,
-                f"The output folder is the working directory, so the run does not write {handlersrecord.name}."
-                f" The ion handlers of this run: {json.dumps(ion_handlers)}",
-            )
-    else:
-        with handlersrecord.open("w", encoding="utf-8") as f:
-            json.dump(obj=ion_handlers, fp=f)
+    # A record of what this run used, beside the output files. Its name is not the name of the
+    # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working
+    # directory, or a later run from inside an output folder, must not take the record of an
+    # earlier run as its ion selection. Copy the record to ./artisatomicionhandlers.json to repeat
+    # a run exactly. It holds the ions that the limits kept, so the repeat run must not give a
+    # limit again.
+    with Path(args.output_folder, handlersrecordname).open("w", encoding="utf-8") as f:
+        json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)

@@ -14,6 +14,7 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
+from artisatomic.base import IonLog
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
@@ -85,7 +86,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     for linenumber, readlinein in enumerate(headerlines[:7]):
         if linenumber < 3:
-            log_comment(flog, ("adata", "transitiondata"), readlinein)
+            # the log file gets the header line of the data file as it is, and the comment blocks
+            # get it with no # of its own
+            log_and_print(flog, readlinein)
+            if isinstance(flog, IonLog):
+                flog.add_comment(("adata", "transitiondata"), readlinein.removeprefix("#"))
 
         if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
             break

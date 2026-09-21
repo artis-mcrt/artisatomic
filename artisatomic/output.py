@@ -33,7 +33,8 @@ file_comment_end = """
 COMMENTS
 A line that starts with # is a comment. ARTIS skips a comment only directly before a header line.
 {commentrule}A comment block before {blockposition} of each ion gives the handler, the source of the data and its
-source files.
+source files. The name of a source file has no extension of a compression, but the file on the disk can
+have one (.zst, .gz or .xz).
 """
 
 adata_file_comment = (

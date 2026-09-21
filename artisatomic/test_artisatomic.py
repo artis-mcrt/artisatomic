@@ -3291,6 +3291,9 @@ def test_readfloers25data_extend_ion_list_skips_hidden_files(tmp_path, monkeypat
     for name in ("70YbII_levels_calib.txt", "._70YbII_levels_calib.txt", "._57LaIII_levels_uncalib.txt"):
         (tmp_path / name).write_text("", encoding="utf-8")
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda withforbidden: tmp_path)  # ruff: ignore[unused-lambda-argument]
+    # Without the test mode, the search of the private folder runs first, and the folder of this
+    # test is the public folder and the private folder. The result must not depend on the mode.
+    monkeypatch.setattr(readfloers25data, "TESTMODE", True)
 
     assert readfloers25data.extend_ion_list([]) == [(70, [(2, "floers25calib")])]
 
@@ -4731,15 +4734,11 @@ def test_write_comment_block_gives_every_part_of_a_line_a_hash():
     from artisatomic.output import write_comment_block
 
     flog = IonLog(io.StringIO())
-    flog.comments["transitiondata"].extend(
-        ["Temperatures:\n0.1, 0.2", "# a header line of the source file", "source: a data set"]
-    )
+    flog.comments["transitiondata"].extend(["Temperatures:\n0.1, 0.2", "source: a data set"])
     out = io.StringIO()
     write_comment_block(out, "transitiondata", ("Z=26 Fe II",), flog)
     # the source line comes directly after the title lines, wherever a reader recorded it
-    assert out.getvalue() == (
-        "# Z=26 Fe II\n# source: a data set\n# Temperatures:\n# 0.1, 0.2\n# a header line of the source file\n"
-    )
+    assert out.getvalue() == "# Z=26 Fe II\n# source: a data set\n# Temperatures:\n# 0.1, 0.2\n"
 
     # no title line and a plain stream: the writer tests that pin the whole output depend on this
     out = io.StringIO()
@@ -4988,7 +4987,7 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
 
 
 def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_files(tmp_path, monkeypatch):
-    """The log of all ions is artisatomiclog.txt, and it sits with artisatomicionhandlers.json beside adata.txt."""
+    """The log of all ions is artisatomiclog.txt, and it sits with the record of the ion handlers beside adata.txt."""
     handlers = [[38, [[1, "kurucz"], [2, "kurucz"]]]]
     (tmp_path / "artisatomicionhandlers.json").write_text(json.dumps(handlers), encoding="utf-8")
     monkeypatch.chdir(tmp_path)
@@ -5004,14 +5003,14 @@ def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_file
         "transitiondata.txt",
         "phixsdata_v2.txt",
         "artisatomiclog.txt",
-        "artisatomicionhandlers.json",
+        "artisatomicionhandlers_used.json",
     }
-    assert json.loads((outputfolder / "artisatomicionhandlers.json").read_text(encoding="utf-8")) == handlers
+    assert json.loads((outputfolder / "artisatomicionhandlers_used.json").read_text(encoding="utf-8")) == handlers
     assert not (outputfolder / "artisatomiclog.txt").read_text(encoding="utf-8")
 
 
-def test_main_writes_no_handlers_record_into_the_working_directory(tmp_path, monkeypatch):
-    """A record in the working directory would select the ions of each later run, so the log file gets it."""
+def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handlers_alone(tmp_path, monkeypatch):
+    """get_ion_handlers() reads ./artisatomicionhandlers.json, so the record of a run must not get that name."""
     from artisatomic import cli
 
     monkeypatch.chdir(tmp_path)
@@ -5019,9 +5018,8 @@ def test_main_writes_no_handlers_record_into_the_working_directory(tmp_path, mon
     run_main_with_no_ion_read(monkeypatch, ".")
 
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
-    # the run can still be repeated, because the log file holds the ion handlers
-    logtext = (tmp_path / "artisatomiclog.txt").read_text(encoding="utf-8")
-    assert 'The ion handlers of this run: [[38, [[1, "kurucz"], [2, "kurucz"]]]]' in logtext
+    record = json.loads((tmp_path / "artisatomicionhandlers_used.json").read_text(encoding="utf-8"))
+    assert record == [[38, [[1, "kurucz"], [2, "kurucz"]]]]
 
 
 def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):

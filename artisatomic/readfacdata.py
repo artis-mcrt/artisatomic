@@ -316,12 +316,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         levels_file = ion_folder / f"{ionstr}.lev.asc"
         lines_file = ion_folder / f"{ionstr}.tr.asc"
 
-    log_comment(
-        flog,
-        ("adata", "transitiondata"),
-        f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {path_for_log(ion_folder, relative_to=logged_root)}",
-    )
+    log_comment(flog, ("adata",), f"Reading {path_for_log(levels_file, relative_to=logged_root)}")
+    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(lines_file, relative_to=logged_root)}")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)

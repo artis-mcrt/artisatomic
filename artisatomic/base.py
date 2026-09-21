@@ -431,15 +431,14 @@ def comment_lines(lines: Iterable[str]) -> Iterator[str]:
     """Turn text lines into the comment lines of an ARTIS input file, in ASCII, each with its line end.
 
     ARTIS takes a line as a comment only when its first character that is not a space is a #.
-    A text line can hold a line break, so each part gets its own #. A part that starts with a #
-    is a comment already, for example a header line that a reader copied from its source file.
+    A text line can hold a line break, so each part gets its own #.
 
     The three writers of output.py and the writer of chargetransfer.txt use this function, and a
     checksum test covers each of those files. A change here can therefore change all of them.
     """
     for line in lines:
         for part in to_ascii(line).splitlines() or [""]:
-            yield (part if part.startswith("#") else f"# {part}").rstrip() + "\n"
+            yield f"# {part}".rstrip() + "\n"
 
 
 def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
@@ -461,9 +460,11 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     return path_for_log(filepath)
 
 
+# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
+# get_nist_ionization_provenance()). The export does not record the version of the database.
 nist_ionization_energy_comment = (
     "The ionisation energy comes from the NIST Atomic Spectra Database, https://physics.nist.gov/asd,"
-    " doi:10.18434/T4W30F, and not from the data set of the levels."
+    " doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23), and not from the data set of the levels."
 )
 
 

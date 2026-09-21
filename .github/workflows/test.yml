@@ -232,7 +232,7 @@ jobs:
               working-directory: tests/${{ matrix.testname }}/output
               run: |
                   cat compositiondata.txt
-                  cat artisatomicionhandlers.json
+                  cat artisatomicionhandlers_used.json
                   echo
                   md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt
                   md5sum -c ../checksums.txt

@@ -1,4 +1,8 @@
-"""Read levels and transitions from the Kurucz gfall line lists (http://kurucz.harvard.edu/linelists/gfall/)."""
+"""Read levels and transitions from the Kurucz gfall line lists (http://kurucz.harvard.edu/linelists/gfall/).
+
+The reference for the line lists is Kurucz, R. L. (2017), Can. J. Phys., 95, 825-827,
+doi:10.1139/cjp-2016-0794.
+"""
 
 import itertools
 import re
@@ -27,7 +31,10 @@ if TESTMODE:
     kuruczdatapath /= "test_sample"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
-description = "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/"
+description = (
+    "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/. Kurucz, R. L. (2017), Can. J. Phys., 95,"
+    " 825-827, doi:10.1139/cjp-2016-0794"
+)
 
 
 def parse_gfall(fname: str) -> pl.LazyFrame:

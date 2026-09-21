@@ -132,11 +132,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     the energy plus the zero-based level id, so two levels with one energy keep separate names.
     NIST supplies the ionisation energy.
     """
-    log_comment(
-        flog,
-        ("adata",),
-        f"Reading {levels_member(atomic_number, ion_stage)} in {path_in_data_folder(datafilepath / levels_archive, monsfolder)}",
-    )
+    # the path of the archive, then the name of its member
+    levelspath = path_in_data_folder(datafilepath / levels_archive, monsfolder)
+    log_comment(flog, ("adata",), f"Reading {levelspath}/{levels_member(atomic_number, ion_stage)}")
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
 
@@ -155,11 +153,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         }
     ).with_columns(parity=pl.lit(None, dtype=pl.Int64))
 
-    log_comment(
-        flog,
-        ("transitiondata",),
-        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_in_data_folder(datafilepath / transitions_archive, monsfolder)}",
-    )
+    transitionspath = path_in_data_folder(datafilepath / transitions_archive, monsfolder)
+    log_comment(flog, ("transitiondata",), f"Reading {transitionspath}/{transitions_member(atomic_number, ion_stage)}")
     transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3
     )

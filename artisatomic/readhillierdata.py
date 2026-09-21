@@ -20,6 +20,7 @@ from artisatomic.base import fortran_float
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import ion_label
 from artisatomic.base import IonLog
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
@@ -1483,7 +1484,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
-            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} {photfilename}",
+            label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
         )
 
         for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
@@ -2087,7 +2088,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         )
     else:
         log_comment(flog, ("transitiondata",), f"Read {coll_lines_in} effective collision strengths")
-        log_comment(flog, ("transitiondata",), f"Output {len(upsilondict)} effective collision strengths")
+        log_comment(flog, ("transitiondata",), f"{len(upsilondict)} level pairs got an effective collision strength")
 
     return upsilondict
 

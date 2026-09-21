@@ -295,18 +295,10 @@ def read_levels_and_transitions(
         msg = f"Found no Floers+25 transitions files for {ionstr} ({calibstr}) in {basepath}"
         raise FileNotFoundError(msg)
 
-    log_comment(
-        flog,
-        ("adata", "transitiondata"),
-        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transitions files",
-    )
-    # the name of the folder and of the file only, so the line does not depend on the machine
-    log_comment(
-        flog,
-        ("transitiondata",),
-        "Transitions files: "
-        + ", ".join(f"{basepath.name}/{transition_file.name}" for transition_file in transition_files),
-    )
+    # the name of the folder and of the file only, so a line does not depend on the machine
+    log_comment(flog, ("adata",), f"Reading {basepath.name}/{levels_file.name}")
+    for transition_file in transition_files:
+        log_comment(flog, ("transitiondata",), f"Reading {basepath.name}/{transition_file.name}")
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)

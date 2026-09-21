@@ -24,13 +24,13 @@ import polars as pl
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
-from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
+from artisatomic.base import ion_label
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
@@ -39,7 +39,6 @@ from artisatomic.base import path_for_log
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
-from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
@@ -385,7 +384,7 @@ def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, 
     counts = ", ".join(
         f"{count} of {len(levels)} levels agree with the {name} order" for name, count in agreement.items()
     )
-    log_comment(flog, ("adata",), f"Eissner notation detected for electron configuration ({counts})")
+    log_comment(flog, ("adata",), f"The reader found Eissner notation in the electron configurations ({counts})")
 
     # The digits of a defective Eissner configuration must not become the name of a level. A
     # blank field or a label is not an Eissner configuration, and the reader keeps its text.
@@ -845,7 +844,7 @@ def _fill_co2_phixs(
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
-            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB level id {lowerlevelid}",
+            label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
         )
         combined = combine_phixs_routes(
             [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
@@ -997,7 +996,7 @@ def _fill_co3_phixs(
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
-            label=f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} QUB constant table",
+            label=f"{ion_label(atomic_number, ion_stage)} QUB constant table",
         )["gs"]
 
     log_comment(
