@@ -169,8 +169,8 @@ def remove_old_log_folder(output_folder: Path) -> None:
 
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
     A user could take such a file for a record of the new run. The function removes each .txt
-    file of the folder and the copy of the ion handlers, as that release did at the start of each
-    run. It then removes the folder if the folder is empty.
+    file of the folder and the copy of the ion handlers. That release did the same at the start
+    of each run. The function then removes the folder if the folder is empty.
     """
     old_log_folder = output_folder / "atomic_data_logs"
     if not old_log_folder.is_dir():

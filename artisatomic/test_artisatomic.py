@@ -5118,6 +5118,10 @@ def test_path_in_data_folder_starts_with_the_repository_name_of_the_folder(tmp_p
     assert "kurucz_2024" in str(resolvedfile)
     assert path_in_data_folder(resolvedfile, datafolder) == "atomic-data-kurucz/zztar/gf3800.all"
 
+    # a reader takes a plain file or a compressed file, and the output must be the same for the two
+    compressedfile = (datafolder / "zztar" / "gf3800.all.zst").resolve()
+    assert path_in_data_folder(compressedfile, datafolder) == "atomic-data-kurucz/zztar/gf3800.all"
+
     # a file that is not in the data folder keeps its own path, with no folder name before it
     otherfile = tmp_path / "repository" / "other.txt"
     assert path_in_data_folder(otherfile, datafolder) == str(otherfile)

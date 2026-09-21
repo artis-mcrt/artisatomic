@@ -23,6 +23,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
+from artisatomic.base import without_compression_extension
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
 
@@ -296,9 +297,11 @@ def read_levels_and_transitions(
         raise FileNotFoundError(msg)
 
     # the name of the folder and of the file only, so a line does not depend on the machine
-    log_comment(flog, ("adata",), f"Reading {basepath.name}/{levels_file.name}")
+    log_comment(flog, ("adata",), f"Reading {basepath.name}/{without_compression_extension(levels_file.name)}")
     for transition_file in transition_files:
-        log_comment(flog, ("transitiondata",), f"Reading {basepath.name}/{transition_file.name}")
+        log_comment(
+            flog, ("transitiondata",), f"Reading {basepath.name}/{without_compression_extension(transition_file.name)}"
+        )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)

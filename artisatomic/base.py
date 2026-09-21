@@ -473,14 +473,28 @@ def comment_lines(lines: Iterable[str]) -> Iterator[str]:
             yield f"# {part}".rstrip() + "\n"
 
 
+def without_compression_extension(filename: str) -> str:
+    """Remove the extension of a compression (.zst, .gz or .xz) from a file name, for a comment line.
+
+    A reader accepts a data file with or without such an extension. The output files must be the
+    same for the two forms, so a comment line names the file with no such extension.
+    """
+    for extension in compression_extensions:
+        if extension and filename.endswith(extension):
+            return filename.removesuffix(extension)
+    return filename
+
+
 def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     """Render the path of a file in a data folder of the repository, for a comment line.
 
     datafolder is the path of the data folder before resolve(), for example
     PYDIR / ".." / "atomic-data-adas". The result starts with the name of that folder in the
     repository. A data folder can be a symbolic link to a different disk. The name of the link
-    target depends on the machine, so it must not go into an output file.
+    target depends on the machine, so it must not go into an output file. The result has no
+    extension of a compression (see without_compression_extension()).
     """
+    filepath = without_compression_extension(str(filepath))
     resolvedfolder = datafolder.resolve()
     # the lexical form first and then the form with each link followed, as path_for_log() does
     for normalise in (os.path.abspath, os.path.realpath):
@@ -495,8 +509,8 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
 # The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
 # get_nist_ionization_provenance()). The export does not record the version of the database.
 nist_ionization_energy_comment = (
-    "The ionisation energy comes from the NIST Atomic Spectra Database, https://physics.nist.gov/asd,"
-    " doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23), and not from the data set of the levels."
+    "The ionisation energy does not come from the data set of the levels. It comes from the NIST Atomic Spectra"
+    " Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23)."
 )
 
 

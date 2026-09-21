@@ -45,7 +45,13 @@ A comment block does not repeat a number of the header line of the ion, for exam
 
 In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines for all ions. A kind of detail line that occurs for many levels or transitions of one ion gives one line in the comment block: the first such line, with the count. The log file has each of those lines. The log file is in the output folder, beside `artisatomicionhandlers_used.json`, which records the ions and the handlers of the run. Copy that record to `artisatomicionhandlers.json` in the working directory to repeat the run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
 
-ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment blocks.
+ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them from all three files for such a release. `grep -v` only prints the lines, so write the result to a new file and then replace the old file:
+
+```sh
+for f in adata.txt transitiondata.txt phixsdata_v2.txt; do grep -v '^#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
+```
+
+artistools needs a version that skips the comment blocks.
 
 The package installs three more commands:
 
