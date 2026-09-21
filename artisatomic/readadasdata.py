@@ -396,13 +396,13 @@ def _eissner_order_of_file(levels: list[tuple[str, int]], filepath: str | Path, 
     labels = [config for config in configs if not looks_like_eissner_config(config)]
     if labels:
         log_comment(
-            flog, ("adata",), f"WARNING: levels with no Eissner configuration: {len(labels)}, for example {labels[0]!r}"
+            flog, ("adata",), f"WARNING: {len(labels)} levels have no Eissner configuration, for example {labels[0]!r}."
         )
     if agreement[order] < len(levels) - len(labels):
         log_comment(
             flog,
             ("adata",),
-            f"WARNING: levels whose shells cannot give their total L: {len(levels) - len(labels) - agreement[order]}."
+            f"WARNING: The shells of {len(levels) - len(labels) - agreement[order]} levels cannot give their total L."
             " The file possibly uses a different order of the Eissner shell characters.",
         )
     return order
@@ -554,8 +554,8 @@ def read_adf04(
         log_comment(
             flog,
             ("transitiondata",),
-            f"Selecting {temperature_values[nearest_index]:.0f} K for the collision strengths from"
-            f" {', '.join(temperatures)}",
+            f"The collision strengths are the values at {temperature_values[nearest_index]:.0f} K. The file gives these"
+            f" temperatures [K]: {', '.join(temperatures)}",
         )
 
         # A split at whitespace fails where two values touch, for example "2.81-01-3.01-02".
@@ -617,21 +617,27 @@ def read_adf04(
                 )
 
     log_and_print(flog, f"Read {len(energylevels):d} levels")
-    log_comment(flog, ("transitiondata",), f"Read {len(upsilondict):d} effective collision strengths")
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"The file gives an effective collision strength for {len(upsilondict):d} level pairs.",
+    )
     if skipped_rows:
         log_comment(
-            flog, ("transitiondata",), f"Skipped rows that are not an electron impact excitation: {skipped_rows:d}"
+            flog,
+            ("transitiondata",),
+            f"The reader skipped {skipped_rows:d} collision rows that are not an electron impact excitation.",
         )
     if unreadable_rows:
         log_comment(
-            flog, ("transitiondata",), f"Skipped collision rows that the reader could not parse: {unreadable_rows:d}"
+            flog, ("transitiondata",), f"The reader skipped {unreadable_rows:d} collision rows that it could not parse."
         )
     if short_rows:
         warning = "" if upsilondict else "WARNING: no collision row has an upsilon at the selected temperature. "
         log_comment(
             flog,
             ("transitiondata",),
-            f"{warning}Collision rows with no upsilon at the selected temperature: {short_rows:d}",
+            f"{warning}{short_rows:d} collision rows have no value at the selected temperature.",
         )
 
     return ionization_energy_ev, energylevels, upsilondict, collisiondf
@@ -1040,7 +1046,7 @@ def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args
         log_comment(
             flog,
             ("phixsdata",),
-            f"WARNING: no photoionisation data in atomic-data-adas for Z={atomic_number} ion_stage {ion_stage}",
+            "The ADAS data has no photoionisation cross sections for this ion.",
         )
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
     log_comment(flog, ("phixsdata",), f"source: {qub_cobalt_phixs_description}")

@@ -360,8 +360,8 @@ def read_levels_and_transitions(
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: Discarded {ndiscarded} transitions of {ionstr} that reference levels outside"
-            f" 0..{dflevels.height - 1}",
+            f"WARNING: The reader discarded {ndiscarded} transitions that name a level outside the level list"
+            f" (0 to {dflevels.height - 1}).",
         )
         dftransitions = dftransitions.filter(inrange)
 
@@ -369,7 +369,11 @@ def read_levels_and_transitions(
     # column. Swap those rows into energy order: the merge and the output want lowerlevel first.
     nreversed = dftransitions.filter(pl.col("lowerlevel") > pl.col("upperlevel")).height
     if nreversed > 0:
-        log_comment(flog, ("transitiondata",), f"Swapped the level order of {nreversed} reversed transitions")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The reader swapped the two levels of {nreversed} transitions, because the file names the upper level first.",
+        )
         dftransitions = dftransitions.with_columns(
             lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
             upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),

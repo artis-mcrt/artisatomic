@@ -479,7 +479,10 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
                 )
 
-            addedtext = f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values"
+            addedtext = (
+                f"artisatomic added {dfupsilon_only_transitions.height:d} transitions with A = 0, for level pairs that"
+                " have a collision strength but no transition in the data source."
+            )
             # a count of zero tells nothing about the data, so only the log gets it
             if dfupsilon_only_transitions.is_empty():
                 log_and_print(flog, addedtext)
@@ -734,7 +737,7 @@ def write_transition_data(
             flog,
             ("transitiondata",),
             f"{num_forbidden_transitions:d} transitions are forbidden, and {num_collision_strengths_applied:d}"
-            " transitions have collision strengths",
+            " transitions have collision strengths.",
         )
 
     write_comment_block(ftransitiondata, "transitiondata", titlelines, flog)
@@ -819,8 +822,8 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
         log_comment(
             flog,
             ("phixsdata",),
-            f"Computed a photoionisation threshold for {filled} levels whose reader gave none."
-            " The threshold comes from the ionisation energy and the two level energies, as in ARTIS.",
+            f"artisatomic computed the threshold energy of {filled} tables, because the reader gave none. The threshold"
+            " comes from the ionisation energy and the two level energies, as in ARTIS.",
         )
     return thresholds
 

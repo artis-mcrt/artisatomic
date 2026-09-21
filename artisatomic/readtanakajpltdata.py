@@ -209,7 +209,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
-        log_comment(flog, ("transitiondata",), "WARNING: dropped rows where upper and lower levels are equal")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            "WARNING: The reader dropped the transitions whose upper level and lower level are the same.",
+        )
         dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions

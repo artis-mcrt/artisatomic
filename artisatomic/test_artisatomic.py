@@ -1530,7 +1530,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     ]
     # the four lines are 0-1, 1-2, 2-3 and 3-4. The last two name a dropped level
     assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 1), (1, 2)]
-    assert "dropped 2 levels above the ionisation energy" in flog.getvalue()
+    assert "The reader dropped 2 levels that are above the ionisation energy." in flog.getvalue()
     assert "skipped 2 transitions" in flog.getvalue()
 
 
@@ -2155,8 +2155,8 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     _, energylevels, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    assert "Skipped rows that are not an electron impact excitation: 1" in flog.getvalue()
-    assert "Read 235 effective collision strengths" in flog.getvalue()
+    assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
+    assert "The file gives an effective collision strength for 235 level pairs." in flog.getvalue()
 
 
 def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
@@ -2421,7 +2421,7 @@ def test_read_adf04_file_index_columns(tmp_path):
     filepath = write_hydrogen_adf04(tmp_path, [row + values for row in rows], levels=levels[:200])
     flog = io.StringIO()
     assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(4, 122)]
-    assert "Skipped collision rows that the reader could not parse: 4" in flog.getvalue()
+    assert "The reader skipped 4 collision rows that it could not parse." in flog.getvalue()
 
 
 def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
@@ -2435,7 +2435,7 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
     flog = io.StringIO()
     upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
     assert upsilondict == {(0, 1): pytest.approx(0.429)}
-    assert "Skipped rows that are not an electron impact excitation: 3" in flog.getvalue()
+    assert "The reader skipped 3 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
 
@@ -2451,8 +2451,8 @@ def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
     assert upsilondict == {(0, 1): pytest.approx(0.5)}
     assert collisiondf.columns == ["upper", "lower", "avalue", "upsilon"]
     assert collisiondf["avalue"].to_list() == [1e8, 6.27e8]
-    assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
-    assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
+    assert "The reader skipped 1 collision rows that it could not parse." in flog.getvalue()
+    assert "1 collision rows have no value at the selected temperature." in flog.getvalue()
     assert "WARNING" not in flog.getvalue()
 
 
@@ -2530,14 +2530,14 @@ def test_eissner_order_of_file():
     flog = io.StringIO()
     levels = [("521", 0), ("51151A", 3), ("51151B", 0), ("51151B", 4)]
     assert order_of_file(levels, "x.adf04", flog) == "AUTOSTRUCTURE"
-    assert "WARNING: levels whose shells cannot give their total L: 1." in flog.getvalue()
+    assert "WARNING: The shells of 1 levels cannot give their total L." in flog.getvalue()
 
     # a blank field has no notation, so it does not count in the decision
     assert order_of_file([("521", 0), ("", 0), ("", 0)], "x.adf04", io.StringIO()) == "AUTOSTRUCTURE"
     # a blank field or a label is not a defective Eissner configuration
     flog = io.StringIO()
     assert order_of_file([("521", 0), ("51151A", 3), ("", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
-    assert "WARNING: levels with no Eissner configuration: 1, for example ''" in flog.getvalue()
+    assert "WARNING: 1 levels have no Eissner configuration, for example ''." in flog.getvalue()
 
     # The digits of a defective Eissner configuration must not become the name of a level. "591" is 1s9.
     with pytest.raises(ValueError, match="cannot read the configuration '591'"):
@@ -2887,8 +2887,8 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
     # the ion keeps its bound levels and goes to the output with no line
     assert len(energy_levels) == 2
     assert transitions == []
-    assert "skipped every one of the 2 transitions" in flog.getvalue()
-    assert "dropped 1 levels above the ionisation energy" in flog.getvalue()
+    assert "The reader skipped all 2 transitions" in flog.getvalue()
+    assert "The reader dropped 1 levels that are above the ionisation energy." in flog.getvalue()
 
 
 def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
@@ -3608,7 +3608,7 @@ def test_read_photoionizations_without_data_gives_empty_arrays():
     # The QUB Co II tables are for CMFGEN levels. Co II through the "adas" handler has ADAS levels.
     flog = io.StringIO()
     assert readadasdata.read_photoionizations(27, 2, dfenergylevels, args, flog).crosssections.size == 0
-    assert "no photoionisation data" in flog.getvalue()
+    assert "The ADAS data has no photoionisation cross sections for this ion." in flog.getvalue()
 
 
 def test_fill_missing_phixs_thresholds():
@@ -3846,7 +3846,7 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
         57, 2, flog, calibrated=True, withforbidden=True
     )
-    assert "Discarded 1 transitions" in flog.getvalue()
+    assert "The reader discarded 1 transitions" in flog.getvalue()
 
     assert dflevels.height == 3
     rows = {
@@ -4492,11 +4492,11 @@ def test_read_adf04_selects_the_nearest_temperature():
     """
     flog = io.StringIO()
     _, _, upsilons_6000, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
-    assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
+    assert "The collision strengths are the values at 6030 K." in flog.getvalue()
 
     flog = io.StringIO()
     _, _, upsilons_low, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
-    assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
+    assert "The collision strengths are the values at 3150 K." in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)
     assert any(upsilons_6000[key] != upsilons_low[key] for key in upsilons_6000)

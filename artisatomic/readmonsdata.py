@@ -172,7 +172,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("transitiondata",),
-        f"largest difference between a transition energy and its level: {maxmismatch_percm:.3g} cm^-1",
+        f"The reader finds the levels of a transition by their energy. The largest difference is {maxmismatch_percm:.3g} cm^-1.",
     )
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
         msg = (
@@ -192,7 +192,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     )
     if ambiguouscount > 0:
         log_comment(
-            flog, ("transitiondata",), f"WARNING: {ambiguouscount} level matches have a second level equally close"
+            flog,
+            ("transitiondata",),
+            f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
         )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]

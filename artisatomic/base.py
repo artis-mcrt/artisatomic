@@ -581,7 +581,7 @@ def split_levels_above_ionization(
         log_comment(
             flog,
             ("adata",),
-            f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy",
+            f"WARNING: The reader dropped {len(fileindices_above_ionization):d} levels that are above the ionisation energy.",
         )
 
     dfboundlevels = dflevels.filter(~above_ionization)
@@ -667,14 +667,14 @@ def drop_transitions_of_levels(
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: skipped every one of the {skipped_count:d} transitions, because each one references a level"
-            " above the ionisation energy. The ion goes to the output with no transitions.",
+            f"WARNING: The reader skipped all {skipped_count:d} transitions, because each one names a level above the"
+            " ionisation energy. The ion has no transitions in the output.",
         )
     elif skipped_count > 0:
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy",
+            f"WARNING: The reader skipped {skipped_count:d} transitions that name a level above the ionisation energy.",
         )
 
     return dfkeptlines
