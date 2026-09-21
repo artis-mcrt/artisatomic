@@ -29,7 +29,9 @@ prek install
 ## Usage
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an `artisatomicionhandlers.json` file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection.
 
-### Comment blocks in the output files
+### Comments in the output files
+adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. It gives the format of the file and the options of the run that apply to all ions, for example the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
+
 adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before the data of each ion. Each line of a comment block starts with `#`. A comment block gives:
 
 - the ion and the handler;

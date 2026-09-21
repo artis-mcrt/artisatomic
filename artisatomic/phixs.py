@@ -132,8 +132,7 @@ def match_hydrogenic_phixs(
         log_comment(
             flog,
             ("phixsdata",),
-            "source: the hydrogenic estimate of artisatomic for the lowest"
-            f" {args.nlevels_hydrogenic_for_unknown_phixs} levels. It is the cross section of Kramers, H. A. (1923),"
+            "source: the hydrogenic estimate of artisatomic. It is the cross section of Kramers, H. A. (1923),"
             " Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244, with the Gaunt factors of CMFGEN in"
             f" {gauntpath}",
         )

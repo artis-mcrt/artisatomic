@@ -4571,16 +4571,26 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
 
     assert not phixspath.exists()
-    # the other two files always start again
-    assert not (tmp_path / "adata.txt").read_text(encoding="utf-8")
-    assert not (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    # the other two files always start again, with their file comment only
+    for filename in ("adata.txt", "transitiondata.txt"):
+        lines = (tmp_path / filename).read_text(encoding="utf-8").splitlines()
+        assert lines
+        assert all(line.startswith("#") for line in lines)
+        assert "an earlier run" not in lines
+    assert "6000 K (option -electrontemperature)" in (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
     # a folder with no phixsdata_v2.txt is fine too
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
     assert not phixspath.exists()
 
     # a run that writes cross sections truncates the file and writes the header for the ions
-    clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path)))
-    assert phixspath.read_text(encoding="utf-8").splitlines() == ["100", " 3.0000000e-02"]
+    clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path), optimaltemperature=5500))
+    lines = phixspath.read_text(encoding="utf-8").splitlines()
+    # ARTIS reads the first two numbers with no comment skip, so the file comment comes after them
+    assert lines[:2] == ["100", " 3.0000000e-02"]
+    assert len(lines) > 2
+    assert all(line.startswith("#") for line in lines[2:])
+    assert any("T=5500 K (option -optimaltemperature)" in line for line in lines)
+    assert phixspath.read_text(encoding="utf-8").isascii()
 
 
 @pytest.mark.parametrize(

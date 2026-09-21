@@ -24,19 +24,70 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
 
+generator_comment = "artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file."
+ion_comment = "A comment block before the data of each ion gives the handler and the source of the data."
+
+
+def write_ascii_comments(fout, lines: Iterable[str]) -> None:
+    """Write text lines as comment lines of an output file, in ASCII characters only.
+
+    A program that opens the file with the encoding of an ASCII locale stops on the first other
+    character, and an author name such as Flörs has one. NFKD splits the accent from its letter,
+    so the letter stays.
+    """
+    fout.writelines(
+        unicodedata.normalize("NFKD", commentline).encode("ascii", "ignore").decode("ascii")
+        for commentline in comment_lines(lines)
+    )
+
 
 def clear_files(args: argparse.Namespace) -> None:
-    """Truncate the output files and write the phixs header. The writer appends the ions after it.
+    """Start the output files again, each with its file comment. The writer appends the ions after it.
+
+    The file comment gives the format of the file and the options of the run that apply to all
+    ions of the file. ARTIS skips a comment line before the first header line of an ion in
+    adata.txt and transitiondata.txt. It reads the first two numbers of phixsdata_v2.txt with no
+    comment skip, so the file comment of that file comes after them.
 
     The option --nophixs writes no phixsdata_v2.txt. The run removes the file of an earlier run in
     the same folder, because its level ids belong to that run's adata.txt.
     """
     outdir = Path(args.output_folder)
-    with (
-        (outdir / "adata.txt").open("w", encoding="utf-8"),
-        (outdir / "transitiondata.txt").open("w", encoding="utf-8"),
-    ):
-        pass
+    with (outdir / "adata.txt").open("w", encoding="utf-8") as fatommodels:
+        write_ascii_comments(
+            fatommodels,
+            [
+                generator_comment,
+                "Header line of an ion: atomic number, ion stage, count of levels, ionisation energy [eV].",
+                (
+                    "Level line: level number, energy above the ground level [eV], statistical weight, count of transitions,"
+                    " level name."
+                ),
+                ion_comment,
+            ],
+        )
+
+    with (outdir / "transitiondata.txt").open("w", encoding="utf-8") as ftransitiondata:
+        write_ascii_comments(
+            ftransitiondata,
+            [
+                generator_comment,
+                "Header line of an ion: atomic number, ion stage, count of transitions.",
+                (
+                    "Transition line: lower level number, upper level number, A [s^-1], effective collision strength,"
+                    " forbidden flag (1 for a forbidden transition)."
+                ),
+                (
+                    "A collision strength of -1 means no value for a permitted transition. A value of -2 means no value for"
+                    " a forbidden transition."
+                ),
+                (
+                    "The effective collision strengths are the values at the tabulated temperature closest to"
+                    f" {args.electrontemperature} K (option -electrontemperature)."
+                ),
+                ion_comment,
+            ],
+        )
 
     if args.nophixs:
         (outdir / "phixsdata_v2.txt").unlink(missing_ok=True)
@@ -45,6 +96,35 @@ def clear_files(args: argparse.Namespace) -> None:
     with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:
         fphixs.write(f"{args.nphixspoints:d}\n")
         fphixs.write(f"{args.phixsnuincrement:14.7e}\n")
+        write_ascii_comments(
+            fphixs,
+            [
+                generator_comment,
+                (
+                    "Line 1: count of points of each cross section table (option -nphixspoints). Line 2: step between two"
+                    " points, as a fraction of the threshold frequency (option -phixsnuincrement)."
+                ),
+                (
+                    "Header line of a table: atomic number, upper ion stage, upper level number, lower ion stage, lower level"
+                    " number, threshold energy [eV]. An upper level number of -1 means that a list of the target levels"
+                    " and their fractions comes next."
+                ),
+                "ARTIS does not use the threshold energy of a table. It takes the threshold from the level energies.",
+                (
+                    "Table: cross section [Mb] at the frequencies nu_edge * (1 + i * step), for i = 0 to the count of points"
+                    " less 1."
+                ),
+                (
+                    "artisatomic downsamples each table to this grid. It keeps the recombination rate constant at"
+                    f" T={args.optimaltemperature} K (option -optimaltemperature)."
+                ),
+                (
+                    "An ion whose handler gives no cross section gets the hydrogenic estimate for its lowest"
+                    f" {args.nlevels_hydrogenic_for_unknown_phixs} levels (option -nlevels_hydrogenic_for_unknown_phixs)."
+                ),
+                "A comment block before the first table of each ion gives the handler and the source of the data.",
+            ],
+        )
 
 
 # A transition this strong is an electric dipole line, whatever the level names say. Below these
@@ -408,14 +488,7 @@ def write_comment_block(fout, table: str, commentheader: Iterable[str], flog) ->
 
     The function writes nothing for an empty header and a log that is not an IonLog.
     """
-    lines = [*commentheader, *(flog.comments[table] if isinstance(flog, IonLog) else ())]
-    # ASCII only: a program that opens the file with the encoding of an ASCII locale stops on the
-    # first other character, and an author name such as Flörs has one. NFKD splits the accent
-    # from its letter, so the letter stays.
-    fout.writelines(
-        unicodedata.normalize("NFKD", commentline).encode("ascii", "ignore").decode("ascii")
-        for commentline in comment_lines(lines)
-    )
+    write_ascii_comments(fout, [*commentheader, *(flog.comments[table] if isinstance(flog, IonLog) else ())])
 
 
 def write_adata(
