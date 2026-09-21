@@ -39,7 +39,7 @@ adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before t
 
 A comment block does not repeat a number of the header line of the ion, for example the count of levels or the ionisation energy.
 
-In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log files in `atomic_data_logs` hold the same lines and more detail. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
+In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines and more detail for all ions. It is in the output folder, beside `artisatomicionhandlers.json`, which records the ions and the handlers of the run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
 
 ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment blocks.
 

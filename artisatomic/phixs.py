@@ -54,7 +54,7 @@ def match_hydrogenic_phixs(
     estimate, and this function writes a warning.
 
     The parser returns None for a name it cannot read. Such a level gets no estimate, and the
-    ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only. A level
+    log file records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only. A level
     outside that range also gets no estimate, and the function does not read past the table.
     """
     if get_level_valence_n is None:

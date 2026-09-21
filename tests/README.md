@@ -17,8 +17,10 @@ export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"
 cp tests/<name>/artisatomicionhandlers.json .
 uv run makeartisatomicfiles -output_folder tests/<name>/output
 rm artisatomicionhandlers.json
-(cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
+(cd tests/<name>/output && md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt > ../checksums.txt)
 ```
+
+Name the four files. The output folder holds the log file `artisatomiclog.txt` also, and `*.txt` would put it into `checksums.txt`.
 
 `ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
 `test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25

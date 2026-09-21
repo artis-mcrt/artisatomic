@@ -27,11 +27,11 @@ from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_comments
-from artisatomic.base import ion_log_path
 from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_path
 from artisatomic.base import PhixsData
 from artisatomic.base import roman_numerals
 from artisatomic.phixs import match_hydrogenic_phixs
@@ -206,8 +206,7 @@ def read_ion_data(
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
 
-    logfilepath = ion_log_path(Path(args.output_folder, args.output_folder_logs), atomic_number, ion_stage)
-    with logfilepath.open("w", encoding="utf-8") as logstream:
+    with log_path(args.output_folder).open("a", encoding="utf-8") as logstream:
         flog = IonLog(logstream)
         log_and_print(
             flog,
@@ -275,7 +274,7 @@ def read_ion_data(
 
 
 def resolve_photoion_targetfractions(
-    iondatalist: list[IonData], atomic_number: int | None = None, log_folder: str | Path | None = None
+    iondatalist: list[IonData], atomic_number: int | None = None, logpath: str | Path | None = None
 ) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
@@ -285,11 +284,12 @@ def resolve_photoion_targetfractions(
 
     Call this before write_output_files() unless the user switched cross sections off entirely.
     The writer needs the fractions and does not resolve them itself. Give atomic_number and
-    log_folder to append the resolve messages to each ion's log file.
+    logpath (see base.log_path()) to append the resolve messages to the log file of the run. The
+    log file holds all ions, so the messages of each ion come after a line that names the ion.
     """
     # a half-given pair is always a caller bug, so the function raises
-    if (atomic_number is None) != (log_folder is None):
-        msg = "give both atomic_number and log_folder, or neither"
+    if (atomic_number is None) != (logpath is None):
+        msg = "give both atomic_number and logpath, or neither"
         raise ValueError(msg)
 
     if not iondatalist:
@@ -307,17 +307,20 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # The read pass closed the per-ion log. Reopen it in append mode. The IonLog below adds
-            # to the comment lists of the read pass.
+            # The IonLog adds to the comment lists of the read pass.
             logcontext = (
-                ion_log_path(log_folder, atomic_number, iondata.ion_stage).open("a", encoding="utf-8")
-                if log_folder is not None and atomic_number is not None
+                Path(logpath).open("a", encoding="utf-8")  # ruff: ignore[open-file-with-context-handler]
+                if logpath is not None and atomic_number is not None
                 else contextlib.nullcontext()
             )
             with logcontext as logstream:
+                flog = None if logstream is None else IonLog(logstream, iondata.comments)
+                if flog is not None and atomic_number is not None:
+                    ionstr = f"{elsymbols[atomic_number]} {roman_numerals[iondata.ion_stage]}"
+                    log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} photoionisation targets:")
                 iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
                     iondata.dfenergylevels,
                     upperiondata.dfenergylevels,
                     iondata.photoion_targetconfigs,
-                    flog=None if logstream is None else IonLog(logstream, iondata.comments),
+                    flog=flog,
                 )

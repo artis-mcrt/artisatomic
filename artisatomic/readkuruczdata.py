@@ -358,7 +358,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Kurucz level label.
 
     Returns None for a label that it cannot parse. The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log. A guessed n would give the
+    gives the level no estimate and writes a warning to the log file. A guessed n would give the
     level a cross section of the wrong size without a trace in the output.
 
     A label can end in a parent term ("6s6p*(3P*)"), an odd-parity mark ("*"), or a prime that

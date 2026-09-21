@@ -238,7 +238,7 @@ hyd_gaunt_factor: dict[int, list[float]] = {}
 max_hyd_l_n, max_hyd_gaunt_n = -1, -1
 
 
-# the root of the CMFGEN data. The log files name each file relative to this folder
+# the root of the CMFGEN data. The log file names each file relative to this folder
 hillier_datadir = (PYDIR / ".." / "atomic-data-hillier").resolve()
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
@@ -955,7 +955,7 @@ class PhotFileReader:
 
         redirect_stdout(): the read of the ion above writes its own log lines through
         log_and_print(), which prints. Those lines belong to the ion above and not to the ion
-        under conversion, so they go to the log file of this ion with a prefix and not to the
+        under conversion, so they go to the log file with a prefix and not to the
         terminal. A notice of that read, for example a file rewritten as utf-8, stays on record.
         """
         if self.excitation_energy_ev is not None:
@@ -1842,7 +1842,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     The last orbital of the configuration is the valence one: '2s2_2p3(4So)3p_5Pe[1]' gives 3,
     '3d5(4D)4po[3]' gives 4, and a merged shell such as '2s2_18w_2W' gives 18. Returns None for a
     name with no readable orbital ('1___', '8SNG'). The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log.
+    gives the level no estimate and writes a warning to the log file.
 
     An orbital is digits and a lower-case orbital letter. A term is an upper-case letter with an
     optional seniority digit and parity letter ('2D2e'). The digit run that follows an upper-case
@@ -2118,7 +2118,7 @@ def get_photoiontargetfractions(
     """
 
     def logprint(strout: str) -> None:
-        """Write to stdout, and to the ion log when the caller gave one."""
+        """Write to stdout, and to the log file when the caller gave one."""
         if flog is None:
             print(strout)
         else:

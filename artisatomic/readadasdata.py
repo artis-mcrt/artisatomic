@@ -699,7 +699,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     supplies an upsilondict. Most other readers leave another module to fill it.
     """
     # the plain name, not the found path: read_adf04() logs the name that it receives. The
-    # tested log files carry the plain name for a plain file and for a compressed file.
+    # tested log file carries the plain name for a plain file and for a compressed file.
     atom_filepath = adaspath / f"{atomic_number}_{ion_stage}.adf04"
 
     origin = ion_origins.get((atomic_number, ion_stage)) or ion_origins.get((atomic_number, None))
@@ -1046,7 +1046,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from an ADAS level name.
 
     Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log.
+    gives the level no estimate and writes a warning to the log file.
 
     Kept separate from the other readers' versions. Each data source names its levels
     differently, so a shared parser would have to guess the convention of each name.

@@ -617,13 +617,13 @@ def test_resolve_photoion_targetfractions_keeps_reader_supplied():
 
 
 def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
-    """A caller must give both atomic_number and log_folder, or neither, so a log is not lost silently."""
+    """A caller must give both atomic_number and logpath, or neither, so a log is not lost silently."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
     upper = make_iondata(2, is_top_ion=True)
 
-    with pytest.raises(ValueError, match="both atomic_number and log_folder"):
+    with pytest.raises(ValueError, match="both atomic_number and logpath"):
         resolve_photoion_targetfractions([lower, upper], 8)
 
 
@@ -649,19 +649,9 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
     write_output_files() no longer resolves target fractions itself. For an ion with cross sections
     but no targets, write_phixs_data() would silently skip every one of its tables.
     """
-    import argparse
-
     from artisatomic.output import write_output_files
 
-    (tmp_path / "logs").mkdir()
-    tmpargs = argparse.Namespace(
-        output_folder=str(
-            tmp_path,
-        ),
-        output_folder_logs="logs",
-        nophixs=False,
-        nphixspoints=100,
-    )
+    tmpargs = phixs_args(output_folder=str(tmp_path))
     lower = make_iondata(1, is_top_ion=False)
     lower.photoionization_crosssections = np.zeros((1, 100))
 
@@ -4514,7 +4504,7 @@ def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypa
     """The ground level's Lam(A) must give the header's ionisation energy to four significant figures.
 
     The header value is the one adata.txt gets. A difference above that precision means the header
-    and the level table disagree, which the ion log must say. The test copies the H I file with
+    and the level table disagree, which the log file must say. The test copies the H I file with
     its header value raised by one percent; the unchanged file gives no warning.
     """
     import contextlib
@@ -4774,10 +4764,7 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     from artisatomic.output import write_output_files
 
     nphixspoints = 3
-    (tmp_path / "logs").mkdir()
-    tmpargs = phixs_args(
-        output_folder=str(tmp_path), output_folder_logs="logs", nphixspoints=nphixspoints, phixsnuincrement=0.1
-    )
+    tmpargs = phixs_args(output_folder=str(tmp_path), nphixspoints=nphixspoints, phixsnuincrement=0.1)
 
     # Fe II has no cross section table, and it is not the top ion
     ionstages = [1, 2, 3, 4]
@@ -4787,6 +4774,11 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     ]
     clear_files(tmpargs)
     write_output_files(26, iondatalist, tmpargs)
+
+    # all ions share one log file, and each pass names its ion
+    logtext = (tmp_path / "artisatomiclog.txt").read_text(encoding="utf-8")
+    for ionstr in ("Fe I", "Fe II", "Fe III", "Fe IV"):
+        assert logtext.count(f"Z=26 {ionstr} output:") == 1
 
     adatatext = (tmp_path / "adata.txt").read_text(encoding="utf-8")
     assert "# Z=26 Fe II\n# handler: cmfgen\n# source: the source of the levels\n# Reading osc_data\n" in adatatext
@@ -4938,3 +4930,51 @@ def test_hydrogenic_estimate_records_its_source_only_with_a_table():
     assert sourceline.startswith("source: the hydrogenic estimate of artisatomic")
     assert "gbf_n_data.dat" in sourceline
     assert "/Users/" not in sourceline
+
+
+def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_files(tmp_path, monkeypatch):
+    """The log of all ions is artisatomiclog.txt, and it sits with artisatomicionhandlers.json beside adata.txt."""
+    import sys
+
+    from artisatomic import cli
+
+    handlers = [[38, [[1, "kurucz"], [2, "kurucz"]]]]
+    (tmp_path / "artisatomicionhandlers.json").write_text(json.dumps(handlers), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    # a log of an earlier run must not stay in the file
+    (outputfolder / "artisatomiclog.txt").write_text("the log of an earlier run\n", encoding="utf-8")
+    # the read of the ions needs the data sets, and this test is about the files of the run only
+    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    monkeypatch.setattr(sys, "argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
+
+    cli.main()
+
+    assert {path.name for path in outputfolder.iterdir()} == {
+        "adata.txt",
+        "compositiondata.txt",
+        "transitiondata.txt",
+        "phixsdata_v2.txt",
+        "artisatomiclog.txt",
+        "artisatomicionhandlers.json",
+    }
+    assert json.loads((outputfolder / "artisatomicionhandlers.json").read_text(encoding="utf-8")) == handlers
+    assert not (outputfolder / "artisatomiclog.txt").read_text(encoding="utf-8")
+
+
+def test_main_writes_no_handlers_record_into_the_working_directory(tmp_path, monkeypatch):
+    """get_ion_handlers() reads ./artisatomicionhandlers.json, so a record there would select the ions of each later run."""
+    import sys
+
+    from artisatomic import cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
+    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    monkeypatch.setattr(sys, "argv", ["makeartisatomicfiles", "-output_folder", "."])
+
+    cli.main()
+
+    assert (tmp_path / "artisatomiclog.txt").exists()
+    assert not (tmp_path / "artisatomicionhandlers.json").exists()

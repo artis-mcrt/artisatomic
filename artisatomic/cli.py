@@ -10,6 +10,7 @@ import argcomplete
 
 from artisatomic import readadasdata
 from artisatomic.base import check_ion_stages_contiguous
+from artisatomic.base import log_path
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.ionhandlers import get_ion_handlers
@@ -26,7 +27,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="Produce an ARTIS atomic database from published atomic data sets.",
     )
     parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
-    parser.add_argument("-output_folder_logs", action="store", default="atomic_data_logs", help="Folder for log files")
     parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points to save in output")
     parser.add_argument(
         "-phixsnuincrement",
@@ -144,21 +144,21 @@ def main() -> None:
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 
-    log_folder = Path(args.output_folder) / args.output_folder_logs
-    if log_folder.exists():
-        # a log of an ion that this run does not select would otherwise stay beside the new logs
-        for logfile in sorted(log_folder.glob("*.txt")):
-            logfile.unlink(missing_ok=True)
-            print("deleting", logfile)
-    else:
-        Path(log_folder).mkdir(exist_ok=True, parents=True)
+    # this empties the log of the last run. The passes of each ion append to the file.
+    log_path(args.output_folder).write_text("", encoding="utf-8")
 
-    # A record of what this run used, beside the logs. It is NOT the file
+    # A record of what this run used, beside the output files. It is NOT the file
     # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
     # directory. Copy this one there to repeat a run exactly, as the CI workflow does. The copy
     # holds the ions that the limits kept, so the repeat run must not give a limit again.
-    with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
-        json.dump(obj=ion_handlers, fp=f)
+    handlersrecord = Path(args.output_folder, "artisatomicionhandlers.json")
+    if handlersrecord.resolve() == Path("artisatomicionhandlers.json").resolve():
+        # With the working directory as the output folder, the record would be the file that
+        # get_ion_handlers() reads. It would then select the ions of each later run.
+        print(f"The output folder is the working directory, so the run does not write {handlersrecord.name}")
+    else:
+        with handlersrecord.open("w", encoding="utf-8") as f:
+            json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
@@ -181,9 +181,7 @@ def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: a
         ]
 
         if not args.nophixs:
-            resolve_photoion_targetfractions(
-                iondatalist, atomic_number, Path(args.output_folder, args.output_folder_logs)
-            )
+            resolve_photoion_targetfractions(iondatalist, atomic_number, log_path(args.output_folder))
 
         write_output_files(atomic_number, iondatalist, args)
 

@@ -266,13 +266,17 @@ def resolve_transition_levelids(
     return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
 
 
-def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:
-    """Path of the per-ion log file. The read pass writes it, and the write pass appends to it."""
-    return Path(log_folder, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
+def log_path(output_folder: str | Path) -> Path:
+    """Path of the log file of the run, which all ions share.
+
+    The run empties the file at its start. Each pass of each ion then appends to it, so open it
+    in append mode.
+    """
+    return Path(output_folder, "artisatomiclog.txt")
 
 
 def log_and_print(flog, strout):
-    """Write a line to both stdout and this ion's log file."""
+    """Write a line to both stdout and the log file of the run."""
     print(strout)
     flog.write(strout + "\n")
 
@@ -289,7 +293,7 @@ def empty_comments() -> dict[str, list[str]]:
 
 
 class IonLog:
-    """The log file of one ion, and the lines that go into the output files as comments.
+    """The log file of the run during one pass of one ion, and the lines that go into the output files as comments.
 
     comments has one list of lines for each name in COMMENT_TABLES. The write pass gives the
     dictionary of the read pass, so the two passes fill the same lists.
@@ -357,7 +361,7 @@ def comment_lines(lines: Iterable[str]) -> Iterator[str]:
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     """Render an input data path for a log file, relative to a directory.
 
-    The log files must not depend on the location of the repository checkout, so an absolute
+    The log file must not depend on the location of the repository checkout, so an absolute
     path would be wrong there. The default directory is the repository root. A reader whose files
     all sit under one data folder passes that folder, which keeps the logged path short.
 

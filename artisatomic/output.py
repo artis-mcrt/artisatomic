@@ -16,10 +16,10 @@ from artisatomic.base import comment_lines
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
-from artisatomic.base import ion_log_path
 from artisatomic.base import IonLog
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_path
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
@@ -270,7 +270,6 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
     rejects it.
     """
     outdir = Path(args.output_folder)
-    log_folder = outdir / args.output_folder_logs
 
     # A level's photoionisation threshold reaches into the ion above it, so keep the whole
     # element available and not only the current ion.
@@ -284,7 +283,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         # the "source:" line is one of the recorded comment lines, because a reader knows its source
         commentheader = (f"Z={atomic_number} {ionstr}", f"handler: {iondata.handler}")
 
-        with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as logstream:
+        with log_path(outdir).open("a", encoding="utf-8") as logstream:
             # the comment lines of the read pass, so the lines of this pass go to the same lists
             flog = IonLog(logstream, iondata.comments)
             log_and_print(flog, f"\n===========> Z={atomic_number} {ionstr} output:")
