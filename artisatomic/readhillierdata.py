@@ -573,15 +573,15 @@ def read_levels_and_transitions_from_file(
                 print(f"  {row_format_energy_level}")
             elif line.rstrip().endswith("!Number of energy levels"):
                 expected_energy_levels = int(row[0])
-                log_comment(flog, ("adata",), f"File specifies {expected_energy_levels:d} levels")
+                log_and_print(flog, f"File specifies {expected_energy_levels:d} levels")
             elif line.rstrip().endswith("!Number of transitions"):
                 expected_transitions = int(row[0])
-                log_comment(flog, ("transitiondata",), f"File specifies {expected_transitions:d} transitions")
+                log_and_print(flog, f"File specifies {expected_transitions:d} transitions")
             elif line.rstrip().endswith("!Ionization energy"):
                 # the header gives the value in cm^-1 to the full precision of the file. The Lam(A)
                 # column of the level table has four significant figures only.
                 hillier_ionization_energy_ev = fortran_float(row[0]) * hc_in_ev_cm
-                log_comment(flog, ("adata",), f"File specifies an ionisation energy of {row[0]} cm^-1")
+                log_and_print(flog, f"File specifies an ionisation energy of {row[0]} cm^-1")
             elif len(row) == 3 and row[1] == "!Format" and row[2] == "date":
                 format_date = row[0]
                 print(f"Format date: {format_date}")
@@ -679,7 +679,7 @@ def read_levels_and_transitions_from_file(
             if re.match(r"^\s*Osci(l|ll)ator strengths", line) and len(levelrows) > 0:
                 break
 
-    log_comment(flog, ("adata",), f"Read {len(levelrows):d} levels")
+    log_and_print(flog, f"Read {len(levelrows):d} levels")
     if levels_without_parity:
         # This is normal for ions with merged levels, so the log gets a count and a sample and
         # not a warning per level. H I and He II have only merged levels.
@@ -704,7 +704,7 @@ def read_levels_and_transitions_from_file(
     # half a million of them
     dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
 
-    log_comment(flog, ("transitiondata",), f"Read {dftransitions.height:d} transitions")
+    log_and_print(flog, f"Read {dftransitions.height:d} transitions")
     if dftransitions.height != expected_transitions:
         msg = f"{filename} declares {expected_transitions} transitions but has {dftransitions.height}"
         raise ValueError(msg)

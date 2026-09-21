@@ -460,7 +460,7 @@ def read_adf04(
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         ionization_energy_ev = _read_adf04_header(line, atomic_number, ion_stage, filepath)
-        log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_ev:.7f} eV")
+        log_and_print(flog, f"ionisation energy: {ionization_energy_ev:.7f} eV")
         # A note between two 'C-' rule lines can sit inside the level block, and the reader skips
         # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
         # collision block.
@@ -608,7 +608,7 @@ def read_adf04(
                     f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
 
-    log_comment(flog, ("adata",), f"Read {len(energylevels):d} levels")
+    log_and_print(flog, f"Read {len(energylevels):d} levels")
     log_comment(flog, ("transitiondata",), f"Read {len(upsilondict):d} effective collision strengths")
     if skipped_rows:
         log_comment(
@@ -738,7 +738,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_ev} eV (NIST)")
+        log_and_print(flog, f"ionisation energy: {ionization_energy_ev} eV (NIST)")
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
@@ -772,7 +772,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         msg = f"No ADAS data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
         raise ValueError(msg)
 
-    log_comment(flog, ("transitiondata",), f"Read {len(adas_transitions):d} transitions")
+    log_and_print(flog, f"Read {len(adas_transitions):d} transitions")
 
     return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
 

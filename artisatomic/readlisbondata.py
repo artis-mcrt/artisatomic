@@ -14,6 +14,7 @@ from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import levelid_of_fileindex_map
+from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
@@ -202,7 +203,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # from NIST, as every other reader whose data set carries no ionisation energy does
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     levelsfile = iondir / f"{elsym}{ion_stage_roman}_Levels.csv"
@@ -228,7 +229,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
-    log_comment(flog, ("adata",), f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     linesfile = iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"
     log_comment(flog, ("transitiondata",), f"Reading {path_for_log(linesfile, relative_to=lisbonpath.parent)}")
@@ -246,6 +247,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
-    log_comment(flog, ("transitiondata",), f"Read {len(transitions):d} transitions")
+    log_and_print(flog, f"Read {len(transitions):d} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions

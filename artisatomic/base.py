@@ -302,6 +302,12 @@ class IonLog:
         for table in COMMENT_TABLES:
             self.comments.setdefault(table, [])
 
+    def add_comment(self, tables: Iterable[str], text: str) -> None:
+        """Record a comment line for each named output file, with no entry in the log file."""
+        for table in tables:
+            # the indent of a line shows its place in the log, and a comment block has no such order
+            self.comments[table].append(text.strip())
+
     def comment_counts(self) -> dict[str, int]:
         """Return the number of comment lines of each output file, for drop_comments_after()."""
         return {table: len(lines) for table, lines in self.comments.items()}
@@ -327,13 +333,13 @@ class IonLog:
 def log_comment(flog, tables: Iterable[str], strout: str) -> None:
     """Log a line, and record it as a comment line for each named output file.
 
-    A log that is not an IonLog records nothing, so a caller can give a plain stream.
+    A log that is not an IonLog records nothing, so a caller can give a plain stream. Do not
+    record a line that only repeats a number of the header line of the ion, for example the count
+    of levels, the count of transitions, or the ionisation energy.
     """
     log_and_print(flog, strout)
     if isinstance(flog, IonLog):
-        for table in tables:
-            # the indent of a line shows its place in the log, and a comment block has no such order
-            flog.comments[table].append(strout.strip())
+        flog.add_comment(tables, strout)
 
 
 def comment_lines(lines: Iterable[str]) -> Iterator[str]:

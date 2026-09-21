@@ -23,6 +23,7 @@ from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
+from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
@@ -331,7 +332,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    log_comment(flog, ("adata",), f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"Read {len(energy_levels):d} levels")
 
     if not lines_file.is_file():
         msg = f"FAC transitions file {lines_file} not found"
@@ -345,7 +346,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map)
 
-    log_comment(flog, ("transitiondata",), f"Read {len(transitions)} transitions")
+    log_and_print(flog, f"Read {len(transitions)} transitions")
 
     return ionization_energy_in_ev, energy_levels, transitions
 

@@ -35,7 +35,9 @@ adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before t
 - the ion and the handler;
 - the data source with its reference (the `source:` line);
 - the source files;
-- the counts and the warnings for that file.
+- the choices and the warnings for that file.
+
+A comment block does not repeat a number of the header line of the ion, for example the count of levels or the ionisation energy.
 
 In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log files in `atomic_data_logs` hold the same lines and more detail. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
 

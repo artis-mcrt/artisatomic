@@ -15,6 +15,7 @@ from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
@@ -334,7 +335,7 @@ def read_levels_and_transitions(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
 
-    log_comment(flog, ("adata",), f"Read {dflevels.height:d} levels")
+    log_and_print(flog, f"Read {dflevels.height:d} levels")
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
@@ -342,7 +343,7 @@ def read_levels_and_transitions(
         [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
-    log_comment(flog, ("transitiondata",), f"Read {dftransitions.height} transitions")
+    log_and_print(flog, f"Read {dftransitions.height} transitions")
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.

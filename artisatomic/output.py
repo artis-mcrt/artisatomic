@@ -549,13 +549,18 @@ def write_transition_data(
         else dftransitions_ion.select(pl.col("forbidden").sum(), (pl.col("coll_str") > 0).sum()).row(0)
     )
 
-    # before the header, because the comment block takes this line
-    log_comment(
+    log_and_print(
         flog,
-        ("transitiondata",),
         f"  output {dftransitions_ion.height:d} transitions of which {num_forbidden_transitions:d} are forbidden and"
         f" {num_collision_strengths_applied:d} have collision strengths",
     )
+    # the header line gives the count of transitions, so the comment block gives the other two
+    if isinstance(flog, IonLog):
+        flog.add_comment(
+            ("transitiondata",),
+            f"{num_forbidden_transitions:d} transitions are forbidden, and {num_collision_strengths_applied:d}"
+            " transitions have collision strengths",
+        )
 
     write_comment_block(ftransitiondata, "transitiondata", commentheader, flog)
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")

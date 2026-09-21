@@ -15,6 +15,7 @@ from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
+from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
@@ -89,11 +90,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     require(readlinein == f"# {atomic_number} {ion_stage}", f"no '# {atomic_number} {ion_stage}' line in the header")
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
-    log_comment(flog, ("adata",), f"levels: {levelcount}")
-    log_comment(flog, ("transitiondata",), f"transitions: {transitioncount}")
+    log_and_print(flog, f"levels: {levelcount}")
+    log_and_print(flog, f"transitions: {transitioncount}")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    log_comment(flog, ("adata",), f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
     require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
