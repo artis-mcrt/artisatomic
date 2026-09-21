@@ -5211,3 +5211,43 @@ def test_phot_file_reader_rejects_a_target_that_a_second_file_or_line_repeats(tm
     reader = PhotFileReader(56, 2, 1, [911.0], {"A": 0}, {"A": 0}, io.StringIO())
     with pytest.raises(ValueError, match="phot_C has more than one '!Final state in ion' line"):
         reader.read_file(0, tmp_path / "phot_C", "phot_C")
+
+
+def test_log_detail_gives_one_count_line_for_each_kind():
+    """The log file gets each detail line, and the comment block gets the first line of a kind with its count."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+    from artisatomic.base import log_detail
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_comment(flog, ("transitiondata",), "source: a data set")
+    for upper in ("B", "C", "D"):
+        log_detail(
+            flog, ("transitiondata",), "swapped transition levels", f"WARNING: Swapped transition levels A -> {upper}"
+        )
+    log_detail(flog, ("transitiondata",), "discarded upsilon", "Discarded upsilon=0.500 for A -> B")
+    log_comment(flog, ("transitiondata",), "Read 4 effective collision strengths")
+
+    assert stream.getvalue().count("Swapped transition levels") == 3
+    assert flog.comments["transitiondata"] == [
+        "source: a data set",
+        "WARNING: Swapped transition levels A -> B (the first of 3 such lines in the log file)",
+        # one line of a kind goes into the block as it is
+        "Discarded upsilon=0.500 for A -> B",
+        "Read 4 effective collision strengths",
+    ]
+
+    # a read that runs again starts each count again, so no count line shows the lines of two reads
+    flog = IonLog(io.StringIO())
+    counts = flog.comment_counts()
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'x' has no LS term")
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'y' has no LS term")
+    flog.drop_comments_after(counts)
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'x' has no LS term")
+    assert flog.comments["adata"] == ["The Hillier level name 'x' has no LS term"]
+
+    # a plain stream records nothing
+    plainstream = io.StringIO()
+    log_detail(plainstream, ("adata",), "kind", "a detail line")
+    assert plainstream.getvalue() == "a detail line\n"

@@ -34,6 +34,7 @@ from artisatomic.base import ion_label
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import path_in_data_folder
@@ -607,8 +608,10 @@ def read_adf04(
             if levelidpair not in upsilondict:
                 upsilondict[levelidpair] = upsilon
             else:
-                log_and_print(
+                log_detail(
                     flog,
+                    ("transitiondata",),
+                    "duplicate upsilon",
                     f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
                     f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
@@ -831,8 +834,10 @@ def _fill_co2_phixs(
                 # nothing positive in this column, so there is no table to downsample. A skip
                 # here leaves the target out of the fractions below, which is what a zero cross
                 # section means. reduce_phixs_tables() would index an empty array and fail.
-                log_and_print(
+                log_detail(
                     flog,
+                    ("phixsdata",),
+                    "target with no positive cross section",
                     f"WARNING: level {lowerlevelid} has no positive cross section to target"
                     f" {targetcolumn - 1}, so the reader drops that target",
                 )
@@ -851,13 +856,18 @@ def _fill_co2_phixs(
         )
         if not combined.fractions:
             # the code assigns nothing for this level, so write_phixs_data() will skip it
-            log_and_print(
-                flog, f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section"
+            log_detail(
+                flog,
+                ("phixsdata",),
+                "level with zero cross section to each target",
+                f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section",
             )
             continue
         for target, factor in combined.dropped:
-            log_and_print(
+            log_detail(
                 flog,
+                ("phixsdata",),
+                "target below the cut",
                 f"level {lowerlevelid}: target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut"
                 f" with {factor:.4e} Mb, so its route drops out",
             )

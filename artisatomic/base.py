@@ -338,6 +338,9 @@ class IonLog:
         """Wrap the stream of the log file. Give comments to add to the lists of an earlier pass."""
         self.stream = stream
         self.comments = empty_comments() if comments is None else comments
+        # for log_detail(): the place of the count line of each kind of detail line, as
+        # (table, kind) -> (index in self.comments[table], count, first line)
+        self.detailcounts: dict[tuple[str, str], tuple[int, int, str]] = {}
 
     def add_comment(self, tables: Iterable[str], text: str) -> None:
         """Record a comment line for each named output file, with no entry in the log file."""
@@ -357,6 +360,22 @@ class IonLog:
         """
         for table, count in counts.items():
             del self.comments[table][count:]
+        # a count line that went away starts again at zero
+        self.detailcounts = {
+            key: value for key, value in self.detailcounts.items() if value[0] < len(self.comments[key[0]])
+        }
+
+    def add_detail(self, tables: Iterable[str], kind: str, text: str) -> None:
+        """Count a detail line of one kind, and keep one comment line for that kind (see log_detail())."""
+        for table in tables:
+            index, count, firstline = self.detailcounts.get((table, kind), (len(self.comments[table]), 0, text.strip()))
+            count += 1
+            commentline = firstline if count == 1 else f"{firstline} (the first of {count} such lines in the log file)"
+            if index == len(self.comments[table]):
+                self.comments[table].append(commentline)
+            else:
+                self.comments[table][index] = commentline
+            self.detailcounts[table, kind] = (index, count, firstline)
 
     def write(self, text: str) -> int:
         """Write text to the log file."""
@@ -378,6 +397,19 @@ def log_comment(flog, tables: Iterable[str], strout: str) -> None:
     log_and_print(flog, strout)
     if isinstance(flog, IonLog):
         flog.add_comment(tables, strout)
+
+
+def log_detail(flog, tables: Iterable[str], kind: str, strout: str) -> None:
+    """Log a detail line that can occur for many levels or transitions of one ion.
+
+    The log file gets each such line. The comment block gets one line for each kind: the first
+    line, and the count of the lines of that kind. A block thus stays short, and it still shows
+    each kind of detail that the log file holds. kind is a short name that the lines of one kind
+    share. A log that is not an IonLog records nothing.
+    """
+    log_and_print(flog, strout)
+    if isinstance(flog, IonLog):
+        flog.add_detail(tables, kind, strout)
 
 
 # NFKD keeps the letter of an accented character. It has no ASCII form for these characters, so

@@ -25,6 +25,7 @@ from artisatomic.base import IonLog
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_detail
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -673,7 +674,12 @@ def read_levels_and_transitions_from_file(
                 # Neither is worth a line here. What remains is a name that we expected to read
                 # and could not.
                 if twosplusone == -1 and atomic_number > 1 and not isjjcoupled and not ismerged:
-                    log_and_print(flog, f"The Hillier level name '{levelname}' has no LS term")
+                    log_detail(
+                        flog,
+                        ("adata",),
+                        "level name with no LS term",
+                        f"The Hillier level name '{levelname}' has no LS term",
+                    )
 
                 if hillierlevelid != len(levelrows):
                     msg = f"Hillier levels mismatch: id {hillierlevelid:d} found at entry number {len(levelrows):d}"
@@ -1234,8 +1240,10 @@ class PhotFileReader:
             )
             raise ValueError(msg)
         if len(energyryd) < self.pending_numpoints:
-            log_and_print(
+            log_detail(
                 self.flog,
+                ("phixsdata",),
+                "short cross section block",
                 f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
@@ -1350,11 +1358,19 @@ class PhotFileReader:
             if len(fitcoefficients) == 3:
                 n, l_start, l_end = fitcoefficients
                 if n > max_hyd_l_n:
-                    log_and_print(
-                        flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table"
+                    log_detail(
+                        flog,
+                        ("phixsdata",),
+                        "n above the hydrogenic l tables",
+                        f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table",
                     )
                 elif l_end > n - 1:
-                    log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
+                    log_detail(
+                        flog,
+                        ("phixsdata",),
+                        "l_end above n - 1",
+                        f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}",
+                    )
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
                     if lambda_angstrom is None:
@@ -1367,8 +1383,11 @@ class PhotFileReader:
             if len(fitcoefficients) == 2:
                 scale, n = fitcoefficients
                 if n > max_hyd_gaunt_n:
-                    log_and_print(
-                        flog, f"WARNING: n ({n}) > max_hyd_gaunt_n ({max_hyd_gaunt_n}), so the reader skips the table"
+                    log_detail(
+                        flog,
+                        ("phixsdata",),
+                        "n above the hydrogenic Gaunt tables",
+                        f"WARNING: n ({n}) > max_hyd_gaunt_n ({max_hyd_gaunt_n}), so the reader skips the table",
                     )
                     return
                 lambda_angstrom = self.edge_lambda_angstrom()
@@ -1386,11 +1405,19 @@ class PhotFileReader:
             if len(fitcoefficients) == 4:
                 n, l_start, l_end, nu_o = fitcoefficients
                 if n > max_hyd_l_n:
-                    log_and_print(
-                        flog, f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table"
+                    log_detail(
+                        flog,
+                        ("phixsdata",),
+                        "n above the hydrogenic l tables",
+                        f"WARNING: n ({n}) > max_hyd_l_n ({max_hyd_l_n}), so the reader skips the table",
                     )
                 elif l_end > n - 1:
-                    log_and_print(flog, f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}")
+                    log_detail(
+                        flog,
+                        ("phixsdata",),
+                        "l_end above n - 1",
+                        f"ERROR: l_end = {l_end} is greater than n - 1 = {n - 1}",
+                    )
                 else:
                     lambda_angstrom = self.edge_lambda_angstrom()
                     if lambda_angstrom is None:
@@ -1521,8 +1548,10 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 f" Target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut, so its route drops out."
                 for target, _ in combined.dropped
             )
-            log_and_print(
+            log_detail(
                 flog,
+                ("phixsdata",),
+                "level with more than one route",
                 f"{lowerlevelname} has a cross section table in {len(combined.factors)} photoionisation files."
                 f" The sums of the reduced tables are {factortext}.{droppedtext}",
             )
@@ -1886,7 +1915,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         if levelname != levelnamenoJ:  # levels are J split
             level_ids_of_level_name[levelname] = [levelid]
         elif not found_nonjsplit_level:
-            log_and_print(flog, "Found at least one level name with no J value")
+            log_comment(flog, ("transitiondata",), "Found at least one level name with no J value")
             found_nonjsplit_level = True
 
         # keep the level ids of states that differ by J only, for the case that the level names
@@ -2023,15 +2052,19 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 if unlisted:
                     unlisted_from_message = " (unlisted)" if namefrom in unlisted else ""
                     unlisted_to_message = " (unlisted)" if nameto in unlisted else ""
-                    log_and_print(
+                    log_detail(
                         flog,
+                        ("transitiondata",),
+                        "discarded upsilon",
                         f"Discarded upsilon={upsilon:.3f} for {namefrom}{unlisted_from_message} ->"
                         f" {nameto}{unlisted_to_message}",
                     )
                     continue
                 if level_ids_of_level_name[namefrom][0] > level_ids_of_level_name[nameto][0]:
-                    log_and_print(
+                    log_detail(
                         flog,
+                        ("transitiondata",),
+                        "swapped transition levels",
                         f"WARNING: Swapped transition levels {namefrom} {level_ids_of_level_name[namefrom]} "
                         f"-> {nameto} {level_ids_of_level_name[nameto]}.",
                     )
@@ -2065,8 +2098,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                         # drop the pairs that come out reversed.
                         key = (min(id_lower, id_upper), max(id_lower, id_upper))
                         if key in upsilondict and upsilondict[key] >= 0.0:
-                            log_and_print(
+                            log_detail(
                                 flog,
+                                ("transitiondata",),
+                                "duplicate collisional transition",
                                 f"ERROR: Duplicate collisional transition from {namefrom} <->"
                                 f" {nameto} ({key[0]} -> {key[1]}). The reader keeps the existing collision"
                                 f" strength {upsilondict[key]:.2e} and ignores the new value"
@@ -2195,10 +2230,15 @@ def get_photoiontargetfractions(
                         matchednames = sorted(
                             {name for partnames in names_of_strippedname.values() for name in partnames}
                         )
-                        logprint(
+                        # one time for each target name, so the comment block gets the line also
+                        separatorsmessage = (
                             f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
                             " with the name separators removed"
                         )
+                        if flog is None:
+                            print(separatorsmessage)
+                        else:
+                            log_comment(flog, ("phixsdata",), separatorsmessage)
                 if not upperionlevelids:
                     # This choice sets the upper_level of each table of this target. The loop comes
                     # here one time for each target name, so the comment block gets the line also.
