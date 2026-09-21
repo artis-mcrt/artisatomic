@@ -4710,19 +4710,6 @@ def test_log_comment_records_for_an_ionlog_only():
     assert plainstream.getvalue() == "Reading a file\n"
 
 
-def test_log_comment_without_echo_keeps_the_line_off_stdout(capsys):
-    """The line goes to the log file and to the comment list only."""
-    from artisatomic.base import IonLog
-    from artisatomic.base import log_comment
-
-    stream = io.StringIO()
-    flog = IonLog(stream)
-    log_comment(flog, ("phixsdata",), "quiet line", echo=False)
-    assert not capsys.readouterr().out
-    assert stream.getvalue() == "quiet line\n"
-    assert flog.comments["phixsdata"] == ["quiet line"]
-
-
 def test_write_comment_block_gives_every_part_of_a_line_a_hash():
     """ARTIS reads a line with no # as data, so a line break in a log line must not end the comment."""
     from artisatomic.base import IonLog
@@ -4747,73 +4734,77 @@ def artis_noncommentline(lines: list[str], pos: int) -> int:
     return pos
 
 
+def two_level_iondata(ion_stage: int, nphixspoints: int, *, has_phixs: bool, is_top_ion: bool = False):
+    """Build an ion with two levels and one collision strength, with or without cross section tables."""
+    import dataclasses
+
+    from artisatomic.base import empty_comments
+
+    comments = empty_comments()
+    comments["adata"] += ["source: the source of the levels", "Reading osc_data"]
+    comments["transitiondata"] += ["source: the source of the levels", "Temperatures:\n0.1, 0.2"]
+    comments["phixsdata"] += ["source: the source of the cross sections"]
+    return dataclasses.replace(
+        make_iondata(ion_stage, is_top_ion=is_top_ion),
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0, 1],
+                "energyabovegsinpercm": [0.0, 1000.0],
+                "g": [9.0, 7.0],
+                "parity": [0, 1],
+                "levelname": [f"gs{ion_stage}", f"excited{ion_stage} # not a comment"],
+            }
+        ),
+        upsilondict={(0, 1): 0.5},
+        photoionization_crosssections=np.ones((2, nphixspoints)) if has_phixs else np.empty((0, nphixspoints)),
+        # one target for level id 0 and two targets for level id 1, so both table forms occur
+        photoionization_targetfractions=[[(0, 1.0)], [(0, 0.25), (1, 0.75)]] if has_phixs else [],
+        photoionization_thresholds_ev=np.array([10.0, 9.0]) if has_phixs else np.empty(0),
+        comments=comments,
+    )
+
+
 def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     """Read the output files as ARTIS does (input.cc), so a comment at a wrong position fails here.
 
     ARTIS skips a comment line only before the header of an ion or of a cross section table.
     Inside a block it takes a fixed count of lines, whatever they hold.
     """
-    from artisatomic.iondata import IonData
     from artisatomic.output import clear_files
     from artisatomic.output import write_output_files
 
     nphixspoints = 3
     (tmp_path / "logs").mkdir()
-    tmpargs = argparse.Namespace(
-        output_folder=str(tmp_path),
-        output_folder_logs="logs",
-        nophixs=False,
-        nphixspoints=nphixspoints,
-        phixsnuincrement=0.1,
-        optimaltemperature=6000,
+    tmpargs = phixs_args(
+        output_folder=str(tmp_path), output_folder_logs="logs", nphixspoints=nphixspoints, phixsnuincrement=0.1
     )
 
-    def iondata(ion_stage: int, is_top_ion: bool) -> IonData:
-        return IonData(
-            ion_stage=ion_stage,
-            handler="cmfgen_qubphixs",
-            is_top_ion=is_top_ion,
-            ionization_energy_ev=10.0,
-            dfenergylevels=pl.DataFrame(
-                {
-                    "levelid": [0, 1],
-                    "energyabovegsinpercm": [0.0, 1000.0],
-                    "g": [9.0, 7.0],
-                    "parity": [0, 1],
-                    "levelname": [f"gs{ion_stage}", f"excited{ion_stage} # not a comment"],
-                }
-            ),
-            dftransitions=pl.DataFrame(),
-            upsilondict={(0, 1): 0.5},
-            photoion_targetconfigs=None,
-            photoionization_crosssections=np.empty((0, nphixspoints)) if is_top_ion else np.ones((2, nphixspoints)),
-            # one target for level id 0 and two targets for level id 1, so both table forms occur
-            photoionization_targetfractions=[] if is_top_ion else [[(0, 1.0)], [(0, 0.25), (1, 0.75)]],
-            photoionization_thresholds_ev=np.empty(0) if is_top_ion else np.array([10.0, 9.0]),
-            comments={"adata": ["Reading osc_data"], "transitiondata": ["Temperatures:\n0.1, 0.2"], "phixsdata": []},
-        )
-
-    ionstages = [1, 2, 3]
+    # Fe II has no cross section table, and it is not the top ion
+    ionstages = [1, 2, 3, 4]
+    iondatalist = [
+        two_level_iondata(ion_stage, nphixspoints, has_phixs=ion_stage in {1, 3}, is_top_ion=ion_stage == 4)
+        for ion_stage in ionstages
+    ]
     clear_files(tmpargs)
-    write_output_files(26, [iondata(ion_stage, is_top_ion=ion_stage == 3) for ion_stage in ionstages], tmpargs)
+    write_output_files(26, iondatalist, tmpargs)
 
     adatatext = (tmp_path / "adata.txt").read_text(encoding="utf-8")
-    assert "# Z=26 Fe II\n# handler: cmfgen_qubphixs\n# source: the CMFGEN model atoms" in adatatext
-    assert "# Reading osc_data\n" in adatatext
+    assert "# Z=26 Fe II\n# handler: cmfgen\n# source: the source of the levels\n# Reading osc_data\n" in adatatext
     lines = adatatext.splitlines()
     pos = 0
     for ion_stage in ionstages:
         pos = artis_noncommentline(lines, pos)
         atomic_number, ion_stage_in, nlevels, _ionpot = lines[pos].split()
         assert (int(atomic_number), int(ion_stage_in), int(nlevels)) == (26, ion_stage, 2)
-        for levelline in lines[pos + 1 : pos + 1 + 2]:
-            levelindex, energy, g, ntransitions = levelline.split()[:4]
-            assert (int(levelindex), float(energy), float(g), int(ntransitions)) is not None
+        for levelnumber, levelline in enumerate(lines[pos + 1 : pos + 1 + 2], start=1):
+            levelnumber_in, energy, g, ntransitions = levelline.split()[:4]
+            assert (int(levelnumber_in), float(g), int(ntransitions)) == (levelnumber, [9.0, 7.0][levelnumber - 1], 1)
+            assert float(energy) >= 0.0
         pos += 1 + 2
 
     transitiontext = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
     assert "# Temperatures:\n# 0.1, 0.2\n" in transitiontext
-    assert "# source: the CMFGEN model atoms" in transitiontext
+    assert "# source: the source of the levels\n" in transitiontext
     lines = transitiontext.splitlines()
     pos = 0
     for ion_stage in ionstages:
@@ -4824,8 +4815,13 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
         pos += 1 + 1
 
     phixstext = (tmp_path / "phixsdata_v2.txt").read_text(encoding="utf-8")
-    assert "# source: the Co data of Queen's University Belfast" in phixstext
-    assert "# Downsample of the cross sections" in phixstext
+    assert phixstext.count("# source: the source of the cross sections\n") == 2
+    # an ion with no table gets no block, because a block must come directly before a table header
+    assert "# Z=26 Fe II\n" not in phixstext
+    assert not phixstext.splitlines()[-1].startswith("#")
+    # the file holds the two grid numbers and the tables of each ion already
+    assert "Downsample" not in phixstext
+    assert "Writing" not in phixstext
     lines = phixstext.splitlines()
     # ARTIS reads the first two numbers with no comment skip
     assert int(lines[0]) == nphixspoints
@@ -4849,4 +4845,96 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
         assert [float(line) for line in lines[pos : pos + nphixspoints]] == [1.0] * nphixspoints
         pos += nphixspoints
         tables.append((int(lowerionstage), int(lowerlevel)))
-    assert tables == [(1, 1), (1, 2), (2, 1), (2, 2)]
+    assert tables == [(1, 1), (1, 2), (3, 1), (3, 2)]
+
+
+def test_write_comment_block_writes_ascii_only():
+    """A program that opens an output file with the encoding of an ASCII locale must not stop on an author name."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["adata"].append("source: Flörs, A., Martínez-Pinedo, G., Kitovienė, L.")
+    out = io.StringIO()
+    write_comment_block(out, "adata", (), flog)
+    assert out.getvalue() == "# source: Flors, A., Martinez-Pinedo, G., Kitoviene, L.\n"
+    assert out.getvalue().isascii()
+
+
+def test_ionlog_drops_the_comments_of_a_read_that_runs_again():
+    """The CMFGEN reader reads a file a second time after a rewrite as utf-8, and no comment line must occur twice."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    flog = IonLog(io.StringIO())
+    log_comment(flog, ("adata",), "source: a data set")
+    counts = flog.comment_counts()
+    log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+    flog.drop_comments_after(counts)
+    log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+    assert flog.comments == {
+        "adata": ["source: a data set", "Reading osc_data"],
+        "transitiondata": ["Reading osc_data"],
+        "phixsdata": [],
+    }
+
+
+def test_cmfgen_reader_records_each_comment_one_time_after_the_utf8_retry(monkeypatch):
+    """The run that rewrites a file as utf-8 must give the same comment block as each later run."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    attempts = []
+
+    def fake_read(_atomic_number, _ion_stage, flog):
+        log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+        attempts.append(1)
+        if len(attempts) == 1:
+            encoding = "utf-8"
+            raise UnicodeDecodeError(encoding, b"\xed", 0, 1, "invalid continuation byte")
+        return 1.0, pl.DataFrame(), pl.DataFrame()
+
+    monkeypatch.setattr(readhillierdata, "read_levels_and_transitions_from_file", fake_read)
+    monkeypatch.setattr(readhillierdata, "rewrite_file_as_utf8", lambda _filename: True)
+
+    flog = IonLog(io.StringIO())
+    readhillierdata.read_levels_and_transitions(26, 2, flog)
+    assert len(attempts) == 2
+    assert flog.comments["adata"] == ["Reading osc_data"]
+    assert flog.comments["transitiondata"] == ["Reading osc_data"]
+
+
+def test_each_reader_of_the_registry_takes_a_log():
+    """read_ion_data() gives each reader (atomic_number, ion_stage, flog), so each one must take a third argument."""
+    import inspect
+
+    from artisatomic.iondata import handlers
+
+    for name, handler in handlers.items():
+        parameters = list(inspect.signature(handler.read_levels_and_transitions).parameters)
+        assert parameters[:3] == ["atomic_number", "ion_stage", "flog"], name
+        assert handler.description, name
+
+
+def test_hydrogenic_estimate_records_its_source_only_with_a_table():
+    """An ion that got no hydrogenic table must not name the estimate as the source of its cross sections."""
+    from artisatomic.base import IonLog
+
+    levels = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [2.0], "levelname": ["3s_2Se"]})
+    args = phixs_args()
+
+    flog = IonLog(io.StringIO())
+    crosssections, _, _ = match_hydrogenic_phixs(11, levels, 5.139, "mons", None, args, flog)
+    assert len(crosssections) == 0
+    assert flog.comments["phixsdata"] == []
+
+    flog = IonLog(io.StringIO())
+    crosssections, _, _ = match_hydrogenic_phixs(
+        11, levels, 5.139, "cmfgen", readhillierdata.get_level_valence_n, args, flog
+    )
+    assert len(crosssections) == 1
+    assert len(flog.comments["phixsdata"]) == 1
+    sourceline = flog.comments["phixsdata"][0]
+    assert sourceline.startswith("source: the hydrogenic estimate of artisatomic")
+    assert "gbf_n_data.dat" in sourceline
+    assert "/Users/" not in sourceline

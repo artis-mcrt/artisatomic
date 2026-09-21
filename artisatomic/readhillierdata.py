@@ -20,6 +20,7 @@ from artisatomic.base import fortran_float
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import IonLog
 from artisatomic.base import isfloat
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
@@ -239,6 +240,11 @@ max_hyd_l_n, max_hyd_gaunt_n = -1, -1
 
 # the root of the CMFGEN data. The log files name each file relative to this folder
 hillier_datadir = (PYDIR / ".." / "atomic-data-hillier").resolve()
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "the CMFGEN model atoms of Hillier. Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427, doi:10.1086/305350"
+)
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -464,12 +470,17 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     both reads of the first call. rewrite_file_as_utf8() converts the file once, so the second
     call reads it.
     """
+    commentcounts = flog.comment_counts() if isinstance(flog, IonLog) else None
     try:
         return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
     except (UnicodeDecodeError, pl.exceptions.ComputeError):
         # a failure that the encoding does not explain belongs to the caller
         if not rewrite_file_as_utf8(hillier_osc_filename(atomic_number, ion_stage)):
             raise
+        # The second read records each comment line again. Without this, the output files of
+        # the run that converts the file would differ from those of each later run.
+        if isinstance(flog, IonLog) and commentcounts is not None:
+            flog.drop_comments_after(commentcounts)
 
     return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
 
@@ -921,6 +932,8 @@ class PhotFileReader:
         self.levels_without_edge: dict[str, None] = {}
         self.duplicate_energy_rows = 0
         self.duplicate_energy_first: tuple[str, float] | None = None
+        # the count of lines before the header of the current file that name no target
+        self.lines_without_target = 0
         # set to skip the problem lines in Fe VIII and Ni X phot_data_A (see take_event_line)
         self.in_header = False
 
@@ -1047,6 +1060,13 @@ class PhotFileReader:
                 f" zero or below, so they get no cross section."
                 f" The first is {next(iter(self.levels_without_edge))}.",
             )
+        if self.lines_without_target:
+            log_comment(
+                self.flog,
+                ("phixsdata",),
+                f"WARNING: {self.lines_without_target} lines before the header of {photfilename} name no"
+                " photoionisation target, so the reader skipped them.",
+            )
         if self.duplicate_energy_first is not None:
             duplicate_levelname, duplicate_energy = self.duplicate_energy_first
             log_comment(
@@ -1103,11 +1123,12 @@ class PhotFileReader:
             row[-3:]
         ) == "!Configuration name [*]":
             if not self.in_header:
-                log_comment(
+                # the log gets each line, and the comment block gets the one summary of read_file()
+                log_and_print(
                     self.flog,
-                    ("phixsdata",),
                     f"WARNING: no photoionisation target ({line.strip()}). The reader skips to the next line",
                 )
+                self.lines_without_target += 1
                 # Fe VIII and Ni X phot_data_A have lines before the header that end in
                 # "!Configuration name" and are not level blocks
                 return
@@ -1400,6 +1421,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # as "no data" and applies the hydrogenic estimate. A zero-filled array would pass as data.
         log_comment(flog, ("phixsdata",), "No photoionisation files for this ion")
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetconfigs=[None] * levelcount)
+    log_comment(flog, ("phixsdata",), f"source: {description}")
 
     # the type 2, 3 and 8 fits interpolate the hydrogenic tables
     read_hyd_phixsdata()
@@ -1677,6 +1699,11 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 # test: hydrogen n = 5: 2.72 eV threshold cross section is near 37.0 Mb. The source of this value is unknown.
 # gives nearly the same threshold value as get_hydrogenic_nl_phixstable(lambda_angstrom, n, 0, n - 1),
 # on a different grid
+def hyd_gaunt_filename() -> str:
+    """Path of the CMFGEN file of the bound-free Gaunt factors of hydrogen, for each n."""
+    return hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
+
+
 def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     """Evaluate a hydrogenic cross section for a whole shell (CMFGEN type 3), all l of one n.
 
@@ -2271,7 +2298,7 @@ def read_hyd_phixsdata(force: bool = False) -> None:
             # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
             hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
 
-    hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/gbf_n_data.dat"
+    hyd_filename = hyd_gaunt_filename()
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")
     max_n = -1
     n_start_u = 0.0

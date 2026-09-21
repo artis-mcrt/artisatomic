@@ -23,6 +23,12 @@ from artisatomic.base import Transition
 
 # the h5 file comes from Andreas Floers's DREAM parser
 dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325.h5"
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "the DREAM database (Database on Rare Earths At Mons university) of Z >= 57. Quinet, P., Palmeri, P. (2020),"
+    " Atoms, 8, 18, doi:10.3390/atoms8020018"
+)
 dreamdata: pl.DataFrame | None = None
 
 

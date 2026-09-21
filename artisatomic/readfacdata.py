@@ -32,8 +32,15 @@ from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import split_levels_above_ionization
 from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
+from artisatomic.readfloers25data import reference as floers25_reference
 
 USE_CALIBRATED = True
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    f"FAC and cFAC output, an early version of the calibrated Floers+25 data. {floers25_reference}."
+    " FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
+)
 
 
 def get_basepath() -> Path:
@@ -307,7 +314,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         flog,
         ("adata", "transitiondata"),
         f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {path_for_log(ion_folder)}",
+        f" {path_for_log(ion_folder, relative_to=get_basepath().parent.parent)}",
     )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]

@@ -24,6 +24,14 @@ from artisatomic.base import TESTMODE
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
 
+# the FAC reader gives the same paper
+reference = (
+    "Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026), Phys. Rev. D, 113,"
+    " 063041, doi:10.1103/jxqw-7ynk"
+)
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = f"the Floers+25 data set. {reference}. Data set: doi:10.5281/zenodo.15835360"
+
 
 def get_basepath(withforbidden: bool) -> Path:
     """Directory that holds the Floers+25 level and transitions files.

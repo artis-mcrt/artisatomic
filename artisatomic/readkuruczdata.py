@@ -20,9 +20,13 @@ from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
 from artisatomic.levelnames import split_count_and_n
 
-kuruczdatapath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
+kuruczbasepath = (PYDIR / ".." / "atomic-data-kurucz").resolve()
+kuruczdatapath = kuruczbasepath
 if TESTMODE:
     kuruczdatapath /= "test_sample"
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/"
 
 
 def parse_gfall(fname: str) -> pl.LazyFrame:
@@ -171,7 +175,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     log_and_print(flog, f"Using Kurucz for Z={atomic_number} ion_stage {ion_stage}")
 
     path_gfall = find_gfall(atomic_number, ion_charge)
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(path_gfall)}")
+    log_comment(
+        flog, ("adata", "transitiondata"), f"Reading {path_for_log(path_gfall, relative_to=kuruczbasepath.parent)}"
+    )
 
     gfall = parse_gfall(fname=str(path_gfall))
     column_renames = {

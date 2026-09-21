@@ -18,6 +18,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
+from artisatomic.base import path_for_log
 from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import ryd_to_hz
 
@@ -56,20 +57,16 @@ def match_hydrogenic_phixs(
     ion log records it. The hydrogenic tables cover n = 1 to max_hyd_gaunt_n only. A level
     outside that range also gets no estimate, and the function does not read past the table.
     """
-    # stdout only: the warning concerns the whole ion, and the ion log holds the messages about
-    # single levels. A skipped level below goes to the log.
     if get_level_valence_n is None:
-        log_comment(
+        log_and_print(
             flog,
-            ("phixsdata",),
             f"WARNING: no hydrogenic photoionisation cross sections, because no parser gives the principal"
             f" quantum number of a {ion_handler} level",
         )
         return np.empty((0, args.nphixspoints)), [], np.empty(0)
 
-    log_comment(
+    log_and_print(
         flog,
-        ("phixsdata",),
         f"artisatomic uses hydrogenic photoionisation cross sections for Z={atomic_number} {elsymbols[atomic_number]}",
     )
     # This loads the tables on the first call. The range test below reads max_hyd_gaunt_n, which
@@ -128,6 +125,18 @@ def match_hydrogenic_phixs(
     )
     for levelindex, reduced_phixs_table in reduced_phixs_dict.items():
         photoionization_crosssections[levelindex] = reduced_phixs_table
+
+    # only an ion that got a table names the estimate as its source
+    if reduced_phixs_dict:
+        gauntpath = path_for_log(readhillierdata.hyd_gaunt_filename(), relative_to=readhillierdata.hillier_datadir)
+        log_comment(
+            flog,
+            ("phixsdata",),
+            "source: the hydrogenic estimate of artisatomic for the lowest"
+            f" {args.nlevels_hydrogenic_for_unknown_phixs} levels. It is the cross section of Kramers, H. A. (1923),"
+            " Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244, with the Gaunt factors of CMFGEN in"
+            f" {gauntpath}",
+        )
 
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 

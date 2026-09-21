@@ -26,6 +26,9 @@ from artisatomic.base import xopen_check_extension
 # the count of provenance lines at the top of every Lisbon CSV, before the header row
 PROVENANCE_LINES = 8
 
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = "the Lisbon Atomic Group data set"
+
 
 def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: str) -> pl.DataFrame:
     """Read a Lisbon CSV past the provenance lines, and check the row count that its header gives.

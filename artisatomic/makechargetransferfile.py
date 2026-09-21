@@ -32,6 +32,7 @@ from pathlib import Path
 
 import numpy as np
 
+from artisatomic.base import comment_lines
 from artisatomic.base import elsymbols
 from artisatomic.base import PYDIR
 from artisatomic.base import xopen_check_extension
@@ -209,7 +210,7 @@ SS11_ZNUM = {elsymbol: elsymbols.index(elsymbol) for elsymbol in ("Ge", "Se", "B
 
 def comment_block(lines: list[str]) -> str:
     """Return the lines as a block of comments of the output file."""
-    return "".join(f"# {line}".rstrip() + "\n" for line in lines)
+    return "".join(comment_lines(lines))
 
 
 def format_header(source_counts: Counter[str]) -> str:

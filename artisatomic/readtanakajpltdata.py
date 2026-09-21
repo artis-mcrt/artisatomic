@@ -22,6 +22,13 @@ from artisatomic.base import scan_file_lines
 
 jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
 
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "the Japan-Lithuania opacity database for kilonovae, of 26 <= Z <= 88. Tanaka, M., Kato, D., Gaigalas, G.,"
+    " Kawaguchi, K. (2020), MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576 (version 1), and Kato, D., Tanaka, M.,"
+    " Gaigalas, G., Kitovienė, L., Rynkun, P. (2024), MNRAS, 535, 2670-2686, doi:10.1093/mnras/stae2504 (version 2)"
+)
+
 # the name of a data file, e.g. 26_2.txt or 26_2.txt.zst
 jplt_filename_pattern = ion_filename_pattern(".txt")
 
@@ -57,7 +64,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     with a warning.
     """
     filename = f"{atomic_number}_{ion_stage}.txt"
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(jpltpath / filename)}")
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"Reading {path_for_log(jpltpath / filename, relative_to=jpltpath.parent.parent)}",
+    )
 
     def require(condition: bool, message: str) -> None:
         # not an assert: input validation must survive python -O

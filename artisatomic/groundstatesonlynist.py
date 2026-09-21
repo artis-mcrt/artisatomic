@@ -17,6 +17,12 @@ from artisatomic.base import PYDIR
 
 datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
 
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "ground states only, from the NIST Atomic Spectra Database. Kramida, A., Ralchenko, Yu., Reader, J. and NIST ASD"
+    " Team, https://physics.nist.gov/asd, doi:10.18434/T4W30F"
+)
+
 
 @cache
 def read_groundstates_table() -> pl.DataFrame:

@@ -1,6 +1,7 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
+import unicodedata
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -11,6 +12,7 @@ import polars as pl
 
 from artisatomic.base import atomic_weights
 from artisatomic.base import check_ion_stages_contiguous
+from artisatomic.base import comment_lines
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
 from artisatomic.base import hc_in_ev_cm
@@ -21,7 +23,6 @@ from artisatomic.base import log_comment
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
-from artisatomic.iondata import source_description
 
 
 def clear_files(args: argparse.Namespace) -> None:
@@ -260,6 +261,9 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
 def write_output_files(atomic_number: int, iondatalist: list[IonData], args: argparse.Namespace) -> None:
     """Append one element's ions to adata.txt, transitiondata.txt and phixsdata_v2.txt.
 
+    Call this function one time for each element. It adds its comment lines to the lists of each
+    IonData, so a second call would write those lines two times.
+
     resolve_photoion_targetfractions() (in iondata) must already have filled in every non-top
     ion's photoionization_targetfractions. This function does not call it. An ion that still
     needs the resolve pass would lose its cross sections without a message, so this function
@@ -277,12 +281,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
         upsilondict = iondata.upsilondict
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
 
-        def commentheader(table: str, iondata: IonData = iondata, ionstr: str = ionstr) -> tuple[str, ...]:
-            return (
-                f"Z={atomic_number} {ionstr}",
-                f"handler: {iondata.handler}",
-                f"source: {source_description(iondata, table)}",
-            )
+        # the "source:" line is one of the recorded comment lines, because a reader knows its source
+        commentheader = (f"Z={atomic_number} {ionstr}", f"handler: {iondata.handler}")
 
         with ion_log_path(log_folder, atomic_number, ion_stage).open("a", encoding="utf-8") as logstream:
             # the comment lines of the read pass, so the lines of this pass go to the same lists
@@ -316,11 +316,12 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
                 )
 
-            log_comment(
-                flog,
-                ("transitiondata",),
-                f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values",
-            )
+            addedtext = f"Added {dfupsilon_only_transitions.height:d} extra transitions that have only upsilon values"
+            # a count of zero tells nothing about the data, so only the log gets it
+            if dfupsilon_only_transitions.is_empty():
+                log_and_print(flog, addedtext)
+            else:
+                log_comment(flog, ("transitiondata",), addedtext)
 
             if not dfupsilon_only_transitions.is_empty():
                 dfupsilon_only_transitions = dfupsilon_only_transitions.with_columns(A=0.0)
@@ -349,7 +350,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     iondata.ionization_energy_ev,
                     transition_counts,
                     flog,
-                    commentheader("adata"),
+                    commentheader,
                 )
 
             # maintain_order: a reader can give one level pair several rows with different A
@@ -369,7 +370,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                     ion_stage,
                     dftransitions_ion,
                     flog,
-                    commentheader("transitiondata"),
+                    commentheader,
                 )
 
             if not iondata.is_top_ion and not args.nophixs:
@@ -393,26 +394,28 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                         fill_missing_phixs_thresholds(iondata, iondata_of_ion_stage.get(ion_stage + 1), flog),
                         args,
                         flog,
-                        commentheader("phixsdata"),
+                        commentheader,
                     )
 
 
 def write_comment_block(fout, table: str, commentheader: Iterable[str], flog) -> None:
     """Write the comment block of one ion: the header lines, then the lines that the log holds for this file.
 
-    ARTIS skips a comment line only where it reads the header of an ion in adata.txt and
-    transitiondata.txt, and the header of a table in phixsdata_v2.txt (get_noncommentline() in
-    input.cc). Inside a block it counts the lines, so a comment there would move every later
-    line. A writer must therefore call this function directly before it writes such a header, and
-    not at any other position.
+    ARTIS skips a comment line only directly before the header line of an ion in adata.txt and
+    transitiondata.txt. In phixsdata_v2.txt it skips one only directly before the header line of
+    a table (get_noncommentline() in input.h). Inside a block ARTIS counts the lines, so a
+    comment there would move every later line. A writer must therefore call this function
+    directly before it writes such a header line, and at no other position.
 
     The function writes nothing for an empty header and a log that is not an IonLog.
     """
     lines = [*commentheader, *(flog.comments[table] if isinstance(flog, IonLog) else ())]
-    # A line of the log can hold a line break. ARTIS would read a part with no # as data. A header
-    # line that a reader copied from its source file has a # already.
+    # ASCII only: a program that opens the file with the encoding of an ASCII locale stops on the
+    # first other character, and an author name such as Flörs has one. NFKD splits the accent
+    # from its letter, so the letter stays.
     fout.writelines(
-        f"{part}\n" if part.startswith("#") else f"# {part}\n" for line in lines for part in line.splitlines()
+        unicodedata.normalize("NFKD", commentline).encode("ascii", "ignore").decode("ascii")
+        for commentline in comment_lines(lines)
     )
 
 
@@ -539,12 +542,11 @@ def write_transition_data(
             )
             raise ValueError(msg)
 
-    num_forbidden_transitions = (
-        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("forbidden")).height
-    )
-
-    num_collision_strengths_applied = (
-        0 if dftransitions_ion.is_empty() else dftransitions_ion.filter(pl.col("coll_str") > 0).height
+    # sums, and not a filtered copy of the frame for each count: a cmfgen ion has 2.6M rows
+    num_forbidden_transitions, num_collision_strengths_applied = (
+        (0, 0)
+        if dftransitions_ion.is_empty()
+        else dftransitions_ion.select(pl.col("forbidden").sum(), (pl.col("coll_str") > 0).sum()).row(0)
     )
 
     # before the header, because the comment block takes this line
@@ -681,7 +683,7 @@ def write_phixs_data(
         1 for levelid in levelids_to_write if not threshold_is_known(photoionization_thresholds_ev[levelid])
     )
 
-    log_comment(flog, ("phixsdata",), f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
+    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
     if nothreshold:
         log_comment(
             flog,
@@ -690,12 +692,9 @@ def write_phixs_data(
             " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
             " in full.",
         )
-    log_comment(
-        flog,
-        ("phixsdata",),
+    flog.write(
         f"Downsample of the cross sections with T={args.optimaltemperature} Kelvin, "
-        f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}",
-        echo=False,
+        f"nphixspoints={args.nphixspoints}, phixsnuincrement={args.phixsnuincrement}\n"
     )
 
     # Only for a ground state that the writer writes. The writer skips a level with no targets on
@@ -733,7 +732,9 @@ def write_phixs_data(
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
 
-    write_comment_block(fphixs, "phixsdata", commentheader, flog)
+    # An ion with no table gets no block. A block must come directly before a table header line.
+    if levelids_to_write:
+        write_comment_block(fphixs, "phixsdata", commentheader, flog)
 
     # level ids (of this ion and of the upper ion's photoionisation targets) are zero-based in
     # memory, but the output format numbers them from one

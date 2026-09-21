@@ -30,9 +30,16 @@ prek install
 Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an `artisatomicionhandlers.json` file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection.
 
 ### Comment blocks in the output files
-adata.txt, transitiondata.txt and phixsdata_v2.txt have a block of `#` comment lines before the data of each ion. The block gives the handler, the data source with its reference, the source files, and the counts and warnings for that file. The log files in `atomic_data_logs` hold the same lines and more detail. compositiondata.txt has no comment, because ARTIS reads it with no comment skip.
+adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before the data of each ion. Each line of a comment block starts with `#`. A comment block gives:
 
-ARTIS v2023.10 and later skip these comment lines. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment lines.
+- the ion and the handler;
+- the data source with its reference (the `source:` line);
+- the source files;
+- the counts and the warnings for that file.
+
+In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log files in `atomic_data_logs` hold the same lines and more detail. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
+
+ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them for such a release, for example with `grep -v '^#' adata.txt`. artistools needs a version that skips the comment blocks.
 
 The package installs three more commands:
 

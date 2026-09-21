@@ -21,13 +21,21 @@ from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import TESTMODE
 
-datafilepath = (PYDIR / ".." / "atomic-data-mons").resolve()
+monsbasepath = (PYDIR / ".." / "atomic-data-mons").resolve()
+datafilepath = monsbasepath
 if TESTMODE:
     # a reduced Ce V and Ce VI sample cut from the full archives (see tests/README.md)
     datafilepath /= "test_sample"
 
 levels_archive = "outglv_Ln_V--VII.zip"
 transitions_archive = "outggf_Ln_V--VII.zip"
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "the University of Mons data set of the lanthanides V-VII. Carvajal Gallego, H., Deprince, J., Maison, L.,"
+    " Palmeri, P., Quinet, P. (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723. Data set:"
+    " doi:10.5281/zenodo.10635803"
+)
 
 # The transition file quotes the lower level energy to about 8 significant digits, so it differs
 # from the level file by up to 0.02 cm^-1. A larger difference means that the two files disagree.
@@ -125,7 +133,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("adata",),
-        f"Reading {levels_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / levels_archive)}",
+        f"Reading {levels_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / levels_archive, relative_to=monsbasepath.parent)}",
     )
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
     log_comment(flog, ("adata",), f"levels: {len(energy_levels1000percm)}")
@@ -148,7 +156,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("transitiondata",),
-        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / transitions_archive)}",
+        f"Reading {transitions_member(atomic_number, ion_stage)} in {path_for_log(datafilepath / transitions_archive, relative_to=monsbasepath.parent)}",
     )
     transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3

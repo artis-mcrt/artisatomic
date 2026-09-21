@@ -12,6 +12,7 @@ import sys
 import typing as t
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -298,6 +299,21 @@ class IonLog:
         """Wrap the stream of the log file. Give comments to add to the lists of an earlier pass."""
         self.stream = stream
         self.comments = empty_comments() if comments is None else comments
+        for table in COMMENT_TABLES:
+            self.comments.setdefault(table, [])
+
+    def comment_counts(self) -> dict[str, int]:
+        """Return the number of comment lines of each output file, for drop_comments_after()."""
+        return {table: len(lines) for table, lines in self.comments.items()}
+
+    def drop_comments_after(self, counts: dict[str, int]) -> None:
+        """Remove the comment lines that came after comment_counts() gave these numbers.
+
+        A reader that reads a file a second time calls this first. The lines of the first read
+        would otherwise occur two times in the output file.
+        """
+        for table, count in counts.items():
+            del self.comments[table][count:]
 
     def write(self, text: str) -> int:
         """Write text to the log file."""
@@ -308,19 +324,28 @@ class IonLog:
         self.stream.writelines(lines)
 
 
-def log_comment(flog, tables: Iterable[str], strout: str, *, echo: bool = True) -> None:
+def log_comment(flog, tables: Iterable[str], strout: str) -> None:
     """Log a line, and record it as a comment line for each named output file.
 
-    A log that is not an IonLog records nothing, so a caller can give a plain stream. echo=False
-    keeps the line away from stdout.
+    A log that is not an IonLog records nothing, so a caller can give a plain stream.
     """
-    if echo:
-        log_and_print(flog, strout)
-    else:
-        flog.write(strout + "\n")
+    log_and_print(flog, strout)
     if isinstance(flog, IonLog):
         for table in tables:
-            flog.comments[table].append(strout)
+            # the indent of a line shows its place in the log, and a comment block has no such order
+            flog.comments[table].append(strout.strip())
+
+
+def comment_lines(lines: Iterable[str]) -> Iterator[str]:
+    """Turn text lines into the comment lines of an ARTIS input file, each with its line end.
+
+    ARTIS takes a line as a comment only when its first character that is not a space is a #.
+    A text line can hold a line break, so each part gets its own #. A part that starts with a #
+    is a comment already, for example a header line that a reader copied from its source file.
+    """
+    for line in lines:
+        for part in line.splitlines() or [""]:
+            yield (part if part.startswith("#") else f"# {part}").rstrip() + "\n"
 
 
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
