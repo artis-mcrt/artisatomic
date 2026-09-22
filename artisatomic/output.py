@@ -671,9 +671,7 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
             flog,
             ("transitiondata",),
             f"WARNING: {degenerate.height:d} transitions connect two levels of the same energy"
-            f" ({withcollstr:d} of them with a collision strength). ARTIS computes the frequency of"
-            " each transition from the level energies and drops a transition with a frequency of zero."
-            " The output file has these transitions, but ARTIS does not use them.",
+            f" ({withcollstr:d} of them with a collision strength), so their frequency is zero.",
         )
 
     inverted = notabove.height - degenerate.height
@@ -682,8 +680,7 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
             flog,
             ("transitiondata",),
             f"WARNING: {inverted:d} transitions have a lower level id whose energy is above the upper"
-            " level's. The level list is not in energy order. ARTIS drops a transition with a"
-            " negative frequency. The output file has these transitions, but ARTIS does not use them.",
+            " level's, so their frequency is negative. The level list is not in energy order.",
         )
 
 
@@ -823,7 +820,7 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
             flog,
             ("phixsdata",),
             f"artisatomic computed the threshold energy of {filled} tables, because the reader gave none. The threshold"
-            " comes from the ionisation energy and the two level energies, as in ARTIS.",
+            " comes from the ionisation energy and the two level energies.",
         )
     return thresholds
 
@@ -871,9 +868,7 @@ def write_phixs_data(
         log_comment(
             flog,
             ("phixsdata",),
-            f"{nothreshold} tables have no threshold energy, so the output gives them a threshold of"
-            " zero. ARTIS then takes the threshold from the level energies and uses their cross sections"
-            " in full.",
+            f"{nothreshold} tables have no threshold energy, so the output gives them a threshold of zero.",
         )
     flog.write(
         f"Downsample of the cross sections with T={args.optimaltemperature} Kelvin, "
