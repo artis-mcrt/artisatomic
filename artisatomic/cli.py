@@ -179,7 +179,8 @@ def remove_old_log_folder(output_folder: Path) -> None:
         if oldfile.is_file():
             print("deleting", oldfile)
             oldfile.unlink()
-    if not any(old_log_folder.iterdir()):
+    # rmdir() fails on a symbolic link to a folder, so such a link stays
+    if not old_log_folder.is_symlink() and not any(old_log_folder.iterdir()):
         old_log_folder.rmdir()
 
 

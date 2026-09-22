@@ -39,10 +39,19 @@ from artisatomic.readfloers25data import reference as floers25_reference
 USE_CALIBRATED = True
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+fac_reference = "FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
 description = (
-    f"FAC and cFAC output, an early version of the calibrated Floers+25 data. {floers25_reference}."
-    " FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
+    f"FAC and cFAC output, an early version of the calibrated Floers+25 data. {floers25_reference}. {fac_reference}"
 )
+description_uranium = (
+    "FAC output of the convergence study of Nd and U (folder Paper_Nd_U) that came with the Floers+25 data."
+    f" {floers25_reference}. {fac_reference}"
+)
+
+
+def description_of_ion(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of an ion. U II and U III come from a separate convergence study."""
+    return description_uranium if atomic_number == 92 and ion_stage in {2, 3} else description
 
 
 def get_basepath() -> Path:

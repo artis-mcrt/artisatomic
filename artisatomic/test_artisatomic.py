@@ -5116,6 +5116,36 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     remove_old_log_folder(tmp_path / "artis_files")
     assert not (tmp_path / "artis_files").exists()
 
+    # a symbolic link to a folder loses its old files and stays, because rmdir() fails on a link
+    target = tmp_path / "logs_on_another_disk"
+    target.mkdir()
+    (target / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    linkfolder = tmp_path / "linked"
+    linkfolder.mkdir()
+    (linkfolder / "atomic_data_logs").symlink_to(target)
+    remove_old_log_folder(linkfolder)
+    assert (linkfolder / "atomic_data_logs").is_symlink()
+    assert not any(target.iterdir())
+
+
+def test_description_of_ion_names_the_source_of_a_special_ion():
+    """U II and U III of the FAC handler, and Co IV of the ADAS handler, do not come from the shared source."""
+    from artisatomic import readadasdata
+    from artisatomic import readfacdata
+    from artisatomic.iondata import handlers
+
+    assert handlers["fac"].description is readfacdata.description_of_ion
+    assert readfacdata.description_of_ion(60, 2) == readfacdata.description
+    assert readfacdata.description_of_ion(92, 2) == readfacdata.description_uranium
+    assert readfacdata.description_of_ion(92, 3) == readfacdata.description_uranium
+    assert readfacdata.description_of_ion(92, 4) == readfacdata.description
+    assert "Paper_Nd_U" in readfacdata.description_uranium
+
+    assert handlers["adas"].description is readadasdata.description_of_ion
+    assert readadasdata.description_of_ion(27, 3) == readadasdata.description
+    assert readadasdata.description_of_ion(27, 4) == readadasdata.description_co4
+    assert "adf04" not in readadasdata.description_co4
+
 
 def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
     """Each output file names its creation time, and the time of a checksum run is the same for each run."""

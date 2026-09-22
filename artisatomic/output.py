@@ -44,8 +44,8 @@ artisatomic (https://github.com/artis-mcrt/artisatomic) wrote this file at {crea
 
 FORMAT
 The file has one block for each ion. A blank line ends each block. ARTIS reads the file from the top
-to the bottom one time. The blocks must therefore be in the order of compositiondata.txt: the elements
-in the order of that file, and the ion stages of an element from the lowest to the highest.
+to the bottom one time. The blocks must therefore be in the order of compositiondata.txt. That order is
+the elements in the order of that file, and the ion stages of an element from the lowest to the highest.
   header line:  Z  ion_stage  nlevels  ionisation_energy
   level line:   level_number  energy  g  ntransitions  level_name    (nlevels lines)
 

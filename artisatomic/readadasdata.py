@@ -127,6 +127,17 @@ tyndall_co3_path = (adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_ty
 description = (
     "files in the ADAS adf04 format, in the folder atomic-data-adas of the artisatomic repository (see its README.txt)"
 )
+description_co4 = (
+    "the ground level of Co IV (3d6 5D4) as a constant in the code of artisatomic, with no transition, and the"
+    " ionisation energy of the NIST Atomic Spectra Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F"
+)
+
+
+def description_of_ion(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of an ion. No file gives the one level of Co IV."""
+    return description_co4 if (atomic_number, ion_stage) == (27, 4) else description
+
+
 # The origin of the files of one element or one ion. atomic-data-adas/README.txt holds the same
 # facts, so change the two together. Co IV has no entry, because no file gives its one level.
 qub_origin = "Authors at Queen's University Belfast (QUB) made the {} files."

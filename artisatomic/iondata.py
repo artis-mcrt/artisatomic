@@ -89,11 +89,13 @@ class Handler:
 
     description is the name of the data source of the levels and the transitions, with its
     reference where the repository holds one. read_ion_data() records it as the "source:" line of
-    adata.txt and transitiondata.txt. A function that gives cross sections records the "source:"
-    line of phixsdata_v2.txt itself, because the source can be different for each ion of a handler.
+    adata.txt and transitiondata.txt. A handler whose source differs between its ions gives a
+    function of the atomic number and the ion stage instead. A function that gives cross sections
+    records the "source:" line of phixsdata_v2.txt itself, because the source can be different for
+    each ion of a handler.
     """
 
-    description: str
+    description: str | Callable[[int, int], str]
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
     get_level_valence_n: Callable[[str], int | None] | None = None
     returns_upsilondict: bool = False
@@ -133,7 +135,7 @@ handlers: dict[str, Handler] = {
         readfloers25data.get_level_valence_n,
     ),
     "fac": Handler(
-        readfacdata.description,
+        readfacdata.description_of_ion,
         readfacdata.read_levels_and_transitions,
         readfacdata.get_level_valence_n,
     ),
@@ -154,7 +156,7 @@ handlers: dict[str, Handler] = {
     # -electrontemperature picks one, so the reader takes args.
     # Only the QUB Co III data has cross sections. An ion with none gets the hydrogenic estimate.
     "adas": Handler(
-        readadasdata.description,
+        readadasdata.description_of_ion,
         readadasdata.read_adas_levels_and_transitions,
         readadasdata.get_level_valence_n,
         returns_upsilondict=True,
@@ -209,7 +211,12 @@ def read_ion_data(
         flog = IonLog(logstream)
         log_and_print(flog, f"\n===========> {ion_label(atomic_number, ion_stage)} input:")
         log_and_print(flog, f"handler: {handler}")
-        log_source(flog, ("adata", "transitiondata"), "the levels and the transitions", handlerspec.description)
+        description = (
+            handlerspec.description
+            if isinstance(handlerspec.description, str)
+            else handlerspec.description(atomic_number, ion_stage)
+        )
+        log_source(flog, ("adata", "transitiondata"), "the levels and the transitions", description)
         result = (
             handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, args)
             if handlerspec.reader_takes_args

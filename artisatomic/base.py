@@ -511,7 +511,8 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     # the lexical form first and then the form with each link followed, as path_for_log() does
     for normalise in (os.path.abspath, os.path.realpath):
         try:
-            return f"{datafolder.name}/{Path(normalise(filepath)).relative_to(normalise(resolvedfolder))}"
+            # as_posix(): the same separator on each system, so the output files do not depend on it
+            return f"{datafolder.name}/{Path(normalise(filepath)).relative_to(normalise(resolvedfolder)).as_posix()}"
         except ValueError:
             continue
     # a file outside the data folder keeps its own path
@@ -553,11 +554,12 @@ def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     for normalise in (lexical, followlinks):
         for base in bases:
             try:
-                return str(normalise(filepath).relative_to(normalise(base)))
+                # as_posix(): the same separator on each system, so the output files do not depend on it
+                return normalise(filepath).relative_to(normalise(base)).as_posix()
             except ValueError:
                 continue
 
-    return str(filepath)
+    return Path(filepath).as_posix()
 
 
 def fortran_float(text: str) -> float:
