@@ -4924,7 +4924,9 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
         pos += 1 + 1
 
     phixstext = (tmp_path / "phixsdata_v2.txt").read_text(encoding="utf-8")
+    # one block for each ion with a table, and not one for each of the two tables of an ion
     assert phixstext.count("# source: the source of the cross sections\n") == 2
+    assert [line for line in phixstext.splitlines() if line.startswith("# Z=")] == ["# Z=26 Fe I", "# Z=26 Fe III"]
     # an ion with no table gets no block, because a block must come directly before a table header
     assert "# Z=26 Fe II\n" not in phixstext
     assert not phixstext.splitlines()[-1].startswith("#")
