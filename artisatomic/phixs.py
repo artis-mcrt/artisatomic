@@ -16,6 +16,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_source
 from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
 from artisatomic.base import path_in_data_folder
@@ -136,10 +137,11 @@ def match_hydrogenic_phixs(
     # only an ion that got a table names the estimate as its source
     if reduced_phixs_dict:
         gauntpath = path_in_data_folder(readhillierdata.hyd_gaunt_filename(), readhillierdata.hillier_folder)
-        log_comment(
+        log_source(
             flog,
             ("phixsdata",),
-            "source: the hydrogenic estimate of artisatomic. It is the cross section of Kramers, H. A. (1923),"
+            "the cross sections",
+            "the hydrogenic estimate of artisatomic. It is the cross section of Kramers, H. A. (1923),"
             " Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244, with the Gaunt factors of CMFGEN in"
             f" {gauntpath}",
         )

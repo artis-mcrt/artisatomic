@@ -35,6 +35,7 @@ from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
+from artisatomic.base import log_source
 from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import path_in_data_folder
@@ -442,12 +443,22 @@ def _standardise_config(config: str, *, eissner_order: str | None) -> str:
 
 
 def read_adf04(
-    filepath: str | Path, flog, electrontemperature: float, atomic_number: int, ion_stage: int
+    filepath: str | Path,
+    flog,
+    electrontemperature: float,
+    atomic_number: int,
+    ion_stage: int,
+    *,
+    contents: str = "The levels, the transitions and the collision strengths",
+    origin: str | None = None,
 ) -> tuple[float, list[ADASEnergyLevel], dict[tuple[int, int], float], pl.DataFrame]:
     """Read levels and effective collision strengths from an ADAS adf04 file.
 
     The collision strengths come from the tabulated temperature nearest to electrontemperature,
     as readhillierdata.read_coldata() picks them for the CMFGEN files.
+
+    The comment blocks name the file as the source of contents. origin is the sentence of
+    ion_origins for the file, which follows the file name in the blocks.
 
     Returns four values:
     - the ionisation energy in eV;
@@ -462,11 +473,13 @@ def read_adf04(
     energylevels: list[ADASEnergyLevel] = []
     upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_in_data_folder(filepath, adasfolder)}")
+    log_comment(flog, ("adata", "transitiondata"), f"{contents} come from {path_in_data_folder(filepath, adasfolder)}.")
+    if origin is not None:
+        log_comment(flog, ("adata", "transitiondata"), origin)
     with xopen_check_extension(filepath) as fleveltrans:
         line = fleveltrans.readline()
         ionization_energy_ev = _read_adf04_header(line, atomic_number, ion_stage, filepath)
-        log_and_print(flog, f"ionisation energy: {ionization_energy_ev:.7f} eV")
+        log_and_print(flog, f"The file gives an ionisation energy of {ionization_energy_ev:.7f} eV.")
         # A note between two 'C-' rule lines can sit inside the level block, and the reader skips
         # its lines. The loops stop at the '-1' rows, so the reader never reads a note after the
         # collision block.
@@ -554,8 +567,8 @@ def read_adf04(
         log_comment(
             flog,
             ("transitiondata",),
-            f"The collision strengths are the values at {temperature_values[nearest_index]:.0f} K. The file gives these"
-            f" temperatures [K]: {', '.join(temperatures)}",
+            f"The collision strengths are the values at {temperature_values[nearest_index]:.0f} K. The collision data"
+            f" file gives these temperatures [K]: {', '.join(f'{t:.10g}' for t in temperature_values)}.",
         )
 
         # A split at whitespace fails where two values touch, for example "2.81-01-3.01-02".
@@ -616,12 +629,7 @@ def read_adf04(
                     f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
                 )
 
-    log_and_print(flog, f"Read {len(energylevels):d} levels")
-    log_comment(
-        flog,
-        ("transitiondata",),
-        f"The file gives an effective collision strength for {len(upsilondict):d} level pairs.",
-    )
+    log_and_print(flog, f"The reader got {len(energylevels):d} levels.")
     if skipped_rows:
         log_comment(
             flog,
@@ -717,18 +725,24 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     atom_filepath = adaspath / f"{atomic_number}_{ion_stage}.adf04"
 
     origin = ion_origins.get((atomic_number, ion_stage)) or ion_origins.get((atomic_number, None))
-    if origin is not None:
-        log_comment(flog, ("adata", "transitiondata"), origin)
 
     if (atomic_number == 27) and (ion_stage == 3):
         # Co III takes its A-values from a separate file, so the collision rows are not needed
         ionization_energy_ev, adas_energylevels, upsilondict, _ = read_adf04(
-            tyndall_co3_path / "adf04_v1", flog, args.electrontemperature, atomic_number, ion_stage
+            tyndall_co3_path / "adf04_v1",
+            flog,
+            args.electrontemperature,
+            atomic_number,
+            ion_stage,
+            contents="The levels and the collision strengths",
+            origin=origin,
         )
 
         adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
         transitionfile = tyndall_co3_path / "adf04rad_v1"
-        log_comment(flog, ("transitiondata",), f"Reading {path_in_data_folder(transitionfile, adasfolder)}")
+        log_comment(
+            flog, ("transitiondata",), f"The transitions come from {path_in_data_folder(transitionfile, adasfolder)}."
+        )
         with xopen_check_extension(transitionfile) as ftrans:
             for line in ftrans:
                 row = line.split()
@@ -757,13 +771,13 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         upsilondict: dict[tuple[int, int], float] = {}
         ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
         log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"ionisation energy: {ionization_energy_ev} eV (NIST)")
+        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
         # adaspath. So an adf04 file that discovery registers is one that this reader accepts.
         ionization_energy_ev, adas_energylevels, upsilondict, collisiondf = read_adf04(
-            atom_filepath, flog, args.electrontemperature, atomic_number, ion_stage
+            atom_filepath, flog, args.electrontemperature, atomic_number, ion_stage, origin=origin
         )
 
         adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
@@ -791,7 +805,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         msg = f"No ADAS data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
         raise ValueError(msg)
 
-    log_and_print(flog, f"Read {len(adas_transitions):d} transitions")
+    log_and_print(flog, f"The reader got {len(adas_transitions):d} transitions.")
 
     return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
 
@@ -810,13 +824,13 @@ def _fill_co2_phixs(
     log_comment(
         flog,
         ("phixsdata",),
-        f"Reading the cross section files 1 to 8 in {path_in_data_folder(tyndall_co3_path, adasfolder)}",
+        f"The cross sections come from the files 1 to 8 in {path_in_data_folder(tyndall_co3_path, adasfolder)}.",
     )
     for lowerlevelid in range(8):
         # the name of a cross section file is the level's number in the source data, which
         # counts from one
         filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
-        log_and_print(flog, f"Reading {path_for_log(filename)}")
+        log_and_print(flog, f"The cross sections of level {lowerlevelid + 1} come from {path_for_log(filename)}.")
         ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
         # One space separates the columns, and every field is a number. So a null means that
         # the columns are not where the read expects them. A read of the first five columns
@@ -866,7 +880,7 @@ def _fill_co2_phixs(
                 flog,
                 ("phixsdata",),
                 "level with zero cross section to each target",
-                f"WARNING: all photoionisation targets for level {lowerlevelid} have zero cross section",
+                f"WARNING: level {lowerlevelid + 1} has a zero cross section to each target, so it gets no table.",
             )
             continue
         for target, factor in combined.dropped:
@@ -874,8 +888,9 @@ def _fill_co2_phixs(
                 flog,
                 ("phixsdata",),
                 "target below the cut",
-                f"level {lowerlevelid}: target {target} is below the {PHIXS_TARGET_FRACTION_CUT:.0%} cut"
-                f" with {factor:.4e} Mb, so its route drops out",
+                f"The cross section of level {lowerlevelid + 1} to the upper level {target + 1} sums to"
+                f" {factor:.4e} Mb, less than {PHIXS_TARGET_FRACTION_CUT:.0%} of the total, so the output drops"
+                " that target.",
             )
 
         # NaN, the arrays' initial value, says: the threshold energy comes from the level
@@ -1049,7 +1064,7 @@ def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args
             "The ADAS data has no photoionisation cross sections for this ion.",
         )
         return PhixsData(np.empty((0, args.nphixspoints)), np.empty(0), targetfractions=[])
-    log_comment(flog, ("phixsdata",), f"source: {qub_cobalt_phixs_description}")
+    log_source(flog, ("phixsdata",), "the cross sections", qub_cobalt_phixs_description)
     photoionization_crosssections = np.zeros((levelcount, args.nphixspoints))
     photoionization_targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(levelcount)]
     photoionization_thresholds_ev = np.full(levelcount, np.nan)

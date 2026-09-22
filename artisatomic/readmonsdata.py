@@ -134,9 +134,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     """
     # the path of the archive, then the name of its member
     levelspath = path_in_data_folder(datafilepath / levels_archive, monsfolder)
-    log_comment(flog, ("adata",), f"Reading {levelspath}/{levels_member(atomic_number, ion_stage)}")
+    log_comment(flog, ("adata",), f"The levels come from {levelspath}/{levels_member(atomic_number, ion_stage)}.")
     energy_levels1000percm, j_arr = read_csv_columns(levels_archive, levels_member(atomic_number, ion_stage), 2)
-    log_and_print(flog, f"levels: {len(energy_levels1000percm)}")
+    log_and_print(flog, f"The reader got {len(energy_levels1000percm)} levels.")
 
     sortorder = np.argsort(energy_levels1000percm, kind="stable")
     energiesabovegsinpercm = energy_levels1000percm[sortorder] * 1000
@@ -154,11 +154,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     ).with_columns(parity=pl.lit(None, dtype=pl.Int64))
 
     transitionspath = path_in_data_folder(datafilepath / transitions_archive, monsfolder)
-    log_comment(flog, ("transitiondata",), f"Reading {transitionspath}/{transitions_member(atomic_number, ion_stage)}")
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"The transitions come from {transitionspath}/{transitions_member(atomic_number, ion_stage)}.",
+    )
     transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3
     )
-    log_and_print(flog, f"transitions: {len(energy_levels_lower_1000percm)}")
+    log_and_print(flog, f"The reader got {len(energy_levels_lower_1000percm)} transitions.")
 
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
     energy_levels_upper_percm = energy_levels_lower_percm + 1e8 / transition_wavelength_A
@@ -199,7 +203,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV (NIST)")
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
     # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does

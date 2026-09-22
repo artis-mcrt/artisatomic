@@ -244,7 +244,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     if dfiondata.is_empty():
         msg = f"The DREAM database has no lines for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(dreamdatapath)}")
+    log_comment(
+        flog, ("adata", "transitiondata"), f"The levels and the transitions come from {path_for_log(dreamdatapath)}."
+    )
 
     energy_levels = read_levels_data(dfiondata)
 
@@ -275,8 +277,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # DREAM has no ionisation energies, so take them from NIST as the other handlers do
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
 
-    log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
     return ionization_energy_in_ev, energy_levels, transitions

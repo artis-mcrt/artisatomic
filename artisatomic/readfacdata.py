@@ -316,8 +316,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         levels_file = ion_folder / f"{ionstr}.lev.asc"
         lines_file = ion_folder / f"{ionstr}.tr.asc"
 
-    log_comment(flog, ("adata",), f"Reading {path_for_log(levels_file, relative_to=logged_root)}")
-    log_comment(flog, ("transitiondata",), f"Reading {path_for_log(lines_file, relative_to=logged_root)}")
+    log_comment(flog, ("adata",), f"The levels come from {path_for_log(levels_file, relative_to=logged_root)}.")
+    log_comment(
+        flog, ("transitiondata",), f"The transitions come from {path_for_log(lines_file, relative_to=logged_root)}."
+    )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
@@ -334,7 +336,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
     if not lines_file.is_file():
         msg = f"FAC transitions file {lines_file} not found"
@@ -348,7 +350,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map)
 
-    log_and_print(flog, f"Read {len(transitions)} transitions")
+    log_and_print(flog, f"The reader got {len(transitions)} transitions.")
 
     return ionization_energy_in_ev, energy_levels, transitions
 

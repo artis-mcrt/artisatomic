@@ -30,8 +30,8 @@ from artisatomic.base import ion_label
 from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
-from artisatomic.base import log_comment
 from artisatomic.base import log_path
+from artisatomic.base import log_source
 from artisatomic.base import PhixsData
 from artisatomic.phixs import match_hydrogenic_phixs
 
@@ -208,8 +208,8 @@ def read_ion_data(
     with log_path(args.output_folder).open("a", encoding="utf-8") as logstream:
         flog = IonLog(logstream)
         log_and_print(flog, f"\n===========> {ion_label(atomic_number, ion_stage)} input:")
-        log_and_print(flog, f"Source handler: {handler}")
-        log_comment(flog, ("adata", "transitiondata"), f"source: {handlerspec.description}")
+        log_and_print(flog, f"handler: {handler}")
+        log_source(flog, ("adata", "transitiondata"), "the levels and the transitions", handlerspec.description)
         result = (
             handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, args)
             if handlerspec.reader_takes_args

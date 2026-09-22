@@ -297,10 +297,14 @@ def read_levels_and_transitions(
         raise FileNotFoundError(msg)
 
     # the name of the folder and of the file only, so a line does not depend on the machine
-    log_comment(flog, ("adata",), f"Reading {basepath.name}/{without_compression_extension(levels_file.name)}")
+    log_comment(
+        flog, ("adata",), f"The levels come from {basepath.name}/{without_compression_extension(levels_file.name)}."
+    )
     for transition_file in transition_files:
         log_comment(
-            flog, ("transitiondata",), f"Reading {basepath.name}/{without_compression_extension(transition_file.name)}"
+            flog,
+            ("transitiondata",),
+            f"The transitions come from {basepath.name}/{without_compression_extension(transition_file.name)}.",
         )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
@@ -343,7 +347,7 @@ def read_levels_and_transitions(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
 
-    log_and_print(flog, f"Read {dflevels.height:d} levels")
+    log_and_print(flog, f"The reader got {dflevels.height:d} levels.")
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
@@ -351,7 +355,7 @@ def read_levels_and_transitions(
         [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
-    log_and_print(flog, f"Read {dftransitions.height} transitions")
+    log_and_print(flog, f"The reader got {dftransitions.height} transitions.")
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.

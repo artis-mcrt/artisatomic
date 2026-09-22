@@ -38,7 +38,11 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     contributes only its ground state and ionisation energy to the output.
     """
     # the transitiondata.txt block needs its source file also, although this handler gives no transition
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(datafilepath)}")
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"The ground level and the ionisation energy come from {path_for_log(datafilepath)}.",
+    )
     groundstatesdata = read_groundstates_table()
 
     this_ion = groundstatesdata.filter(
@@ -50,7 +54,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
         msg = f"groundstates.dat has no row for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
     ionization_energy_in_ev = this_ion["IonizationEnergy"].item(0)
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"The table gives an ionisation energy of {ionization_energy_in_ev} eV.")
     energy_levels = [
         EnergyLevel(
             levelname=this_ion["config"].item(0),

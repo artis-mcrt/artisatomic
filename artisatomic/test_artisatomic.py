@@ -561,7 +561,7 @@ def test_write_phixs_data_with_no_phixs_arrays():
     )
 
     assert not fphixs.getvalue()
-    assert "Writing 0 phixs tables" in flog.getvalue()
+    assert "artisatomic writes 0 cross section tables to phixsdata_v2.txt." in flog.getvalue()
 
 
 def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
@@ -780,7 +780,7 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "Target target1 is below the 2% cut" in log
+    assert "The target target1 has less than 2% of the total, so the output drops it." in log
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -2156,7 +2156,8 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
     assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
-    assert "The file gives an effective collision strength for 235 level pairs." in flog.getvalue()
+    assert "The levels, the transitions and the collision strengths come from " in flog.getvalue()
+    assert "level pairs" not in flog.getvalue()
 
 
 def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
@@ -3332,6 +3333,44 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
 
     assert dflevels.height == 3
     assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5, 2.386e-13], rel=1e-12)
+
+
+def test_readtanakajpltdata_records_the_header_with_a_joined_paper_line(tmp_path, monkeypatch):
+    """The v2.1 header of Se III continues its paper line on a line with no #, and the ion name line repeats the title."""
+    from artisatomic import readtanakajpltdata
+    from artisatomic.base import IonLog
+
+    lines = [
+        "# Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        '# L. Kitoviene, G. Gaigalas, "Theoretical Investigation of the Ge',
+        'Sequence" Journal of Physical and Chemical Reference Data 53 (2024) 033101.',
+        "# Se III ",
+        "# 34 3 ",
+        "# 1 0 ",
+        "#  ",
+        "# IP = 31.697 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)      configuration ",
+        "      1   1.0  even  0.0000000e+00 {  4s+ 2 } ",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+    ]
+    (tmp_path / "34_3.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO())
+
+    _ionization_energy_ev, dflevels, _dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 3, flog)
+
+    assert dflevels.height == 1
+    recorded = [line for line in flog.comments["adata"] if "come from" not in line]
+    assert recorded == [
+        "Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        (
+            'L. Kitoviene, G. Gaigalas, "Theoretical Investigation of the Ge'
+            ' Sequence" Journal of Physical and Chemical Reference Data 53 (2024) 033101.'
+        ),
+    ]
+    assert recorded == [line for line in flog.comments["transitiondata"] if "come from" not in line]
 
 
 def test_write_adata_writes_a_negative_zero_energy_as_zero():
@@ -4726,6 +4765,39 @@ def test_log_comment_records_for_an_ionlog_only():
     plainstream = io.StringIO()
     log_comment(plainstream, ("adata",), "Reading a file")
     assert plainstream.getvalue() == "Reading a file\n"
+
+
+def test_log_source_labels_the_log_line_and_records_a_plain_source_line():
+    """Each pass logs its own source, so the log says what the source is for. The block needs "source:"."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_source
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_source(flog, ("phixsdata",), "the cross sections", "a data set")
+    assert stream.getvalue() == "source of the cross sections: a data set\n"
+    assert flog.comments == {"adata": [], "transitiondata": [], "phixsdata": ["source: a data set"]}
+
+    plainstream = io.StringIO()
+    log_source(plainstream, ("adata",), "the levels", "a data set")
+    assert plainstream.getvalue() == "source of the levels: a data set\n"
+
+
+def test_read_adf04_logs_the_file_before_its_origin(tmp_path):
+    """The block names the file first, and then the sentence about who made it."""
+    from artisatomic import readadasdata
+    from artisatomic.base import IonLog
+
+    filepath = write_hydrogen_adf04(tmp_path, ["   2   1 1.00+08 5.00-01 5.00-01"])
+    flog = IonLog(io.StringIO())
+    readadasdata.read_adf04(
+        filepath, flog, 5000.0, 1, 1, contents="The levels and the collision strengths", origin="A group made the file."
+    )
+    lines = flog.comments["adata"]
+    assert lines[0].startswith("The levels and the collision strengths come from ")
+    assert lines[0].endswith("/1_1.adf04.")
+    assert lines[1] == "A group made the file."
+    assert flog.comments["transitiondata"][:2] == lines[:2]
 
 
 def test_write_comment_block_gives_every_part_of_a_line_a_hash():

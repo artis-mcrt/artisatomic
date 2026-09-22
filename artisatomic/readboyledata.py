@@ -182,7 +182,9 @@ def read_lines_data(atomic_number, ion_stage):
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
-    log_comment(flog, ("adata", "transitiondata"), f"Reading {path_for_log(datafilepath)}")
+    log_comment(
+        flog, ("adata", "transitiondata"), f"The levels and the transitions come from {path_for_log(datafilepath)}."
+    )
     transitions = read_lines_data(atomic_number, ion_stage)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)

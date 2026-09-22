@@ -399,6 +399,18 @@ def log_comment(flog, tables: Iterable[str], strout: str) -> None:
         flog.add_comment(tables, strout)
 
 
+def log_source(flog, tables: Iterable[str], subject: str, description: str) -> None:
+    """Log the source of the data, and record it as the "source:" line of the comment blocks.
+
+    Each pass of an ion logs its own source line, so the log file gets a label with the subject,
+    for example "the cross sections". The block gets the plain "source:" line that
+    write_comment_block() expects. A log that is not an IonLog records nothing.
+    """
+    log_and_print(flog, f"source of {subject}: {description}")
+    if isinstance(flog, IonLog):
+        flog.add_comment(tables, f"source: {description}")
+
+
 def log_detail(flog, tables: Iterable[str], kind: str, strout: str) -> None:
     """Log a detail line that can occur for many levels or transitions of one ion.
 

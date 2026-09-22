@@ -33,8 +33,8 @@ file_comment_end = """
 COMMENTS
 A line that starts with # is a comment. ARTIS skips a comment only directly before a header line.
 {commentrule}A comment block before {blockposition} of each ion gives the handler, the source of the data and its
-source files. The name of a source file has no extension of a compression, but the file on the disk can
-have one (.zst, .gz or .xz).
+source files. A source file name in a comment omits the compression extension (.zst, .gz or .xz) that
+the file on the disk can have.
 """
 
 adata_file_comment = (
@@ -612,7 +612,7 @@ def write_adata(
     must not pad it. The comment block of the ion comes before the header line (see
     write_comment_block()).
     """
-    log_and_print(flog, f"Writing {dfenergylevels.height} levels to 'adata.txt'")
+    log_and_print(flog, f"artisatomic writes {dfenergylevels.height} levels to adata.txt.")
     write_comment_block(fatommodels, "adata", titlelines, flog)
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
@@ -701,7 +701,7 @@ def write_transition_data(
     lower id of every transition first. The comment block of the ion comes before the header line
     (see write_comment_block()).
     """
-    log_and_print(flog, f"Writing {dftransitions_ion.height} transitions to 'transitiondata.txt'")
+    log_and_print(flog, f"artisatomic writes {dftransitions_ion.height} transitions to transitiondata.txt.")
 
     # ARTIS reads the two ids as lower then upper, so a reversed pair would be a different
     # transition. The check runs over the whole frame before the header goes out. A bad row
@@ -866,7 +866,7 @@ def write_phixs_data(
         1 for levelid in levelids_to_write if not threshold_is_known(photoionization_thresholds_ev[levelid])
     )
 
-    log_and_print(flog, f"Writing {len(levelids_to_write)} phixs tables to 'phixsdata_v2.txt'")
+    log_and_print(flog, f"artisatomic writes {len(levelids_to_write)} cross section tables to phixsdata_v2.txt.")
     if nothreshold:
         log_comment(
             flog,
