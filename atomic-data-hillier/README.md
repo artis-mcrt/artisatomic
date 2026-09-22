@@ -1,4 +1,4 @@
-CMFGEN model atoms of D. J. Hillier: <http://kookaburra.phyast.pitt.edu/hillier/web/CMFGEN.htm>.
+CMFGEN atomic data compilation of D. J. Hillier: <http://kookaburra.phyast.pitt.edu/hillier/web/CMFGEN.htm>.
 Paper: Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427, doi:10.1086/305350.
 
 The readers use the atomic_21jun23 data set only. `setup_cmfgen_data.sh` downloads

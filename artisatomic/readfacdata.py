@@ -24,6 +24,8 @@ from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
@@ -32,8 +34,24 @@ from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import split_levels_above_ionization
 from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
+from artisatomic.readfloers25data import reference as floers25_reference
 
 USE_CALIBRATED = True
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+fac_reference = "FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
+description = (
+    f"FAC and cFAC output, an early version of the calibrated Floers+25 data. {floers25_reference}. {fac_reference}"
+)
+description_uranium = (
+    "FAC output of the convergence study of Nd and U (folder Paper_Nd_U) that came with the Floers+25 data."
+    f" {floers25_reference}. {fac_reference}"
+)
+
+
+def description_of_ion(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of an ion. U II and U III come from a separate convergence study."""
+    return description_uranium if atomic_number == 92 and ion_stage in {2, 3} else description
 
 
 def get_basepath() -> Path:
@@ -294,22 +312,26 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ion_folder = get_basepath() / ionstr
     levels_file = ion_folder / f"{ionstr}.lev.asc"
     lines_file = ion_folder / f"{ionstr}.tr.asc"
+    # The comment lines give the folder of the ion relative to this folder. A user sets the path
+    # of the data with ARTISATOMIC_FAC_PATH, so no part of that path must go into an output file.
+    logged_root = get_basepath()
 
     if atomic_number == 92 and ion_stage in {2, 3}:
         # U II and U III come from a separate convergence study. Its folder Paper_Nd_U sits beside
         # the OptimizedFACdata directory, two levels above the OptimizedFAC_lanthanides folder.
         ionstr = f"{elsym}{ion_stage_roman}_convergence_t22_n30_calibrated"
         ion_folder = get_basepath().parent.parent / "Paper_Nd_U" / "FAC" / ionstr
+        logged_root = get_basepath().parent.parent
         levels_file = ion_folder / f"{ionstr}.lev.asc"
         lines_file = ion_folder / f"{ionstr}.tr.asc"
 
-    log_and_print(
-        flog,
-        f"Reading FAC/cFAC data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from"
-        f" {path_for_log(ion_folder)}",
+    log_comment(flog, ("adata",), f"The levels come from {path_for_log(levels_file, relative_to=logged_root)}.")
+    log_comment(
+        flog, ("transitiondata",), f"The transitions come from {path_for_log(lines_file, relative_to=logged_root)}."
     )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
     if not levels_file.is_file():
         msg = f"FAC levels file {levels_file} not found"
@@ -323,7 +345,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels, ilev_enlevelindex_map = read_levels_data(dflevels)
 
-    log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
     if not lines_file.is_file():
         msg = f"FAC transitions file {lines_file} not found"
@@ -337,7 +359,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map)
 
-    log_and_print(flog, f"Read {len(transitions)} transitions")
+    log_and_print(flog, f"The reader got {len(transitions)} transitions.")
 
     return ionization_energy_in_ev, energy_levels, transitions
 
@@ -346,7 +368,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from an FAC level name.
 
     Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log.
+    gives the level no estimate and writes a warning to the log file.
 
     Kept separate from the other readers' versions. Each data source names its levels
     differently, so a shared parser would have to guess the convention of each name.

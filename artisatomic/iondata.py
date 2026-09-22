@@ -6,6 +6,7 @@ import itertools
 import typing as t
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from functools import partial
 from pathlib import Path
 
@@ -24,12 +25,14 @@ from artisatomic import readkuruczdata
 from artisatomic import readlisbondata
 from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
-from artisatomic.base import elsymbols
-from artisatomic.base import ion_log_path
+from artisatomic.base import empty_comments
+from artisatomic.base import ion_label
+from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
+from artisatomic.base import log_path
+from artisatomic.base import log_source
 from artisatomic.base import PhixsData
-from artisatomic.base import roman_numerals
 from artisatomic.phixs import match_hydrogenic_phixs
 
 
@@ -58,6 +61,9 @@ class IonData:
     photoionization_crosssections: npt.NDArray[np.float64]  # cross sections in Mb, indexed by level id
     photoionization_targetfractions: list[list[tuple[int, float]]]  # indexed by level id
     photoionization_thresholds_ev: npt.NDArray[np.float64]  # indexed by level id
+    # The lines for the comment block of each output file (see base.IonLog). Each pass records
+    # into the same lists: the read pass first, then the resolve pass, then the write pass.
+    comments: dict[str, list[str]] = field(default_factory=empty_comments)
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,8 +86,16 @@ class Handler:
 
     read_phixs, when set, takes the same arguments and returns the PhixsData of the ion. Without
     it, the hydrogenic estimate is the only source of cross sections.
+
+    description is the name of the data source of the levels and the transitions, with its
+    reference where the repository holds one. read_ion_data() records it as the "source:" line of
+    adata.txt and transitiondata.txt. A handler whose source differs between its ions gives a
+    function of the atomic number and the ion stage instead. A function that gives cross sections
+    records the "source:" line of phixsdata_v2.txt itself, because the source can be different for
+    each ion of a handler.
     """
 
+    description: str | Callable[[int, int], str]
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
     get_level_valence_n: Callable[[str], int | None] | None = None
     returns_upsilondict: bool = False
@@ -92,51 +106,66 @@ class Handler:
 
 handlers: dict[str, Handler] = {
     "boyle": Handler(
-        lambda atomic_number, ion_stage, _flog: readboyledata.read_levels_and_transitions(atomic_number, ion_stage)
+        readboyledata.description,
+        readboyledata.read_levels_and_transitions,
     ),
-    "kurucz": Handler(readkuruczdata.read_levels_and_transitions, readkuruczdata.get_level_valence_n),
-    # the DREAM database of Z >= 57: Quinet & Palmeri (2020), Atoms, 8, 18, doi:10.3390/atoms8020018
-    "dream": Handler(readdreamdata.read_levels_and_transitions),
-    "lisbon": Handler(readlisbondata.read_levels_and_transitions),
+    "kurucz": Handler(
+        readkuruczdata.description,
+        readkuruczdata.read_levels_and_transitions,
+        readkuruczdata.get_level_valence_n,
+    ),
+    "dream": Handler(
+        readdreamdata.description,
+        readdreamdata.read_levels_and_transitions,
+    ),
+    "lisbon": Handler(readlisbondata.description, readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
+        readfloers25data.description_withforbidden,
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25calib": Handler(
+        readfloers25data.description.format(variant="calibrated"),
         partial(readfloers25data.read_levels_and_transitions, calibrated=True),
         readfloers25data.get_level_valence_n,
     ),
     "floers25uncalib": Handler(
+        readfloers25data.description.format(variant="uncalibrated"),
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
     ),
-    # fac reads an early version of the floers25 calib data
-    "fac": Handler(readfacdata.read_levels_and_transitions, readfacdata.get_level_valence_n),
-    # the University of Mons lanthanides V-VII: Carvajal Gallego, Deprince, Maison, Palmeri & Quinet
-    # (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723
-    "mons": Handler(readmonsdata.read_levels_and_transitions),
-    # the Japan-Lithuania database of 26 <= Z <= 88: Tanaka, Kato, Gaigalas & Kawaguchi (2020),
-    # MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576
+    "fac": Handler(
+        readfacdata.description_of_ion,
+        readfacdata.read_levels_and_transitions,
+        readfacdata.get_level_valence_n,
+    ),
+    "mons": Handler(
+        readmonsdata.description,
+        readmonsdata.read_levels_and_transitions,
+    ),
     "tanakajplt": Handler(
+        readtanakajpltdata.description,
         readtanakajpltdata.read_levels_and_transitions,
         readtanakajpltdata.get_level_valence_n,
     ),
-    # ground states from the NIST Atomic Spectra Database: Kramida, Ralchenko, Reader & NIST ASD Team,
-    # https://physics.nist.gov/asd, doi:10.18434/T4W30F
-    "gsnist": Handler(groundstatesonlynist.read_ground_levels),
+    "gsnist": Handler(
+        groundstatesonlynist.description,
+        groundstatesonlynist.read_ground_levels,
+    ),
     # The adf04 files tabulate the collision strengths at several temperatures, and
     # -electrontemperature picks one, so the reader takes args.
     # Only the QUB Co III data has cross sections. An ion with none gets the hydrogenic estimate.
     "adas": Handler(
+        readadasdata.description_of_ion,
         readadasdata.read_adas_levels_and_transitions,
         readadasdata.get_level_valence_n,
         returns_upsilondict=True,
         reader_takes_args=True,
         read_phixs=readadasdata.read_photoionizations,
     ),
-    # the CMFGEN model atoms of Hillier: levels, collision strengths and cross sections. Hillier &
-    # Miller (1998), ApJ, 496, 407-427, doi:10.1086/305350
+    # levels, collision strengths and cross sections
     "cmfgen": Handler(
+        readhillierdata.description,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
@@ -145,6 +174,7 @@ handlers: dict[str, Handler] = {
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.
     "cmfgen_qubphixs": Handler(
+        readhillierdata.description,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
@@ -177,13 +207,16 @@ def read_ion_data(
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
 
-    logfilepath = ion_log_path(Path(args.output_folder, args.output_folder_logs), atomic_number, ion_stage)
-    with logfilepath.open("w", encoding="utf-8") as flog:
-        log_and_print(
-            flog,
-            f"\n===========> Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]} input:",
+    with log_path(args.output_folder).open("a", encoding="utf-8") as logstream:
+        flog = IonLog(logstream)
+        log_and_print(flog, f"\n===========> {ion_label(atomic_number, ion_stage)} input:")
+        log_and_print(flog, f"handler: {handler}")
+        description = (
+            handlerspec.description
+            if isinstance(handlerspec.description, str)
+            else handlerspec.description(atomic_number, ion_stage)
         )
-        log_and_print(flog, f"Source handler: {handler}")
+        log_source(flog, ("adata", "transitiondata"), "the levels and the transitions", description)
         result = (
             handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, args)
             if handlerspec.reader_takes_args
@@ -239,11 +272,12 @@ def read_ion_data(
         photoionization_crosssections=photoionization_crosssections,
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
+        comments=flog.comments,
     )
 
 
 def resolve_photoion_targetfractions(
-    iondatalist: list[IonData], atomic_number: int | None = None, log_folder: str | Path | None = None
+    iondatalist: list[IonData], atomic_number: int | None = None, logpath: str | Path | None = None
 ) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
@@ -253,11 +287,12 @@ def resolve_photoion_targetfractions(
 
     Call this before write_output_files() unless the user switched cross sections off entirely.
     The writer needs the fractions and does not resolve them itself. Give atomic_number and
-    log_folder to append the resolve messages to each ion's log file.
+    logpath (see base.log_path()) to append the resolve messages to the log file of the run. The
+    log file holds all ions, so the messages of each ion come after a line that names the ion.
     """
     # a half-given pair is always a caller bug, so the function raises
-    if (atomic_number is None) != (log_folder is None):
-        msg = "give both atomic_number and log_folder, or neither"
+    if (atomic_number is None) != (logpath is None):
+        msg = "give both atomic_number and logpath, or neither"
         raise ValueError(msg)
 
     if not iondatalist:
@@ -275,13 +310,18 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # The read pass closed the per-ion log. Reopen it in append mode.
+            # the IonLog records into the comment lists of the read pass
             logcontext = (
-                ion_log_path(log_folder, atomic_number, iondata.ion_stage).open("a", encoding="utf-8")
-                if log_folder is not None and atomic_number is not None
+                Path(logpath).open("a", encoding="utf-8")  # ruff: ignore[open-file-with-context-handler]
+                if logpath is not None and atomic_number is not None
                 else contextlib.nullcontext()
             )
-            with logcontext as flog:
+            with logcontext as logstream:
+                flog = None if logstream is None else IonLog(logstream, iondata.comments)
+                # an ion with no target names has nothing to resolve, so its section would be empty
+                if flog is not None and atomic_number is not None and iondata.photoion_targetconfigs is not None:
+                    ionlabel = ion_label(atomic_number, iondata.ion_stage)
+                    log_and_print(flog, f"\n===========> {ionlabel} photoionisation targets:")
                 iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
                     iondata.dfenergylevels,
                     upperiondata.dfenergylevels,

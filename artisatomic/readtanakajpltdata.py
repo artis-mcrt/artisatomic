@@ -16,10 +16,20 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
-jpltpath = (PYDIR / ".." / "atomic-data-tanaka-jplt" / "data_v2.1").resolve()
+jpltfolder = PYDIR / ".." / "atomic-data-tanaka-jplt"
+jpltpath = (jpltfolder / "data_v2.1").resolve()
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = (
+    "the Japan-Lithuania opacity database for kilonovae, of 26 <= Z <= 88. Tanaka, M., Kato, D., Gaigalas, G.,"
+    " Kawaguchi, K. (2020), MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576 (version 1), and Kato, D., Tanaka, M.,"
+    " Gaigalas, G., Kitovienė, L., Rynkun, P. (2024), MNRAS, 535, 2670-2686, doi:10.1093/mnras/stae2504 (version 2)"
+)
 
 # the name of a data file, e.g. 26_2.txt or 26_2.txt.zst
 jplt_filename_pattern = ion_filename_pattern(".txt")
@@ -55,8 +65,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     Self-transitions (equal upper and lower level) appear in some files. The reader drops them
     with a warning.
     """
+    # the plain name, also for a compressed file, so the output files do not depend on the compression
     filename = f"{atomic_number}_{ion_stage}.txt"
-    print(f"Reading Tanaka et al. Japan-Lithuania database for Z={atomic_number} ion_stage {ion_stage} from {filename}")
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"The levels and the transitions come from {path_in_data_folder(jpltpath / filename, jpltfolder)}.",
+    )
 
     def require(condition: bool, message: str) -> None:
         # not an assert: input validation must survive python -O
@@ -68,20 +83,31 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # A blank line reads as a null, which strip() cannot take.
     headerlines = [(line or "").strip() for line in scan_file_lines(jpltpath / filename).slice(0, 12).collect()["line"]]
 
-    for linenumber, readlinein in enumerate(headerlines[:7]):
-        if linenumber < 3:
-            log_and_print(flog, readlinein)
+    # search for the "# Z ion_stage" line. The lines before it can differ between the files.
+    linenumber = next(
+        (number for number, line in enumerate(headerlines[:7]) if line == f"# {atomic_number} {ion_stage}"), -1
+    )
+    require(linenumber >= 0, f"no '# {atomic_number} {ion_stage}' line in the header")
 
-        if readlinein == f"# {atomic_number} {ion_stage}":  # search for this line. Header info can be different
-            break
-    require(readlinein == f"# {atomic_number} {ion_stage}", f"no '# {atomic_number} {ion_stage}' line in the header")
+    # The lines before the "# Z ion_stage" line name the database version and the paper of the
+    # ion. The last of them repeats the ion name. A paper line can continue on a line with no #,
+    # so join such a line to the line before it. The log file and the comment blocks get each
+    # joined line with no # of its own.
+    provenance: list[str] = []
+    for readlinein in headerlines[: linenumber - 1]:
+        if readlinein.startswith("#") or not provenance:
+            provenance.append(readlinein.removeprefix("#").strip())
+        else:
+            provenance[-1] = f"{provenance[-1]} {readlinein}"
+    for text in provenance:
+        log_comment(flog, ("adata", "transitiondata"), text)
 
     levelcount, transitioncount = (int(x) for x in headerlines[linenumber + 1].removeprefix("# ").split())
-    log_and_print(flog, f"levels: {levelcount}")
-    log_and_print(flog, f"transitions: {transitioncount}")
+    log_and_print(flog, f"The file header declares {levelcount} levels.")
+    log_and_print(flog, f"The file header declares {transitioncount} transitions.")
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_and_print(flog, f"The file header gives an ionisation energy of {ionization_energy_in_ev} eV.")
     require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
@@ -189,7 +215,11 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
     dftransitions_filtered = dftransitions.filter(pl.col("lowerlevel") != pl.col("upperlevel"))
     if dftransitions.height != dftransitions_filtered.height:
-        log_and_print(flog, "WARNING: dropped rows where upper and lower levels are equal")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            "WARNING: The reader dropped the transitions whose upper level and lower level are the same.",
+        )
         dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions
@@ -199,7 +229,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a JPLT level name.
 
     Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log.
+    gives the level no estimate and writes a warning to the log file.
 
     Kept separate from the other readers' versions. Each data source names its levels
     differently, so a shared parser would have to guess the convention of each name.

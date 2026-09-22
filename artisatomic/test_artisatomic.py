@@ -561,14 +561,16 @@ def test_write_phixs_data_with_no_phixs_arrays():
     )
 
     assert not fphixs.getvalue()
-    assert "Writing 0 phixs tables" in flog.getvalue()
+    assert "artisatomic writes 0 cross section tables to phixsdata_v2.txt." in flog.getvalue()
 
 
 def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None):
-    """Build a minimal single-level IonData for the target-fraction resolver tests."""
+    """Build a minimal single-level IonData, with the source line that each comment block needs."""
+    from artisatomic.base import COMMENT_TABLES
     from artisatomic.iondata import IonData
 
     return IonData(
+        comments={table: [f"source: the source of the {table} test data"] for table in COMMENT_TABLES},
         ion_stage=ion_stage,
         handler="cmfgen",
         is_top_ion=is_top_ion,
@@ -617,13 +619,13 @@ def test_resolve_photoion_targetfractions_keeps_reader_supplied():
 
 
 def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
-    """A caller must give both atomic_number and log_folder, or neither, so a log is not lost silently."""
+    """A caller must give both atomic_number and logpath, or neither, so a log is not lost silently."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
     upper = make_iondata(2, is_top_ion=True)
 
-    with pytest.raises(ValueError, match="both atomic_number and log_folder"):
+    with pytest.raises(ValueError, match="both atomic_number and logpath"):
         resolve_photoion_targetfractions([lower, upper], 8)
 
 
@@ -649,19 +651,9 @@ def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
     write_output_files() no longer resolves target fractions itself. For an ion with cross sections
     but no targets, write_phixs_data() would silently skip every one of its tables.
     """
-    import argparse
-
     from artisatomic.output import write_output_files
 
-    (tmp_path / "logs").mkdir()
-    tmpargs = argparse.Namespace(
-        output_folder=str(
-            tmp_path,
-        ),
-        output_folder_logs="logs",
-        nophixs=False,
-        nphixspoints=100,
-    )
+    tmpargs = phixs_args(output_folder=str(tmp_path))
     lower = make_iondata(1, is_top_ion=False)
     lower.photoionization_crosssections = np.zeros((1, 100))
 
@@ -788,7 +780,7 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "Target target1 is below the 2% cut" in log
+    assert "The target target1 has less than 2% of the total, so the output drops it." in log
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -1538,7 +1530,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     ]
     # the four lines are 0-1, 1-2, 2-3 and 3-4. The last two name a dropped level
     assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 1), (1, 2)]
-    assert "dropped 2 levels above the ionisation energy" in flog.getvalue()
+    assert "The reader dropped 2 levels that are above the ionisation energy." in flog.getvalue()
     assert "skipped 2 transitions" in flog.getvalue()
 
 
@@ -2163,8 +2155,9 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     _, energylevels, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
-    assert "Skipped rows that are not an electron impact excitation: 1" in flog.getvalue()
-    assert "Read 235 effective collision strengths" in flog.getvalue()
+    assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
+    assert "The levels, the transitions and the collision strengths come from " in flog.getvalue()
+    assert "level pairs" not in flog.getvalue()
 
 
 def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
@@ -2429,7 +2422,7 @@ def test_read_adf04_file_index_columns(tmp_path):
     filepath = write_hydrogen_adf04(tmp_path, [row + values for row in rows], levels=levels[:200])
     flog = io.StringIO()
     assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(4, 122)]
-    assert "Skipped collision rows that the reader could not parse: 4" in flog.getvalue()
+    assert "The reader skipped 4 collision rows that it could not parse." in flog.getvalue()
 
 
 def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
@@ -2443,7 +2436,7 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
     flog = io.StringIO()
     upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
     assert upsilondict == {(0, 1): pytest.approx(0.429)}
-    assert "Skipped rows that are not an electron impact excitation: 3" in flog.getvalue()
+    assert "The reader skipped 3 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
 
@@ -2459,8 +2452,8 @@ def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
     assert upsilondict == {(0, 1): pytest.approx(0.5)}
     assert collisiondf.columns == ["upper", "lower", "avalue", "upsilon"]
     assert collisiondf["avalue"].to_list() == [1e8, 6.27e8]
-    assert "Skipped collision rows that the reader could not parse: 1" in flog.getvalue()
-    assert "Collision rows with no upsilon at the selected temperature: 1" in flog.getvalue()
+    assert "The reader skipped 1 collision rows that it could not parse." in flog.getvalue()
+    assert "1 collision rows have no value at the selected temperature." in flog.getvalue()
     assert "WARNING" not in flog.getvalue()
 
 
@@ -2538,14 +2531,14 @@ def test_eissner_order_of_file():
     flog = io.StringIO()
     levels = [("521", 0), ("51151A", 3), ("51151B", 0), ("51151B", 4)]
     assert order_of_file(levels, "x.adf04", flog) == "AUTOSTRUCTURE"
-    assert "WARNING: levels whose shells cannot give their total L: 1." in flog.getvalue()
+    assert "WARNING: The shells of 1 levels cannot give their total L." in flog.getvalue()
 
     # a blank field has no notation, so it does not count in the decision
     assert order_of_file([("521", 0), ("", 0), ("", 0)], "x.adf04", io.StringIO()) == "AUTOSTRUCTURE"
     # a blank field or a label is not a defective Eissner configuration
     flog = io.StringIO()
     assert order_of_file([("521", 0), ("51151A", 3), ("", 0)], "x.adf04", flog) == "AUTOSTRUCTURE"
-    assert "WARNING: levels with no Eissner configuration: 1, for example ''" in flog.getvalue()
+    assert "WARNING: 1 levels have no Eissner configuration, for example ''." in flog.getvalue()
 
     # The digits of a defective Eissner configuration must not become the name of a level. "591" is 1s9.
     with pytest.raises(ValueError, match="cannot read the configuration '591'"):
@@ -2895,8 +2888,8 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
     # the ion keeps its bound levels and goes to the output with no line
     assert len(energy_levels) == 2
     assert transitions == []
-    assert "skipped every one of the 2 transitions" in flog.getvalue()
-    assert "dropped 1 levels above the ionisation energy" in flog.getvalue()
+    assert "The reader skipped all 2 transitions" in flog.getvalue()
+    assert "The reader dropped 1 levels that are above the ionisation energy." in flog.getvalue()
 
 
 def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
@@ -3299,6 +3292,9 @@ def test_readfloers25data_extend_ion_list_skips_hidden_files(tmp_path, monkeypat
     for name in ("70YbII_levels_calib.txt", "._70YbII_levels_calib.txt", "._57LaIII_levels_uncalib.txt"):
         (tmp_path / name).write_text("", encoding="utf-8")
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda withforbidden: tmp_path)  # ruff: ignore[unused-lambda-argument]
+    # Without the test mode, the search of the private folder runs first, and the folder of this
+    # test is the public folder and the private folder. The result must not depend on the mode.
+    monkeypatch.setattr(readfloers25data, "TESTMODE", True)
 
     assert readfloers25data.extend_ion_list([]) == [(70, [(2, "floers25calib")])]
 
@@ -3337,6 +3333,44 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
 
     assert dflevels.height == 3
     assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5, 2.386e-13], rel=1e-12)
+
+
+def test_readtanakajpltdata_records_the_header_with_a_joined_paper_line(tmp_path, monkeypatch):
+    """The v2.1 header of Se III continues its paper line on a line with no #, and the ion name line repeats the title."""
+    from artisatomic import readtanakajpltdata
+    from artisatomic.base import IonLog
+
+    lines = [
+        "# Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        '# L. Kitoviene, G. Gaigalas, "Theoretical Investigation of the Ge',
+        'Sequence" Journal of Physical and Chemical Reference Data 53 (2024) 033101.',
+        "# Se III ",
+        "# 34 3 ",
+        "# 1 0 ",
+        "#  ",
+        "# IP = 31.697 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)      configuration ",
+        "      1   1.0  even  0.0000000e+00 {  4s+ 2 } ",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+    ]
+    (tmp_path / "34_3.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO())
+
+    _ionization_energy_ev, dflevels, _dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 3, flog)
+
+    assert dflevels.height == 1
+    recorded = [line for line in flog.comments["adata"] if "come from" not in line]
+    assert recorded == [
+        "Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        (
+            'L. Kitoviene, G. Gaigalas, "Theoretical Investigation of the Ge'
+            ' Sequence" Journal of Physical and Chemical Reference Data 53 (2024) 033101.'
+        ),
+    ]
+    assert recorded == [line for line in flog.comments["transitiondata"] if "come from" not in line]
 
 
 def test_write_adata_writes_a_negative_zero_energy_as_zero():
@@ -3613,7 +3647,7 @@ def test_read_photoionizations_without_data_gives_empty_arrays():
     # The QUB Co II tables are for CMFGEN levels. Co II through the "adas" handler has ADAS levels.
     flog = io.StringIO()
     assert readadasdata.read_photoionizations(27, 2, dfenergylevels, args, flog).crosssections.size == 0
-    assert "no photoionisation data" in flog.getvalue()
+    assert "The ADAS data has no photoionisation cross sections for this ion." in flog.getvalue()
 
 
 def test_fill_missing_phixs_thresholds():
@@ -3851,7 +3885,7 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
         57, 2, flog, calibrated=True, withforbidden=True
     )
-    assert "Discarded 1 transitions" in flog.getvalue()
+    assert "The reader discarded 1 transitions" in flog.getvalue()
 
     assert dflevels.height == 3
     rows = {
@@ -3962,6 +3996,7 @@ def test_iondata_handlers_registry():
     run.
     """
     from artisatomic import groundstatesonlynist
+    from artisatomic import readboyledata
     from artisatomic import readdreamdata
     from artisatomic import readlisbondata
     from artisatomic.iondata import handlers
@@ -4020,6 +4055,7 @@ def test_iondata_handlers_registry():
         "tanakajplt": readtanakajpltdata.read_levels_and_transitions,
         "gsnist": groundstatesonlynist.read_ground_levels,
         "adas": readadasdata.read_adas_levels_and_transitions,
+        "boyle": readboyledata.read_levels_and_transitions,
     }
     for name, reader in expected_readers.items():
         assert handlers[name].read_levels_and_transitions is reader, name
@@ -4036,26 +4072,6 @@ def test_iondata_handlers_registry():
         assert isinstance(reader, functools.partial)
         assert reader.func is readfloers25data.read_levels_and_transitions
         assert reader.keywords == keywords
-
-
-def test_iondata_boyle_entry_calls_the_boyle_reader(monkeypatch):
-    """The boyle entry is the one adapter that drops an argument, so it needs its own check.
-
-    Its reader takes no flog, and the registry calls every reader with one, so the entry has to
-    drop it. A comparison of the callables cannot catch a mis-wired adapter here.
-    """
-    from artisatomic import readboyledata
-    from artisatomic.iondata import handlers
-
-    calls = []
-    monkeypatch.setattr(
-        readboyledata,
-        "read_levels_and_transitions",
-        lambda atomic_number, ion_stage: calls.append((atomic_number, ion_stage)),
-    )
-    handlers["boyle"].read_levels_and_transitions(2, 1, io.StringIO())
-
-    assert calls == [(2, 1)]
 
 
 def test_console_script_entry_points_resolve():
@@ -4515,11 +4531,11 @@ def test_read_adf04_selects_the_nearest_temperature():
     """
     flog = io.StringIO()
     _, _, upsilons_6000, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
-    assert "Selecting 6030 K for the collision strengths" in flog.getvalue()
+    assert "The collision strengths are the values at 6030 K." in flog.getvalue()
 
     flog = io.StringIO()
     _, _, upsilons_low, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
-    assert "Selecting 3150 K for the collision strengths" in flog.getvalue()
+    assert "The collision strengths are the values at 3150 K." in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)
     assert any(upsilons_6000[key] != upsilons_low[key] for key in upsilons_6000)
@@ -4532,7 +4548,7 @@ def test_readhillierdata_warns_when_ground_lambda_disagrees_with_header(monkeypa
     """The ground level's Lam(A) must give the header's ionisation energy to four significant figures.
 
     The header value is the one adata.txt gets. A difference above that precision means the header
-    and the level table disagree, which the ion log must say. The test copies the H I file with
+    and the level table disagree, which the log file must say. The test copies the H I file with
     its header value raised by one percent; the unchanged file gives no warning.
     """
     import contextlib
@@ -4599,16 +4615,39 @@ def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
 
     assert not phixspath.exists()
-    # the other two files always start again
-    assert not (tmp_path / "adata.txt").read_text(encoding="utf-8")
-    assert not (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    # the other two files always start again, with their file comment only
+    for filename in ("adata.txt", "transitiondata.txt"):
+        lines = (tmp_path / filename).read_text(encoding="utf-8").splitlines()
+        assert lines
+        assert all(line.startswith("#") for line in lines)
+        assert "an earlier run" not in lines
+    transitioncomment = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert "temperature closest to 6000 K" in transitioncomment
+    # each file comment explains each field of its file
+    for field in ("Z", "ion_stage", "ntransitions", "lower, upper", "A", "coll_str", "forbidden"):
+        assert f"\n# {field} " in transitioncomment, field
+    adatacomment = (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    # each file comment says that its level numbers and ion stages start at 1 and not at 0
+    for filecomment in (transitioncomment, adatacomment):
+        assert "\n# NUMBERS START AT 1\n" in filecomment
+        assert "start at 1, and not at 0" in filecomment
+    for field in ("Z", "ion_stage", "nlevels", "ionisation_energy", "level_number", "energy", "g", "level_name"):
+        assert f"\n# {field} " in adatacomment, field
     # a folder with no phixsdata_v2.txt is fine too
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
     assert not phixspath.exists()
 
     # a run that writes cross sections truncates the file and writes the header for the ions
-    clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path)))
-    assert phixspath.read_text(encoding="utf-8").splitlines() == ["100", " 3.0000000e-02"]
+    clear_files(phixs_args(nophixs=False, output_folder=str(tmp_path), optimaltemperature=5500))
+    lines = phixspath.read_text(encoding="utf-8").splitlines()
+    # ARTIS reads the first two numbers with no comment skip, so the file comment comes after them
+    assert lines[:2] == ["100", " 3.0000000e-02"]
+    assert len(lines) > 2
+    assert all(line.startswith("#") for line in lines[2:])
+    assert any("T=5500 K (option -optimaltemperature)" in line for line in lines)
+    assert "# NUMBERS START AT 1" in lines
+    assert any("Only the point number i of a table starts at 0" in line for line in lines)
+    assert phixspath.read_text(encoding="utf-8").isascii()
 
 
 @pytest.mark.parametrize(
@@ -4706,3 +4745,617 @@ def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
     ions = {(atomic_number, ion) for atomic_number, listions in ion_handlers for ion in listions}
     ions_unlimited = {(atomic_number, ion) for atomic_number, listions in unlimited for ion in listions}
     assert ions <= ions_unlimited
+
+
+def test_log_comment_records_for_an_ionlog_only():
+    """A plain stream gets the log line and records nothing, so the older callers stay valid."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_comment(flog, ("adata", "phixsdata"), "Reading a file")
+    assert stream.getvalue() == "Reading a file\n"
+    assert flog.comments == {"adata": ["Reading a file"], "transitiondata": [], "phixsdata": ["Reading a file"]}
+
+    # a second IonLog with the same dictionary adds to the same lists, as the write pass does
+    log_comment(IonLog(io.StringIO(), flog.comments), ("adata",), "second pass")
+    assert flog.comments["adata"] == ["Reading a file", "second pass"]
+
+    plainstream = io.StringIO()
+    log_comment(plainstream, ("adata",), "Reading a file")
+    assert plainstream.getvalue() == "Reading a file\n"
+
+
+def test_log_source_labels_the_log_line_and_records_a_plain_source_line():
+    """Each pass logs its own source, so the log says what the source is for. The block needs "source:"."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_source
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_source(flog, ("phixsdata",), "the cross sections", "a data set")
+    assert stream.getvalue() == "source of the cross sections: a data set\n"
+    assert flog.comments == {"adata": [], "transitiondata": [], "phixsdata": ["source: a data set"]}
+
+    plainstream = io.StringIO()
+    log_source(plainstream, ("adata",), "the levels", "a data set")
+    assert plainstream.getvalue() == "source of the levels: a data set\n"
+
+
+def test_read_adf04_logs_the_file_before_its_origin(tmp_path):
+    """The block names the file first, and then the sentence about who made it."""
+    from artisatomic import readadasdata
+    from artisatomic.base import IonLog
+
+    filepath = write_hydrogen_adf04(tmp_path, ["   2   1 1.00+08 5.00-01 5.00-01"])
+    flog = IonLog(io.StringIO())
+    readadasdata.read_adf04(
+        filepath, flog, 5000.0, 1, 1, contents="The levels and the collision strengths", origin="A group made the file."
+    )
+    lines = flog.comments["adata"]
+    assert lines[0].startswith("The levels and the collision strengths come from ")
+    assert lines[0].endswith("/1_1.adf04.")
+    assert lines[1] == "A group made the file."
+    assert flog.comments["transitiondata"][:2] == lines[:2]
+
+
+def test_write_comment_block_gives_every_part_of_a_line_a_hash():
+    """ARTIS reads a line with no # as data, so a line break in a log line must not end the comment."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["transitiondata"].extend(["Temperatures:\n0.1, 0.2", "source: a data set"])
+    out = io.StringIO()
+    write_comment_block(out, "transitiondata", ("Z=26 Fe II",), flog)
+    # the source line comes directly after the title lines, wherever a reader recorded it
+    assert out.getvalue() == "# Z=26 Fe II\n# source: a data set\n# Temperatures:\n# 0.1, 0.2\n"
+
+    # no title line and a plain stream: the writer tests that pin the whole output depend on this
+    out = io.StringIO()
+    write_comment_block(out, "transitiondata", (), io.StringIO())
+    assert not out.getvalue()
+
+
+def test_write_comment_block_needs_exactly_one_source_line():
+    """A block with no source line means that a reader does not state its source, so the run must stop."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["phixsdata"].append("Reading a file")
+    with pytest.raises(ValueError, match="needs one source line but has 0"):
+        write_comment_block(io.StringIO(), "phixsdata", ("Z=26 Fe II", "handler: cmfgen"), flog)
+
+    flog.comments["phixsdata"] += ["source: a data set", "source: a second data set"]
+    with pytest.raises(ValueError, match="needs one source line but has 2"):
+        write_comment_block(io.StringIO(), "phixsdata", ("Z=26 Fe II", "handler: cmfgen"), flog)
+
+
+def artis_noncommentline(lines: list[str], pos: int) -> int:
+    """Return the index of the next line that get_noncommentline() of ARTIS (input.h) returns."""
+    while not lines[pos].strip() or lines[pos].lstrip().startswith("#"):
+        pos += 1
+    return pos
+
+
+def two_level_iondata(ion_stage: int, nphixspoints: int, *, has_phixs: bool, is_top_ion: bool = False):
+    """Build an ion with two levels and one collision strength, with or without cross section tables."""
+    import dataclasses
+
+    from artisatomic.base import empty_comments
+
+    comments = empty_comments()
+    # the source line is not the first line here, and the writer must put it first
+    comments["adata"] += ["Reading osc_data", "source: the source of the levels"]
+    comments["transitiondata"] += ["source: the source of the levels", "Temperatures:\n0.1, 0.2"]
+    comments["phixsdata"] += ["source: the source of the cross sections"]
+    return dataclasses.replace(
+        make_iondata(ion_stage, is_top_ion=is_top_ion),
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0, 1],
+                "energyabovegsinpercm": [0.0, 1000.0],
+                "g": [9.0, 7.0],
+                "parity": [0, 1],
+                "levelname": [f"gs{ion_stage}", f"excited{ion_stage} # not a comment"],
+            }
+        ),
+        upsilondict={(0, 1): 0.5},
+        photoionization_crosssections=np.ones((2, nphixspoints)) if has_phixs else np.empty((0, nphixspoints)),
+        # one target for level id 0 and two targets for level id 1, so both table forms occur
+        photoionization_targetfractions=[[(0, 1.0)], [(0, 0.25), (1, 0.75)]] if has_phixs else [],
+        photoionization_thresholds_ev=np.array([10.0, 9.0]) if has_phixs else np.empty(0),
+        comments=comments,
+    )
+
+
+def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
+    """Read the output files as ARTIS does (input.cc), so a comment at a wrong position fails here.
+
+    ARTIS skips a comment line only before the header of an ion or of a cross section table.
+    Inside a block it takes a fixed count of lines, whatever they hold.
+    """
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    nphixspoints = 3
+    tmpargs = phixs_args(output_folder=str(tmp_path), nphixspoints=nphixspoints, phixsnuincrement=0.1)
+
+    # Fe II has no cross section table, and it is not the top ion
+    ionstages = [1, 2, 3, 4]
+    iondatalist = [
+        two_level_iondata(ion_stage, nphixspoints, has_phixs=ion_stage in {1, 3}, is_top_ion=ion_stage == 4)
+        for ion_stage in ionstages
+    ]
+    clear_files(tmpargs)
+    write_output_files(26, iondatalist, tmpargs)
+
+    # all ions share one log file, and each pass names its ion
+    logtext = (tmp_path / "artisatomiclog.txt").read_text(encoding="utf-8")
+    for ionstr in ("Fe I", "Fe II", "Fe III", "Fe IV"):
+        assert logtext.count(f"Z=26 {ionstr} output:") == 1
+
+    adatatext = (tmp_path / "adata.txt").read_text(encoding="utf-8")
+    assert "# Z=26 Fe II\n# handler: cmfgen\n# source: the source of the levels\n# Reading osc_data\n" in adatatext
+    lines = adatatext.splitlines()
+    pos = 0
+    for ion_stage in ionstages:
+        pos = artis_noncommentline(lines, pos)
+        atomic_number, ion_stage_in, nlevels, _ionpot = lines[pos].split()
+        assert (int(atomic_number), int(ion_stage_in), int(nlevels)) == (26, ion_stage, 2)
+        for levelnumber, levelline in enumerate(lines[pos + 1 : pos + 1 + 2], start=1):
+            levelnumber_in, energy, g, ntransitions = levelline.split()[:4]
+            assert (int(levelnumber_in), float(g), int(ntransitions)) == (levelnumber, [9.0, 7.0][levelnumber - 1], 1)
+            assert float(energy) >= 0.0
+        pos += 1 + 2
+
+    transitiontext = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert "# Temperatures:\n# 0.1, 0.2\n" in transitiontext
+    assert "# source: the source of the levels\n" in transitiontext
+    lines = transitiontext.splitlines()
+    pos = 0
+    for ion_stage in ionstages:
+        pos = artis_noncommentline(lines, pos)
+        assert [int(field) for field in lines[pos].split()] == [26, ion_stage, 1]
+        # ARTIS counts the columns of the first row, so the row must hold five numbers and no more
+        assert [float(field) for field in lines[pos + 1].split()] == [1.0, 2.0, 0.0, 0.5, 0.0]
+        pos += 1 + 1
+
+    phixstext = (tmp_path / "phixsdata_v2.txt").read_text(encoding="utf-8")
+    # one block for each ion with a table, and not one for each of the two tables of an ion
+    assert phixstext.count("# source: the source of the cross sections\n") == 2
+    assert [line for line in phixstext.splitlines() if line.startswith("# Z=")] == ["# Z=26 Fe I", "# Z=26 Fe III"]
+    # an ion with no table gets no block, because a block must come directly before a table header
+    assert "# Z=26 Fe II\n" not in phixstext
+    assert not phixstext.splitlines()[-1].startswith("#")
+    # the file holds the two grid numbers and the tables of each ion already
+    assert "Downsample" not in phixstext
+    assert "Writing" not in phixstext
+    lines = phixstext.splitlines()
+    # ARTIS reads the first two numbers with no comment skip
+    assert int(lines[0]) == nphixspoints
+    assert float(lines[1]) == 0.1
+    pos = 2
+    tables = []
+    while any(line.strip() and not line.lstrip().startswith("#") for line in lines[pos:]):
+        pos = artis_noncommentline(lines, pos)
+        _, upperionstage, targetlevel, lowerionstage, lowerlevel, _threshold = lines[pos].split()
+        assert int(upperionstage) == int(lowerionstage) + 1
+        pos += 1
+        if int(targetlevel) == -1:
+            pos = artis_noncommentline(lines, pos)
+            ntargets = int(lines[pos])
+            pos += 1
+            for _ in range(ntargets):
+                pos = artis_noncommentline(lines, pos)
+                assert len(lines[pos].split()) == 2
+                pos += 1
+        # ARTIS reads the points with >>, which stops at a #
+        assert [float(line) for line in lines[pos : pos + nphixspoints]] == [1.0] * nphixspoints
+        pos += nphixspoints
+        tables.append((int(lowerionstage), int(lowerlevel)))
+    assert tables == [(1, 1), (1, 2), (3, 1), (3, 2)]
+
+
+def test_write_comment_block_writes_ascii_only():
+    """A program that opens an output file with the encoding of an ASCII locale must not stop on an author name."""
+    from artisatomic.base import IonLog
+    from artisatomic.output import write_comment_block
+
+    flog = IonLog(io.StringIO())
+    flog.comments["adata"].append("source: Flörs, A., Martínez-Pinedo, G., Kitovienė, L.")
+    out = io.StringIO()
+    write_comment_block(out, "adata", (), flog)
+    assert out.getvalue() == "# source: Flors, A., Martinez-Pinedo, G., Kitoviene, L.\n"
+    assert out.getvalue().isascii()
+
+
+def test_ionlog_drops_the_comments_of_a_read_that_runs_again():
+    """The CMFGEN reader reads a file a second time after a rewrite as utf-8, and no comment line must occur twice."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    flog = IonLog(io.StringIO())
+    log_comment(flog, ("adata",), "source: a data set")
+    counts = flog.comment_counts()
+    log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+    flog.drop_comments_after(counts)
+    log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+    assert flog.comments == {
+        "adata": ["source: a data set", "Reading osc_data"],
+        "transitiondata": ["Reading osc_data"],
+        "phixsdata": [],
+    }
+
+
+def test_cmfgen_reader_records_each_comment_one_time_after_the_utf8_retry(monkeypatch):
+    """The run that rewrites a file as utf-8 must give the same comment block as each later run."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+
+    attempts = []
+
+    def fake_read(_atomic_number, _ion_stage, flog):
+        log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
+        attempts.append(1)
+        if len(attempts) == 1:
+            encoding = "utf-8"
+            raise UnicodeDecodeError(encoding, b"\xed", 0, 1, "invalid continuation byte")
+        return 1.0, pl.DataFrame(), pl.DataFrame()
+
+    monkeypatch.setattr(readhillierdata, "read_levels_and_transitions_from_file", fake_read)
+    monkeypatch.setattr(readhillierdata, "rewrite_file_as_utf8", lambda _filename: True)
+
+    flog = IonLog(io.StringIO())
+    readhillierdata.read_levels_and_transitions(26, 2, flog)
+    assert len(attempts) == 2
+    assert flog.comments["adata"] == ["Reading osc_data"]
+    assert flog.comments["transitiondata"] == ["Reading osc_data"]
+
+
+def test_each_reader_of_the_registry_takes_a_log():
+    """read_ion_data() gives each reader (atomic_number, ion_stage, flog), so each one must take a third argument."""
+    import inspect
+
+    from artisatomic.iondata import handlers
+
+    for name, handler in handlers.items():
+        parameters = list(inspect.signature(handler.read_levels_and_transitions).parameters)
+        assert parameters[:3] == ["atomic_number", "ion_stage", "flog"], name
+        assert handler.description, name
+
+
+def test_hydrogenic_estimate_records_its_source_only_with_a_table():
+    """An ion that got no hydrogenic table must not name the estimate as the source of its cross sections."""
+    from artisatomic.base import IonLog
+
+    levels = pl.DataFrame({"levelid": [0], "energyabovegsinpercm": [0.0], "g": [2.0], "levelname": ["3s_2Se"]})
+    args = phixs_args()
+
+    flog = IonLog(io.StringIO())
+    crosssections, _, _ = match_hydrogenic_phixs(11, levels, 5.139, "mons", None, args, flog)
+    assert len(crosssections) == 0
+    assert flog.comments["phixsdata"] == []
+
+    flog = IonLog(io.StringIO())
+    crosssections, _, _ = match_hydrogenic_phixs(
+        11, levels, 5.139, "cmfgen", readhillierdata.get_level_valence_n, args, flog
+    )
+    assert len(crosssections) == 1
+    assert len(flog.comments["phixsdata"]) == 1
+    sourceline = flog.comments["phixsdata"][0]
+    assert sourceline.startswith("source: the hydrogenic estimate of artisatomic")
+    assert "gbf_n_data.dat" in sourceline
+    assert "/Users/" not in sourceline
+
+
+def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
+    """Run cli.main() with no read of an ion. The read needs the data sets, and the callers test the files of the run only."""
+    from artisatomic import cli
+
+    monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
+    cli.main()
+
+
+def test_main_writes_one_log_file_and_the_handlers_record_beside_the_output_files(tmp_path, monkeypatch):
+    """The log of all ions is artisatomiclog.txt, and it sits with the record of the ion handlers beside adata.txt."""
+    handlers = [[38, [[1, "kurucz"], [2, "kurucz"]]]]
+    (tmp_path / "artisatomicionhandlers.json").write_text(json.dumps(handlers), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    # a log of an earlier run must not stay in the file
+    (outputfolder / "artisatomiclog.txt").write_text("the log of an earlier run\n", encoding="utf-8")
+    run_main_with_no_ion_read(monkeypatch, outputfolder)
+
+    assert {path.name for path in outputfolder.iterdir()} == {
+        "adata.txt",
+        "compositiondata.txt",
+        "transitiondata.txt",
+        "phixsdata_v2.txt",
+        "artisatomiclog.txt",
+        "artisatomicionhandlers_used.json",
+    }
+    assert json.loads((outputfolder / "artisatomicionhandlers_used.json").read_text(encoding="utf-8")) == handlers
+    assert not (outputfolder / "artisatomiclog.txt").read_text(encoding="utf-8")
+
+
+def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handlers_alone(tmp_path, monkeypatch):
+    """get_ion_handlers() reads ./artisatomicionhandlers.json, so the record of a run must not get that name."""
+    from artisatomic import cli
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
+    run_main_with_no_ion_read(monkeypatch, ".")
+
+    assert not (tmp_path / "artisatomicionhandlers.json").exists()
+    record = json.loads((tmp_path / "artisatomicionhandlers_used.json").read_text(encoding="utf-8"))
+    assert record == [[38, [[1, "kurucz"], [2, "kurucz"]]]]
+
+
+def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
+    """The per-ion logs of an earlier release must not stay beside the log file of a new run."""
+    from artisatomic.cli import remove_old_log_folder
+
+    oldfolder = tmp_path / "atomic_data_logs"
+    oldfolder.mkdir()
+    (oldfolder / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    (oldfolder / "artisatomicionhandlers.json").write_text("[]", encoding="utf-8")
+    remove_old_log_folder(tmp_path)
+    assert not oldfolder.exists()
+
+    # a file that the earlier release did not write stays, and so does its folder
+    oldfolder.mkdir()
+    (oldfolder / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    (oldfolder / "notes.md").write_text("my notes\n", encoding="utf-8")
+    remove_old_log_folder(tmp_path)
+    assert [path.name for path in oldfolder.iterdir()] == ["notes.md"]
+
+    # no folder is fine too
+    remove_old_log_folder(tmp_path / "artis_files")
+    assert not (tmp_path / "artis_files").exists()
+
+    # a symbolic link to a folder loses its old files and stays, because rmdir() fails on a link
+    target = tmp_path / "logs_on_another_disk"
+    target.mkdir()
+    (target / "fe2.txt").write_text("an old log\n", encoding="utf-8")
+    linkfolder = tmp_path / "linked"
+    linkfolder.mkdir()
+    (linkfolder / "atomic_data_logs").symlink_to(target)
+    remove_old_log_folder(linkfolder)
+    assert (linkfolder / "atomic_data_logs").is_symlink()
+    assert not any(target.iterdir())
+
+
+def test_description_of_ion_names_the_source_of_a_special_ion():
+    """U II and U III of the FAC handler, and Co IV of the ADAS handler, do not come from the shared source."""
+    from artisatomic import readadasdata
+    from artisatomic import readfacdata
+    from artisatomic.iondata import handlers
+
+    assert handlers["fac"].description is readfacdata.description_of_ion
+    assert readfacdata.description_of_ion(60, 2) == readfacdata.description
+    assert readfacdata.description_of_ion(92, 2) == readfacdata.description_uranium
+    assert readfacdata.description_of_ion(92, 3) == readfacdata.description_uranium
+    assert readfacdata.description_of_ion(92, 4) == readfacdata.description
+    assert "Paper_Nd_U" in readfacdata.description_uranium
+
+    assert handlers["adas"].description is readadasdata.description_of_ion
+    assert readadasdata.description_of_ion(27, 3) == readadasdata.description
+    assert readadasdata.description_of_ion(27, 4) == readadasdata.description_co4
+    assert "adf04" not in readadasdata.description_co4
+
+
+def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
+    """Each output file names its creation time, and the time of a checksum run is the same for each run."""
+    import re
+
+    from artisatomic import base
+    from artisatomic.output import clear_files
+
+    # CI sets the test mode for all tests, and the test mode comes before SOURCE_DATE_EPOCH
+    monkeypatch.setattr(base, "TESTMODE", False)
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    clear_files(phixs_args(output_folder=str(tmp_path)))
+    for filename in ("adata.txt", "transitiondata.txt", "phixsdata_v2.txt"):
+        assert "wrote this file at 2026-09-21T14:13:20Z (UTC)." in (tmp_path / filename).read_text(encoding="utf-8")
+
+    for badvalue in ("", "abc", "1e9", "-1", "99999999999999999999"):
+        monkeypatch.setenv("SOURCE_DATE_EPOCH", badvalue)
+        with pytest.raises(ValueError, match="SOURCE_DATE_EPOCH must be a count of seconds"):
+            base.creation_time_utc()
+
+    # The test mode gives a time of zero, so the checksum recipe needs no other variable. A build
+    # environment can set SOURCE_DATE_EPOCH for its own use, and that must not change the checksums.
+    monkeypatch.setenv("SOURCE_DATE_EPOCH", "1790000000")
+    monkeypatch.setattr(base, "TESTMODE", True)
+    assert base.creation_time_utc() == "1970-01-01T00:00:00Z"
+
+    # a normal run gives the time of the run
+    monkeypatch.setattr(base, "TESTMODE", False)
+    monkeypatch.delenv("SOURCE_DATE_EPOCH")
+    assert re.fullmatch(r"20\d{2}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", base.creation_time_utc())
+
+
+def test_to_ascii_keeps_a_dash_and_the_letter_of_an_accent():
+    """A character with no ASCII form must not go away, because the text on its two sides would then join."""
+    from artisatomic.base import comment_lines
+    from artisatomic.base import to_ascii
+
+    # chr() and not the characters, because ruff rejects a string with a character that looks like an ASCII one
+    endash, minussign, timessign, greaterequal, alpha, lineseparator = (
+        chr(0x2013),
+        chr(0x2212),
+        chr(0x00D7),
+        chr(0x2265),
+        chr(0x03B1),
+        chr(0x2028),
+    )
+    # the JPLT files of Pr II and Tb II name these two ranges of elements, with an en dash and a minus sign
+    assert to_ascii(f"Elements. I. Pr{endash}Gd") == "Elements. I. Pr-Gd"
+    assert to_ascii(f"Elements. II. Tb{minussign}Yb") == "Elements. II. Tb-Yb"
+    assert to_ascii("Flörs, Martínez-Pinedo, Kitovienė") == "Flors, Martinez-Pinedo, Kitoviene"
+    assert to_ascii(f"1{timessign}10 and {greaterequal}5 and {alpha}") == "1x10 and >=5 and ?"
+    for text in (f"Pr{endash}Gd", f"a{lineseparator}b", alpha, ""):
+        for commentline in comment_lines([text]):
+            assert commentline.startswith("#")
+            assert commentline.endswith("\n")
+            assert commentline.count("\n") == 1
+            assert commentline.isascii()
+
+
+def test_path_in_data_folder_starts_with_the_repository_name_of_the_folder(tmp_path):
+    """A data folder can be a symbolic link, and the name of the link target must not go into an output file."""
+    from artisatomic.base import path_in_data_folder
+
+    target = tmp_path / "bulk_disk" / "kurucz_2024"
+    (target / "zztar").mkdir(parents=True)
+    datafolder = tmp_path / "repository" / "atomic-data-kurucz"
+    datafolder.parent.mkdir()
+    datafolder.symlink_to(target, target_is_directory=True)
+
+    # a reader has the path of the file after resolve(), so it holds the name of the link target
+    resolvedfile = (datafolder / "zztar" / "gf3800.all").resolve()
+    assert "kurucz_2024" in str(resolvedfile)
+    assert path_in_data_folder(resolvedfile, datafolder) == "atomic-data-kurucz/zztar/gf3800.all"
+
+    # a reader takes a plain file or a compressed file, and the output must be the same for the two
+    compressedfile = (datafolder / "zztar" / "gf3800.all.zst").resolve()
+    assert path_in_data_folder(compressedfile, datafolder) == "atomic-data-kurucz/zztar/gf3800.all"
+
+    # a file that is not in the data folder keeps its own path, with no folder name before it
+    otherfile = tmp_path / "repository" / "other.txt"
+    assert path_in_data_folder(otherfile, datafolder) == str(otherfile)
+
+
+def test_ion_label():
+    """The comment blocks and the log file name an ion in the same way."""
+    from artisatomic.base import ion_label
+
+    assert ion_label(26, 2) == "Z=26 Fe II"
+
+
+def test_resolve_pass_records_a_target_that_matches_no_level(tmp_path):
+    """The fallback to the ground state sets the upper level of the tables, so the comment block must show it."""
+    from artisatomic.iondata import resolve_photoion_targetfractions
+
+    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("no such level", 1.0)]])
+    logpath = tmp_path / "artisatomiclog.txt"
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)], 26, logpath)
+
+    assert lower.photoionization_targetfractions == [[(0, 1.0)]]
+    warning = "WARNING: photoionisation target 'no such level' matched no level of the upper ion"
+    assert [line for line in lower.comments["phixsdata"] if line.startswith(warning)]
+    logtext = logpath.read_text(encoding="utf-8")
+    assert "Z=26 Fe I photoionisation targets:" in logtext
+    assert warning in logtext
+
+    # an ion with no target names has nothing to resolve, so the log file gets no empty section
+    logpath.write_text("", encoding="utf-8")
+    resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=True)], 26, logpath)
+    assert not logpath.read_text(encoding="utf-8")
+
+
+def test_hydrogenic_estimate_gives_one_summary_of_the_levels_with_no_table():
+    """The log file gets a warning for each such level, and the comment block gets one count line."""
+    from artisatomic.base import IonLog
+
+    levels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2],
+            "energyabovegsinpercm": [0.0, 1000.0, 1.0e6],
+            "g": [2.0, 2.0, 2.0],
+            "levelname": ["3s_2Se", "a name with no quantum number", "9s_2Se"],
+        }
+    )
+    flog = IonLog(io.StringIO())
+    match_hydrogenic_phixs(11, levels, 5.139, "cmfgen", readhillierdata.get_level_valence_n, phixs_args(), flog)
+    summaries = [line for line in flog.comments["phixsdata"] if "got no hydrogenic table" in line]
+    expected = (
+        "2 of the lowest 3 levels got no hydrogenic table: 1 are at or above the ionisation energy, 1 have a level"
+        " name with no principal quantum number, and 0 have an n outside the hydrogenic tables."
+    )
+    assert summaries == [expected]
+
+
+def test_phot_file_reader_rejects_a_target_that_a_second_file_or_line_repeats(tmp_path):
+    """Each phot file of an ion has one target, and two files of an ion must not name the same target.
+
+    combine_phixs_routes() takes each file as one route to its target. Two routes to one target,
+    or a file with two targets, would give cross sections to the wrong target with no message.
+    """
+    from artisatomic.readhillierdata import PhotFileReader
+
+    def phot_text(targetlines: str) -> str:
+        return (
+            "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+            "1                                       !Number of energy levels\n"
+            "2.0D0                                   !Screened nuclear charge\n"
+            f"{targetlines}"
+            "Megabarns                               !Cross-section unit\n"
+            "False                                   !Split J levels\n"
+            "A                                       !Configuration name\n"
+            "20                                      !Type of cross-section\n"
+            "2                                       !Number of cross-section points\n"
+            "1.0 4.0\n2.0 1.0\n\n"
+        )
+
+    onetarget = "5s2_5p6_1Se                             !Final state in ion\n"
+    othertarget = "5s2_5p5_2Po                             !Final state in ion\n"
+    for name, targetlines in (("phot_A", onetarget), ("phot_B", onetarget), ("phot_C", onetarget + othertarget)):
+        (tmp_path / name).write_text(phot_text(targetlines), encoding="utf-8")
+
+    # the second file of the ion names the target of the first file
+    reader = PhotFileReader(56, 2, 2, [911.0], {"A": 0}, {"A": 0}, io.StringIO())
+    reader.read_file(0, tmp_path / "phot_A", "phot_A")
+    assert reader.phixstargets == ["5s2_5p6_1Se", ""]
+    with pytest.raises(ValueError, match="Multiple phixs files for the same target configuration 5s2_5p6_1Se"):
+        reader.read_file(1, tmp_path / "phot_B", "phot_B")
+
+    # one file with two target lines
+    reader = PhotFileReader(56, 2, 1, [911.0], {"A": 0}, {"A": 0}, io.StringIO())
+    with pytest.raises(ValueError, match="phot_C has more than one '!Final state in ion' line"):
+        reader.read_file(0, tmp_path / "phot_C", "phot_C")
+
+
+def test_log_detail_gives_one_count_line_for_each_kind():
+    """The log file gets each detail line, and the comment block gets the first line of a kind with its count."""
+    from artisatomic.base import IonLog
+    from artisatomic.base import log_comment
+    from artisatomic.base import log_detail
+
+    stream = io.StringIO()
+    flog = IonLog(stream)
+    log_comment(flog, ("transitiondata",), "source: a data set")
+    for upper in ("B", "C", "D"):
+        log_detail(
+            flog, ("transitiondata",), "swapped transition levels", f"WARNING: Swapped transition levels A -> {upper}"
+        )
+    log_detail(flog, ("transitiondata",), "discarded upsilon", "Discarded upsilon=0.500 for A -> B")
+    log_comment(flog, ("transitiondata",), "Read 4 effective collision strengths")
+
+    assert stream.getvalue().count("Swapped transition levels") == 3
+    assert flog.comments["transitiondata"] == [
+        "source: a data set",
+        "WARNING: Swapped transition levels A -> B (the first of 3 such lines in the log file)",
+        # one line of a kind goes into the block as it is
+        "Discarded upsilon=0.500 for A -> B",
+        "Read 4 effective collision strengths",
+    ]
+
+    # a read that runs again starts each count again, so no count line shows the lines of two reads
+    flog = IonLog(io.StringIO())
+    counts = flog.comment_counts()
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'x' has no LS term")
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'y' has no LS term")
+    flog.drop_comments_after(counts)
+    log_detail(flog, ("adata",), "level name with no LS term", "The Hillier level name 'x' has no LS term")
+    assert flog.comments["adata"] == ["The Hillier level name 'x' has no LS term"]
+
+    # a plain stream records nothing
+    plainstream = io.StringIO()
+    log_detail(plainstream, ("adata",), "kind", "a detail line")
+    assert plainstream.getvalue() == "a detail line\n"

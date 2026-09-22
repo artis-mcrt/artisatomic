@@ -16,13 +16,28 @@ from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
+from artisatomic.base import without_compression_extension
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
+
+# the FAC reader gives the same paper
+reference = (
+    "Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026), Phys. Rev. D, 113,"
+    " 063041, doi:10.1103/jxqw-7ynk"
+)
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = f"the Floers+25 data set, {{variant}}. {reference}. Data set: doi:10.5281/zenodo.15835360"
+# OutputFiles_withforbidden holds a later version of the data, which the Zenodo record does not have
+description_withforbidden = (
+    f"a later version of the calibrated Floers+25 data set, with forbidden lines. It is not public. {reference}"
+)
 
 
 def get_basepath(withforbidden: bool) -> Path:
@@ -281,12 +296,19 @@ def read_levels_and_transitions(
         msg = f"Found no Floers+25 transitions files for {ionstr} ({calibstr}) in {basepath}"
         raise FileNotFoundError(msg)
 
-    log_and_print(
-        flog,
-        f"Reading Floers+25 {calibstr}rated data for Z={atomic_number} ion_stage {ion_stage} ({elsym} {ion_stage_roman}) from {basepath.name}/{levels_file.name} and {len(transition_files)} transitions files",
+    # the name of the folder and of the file only, so a line does not depend on the machine
+    log_comment(
+        flog, ("adata",), f"The levels come from {basepath.name}/{without_compression_extension(levels_file.name)}."
     )
+    for transition_file in transition_files:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The transitions come from {basepath.name}/{without_compression_extension(transition_file.name)}.",
+        )
 
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
     # the levels files of the data sets do not all carry the same columns, so name the ones used.
     # J keeps its "5/2" form as a string, which the g column below reads.
@@ -325,7 +347,7 @@ def read_levels_and_transitions(
         levelname=pl.format("{} J={} index={}", pl.col("Configuration"), pl.col("J"), pl.col("Index"))
     )
 
-    log_and_print(flog, f"Read {dflevels.height:d} levels")
+    log_and_print(flog, f"The reader got {dflevels.height:d} levels.")
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
@@ -333,7 +355,7 @@ def read_levels_and_transitions(
         [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
     )
 
-    log_and_print(flog, f"Read {dftransitions.height} transitions")
+    log_and_print(flog, f"The reader got {dftransitions.height} transitions.")
 
     # some transitions files reference levels that the levels file does not list, for example
     # the private Ce III set. Discard those rows with a warning: they cannot attach to a level.
@@ -342,10 +364,11 @@ def read_levels_and_transitions(
     )
     ndiscarded = dftransitions.filter(~inrange).height
     if ndiscarded > 0:
-        log_and_print(
+        log_comment(
             flog,
-            f"WARNING: Discarded {ndiscarded} transitions of {ionstr} that reference levels outside"
-            f" 0..{dflevels.height - 1}",
+            ("transitiondata",),
+            f"WARNING: The reader discarded {ndiscarded} transitions that name a level outside the level list"
+            f" (0 to {dflevels.height - 1}).",
         )
         dftransitions = dftransitions.filter(inrange)
 
@@ -353,7 +376,11 @@ def read_levels_and_transitions(
     # column. Swap those rows into energy order: the merge and the output want lowerlevel first.
     nreversed = dftransitions.filter(pl.col("lowerlevel") > pl.col("upperlevel")).height
     if nreversed > 0:
-        log_and_print(flog, f"Swapped the level order of {nreversed} reversed transitions")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The reader swapped the two levels of {nreversed} transitions, because the file names the upper level first.",
+        )
         dftransitions = dftransitions.with_columns(
             lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
             upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
@@ -378,7 +405,11 @@ def read_levels_and_transitions(
         parity_of_index.gather(dfallowed["lowerlevel"]) == parity_of_index.gather(dfallowed["upperlevel"])
     ).sum()
     if n_paritymatch > 0:
-        log_and_print(flog, f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity")
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {n_paritymatch} E1 transitions connect two levels with the same parity",
+        )
 
     # use standard artisatomic column names. The forbidden flag comes from the Type column
     # above, so add_level_ids_forbidden() does not derive it from the parity.
@@ -396,7 +427,7 @@ def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a Floers+25 level name.
 
     Returns None for a name that it cannot parse. The caller, match_hydrogenic_phixs(), then
-    gives the level no estimate and writes a warning to the ion log.
+    gives the level no estimate and writes a warning to the log file.
 
     Kept separate from the other readers' versions. Each data source names its levels
     differently, so a shared parser would have to guess the convention of each name.

@@ -10,6 +10,7 @@ import argcomplete
 
 from artisatomic import readadasdata
 from artisatomic.base import check_ion_stages_contiguous
+from artisatomic.base import log_path
 from artisatomic.iondata import read_ion_data
 from artisatomic.iondata import resolve_photoion_targetfractions
 from artisatomic.ionhandlers import get_ion_handlers
@@ -17,6 +18,9 @@ from artisatomic.ionhandlers import inputhandlersfile
 from artisatomic.output import clear_files
 from artisatomic.output import write_compositionfile
 from artisatomic.output import write_output_files
+
+# the record of the ions and the handlers of a run, in the output folder
+handlersrecordname = "artisatomicionhandlers_used.json"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,7 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
         description="Produce an ARTIS atomic database from published atomic data sets.",
     )
     parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
-    parser.add_argument("-output_folder_logs", action="store", default="atomic_data_logs", help="Folder for log files")
     parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points to save in output")
     parser.add_argument(
         "-phixsnuincrement",
@@ -144,24 +147,41 @@ def main() -> None:
 
     Path(args.output_folder).mkdir(exist_ok=True, parents=True)
 
-    log_folder = Path(args.output_folder) / args.output_folder_logs
-    if log_folder.exists():
-        # a log of an ion that this run does not select would otherwise stay beside the new logs
-        for logfile in sorted(log_folder.glob("*.txt")):
-            logfile.unlink(missing_ok=True)
-            print("deleting", logfile)
-    else:
-        Path(log_folder).mkdir(exist_ok=True, parents=True)
+    # this empties the log of the last run. The passes of each ion append to the file.
+    log_path(args.output_folder).write_text("", encoding="utf-8")
+    remove_old_log_folder(Path(args.output_folder))
 
-    # A record of what this run used, beside the logs. It is NOT the file
-    # get_ion_handlers() reads: that one is ./artisatomicionhandlers.json, in the working
-    # directory. Copy this one there to repeat a run exactly, as the CI workflow does. The copy
-    # holds the ions that the limits kept, so the repeat run must not give a limit again.
-    with Path(log_folder, "artisatomicionhandlers.json").open("w", encoding="utf-8") as f:
+    # A record of what this run used, beside the output files. Its name is not the name of the
+    # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working
+    # directory, or a later run from inside an output folder, must not take the record of an
+    # earlier run as its ion selection. Copy the record to ./artisatomicionhandlers.json to repeat
+    # a run exactly. It holds the ions that the limits kept, so the repeat run must not give a
+    # limit again.
+    with Path(args.output_folder, handlersrecordname).open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)
     clear_files(args)
     process_files(ion_handlers, args)
+
+
+def remove_old_log_folder(output_folder: Path) -> None:
+    """Remove the log files that an earlier release wrote to the folder atomic_data_logs.
+
+    That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
+    A user could take such a file for a record of the new run. The function removes each .txt
+    file of the folder and the copy of the ion handlers. That release did the same at the start
+    of each run. The function then removes the folder if the folder is empty.
+    """
+    old_log_folder = output_folder / "atomic_data_logs"
+    if not old_log_folder.is_dir():
+        return
+    for oldfile in sorted([*old_log_folder.glob("*.txt"), old_log_folder / "artisatomicionhandlers.json"]):
+        if oldfile.is_file():
+            print("deleting", oldfile)
+            oldfile.unlink()
+    # rmdir() fails on a symbolic link to a folder, so such a link stays
+    if not old_log_folder.is_symlink() and not any(old_log_folder.iterdir()):
+        old_log_folder.rmdir()
 
 
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
@@ -181,9 +201,7 @@ def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: a
         ]
 
         if not args.nophixs:
-            resolve_photoion_targetfractions(
-                iondatalist, atomic_number, Path(args.output_folder, args.output_folder_logs)
-            )
+            resolve_photoion_targetfractions(iondatalist, atomic_number, log_path(args.output_folder))
 
         write_output_files(atomic_number, iondatalist, args)
 

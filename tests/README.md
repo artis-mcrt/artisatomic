@@ -8,17 +8,21 @@ Each directory here is one entry of the `tests` matrix in
 recipe below reproduces it.
 
 Verification is whole-file MD5, so **any** change to level naming, sorting, phixs downsampling or a
-default argument invalidates every checksum at once. Regenerate a set with:
+default argument invalidates every checksum at once. A change to a log line that goes into a comment block
+(`log_comment()`) or to a `Handler` description changes the checksums too. Such a change must leave the files the
+same after `grep -v '^#'`. Regenerate a set with:
 
 ```bash
 export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"
 cp tests/<name>/artisatomicionhandlers.json .
 uv run makeartisatomicfiles -output_folder tests/<name>/output
 rm artisatomicionhandlers.json
-(cd tests/<name>/output && md5sum *.txt > ../checksums.txt)
+(cd tests/<name>/output && md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt > ../checksums.txt)
 ```
 
-`ARTISATOMIC_TESTMODE=1` is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
+Name the four files. The output folder holds the log file `artisatomiclog.txt` also, and `*.txt` would put it into `checksums.txt`.
+
+`ARTISATOMIC_TESTMODE=1` also gives the file comments a creation time of 1970-01-01T00:00:00Z, so the checksums do not depend on the time of the run. The test mode comes before `SOURCE_DATE_EPOCH`, which a build environment can set for its own use. It is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
 `test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
 `test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
 `OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:

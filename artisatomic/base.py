@@ -1,6 +1,7 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
+import datetime
 import io
 import itertools
 import math
@@ -10,8 +11,10 @@ import os
 import re
 import sys
 import typing as t
+import unicodedata
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -265,21 +268,269 @@ def resolve_transition_levelids(
     return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
 
 
-def ion_log_path(log_folder: str | Path, atomic_number: int, ion_stage: int) -> Path:
-    """Path of the per-ion log file. The read pass writes it, and the write pass appends to it."""
-    return Path(log_folder, f"{elsymbols[atomic_number].lower()}{ion_stage:d}.txt")
+def creation_time_utc() -> str:
+    """Give the creation time for the file comments, in UTC, for example 2026-09-21T12:34:56Z.
+
+    The output checksums need files that are the same for each run. ARTISATOMIC_TESTMODE=1
+    therefore gives a time of zero, because the checksum recipe sets the test mode. The test mode
+    comes first: a build environment can set SOURCE_DATE_EPOCH for its own use.
+
+    Without the test mode, SOURCE_DATE_EPOCH gives the time in seconds since 1970. It is the
+    variable of the reproducible builds project
+    (https://reproducible-builds.org/specs/source-date-epoch/).
+    """
+    epoch = "0" if TESTMODE else os.environ.get("SOURCE_DATE_EPOCH")
+    if epoch is None:
+        creationtime = datetime.datetime.now(datetime.UTC)
+    else:
+        try:
+            if int(epoch) < 0:
+                raise ValueError(epoch)  # ruff: ignore[raise-within-try]
+            creationtime = datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
+        except (ValueError, OverflowError, OSError) as exc:
+            msg = f"SOURCE_DATE_EPOCH must be a count of seconds since 1970 as a whole number, not {epoch!r}"
+            raise ValueError(msg) from exc
+    return creationtime.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ion_label(atomic_number: int, ion_stage: int) -> str:
+    """Give the label of an ion for the log file and the comment blocks, for example Z=26 Fe II.
+
+    The comment block of an ion and the lines of that ion in the log file use the same label, so
+    a user can find one from the other.
+    """
+    return f"Z={atomic_number} {elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
+
+
+def log_path(output_folder: str | Path) -> Path:
+    """Path of the log file of the run, which all ions share.
+
+    The run empties the file at its start. Each pass of each ion then appends to it, so open it
+    in append mode.
+    """
+    return Path(output_folder, "artisatomiclog.txt")
 
 
 def log_and_print(flog, strout):
-    """Write a line to both stdout and this ion's log file."""
+    """Write a line to both stdout and the log file of the run."""
     print(strout)
     flog.write(strout + "\n")
+
+
+# the output files that take a comment block. compositiondata.txt is absent, because ARTIS reads
+# it with no comment skip.
+COMMENT_TABLES = ("adata", "transitiondata", "phixsdata")
+
+
+def empty_comments() -> dict[str, list[str]]:
+    """Return an empty list of comment lines for each name in COMMENT_TABLES."""
+    return {table: [] for table in COMMENT_TABLES}
+
+
+class IonLog:
+    """The log file of the run during one pass of one ion, and the lines that go into the output files as comments.
+
+    comments has one list of lines for each name in COMMENT_TABLES. The write pass gives the
+    dictionary of the read pass, so the two passes fill the same lists.
+    """
+
+    def __init__(self, stream: t.TextIO, comments: dict[str, list[str]] | None = None) -> None:
+        """Wrap the stream of the log file. Give comments to add to the lists of an earlier pass."""
+        self.stream = stream
+        self.comments = empty_comments() if comments is None else comments
+        # for log_detail(): the place of the count line of each kind of detail line, as
+        # (table, kind) -> (index in self.comments[table], count, first line)
+        self.detailcounts: dict[tuple[str, str], tuple[int, int, str]] = {}
+
+    def add_comment(self, tables: Iterable[str], text: str) -> None:
+        """Record a comment line for each named output file, with no entry in the log file."""
+        for table in tables:
+            # the indent of a line shows its place in the log, and a comment block has no such order
+            self.comments[table].append(text.strip())
+
+    def comment_counts(self) -> dict[str, int]:
+        """Return the number of comment lines of each output file, for drop_comments_after()."""
+        return {table: len(lines) for table, lines in self.comments.items()}
+
+    def drop_comments_after(self, counts: dict[str, int]) -> None:
+        """Remove the comment lines that came after comment_counts() gave these numbers.
+
+        A reader that reads a file a second time calls this first. The lines of the first read
+        would otherwise occur two times in the output file.
+        """
+        for table, count in counts.items():
+            del self.comments[table][count:]
+        # a count line that went away starts again at zero
+        self.detailcounts = {
+            key: value for key, value in self.detailcounts.items() if value[0] < len(self.comments[key[0]])
+        }
+
+    def add_detail(self, tables: Iterable[str], kind: str, text: str) -> None:
+        """Count a detail line of one kind, and keep one comment line for that kind (see log_detail())."""
+        for table in tables:
+            index, count, firstline = self.detailcounts.get((table, kind), (len(self.comments[table]), 0, text.strip()))
+            count += 1
+            commentline = firstline if count == 1 else f"{firstline} (the first of {count} such lines in the log file)"
+            if index == len(self.comments[table]):
+                self.comments[table].append(commentline)
+            else:
+                self.comments[table][index] = commentline
+            self.detailcounts[table, kind] = (index, count, firstline)
+
+    def write(self, text: str) -> int:
+        """Write text to the log file."""
+        return self.stream.write(text)
+
+    def writelines(self, lines: Iterable[str]) -> None:
+        """Write lines to the log file."""
+        self.stream.writelines(lines)
+
+
+def log_comment(flog, tables: Iterable[str], strout: str) -> None:
+    """Log a line, and record it as a comment line for each named output file.
+
+    A log that is not an IonLog records nothing, so a caller can give a plain stream.
+
+    Do not record a line that only repeats a number of the header line of the ion. Examples are
+    the count of levels, the count of transitions, and the ionisation energy.
+    """
+    log_and_print(flog, strout)
+    if isinstance(flog, IonLog):
+        flog.add_comment(tables, strout)
+
+
+def log_source(flog, tables: Iterable[str], subject: str, description: str) -> None:
+    """Log the source of the data, and record it as the "source:" line of the comment blocks.
+
+    Each pass of an ion logs its own source line, so the log file gets a label with the subject,
+    for example "the cross sections". The block gets the plain "source:" line that
+    write_comment_block() expects. A log that is not an IonLog records nothing.
+    """
+    log_and_print(flog, f"source of {subject}: {description}")
+    if isinstance(flog, IonLog):
+        flog.add_comment(tables, f"source: {description}")
+
+
+def log_detail(flog, tables: Iterable[str], kind: str, strout: str) -> None:
+    """Log a detail line that can occur for many levels or transitions of one ion.
+
+    The log file gets each such line. The comment block gets one line for each kind: the first
+    line, and the count of the lines of that kind. A block thus stays short, and it still shows
+    each kind of detail that the log file holds. kind is a short name that the lines of one kind
+    share. A log that is not an IonLog records nothing.
+    """
+    log_and_print(flog, strout)
+    if isinstance(flog, IonLog):
+        flog.add_detail(tables, kind, strout)
+
+
+# NFKD keeps the letter of an accented character. It has no ASCII form for these characters, so
+# each one gets its own replacement. A reference can hold a dash in a range of elements or pages.
+ascii_replacements = str.maketrans(
+    {
+        "\u2010": "-",  # hyphen
+        "\u2011": "-",  # hyphen with no break
+        "\u2012": "-",  # figure dash
+        "\u2013": "-",  # en dash
+        "\u2014": "-",  # em dash
+        "\u2212": "-",  # minus sign
+        "\u00d7": "x",  # multiplication sign
+        "\u00b0": " deg",  # degree sign
+        "\u00b5": "u",  # micro sign
+        "\u03bc": "u",  # Greek letter mu
+        "\u2264": "<=",
+        "\u2265": ">=",
+        "\u2192": "->",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u00df": "ss",
+        "\u00f8": "o",
+        "\u00d8": "O",
+        "\u00e6": "ae",
+        "\u00c6": "AE",
+        "\u0142": "l",
+        "\u0141": "L",
+    }
+)
+
+
+def to_ascii(text: str) -> str:
+    """Give the text in ASCII characters only, for a comment line of an output file.
+
+    A program that opens an output file with the encoding of an ASCII locale stops on the first
+    other character, and an author name such as Flörs has one. NFKD (the Unicode compatibility
+    decomposition) splits an accent from its letter, so the letter stays. A character with no
+    ASCII form becomes a question mark. It must not go away, because the text on its two sides
+    would then join, for example the two elements of a range.
+    """
+    decomposed = unicodedata.normalize("NFKD", text.translate(ascii_replacements))
+    return "".join(
+        character if character.isascii() else "?" for character in decomposed if not unicodedata.combining(character)
+    )
+
+
+def comment_lines(lines: Iterable[str]) -> Iterator[str]:
+    """Turn text lines into the comment lines of an ARTIS input file, in ASCII, each with its line end.
+
+    ARTIS takes a line as a comment only when its first character that is not a space is a #.
+    A text line can hold a line break, so each part gets its own #.
+
+    The three writers of output.py and the writer of chargetransfer.txt use this function, and a
+    checksum test covers each of those files. A change here can therefore change all of them.
+    """
+    for line in lines:
+        for part in to_ascii(line).splitlines() or [""]:
+            yield f"# {part}".rstrip() + "\n"
+
+
+def without_compression_extension(filename: str) -> str:
+    """Remove the extension of a compression (.zst, .gz or .xz) from a file name, for a comment line.
+
+    A reader accepts a data file with or without such an extension. The output files must be the
+    same for the two forms, so a comment line names the file with no such extension.
+    """
+    for extension in compression_extensions:
+        if extension and filename.endswith(extension):
+            return filename.removesuffix(extension)
+    return filename
+
+
+def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
+    """Render the path of a file in a data folder of the repository, for a comment line.
+
+    datafolder is the path of the data folder before resolve(), for example
+    PYDIR / ".." / "atomic-data-adas". The result starts with the name of that folder in the
+    repository. A data folder can be a symbolic link to a different disk. The name of the link
+    target depends on the machine, so it must not go into an output file. The result has no
+    extension of a compression (see without_compression_extension()).
+    """
+    filepath = without_compression_extension(str(filepath))
+    resolvedfolder = datafolder.resolve()
+    # the lexical form first and then the form with each link followed, as path_for_log() does
+    for normalise in (os.path.abspath, os.path.realpath):
+        try:
+            # as_posix(): the same separator on each system, so the output files do not depend on it
+            return f"{datafolder.name}/{Path(normalise(filepath)).relative_to(normalise(resolvedfolder)).as_posix()}"
+        except ValueError:
+            continue
+    # a file outside the data folder keeps its own path
+    return path_for_log(filepath)
+
+
+# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
+# get_nist_ionization_provenance()). The export does not record the version of the database.
+nist_ionization_energy_comment = (
+    "The ionisation energy does not come from the data set of the levels. It comes from the NIST Atomic Spectra"
+    " Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23)."
+)
 
 
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     """Render an input data path for a log file, relative to a directory.
 
-    The log files must not depend on the location of the repository checkout, so an absolute
+    The log file must not depend on the location of the repository checkout, so an absolute
     path would be wrong there. The default directory is the repository root. A reader whose files
     all sit under one data folder passes that folder, which keeps the logged path short.
 
@@ -303,11 +554,12 @@ def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     for normalise in (lexical, followlinks):
         for base in bases:
             try:
-                return str(normalise(filepath).relative_to(normalise(base)))
+                # as_posix(): the same separator on each system, so the output files do not depend on it
+                return normalise(filepath).relative_to(normalise(base)).as_posix()
             except ValueError:
                 continue
 
-    return str(filepath)
+    return Path(filepath).as_posix()
 
 
 def fortran_float(text: str) -> float:
@@ -354,8 +606,10 @@ def split_levels_above_ionization(
     above_ionization = (pl.col(energycolumn) > (ionization_energy_in_ev / hc_in_ev_cm)).fill_null(False)
     fileindices_above_ionization = {int(fileindex) for fileindex in dflevels.filter(above_ionization)[indexcolumn]}
     if fileindices_above_ionization:
-        log_and_print(
-            flog, f"WARNING: dropped {len(fileindices_above_ionization):d} levels above the ionisation energy"
+        log_comment(
+            flog,
+            ("adata",),
+            f"WARNING: The reader dropped {len(fileindices_above_ionization):d} levels that are above the ionisation energy.",
         )
 
     dfboundlevels = dflevels.filter(~above_ionization)
@@ -438,14 +692,17 @@ def drop_transitions_of_levels(
     skipped_count = dflines.height - dfkeptlines.height
     if dfkeptlines.is_empty() and skipped_count > 0:
         # the writer accepts an ion with no transition, and 66DyIII_calib is such an ion
-        log_and_print(
+        log_comment(
             flog,
-            f"WARNING: skipped every one of the {skipped_count:d} transitions, because each one references a level"
-            " above the ionisation energy. The ion goes to the output with no transitions.",
+            ("transitiondata",),
+            f"WARNING: The reader skipped all {skipped_count:d} transitions, because each one names a level above the"
+            " ionisation energy. The ion has no transitions in the output.",
         )
     elif skipped_count > 0:
-        log_and_print(
-            flog, f"WARNING: skipped {skipped_count:d} transitions that reference a level above the ionisation energy"
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: The reader skipped {skipped_count:d} transitions that name a level above the ionisation energy.",
         )
 
     return dfkeptlines

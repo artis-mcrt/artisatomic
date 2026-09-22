@@ -15,6 +15,9 @@ from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
+from artisatomic.base import log_comment
+from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelids
 from artisatomic.base import roman_numerals
@@ -24,6 +27,9 @@ from artisatomic.base import xopen_check_extension
 
 # the count of provenance lines at the top of every Lisbon CSV, before the header row
 PROVENANCE_LINES = 8
+
+# the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
+description = "the Lisbon Atomic Group data set"
 
 
 def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: str) -> pl.DataFrame:
@@ -198,10 +204,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # from NIST, as every other reader whose data set carries no ionisation energy does
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_and_print(flog, f"ionisation energy: {ionization_energy_in_ev} eV")
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
-    dfalllevels = read_levels_csv(iondir / f"{elsym}{ion_stage_roman}_Levels.csv")
+    levelsfile = iondir / f"{elsym}{ion_stage_roman}_Levels.csv"
+    log_comment(flog, ("adata",), f"The levels come from {path_for_log(levelsfile, relative_to=lisbonpath)}.")
+    dfalllevels = read_levels_csv(levelsfile)
     # not an assert: an empty frame would write an ion with no levels
     if dfalllevels.is_empty():
         msg = f"The Lisbon data has no levels for Z={atomic_number} ion_stage {ion_stage}"
@@ -222,9 +231,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     energy_levels, levelid_of_fileindex = read_levels_data(dflevels)
 
-    log_and_print(flog, f"Read {len(energy_levels):d} levels")
+    log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
-    dfalllines = read_lines_csv(iondir / f"{elsym}{ion_stage_roman}_Transitions.csv")
+    linesfile = iondir / f"{elsym}{ion_stage_roman}_Transitions.csv"
+    log_comment(
+        flog, ("transitiondata",), f"The transitions come from {path_for_log(linesfile, relative_to=lisbonpath)}."
+    )
+    dfalllines = read_lines_csv(linesfile)
 
     # a line that names a dropped level goes with it, because that level has no level id
     dflines = drop_transitions_of_levels(
@@ -238,6 +251,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
-    log_and_print(flog, f"Read {len(transitions):d} transitions")
+    log_and_print(flog, f"The reader got {len(transitions):d} transitions.")
 
     return ionization_energy_in_ev, energy_levels, transitions
