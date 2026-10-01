@@ -7,7 +7,7 @@ import typing as t
 from pathlib import Path
 
 import numpy as np
-from artistools import get_composition_data
+from artistools.atomic import get_composition_data
 
 from artisatomic.base import elsymbols
 from artisatomic.base import PYDIR

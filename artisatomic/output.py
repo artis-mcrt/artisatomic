@@ -786,7 +786,7 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
     at or above the continuum, which a photoionisation edge cannot describe.
     """
     thresholds = iondata.photoionization_thresholds_ev.copy()
-    missing = [levelid for levelid, threshold in enumerate(thresholds) if not threshold_is_known(threshold)]
+    missing = [levelid for levelid, threshold in enumerate(thresholds.tolist()) if not threshold_is_known(threshold)]
     if not missing or upperiondata is None:
         return thresholds
     if "energyabovegsinpercm" not in iondata.dfenergylevels.columns:
