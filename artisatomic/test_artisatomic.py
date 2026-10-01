@@ -1702,12 +1702,12 @@ def test_parse_ion_handlers():
 
 def test_add_handlers_if_not_set_applies_the_limits():
     """A limit keeps an ion out of the list, and every element in the list keeps one ion or more."""
-    limits = {"minionstage": 2, "maxionstage": 3, "maxatomicnumber": 30}
+    add_with_limits = functools.partial(add_handlers_if_not_set, minionstage=2, maxionstage=3, maxatomicnumber=30)
 
-    assert add_handlers_if_not_set([], [(26, 2)], "cmfgen", **limits) == [(26, [(2, "cmfgen")])]
-    assert add_handlers_if_not_set([], [(26, 1)], "cmfgen", **limits) == []
-    assert add_handlers_if_not_set([], [(26, 4)], "cmfgen", **limits) == []
-    assert add_handlers_if_not_set([], [(38, 2)], "cmfgen", **limits) == []
+    assert add_with_limits([], [(26, 2)], "cmfgen") == [(26, [(2, "cmfgen")])]
+    assert add_with_limits([], [(26, 1)], "cmfgen") == []
+    assert add_with_limits([], [(26, 4)], "cmfgen") == []
+    assert add_with_limits([], [(38, 2)], "cmfgen") == []
 
     # A limit of None includes every ion, which is what a direct call to a reader gets. A lower
     # limit of None excludes no ion stage, not even 0.
@@ -1716,7 +1716,7 @@ def test_add_handlers_if_not_set_applies_the_limits():
 
     # a rejected ion returns a new sorted list, as an accepted ion does
     unsorted = [(38, [(2, "cmfgen")]), (26, [(1, "cmfgen")])]
-    assert add_handlers_if_not_set(unsorted, [(26, 9)], "cmfgen", **limits) == [
+    assert add_with_limits(unsorted, [(26, 9)], "cmfgen") == [
         (26, [(1, "cmfgen")]),
         (38, [(2, "cmfgen")]),
     ]
