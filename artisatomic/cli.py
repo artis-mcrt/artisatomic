@@ -181,10 +181,15 @@ def main() -> None:
         print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
         raise
 
-    shutil.rmtree(earlierfolder)
-    workfolder.rmdir()
-    (outputfolder / failedlogname).unlink(missing_ok=True)
-    remove_old_log_folder(outputfolder)
+    # The output folder holds the full new output now. A failure of the cleanup must not make the
+    # run fail, because the files of the earlier run are gone from the output folder.
+    try:
+        shutil.rmtree(earlierfolder)
+        workfolder.rmdir()
+        (outputfolder / failedlogname).unlink(missing_ok=True)
+        remove_old_log_folder(outputfolder)
+    except OSError as error:
+        print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
 
 
 def install_files(workfolder: Path, outputfolder: Path, earlierfolder: Path, installednames: list[str]) -> None:

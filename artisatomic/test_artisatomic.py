@@ -5513,6 +5513,20 @@ def test_cli_restores_the_earlier_output_when_a_move_fails(tmp_path, monkeypatch
     assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
 
 
+def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, capsys):
+    """A failed cleanup after the moves must not stop the run, because the new output is complete."""
+    from artisatomic import cli
+
+    def remove_old_log_folder(_outputfolder):
+        msg = "the cleanup failed"
+        raise OSError(msg)
+
+    monkeypatch.setattr(cli, "remove_old_log_folder", remove_old_log_folder)
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
+    assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
+
+
 def test_cli_replaces_the_earlier_output_when_the_run_succeeds(tmp_path, monkeypatch):
     """A run with --nophixs removes phixsdata_v2.txt of the earlier run, because its level ids belong to that run."""
     (tmp_path / "artis_files").mkdir()
@@ -5659,10 +5673,10 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
     """Component levels merge into one level for each real level, and not into one level for each label and J."""
     component1, component2, _ = li_gfall_lines
 
-    # no whole line names the ground level, so its components give it a shifted energy near 0
+    # no whole line names the ground level, so the mean of its components is a shift above 0
     dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2])
     assert dflevels.height == 2
-    assert dflevels["energyabovegsinpercm"][0] < 0.01
+    assert dflevels["energyabovegsinpercm"][0] == 0.0
     assert dftransitions.height == 1
 
     # a component with a fraction of one has a log of 0.000, but its isotope still marks it
@@ -5717,6 +5731,12 @@ def test_readkuruczdata_drops_combined_lines_that_repeat_a_line(tmp_path, monkey
         in line
         for line in flog.comments["transitiondata"]
     )
+
+    # a component with another upper label is another line, although the energies, J and gf agree
+    relabelled = repeat.replace("1.5 3p  2P", "1.5 3d  2P")
+    (tmp_path / "zztar" / "gf0300.all").write_text(f"{wholeline}\n{relabelled}\n", encoding="utf-8")
+    _, _, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, IonLog(io.StringIO()))
+    assert dftransitions.height == 2
 
 
 def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):

@@ -254,6 +254,16 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         )
         .select("componentrow", "side", "mergedenergy")
     )
+    # The ground level is at 0 cm^-1. If no whole line gives it, the mean of its component levels
+    # is a hyperfine shift above 0, so the lowest group of component levels gets 0.
+    hasgroundline = not wholelines.filter(
+        pl.any_horizontal(pl.col(f"energyabovegsinpercm_{side}") == 0.0 for side in sides)
+    ).is_empty()
+    lowestmerged = unmatched.select(pl.col("mergedenergy").min()).item()
+    if not hasgroundline and lowestmerged is not None and lowestmerged <= component_shift_tolerance_percm:
+        unmatched = unmatched.with_columns(
+            mergedenergy=pl.when(pl.col("mergedenergy") == lowestmerged).then(0.0).otherwise(pl.col("mergedenergy"))
+        )
     mergedenergies = pl.concat([matched, unmatched])
     for side in sides:
         components = components.drop(f"energyabovegsinpercm_{side}").join(
@@ -289,16 +299,24 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         )
     )
     ncombined = combined.height
-    levelpair = ["energyabovegsinpercm_lower", "j_lower", "energyabovegsinpercm_upper", "j_upper"]
+    # with the labels: the reader keeps two levels with the same energy and J but other labels
+    linekey = [
+        "energyabovegsinpercm_lower",
+        "j_lower",
+        "label_lower",
+        "energyabovegsinpercm_upper",
+        "j_upper",
+        "label_upper",
+    ]
     combined = combined.filter(
         (pl.col("energyabovegsinpercm_lower") != pl.col("energyabovegsinpercm_upper"))
         | (pl.col("j_lower") != pl.col("j_upper"))
     )
     nselfline = ncombined - combined.height
     combined = combined.join(
-        wholelines.select(*levelpair, wholelineloggf=pl.col("loggf")),
-        left_on=[*levelpair, "lineloggf"],
-        right_on=[*levelpair, "wholelineloggf"],
+        wholelines.select(*linekey, wholelineloggf=pl.col("loggf")),
+        left_on=[*linekey, "lineloggf"],
+        right_on=[*linekey, "wholelineloggf"],
         how="anti",
     )
     nrepeat = ncombined - nselfline - combined.height
@@ -421,7 +439,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     # ARTIS takes the first level as the ground level. A hydrogenic ion has n-averaged levels with
     # the label AVERAGE, and the filter of parse_gfall() removes all lines of its ground level.
     lowestenergy = dflevels.select(pl.col("energyabovegsinpercm").min()).item()
-    if not lowestenergy <= component_shift_tolerance_percm:
+    if lowestenergy != 0.0:
         msg = (
             f"The lowest level of {path_gfall} that the reader can use is at {lowestenergy} cm^-1 and not at 0."
             " The ion would have no ground level. The reader ignores the levels with the labels AVERAGE,"
