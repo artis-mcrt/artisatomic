@@ -5525,6 +5525,40 @@ def test_readkuruczdata_combines_isotope_and_hyperfine_components(tmp_path, monk
     assert any("combined 2 isotope and hyperfine components into 1 lines" in line for line in flog.comments["adata"])
 
 
+def read_li_gfall_lines(tmp_path, monkeypatch, lines: list[str]) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Read gfall lines as the Kurucz file of Li I, and return the levels and the transitions."""
+    (tmp_path / "zztar").mkdir(exist_ok=True)
+    (tmp_path / "zztar" / "gf0300.all").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+    return dflevels, dftransitions
+
+
+def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
+    """Component levels merge into one level for each real level, and not into one level for each label and J."""
+    component1, component2, _ = li_gfall_lines
+
+    # no whole line names the ground level, so its components give it a shifted energy near 0
+    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2])
+    assert dflevels.height == 2
+    assert dflevels["energyabovegsinpercm"][0] < 0.01
+    assert dftransitions.height == 1
+
+    # a component with a fraction of one has a log of 0.000, but its isotope still marks it
+    fractionone = component2.replace("7-0.359  7-0.034", "7 0.000  7 0.000")
+    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, fractionone])
+    assert dflevels.height == 2
+    gf = 10**0.002 * (10**-0.806 * 10**-0.034 + 1.0)
+    deltae = dflevels["energyabovegsinpercm"][1] - dflevels["energyabovegsinpercm"][0]
+    assert dftransitions["A"].item() == pytest.approx(gf / (gf_to_a_coefficient * 4 * (1e8 / deltae) ** 2))
+
+    # two levels with the same label and J stay two levels
+    otherlevel = [line.replace("14903.983", "15100.000") for line in (component1, component2)]
+    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2, *otherlevel])
+    assert dflevels["energyabovegsinpercm"].to_list()[1:] == [14903.983, 15100.0]
+    assert dftransitions.height == 2
+
+
 def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):
     """A file whose ground level has only n-averaged lines must stop the run, because ARTIS takes the first level as the ground."""
     (tmp_path / "zztar").mkdir()

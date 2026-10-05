@@ -171,64 +171,92 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
+# a component level is at most this far from the level that it belongs to. The hyperfine shifts
+# and the isotope shifts of gfall are much smaller.
+component_shift_tolerance_percm = 1.0
+
+
 def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     """Combine the isotope and hyperfine components of each line into one line.
 
     gfall gives a component the gf value of the whole line, with the log of its isotope fraction
-    and of its hyperfine fraction in two more fields. The level energies of a component include
-    its isotope shift and its hyperfine shift. Without this function, each component is a full
-    line between two sublevels of its own. ARTIS adds the A values of the transitions of a level
-    pair, and it has no isotope or hyperfine levels.
+    and of its hyperfine fraction in two more fields. A component names its isotope. The level
+    energies of a component include its isotope shift and its hyperfine shift, and a negative
+    energy there is a shift below the level and not a predicted level. Without this function, each
+    component is a full line between two sublevels of its own. ARTIS adds the A values of the
+    transitions of a level pair, and it has no isotope or hyperfine levels.
 
-    A component level gets the energy of the level with the same label and J in the lines that are
-    not split. Where no such level exists, it gets the mean energy of its components, weighted by gf.
+    A component level gets the energy of the nearest level with the same label and J in the lines
+    that are not split, if that level is near enough. The labels are not unique, so the label and
+    J alone cannot identify a level. Each other group of component levels with the same label and
+    J and near energies gets the mean energy of the group, weighted by gf.
     """
-    fraction_columns = ["log_f_hyperfine", "log_iso_abundance"]
-    is_component = pl.any_horizontal(pl.col(column).fill_null(0.0) != 0.0 for column in fraction_columns)
+    fractions = [pl.col(column).fill_null(0.0) for column in ("log_f_hyperfine", "log_iso_abundance")]
+    # a fraction of one gives a log of 0, so the isotope also marks a component
+    is_component = (pl.col("isotope").fill_null(0) != 0) | pl.any_horizontal(fraction != 0.0 for fraction in fractions)
     components = dfgfall.filter(is_component)
     if components.is_empty():
         return dfgfall
     wholelines = dfgfall.filter(is_component.not_())
 
-    components = components.with_columns(
-        gf=10 ** (pl.col("loggf") + pl.sum_horizontal(pl.col(column).fill_null(0.0) for column in fraction_columns))
+    components = components.with_row_index("componentrow").with_columns(
+        gf=10 ** (pl.col("loggf") + pl.sum_horizontal(fractions))
     )
-
-    def levels_of(df: pl.DataFrame, *extra: str) -> pl.DataFrame:
-        return pl.concat(
-            df.select(
-                *extra,
-                label=pl.col(f"label_{side}"),
-                j=pl.col(f"j_{side}"),
-                energy=pl.col(f"energyabovegsinpercm_{side}"),
-            )
-            for side in ("lower", "upper")
+    sides = ("lower", "upper")
+    occurrences = pl.concat(
+        components.select(
+            "componentrow",
+            "gf",
+            side=pl.lit(side),
+            label=pl.col(f"label_{side}"),
+            j=pl.col(f"j_{side}"),
+            energyabs=pl.col(f"energyabovegsinpercm_{side}"),
+            energy=pl.when(pl.col(f"energyabovegsinpercm_{side}_predicted"))
+            .then(-pl.col(f"energyabovegsinpercm_{side}"))
+            .otherwise(pl.col(f"energyabovegsinpercm_{side}")),
         )
+        for side in sides
+    )
+    known_levels = pl.concat(
+        wholelines.select(
+            label=pl.col(f"label_{side}"), j=pl.col(f"j_{side}"), knownenergy=pl.col(f"energyabovegsinpercm_{side}")
+        )
+        for side in sides
+    ).unique()
 
-    known_levels = (
-        levels_of(wholelines)
-        .group_by("label", "j")
-        .agg(pl.col("energy").first(), pl.col("energy").n_unique().alias("energycount"))
-        .filter(pl.col("energycount") == 1)
-        .drop("energycount")
+    matched = (
+        occurrences.join(known_levels, on=["label", "j"], how="inner")
+        .with_columns(distance=(pl.col("knownenergy") - pl.col("energyabs")).abs())
+        .filter(pl.col("distance") <= component_shift_tolerance_percm)
+        .sort("componentrow", "side", "distance", "knownenergy")
+        .group_by("componentrow", "side", maintain_order=True)
+        .agg(mergedenergy=pl.col("knownenergy").first())
     )
-    component_levels = (
-        levels_of(components, "gf")
-        .group_by("label", "j")
-        .agg(energy_mean=(pl.col("energy") * pl.col("gf")).sum() / pl.col("gf").sum())
-        .join(known_levels, on=["label", "j"], how="left")
-        .select("label", "j", energy=pl.coalesce("energy", "energy_mean"))
+    unmatched = (
+        occurrences.join(matched, on=["componentrow", "side"], how="anti")
+        .sort("label", "j", "energy")
+        .with_columns(
+            group=(
+                (pl.col("label") != pl.col("label").shift())
+                | (pl.col("j") != pl.col("j").shift())
+                | (pl.col("energy") - pl.col("energy").shift() > component_shift_tolerance_percm)
+            )
+            .fill_null(value=True)
+            .cum_sum()
+        )
+        .with_columns(
+            # the precision of the energies in gfall, so the ground level of a group comes out at 0
+            mergedenergy=((pl.col("energy") * pl.col("gf")).sum() / pl.col("gf").sum()).over("group").round(3).abs()
+        )
+        .select("componentrow", "side", "mergedenergy")
     )
-    for side in ("lower", "upper"):
+    mergedenergies = pl.concat([matched, unmatched])
+    for side in sides:
         components = components.drop(f"energyabovegsinpercm_{side}").join(
-            component_levels.rename(
-                {
-                    "label": f"label_{side}",
-                    "j": f"j_{side}",
-                    "energy": f"energyabovegsinpercm_{side}",
-                }
+            mergedenergies.filter(pl.col("side") == side).select(
+                "componentrow", pl.col("mergedenergy").alias(f"energyabovegsinpercm_{side}")
             ),
-            on=[f"label_{side}", f"j_{side}"],
+            on="componentrow",
             how="left",
             maintain_order="left",
         )
@@ -245,12 +273,12 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
             "label_upper",
             maintain_order=True,
         )
-        .agg(
-            pl.col("gf").sum(),
-            pl.col("energyabovegsinpercm_lower_predicted").any(),
-            pl.col("energyabovegsinpercm_upper_predicted").any(),
+        .agg(pl.col("gf").sum())
+        .with_columns(
+            loggf=pl.col("gf").log10(),
+            energyabovegsinpercm_lower_predicted=pl.lit(value=False),
+            energyabovegsinpercm_upper_predicted=pl.lit(value=False),
         )
-        .with_columns(loggf=pl.col("gf").log10())
     )
     # the fields that tell the components apart are null in a combined line
     combined = combined.select(
@@ -371,8 +399,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     )
     # ARTIS takes the first level as the ground level. A hydrogenic ion has n-averaged levels with
     # the label AVERAGE, and the filter of parse_gfall() removes all lines of its ground level.
-    lowestenergy = dflevels["energyabovegsinpercm"].min()
-    if lowestenergy != 0.0:
+    lowestenergy = dflevels.select(pl.col("energyabovegsinpercm").min()).item()
+    if not lowestenergy <= component_shift_tolerance_percm:
         msg = (
             f"The lowest level of {path_gfall} that the reader can use is at {lowestenergy} cm^-1 and not at 0."
             " The ion would have no ground level. The reader ignores the levels with the labels AVERAGE,"
