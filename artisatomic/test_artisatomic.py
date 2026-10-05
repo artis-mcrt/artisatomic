@@ -5359,3 +5359,32 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     plainstream = io.StringIO()
     log_detail(plainstream, ("adata",), "kind", "a detail line")
     assert plainstream.getvalue() == "a detail line\n"
+
+
+def test_readkuruczdata_gives_a_level_a_possible_j(tmp_path, monkeypatch):
+    """A gfall row that gives a known level a J that it cannot have must not make a second level at the same energy."""
+    from artisatomic.base import IonLog
+
+    samplepath = readkuruczdata.kuruczfolder.resolve() / "test_sample"
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", samplepath)
+
+    # Y II: a row gives d5s a3D (840.213 cm^-1) J = 0, but a D term has J = 1, 2 or 3
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 840.213)["j"].to_list() == [1.0]
+    # a 3G term has no J = 2
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 59179.554)["j"].to_list() == [3.0]
+
+    # Y I has 39 electrons, so a J of 0 is not possible. Only one level at 15994.045 cm^-1 has a possible J.
+    flog = IonLog(io.StringIO())
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 1, flog)
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 15994.045)["j"].to_list() == [1.5]
+    assert any("2 levels keep a J that they cannot have" in line for line in flog.comments["adata"])
+
+    # Sr II in the zztar layout: 4f 2F with J = 0 has two levels with a possible J at its energy
+    (tmp_path / "zztar").mkdir()
+    (tmp_path / "zztar" / "gf3801.all.zst").symlink_to(samplepath / "zztar" / "gf3801.all.zst")
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+    flog = IonLog(io.StringIO())
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(38, 2, flog)
+    assert sorted(dflevels.filter(pl.col("energyabovegsinpercm") == 60991.7)["j"].to_list()) == [2.5, 3.5]
+    assert any("The reader dropped 15 lines" in line for line in flog.comments["transitiondata"])

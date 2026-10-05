@@ -23,6 +23,7 @@ from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
 
 kuruczfolder = PYDIR / ".." / "atomic-data-kurucz"
@@ -171,6 +172,88 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
+# the LS term at the end of a level label, for example "3D" of "d5s a3D", "3P" of "s4p *3P", or "2F" of "(3F)9p 2F?"
+label_term_regex = re.compile(rf"(\d{{1,2}})([{lchars}])\??$")
+
+
+def possible_j_expr(side: str, nelectrons: int) -> pl.Expr:
+    """Give True where the J of the level of one side of a gfall row is a J that the level can have.
+
+    2J is odd for an odd number of electrons and even for an even number. Where the label ends with
+    an LS term, J must also be in the range |L - S| to L + S.
+    """
+    j = pl.col(f"j_{side}")
+    twoj = (2 * j).round().cast(pl.Int64)
+    term = pl.col(f"label_{side}").str.extract_groups(label_term_regex.pattern)
+    twos = term.struct.field("1").cast(pl.Int64, strict=False) - 1
+    twol = 2 * term.struct.field("2").replace_strict(list(lchars), list(range(len(lchars))), default=None)
+    in_term_range = ((twol - twos).abs() <= twoj) & (twoj <= twol + twos)
+    return (twoj % 2 == nelectrons % 2) & in_term_range.fill_null(value=True)
+
+
+def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
+    """Give a level a possible J where a gfall row gives it a J that it cannot have.
+
+    Some rows give a known level a J of 0.0 in place of its J. The reader keys the levels on the
+    energy and J, so such a row made an extra level with g = 1 at the energy of the real level. The
+    row then took an A from the wrong g. If exactly one level with a possible J has the same
+    energy, the row takes that J. If more than one has (an unresolved fine structure), the reader
+    cannot tell the level of the row, and it drops the row.
+    """
+    sides = ("lower", "upper")
+    possible_levels = pl.concat(
+        dfgfall.filter(possible_j_expr(side, nelectrons)).select(
+            energy=pl.col(f"energyabovegsinpercm_{side}"), possiblej=pl.col(f"j_{side}")
+        )
+        for side in sides
+    ).unique()
+    candidates = possible_levels.group_by("energy").agg(
+        pl.col("possiblej").first(), pl.col("possiblej").n_unique().alias("ncandidates")
+    )
+
+    dfgfall = dfgfall.with_row_index("gfallrow")
+    nchanged = 0
+    ambiguousrows: set[int] = set()
+    kept_levels: set[tuple[float, float]] = set()
+    for side in sides:
+        impossible = dfgfall.filter(possible_j_expr(side, nelectrons).not_()).select(
+            "gfallrow", energy=pl.col(f"energyabovegsinpercm_{side}"), j=pl.col(f"j_{side}")
+        )
+        kept_levels.update(impossible.join(candidates, on="energy", how="anti").select("energy", "j").iter_rows())
+        impossible = impossible.join(candidates, on="energy", how="inner")
+        ambiguousrows.update(impossible.filter(pl.col("ncandidates") > 1)["gfallrow"].to_list())
+        newj = impossible.filter(pl.col("ncandidates") == 1).select("gfallrow", newj=pl.col("possiblej"))
+        nchanged += newj.height
+        dfgfall = (
+            dfgfall.join(newj, on="gfallrow", how="left", maintain_order="left")
+            .with_columns(pl.coalesce("newj", f"j_{side}").alias(f"j_{side}"))
+            .drop("newj")
+        )
+
+    if nchanged > 0:
+        log_comment(
+            flog,
+            ("adata", "transitiondata"),
+            f"The file gives {nchanged:d} levels of its lines a J that the level cannot have. The reader gave each one"
+            " the J of the one level at the same energy with a possible J.",
+        )
+    if kept_levels:
+        log_comment(
+            flog,
+            ("adata",),
+            f"WARNING: {len(kept_levels):d} levels keep a J that they cannot have, because no other level has the same"
+            " energy.",
+        )
+    if ambiguousrows:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The reader dropped {len(ambiguousrows):d} lines. Each one has a level with a J that it cannot have, and"
+            " more than one level at the same energy has a possible J.",
+        )
+    return dfgfall.filter(pl.col("gfallrow").is_in(sorted(ambiguousrows)).not_()).drop("gfallrow")
+
+
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
@@ -234,6 +317,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)
 
+    dfgfall = fix_impossible_j(dfgfall, atomic_number - ion_charge, flog)
     gfall = dfgfall.lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
