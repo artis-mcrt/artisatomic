@@ -121,7 +121,8 @@ def rename_old_adas_directory() -> None:
     rename_old_data_directory(old_adaspath, adaspath)
 
 
-tyndall_co3_path = (adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")).resolve()
+# not resolved: a link there must not put its target into a comment line
+tyndall_co3_path = adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -875,17 +876,20 @@ def _fill_co2_phixs(
                 continue
             phixstables[targetcolumn] = phixstable
 
-        reduced_phixs_dict = reduce_phixs_tables(
-            phixstables,
-            args.optimaltemperature,
-            args.nphixspoints,
-            args.phixsnuincrement,
-            label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
-        )
-        combined = combine_phixs_routes(
-            [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
-        )
-        if not combined.fractions:
+        # combine_phixs_routes() stops the run for a level with no table, so test this first
+        combined = None
+        if phixstables:
+            reduced_phixs_dict = reduce_phixs_tables(
+                phixstables,
+                args.optimaltemperature,
+                args.nphixspoints,
+                args.phixsnuincrement,
+                label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
+            )
+            combined = combine_phixs_routes(
+                [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
+            )
+        if combined is None or not combined.fractions:
             # the code assigns nothing for this level, so write_phixs_data() will skip it
             log_detail(
                 flog,

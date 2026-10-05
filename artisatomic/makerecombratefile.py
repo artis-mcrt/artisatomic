@@ -127,31 +127,36 @@ def main():
     )
     ch = import_chianti_core(firstchiantiion) if firstchiantiion is not None else None
 
-    with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
-        for atomic_number, lowerionstage, naharfilename in ionsources:
-            upperionstage = lowerionstage + 1
-            print(f"Z={atomic_number} {elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
+    # The file opens only after the last ion has its rates. A failure of a reader or of Chianti
+    # then leaves the previous recombrates.txt as it was, and no truncated file.
+    outputlines: list[str] = []
+    for atomic_number, lowerionstage, naharfilename in ionsources:
+        upperionstage = lowerionstage + 1
+        print(f"Z={atomic_number} {elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
 
-            if naharfilename is not None:
-                recombrates = read_nahar_rrcfile(naharfilename)
-                frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
-                frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
-            else:
-                assert ch is not None
-                print("  source: Chianti")
-                arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
-                arr_temperature = 10**arr_logT_e
-                ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
-                ion.rrRate()
-                arr_rrc = ion.RrRate["rate"]
-                ion.drRate()
-                arr_drc = ion.DrRate["rate"]
-                # the third column is the total recombination rate, the same as RRC(total) of
-                # the Nahar files above, so the sum must include dielectronic recombination
-                frecombrates.writelines(
-                    f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
-                )
+        if naharfilename is not None:
+            recombrates = read_nahar_rrcfile(naharfilename)
+            outputlines.append(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
+            outputlines.extend(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
+        else:
+            assert ch is not None
+            print("  source: Chianti")
+            arr_logT_e = np.arange(1.0, 9.1, 0.1)
+            arr_temperature = 10**arr_logT_e
+            ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
+            ion.rrRate()
+            arr_rrc = ion.RrRate["rate"]
+            ion.drRate()
+            arr_drc = ion.DrRate["rate"]
+            outputlines.append(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
+            # the third column is the total recombination rate, the same as RRC(total) of
+            # the Nahar files above, so the sum must include dielectronic recombination
+            outputlines.extend(
+                f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
+            )
+
+    with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
+        frecombrates.writelines(outputlines)
 
 
 if __name__ == "__main__":

@@ -165,10 +165,106 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     for stem in stems:
         path_gfall = find_file_check_extension(stem)
         if path_gfall is not None:
-            return path_gfall.resolve()
+            return path_gfall
 
     msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
     raise FileNotFoundError(msg)
+
+
+def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
+    """Combine the isotope and hyperfine components of each line into one line.
+
+    gfall gives a component the gf value of the whole line, with the log of its isotope fraction
+    and of its hyperfine fraction in two more fields. The level energies of a component include
+    its isotope shift and its hyperfine shift. Without this function, each component is a full
+    line between two sublevels of its own. ARTIS adds the A values of the transitions of a level
+    pair, and it has no isotope or hyperfine levels.
+
+    A component level gets the energy of the level with the same label and J in the lines that are
+    not split. Where no such level exists, it gets the mean energy of its components, weighted by gf.
+    """
+    fraction_columns = ["log_f_hyperfine", "log_iso_abundance"]
+    is_component = pl.any_horizontal(pl.col(column).fill_null(0.0) != 0.0 for column in fraction_columns)
+    components = dfgfall.filter(is_component)
+    if components.is_empty():
+        return dfgfall
+    wholelines = dfgfall.filter(is_component.not_())
+
+    components = components.with_columns(
+        gf=10 ** (pl.col("loggf") + pl.sum_horizontal(pl.col(column).fill_null(0.0) for column in fraction_columns))
+    )
+
+    def levels_of(df: pl.DataFrame, *extra: str) -> pl.DataFrame:
+        return pl.concat(
+            df.select(
+                *extra,
+                label=pl.col(f"label_{side}"),
+                j=pl.col(f"j_{side}"),
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+            )
+            for side in ("lower", "upper")
+        )
+
+    known_levels = (
+        levels_of(wholelines)
+        .group_by("label", "j")
+        .agg(pl.col("energy").first(), pl.col("energy").n_unique().alias("energycount"))
+        .filter(pl.col("energycount") == 1)
+        .drop("energycount")
+    )
+    component_levels = (
+        levels_of(components, "gf")
+        .group_by("label", "j")
+        .agg(energy_mean=(pl.col("energy") * pl.col("gf")).sum() / pl.col("gf").sum())
+        .join(known_levels, on=["label", "j"], how="left")
+        .select("label", "j", energy=pl.coalesce("energy", "energy_mean"))
+    )
+    for side in ("lower", "upper"):
+        components = components.drop(f"energyabovegsinpercm_{side}").join(
+            component_levels.rename(
+                {
+                    "label": f"label_{side}",
+                    "j": f"j_{side}",
+                    "energy": f"energyabovegsinpercm_{side}",
+                }
+            ),
+            on=[f"label_{side}", f"j_{side}"],
+            how="left",
+            maintain_order="left",
+        )
+
+    combined = (
+        components.group_by(
+            "atomic_number",
+            "ion_charge",
+            "energyabovegsinpercm_lower",
+            "j_lower",
+            "label_lower",
+            "energyabovegsinpercm_upper",
+            "j_upper",
+            "label_upper",
+            maintain_order=True,
+        )
+        .agg(
+            pl.col("gf").sum(),
+            pl.col("energyabovegsinpercm_lower_predicted").any(),
+            pl.col("energyabovegsinpercm_upper_predicted").any(),
+        )
+        .with_columns(loggf=pl.col("gf").log10())
+    )
+    # the fields that tell the components apart are null in a combined line
+    combined = combined.select(
+        pl.col(column).cast(dtype) if column in combined.columns else pl.lit(None, dtype=dtype).alias(column)
+        for column, dtype in wholelines.schema.items()
+    )
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"The reader combined {components.height:d} isotope and hyperfine components into {combined.height:d}"
+        " lines. A component has the gf value of the whole line times its isotope fraction and its hyperfine"
+        " fraction.",
+    )
+    return pl.concat([wholelines, combined])
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
@@ -224,16 +320,24 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             *transition_columns,
             "energyabovegsinpercm_lower_predicted",
             "energyabovegsinpercm_upper_predicted",
+            "log_iso_abundance",
         ]
     ).collect()
 
     # One file holds one ion. The atomic number and the ion charge both come from the file's
     # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows in
     # memory. A test on the lazy frame would read and parse the whole file again.
+    if dfgfall.is_empty():
+        msg = (
+            f"{path_gfall} has no line between two levels that the reader can use. The reader ignores"
+            " the levels with the labels AVERAGE, ENERGIES and CONTINUUM."
+        )
+        raise ValueError(msg)
     if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)
 
+    dfgfall = combine_line_components(dfgfall, flog)
     gfall = dfgfall.lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
@@ -265,6 +369,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         # add_level_ids_forbidden() leaves every transition permitted
         parity=pl.lit(None, dtype=pl.Int64)
     )
+    # ARTIS takes the first level as the ground level. A hydrogenic ion has n-averaged levels with
+    # the label AVERAGE, and the filter of parse_gfall() removes all lines of its ground level.
+    lowestenergy = dflevels["energyabovegsinpercm"].min()
+    if lowestenergy != 0.0:
+        msg = (
+            f"The lowest level of {path_gfall} that the reader can use is at {lowestenergy} cm^-1 and not at 0."
+            " The ion would have no ground level. The reader ignores the levels with the labels AVERAGE,"
+            " ENERGIES and CONTINUUM."
+        )
+        raise ValueError(msg)
     log_and_print(flog, f"The reader got {len(dflevels):d} levels.")
 
     transitions = (

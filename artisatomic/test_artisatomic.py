@@ -5359,3 +5359,202 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     plainstream = io.StringIO()
     log_detail(plainstream, ("adata",), "kind", "a detail line")
     assert plainstream.getvalue() == "a detail line\n"
+
+
+def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_path):
+    """A copy such as "..._E1 (1).txt" is not one more transition type, so its A values must not add to the original."""
+    from artisatomic import readfloers25data
+
+    header = "Test table\n--\n--\n--\n"
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
+    )
+    transitions = header + " Lower Upper A Type\n 0 1 1.0e+06 E1\n"
+    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transitions)
+    (tmp_path / "57LaII_transitions_calib_E1 (1).txt").write_text(transitions)
+
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    flog = io.StringIO()
+    _, _, dftransitions = readfloers25data.read_levels_and_transitions(57, 2, flog, calibrated=True, withforbidden=True)
+    assert dftransitions["A"].to_list() == [1.0e6]
+    assert "57LaII_transitions_calib_E1 (1).txt is not" in flog.getvalue()
+
+
+def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_path):
+    """The floers25uncalib handler reads the private directory first, and only the public data is on Zenodo."""
+    from artisatomic import readfloers25data
+    from artisatomic.iondata import handlers
+
+    private = tmp_path / "OutputFiles_withforbidden"
+    public = tmp_path / "OutputFiles"
+    private.mkdir()
+    public.mkdir()
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda withforbidden: private if withforbidden else public)
+    monkeypatch.setattr(readfloers25data, "TESTMODE", False)
+    description = handlers["floers25uncalib"].description
+    assert not isinstance(description, str)
+
+    (public / "57LaIII_levels_uncalib.txt").write_text("", encoding="utf-8")
+    assert description(57, 3) == readfloers25data.description.format(variant="uncalibrated")
+
+    (private / "57LaIII_levels_uncalib.txt").write_text("", encoding="utf-8")
+    assert description(57, 3) == readfloers25data.description_uncalibrated_withforbidden
+    assert "It is not public" in readfloers25data.description_uncalibrated_withforbidden
+
+
+@pytest.mark.parametrize(
+    ("option", "value"),
+    [
+        ("-nphixspoints", "0"),
+        ("-nphixspoints", "-3"),
+        ("-phixsnuincrement", "0"),
+        ("-optimaltemperature", "0"),
+        ("-optimaltemperature", "-1"),
+        ("-electrontemperature", "0"),
+    ],
+)
+def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, option, value):
+    """A bad value must stop the run before the run empties the output files of an earlier run."""
+    from artisatomic.cli import main
+
+    monkeypatch.chdir(tmp_path)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    (outputfolder / "adata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), option, value])
+    with pytest.raises(ValueError, match=f"{option} must be more than 0"):
+        main()
+    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
+
+
+def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monkeypatch):
+    """A failure at the second ion must leave the recombrates.txt of the earlier run, and no truncated file."""
+    from artisatomic import makerecombratefile
+    from artisatomic.makerecombratefile import RecombRow
+
+    (tmp_path / "artisatomic").mkdir()
+    naharpath = tmp_path / "atomic-data-nahar"
+    naharpath.mkdir()
+    for name in ("fe1.rrc.txt", "fe2.rrc.txt"):
+        (naharpath / name).write_text("", encoding="utf-8")
+    monkeypatch.setattr(makerecombratefile, "PYDIR", tmp_path / "artisatomic")
+    monkeypatch.setattr(
+        makerecombratefile,
+        "get_composition_data",
+        lambda _path: pl.DataFrame({"Z": [26], "lowermost_ion_stage": [1], "uppermost_ion_stage": [3]}),
+    )
+
+    def read_rrcfile(filename, noprint=False):  # ruff: ignore[unused-function-argument]
+        if Path(filename).name == "fe2.rrc.txt":
+            msg = "the file has no header row"
+            raise ValueError(msg)
+        return [RecombRow(1.0, 2.0, 3.0)]
+
+    monkeypatch.setattr(makerecombratefile, "read_nahar_rrcfile", read_rrcfile)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    (outputfolder / "recombrates.txt").write_text("the rates of an earlier run\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["makeartisrecombratefile", "-output_folder", str(outputfolder)])
+    with pytest.raises(ValueError, match="no header row"):
+        makerecombratefile.main()
+    assert (outputfolder / "recombrates.txt").read_text(encoding="utf-8") == "the rates of an earlier run\n"
+
+
+def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
+    """A Co II level with zeros in its four target columns gets a warning and no table, and the run continues."""
+    import gzip
+
+    from artisatomic.base import IonLog
+
+    energies = np.linspace(0.6, 3.0, 200)
+    for levelnumber in range(1, 9):
+        # level 3 has no positive value in a target column
+        scale = 0.0 if levelnumber == 3 else 1.0
+        rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
+        with gzip.open(tmp_path / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
+            fout.write("\n".join(rows) + "\n")
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+
+    args = build_parser().parse_args([])
+    crosssections = np.zeros((8, args.nphixspoints))
+    thresholds = np.zeros(8)
+    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
+    flog = IonLog(io.StringIO())
+    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, thresholds, targetfractions)  # ruff: ignore[private-member-access]
+
+    assert targetfractions[2] == []
+    assert all(targetfractions[levelid] for levelid in range(8) if levelid != 2)
+    assert any("level 3 has a zero cross section to each target" in line for line in flog.comments["phixsdata"])
+
+
+# Two components of the Li I 670.8 nm line (2s 2S1/2 - 2p 2P3/2, isotope 7) and one whole line
+# (2s 2S1/2 - 3p 2P3/2) from gf0300.all. The energies of a component carry its hyperfine shift.
+li_gfall_lines = [
+    (
+        "   670.7749  0.002  3.00      -0.034  0.5 2s  2S       14903.983  1.5 2p  2P      7.56 -5.78 -7.72NBS  0 0  "
+        "7-0.806  7-0.034    0    0F1-2          0    0"
+    ),
+    (
+        "   670.7773  0.002  3.00       0.020  0.5 2s  2S       14903.983  1.5 2p  2P      7.56 -5.78 -7.72NBS  0 0  "
+        "7-0.359  7-0.034    0    0F2-3          0    0"
+    ),
+    (
+        "   323.2631 -2.253  3.00       0.000  0.5 2s  2S       30925.633  1.5 3p  2P      6.66 -4.50  0.00LN   0 0  "
+        "0 0.000  0 0.000    0    0              0    0"
+    ),
+]
+
+
+def test_readkuruczdata_combines_isotope_and_hyperfine_components(tmp_path, monkeypatch):
+    """The components of a line become one line, with the sum of their gf fractions and no sublevel."""
+    from artisatomic.base import IonLog
+
+    (tmp_path / "zztar").mkdir()
+    (tmp_path / "zztar" / "gf0300.all").write_text("\n".join(li_gfall_lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+    flog = IonLog(io.StringIO())
+    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, flog)
+
+    # the ground level takes its energy from the whole line, and not from the shifted components
+    assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 14903.983, 30925.633]
+    gf = 10**0.002 * (10**-0.806 + 10**-0.359) * 10**-0.034
+    expected_a = gf / (gf_to_a_coefficient * 4 * (1e8 / 14903.983) ** 2)
+    row = dftransitions.filter(pl.col("upperlevel") == 1)
+    assert row.height == 1
+    assert row["A"].item() == pytest.approx(expected_a, rel=1e-12)
+    assert any("combined 2 isotope and hyperfine components into 1 lines" in line for line in flog.comments["adata"])
+
+
+def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):
+    """A file whose ground level has only n-averaged lines must stop the run, because ARTIS takes the first level as the ground."""
+    (tmp_path / "zztar").mkdir()
+    gfallpath = tmp_path / "zztar" / "gf0300.all"
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+
+    shiftedline = li_gfall_lines[2].replace("       0.000  0.5 2s  2S", "   14903.983  1.5 2p  2P")
+    gfallpath.write_text(shiftedline + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"is at 14903.983 cm\^-1 and not at 0"):
+        readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+
+    averagedline = li_gfall_lines[2].replace("2s  2S    ", "AVERAGE   ")
+    gfallpath.write_text(averagedline + "\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has no line between two levels that the reader can use"):
+        readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+
+
+def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
+    """A link below the data folder must not put its target, a path of the machine, into a comment line."""
+    from artisatomic.base import path_in_data_folder
+
+    datafolder = tmp_path / "atomic-data-kurucz"
+    datafolder.mkdir()
+    elsewhere = tmp_path / "otherdisk"
+    elsewhere.mkdir()
+    (elsewhere / "gf3801.all").write_text("", encoding="utf-8")
+    (datafolder / "zztar").symlink_to(elsewhere)
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", datafolder.resolve())
+
+    assert path_in_data_folder(readkuruczdata.find_gfall(38, 1), datafolder) == "atomic-data-kurucz/zztar/gf3801.all"
+    # the same rule for the two other readers with a fixed folder below their data folder
+    assert readtanakajpltdata.jpltpath == readtanakajpltdata.jpltfolder.resolve() / "data_v2.1"
+    assert readadasdata.tyndall_co3_path.parent == readadasdata.adaspath

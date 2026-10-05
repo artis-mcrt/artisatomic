@@ -125,6 +125,14 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
+    # These checks come before clear_files(), because a bad value fails only deep in the run. A
+    # negative temperature even gives NaN cross sections and no error.
+    for name in ("nphixspoints", "phixsnuincrement", "optimaltemperature", "electrontemperature"):
+        value = getattr(args, name)
+        if not value > 0:
+            msg = f"-{name} must be more than 0, got {value}"
+            raise ValueError(msg)
+
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
     readadasdata.rename_old_adas_directory()
     ion_handlers = get_ion_handlers(

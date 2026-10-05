@@ -38,6 +38,9 @@ description = f"the Floers+25 data set, {{variant}}. {reference}. Data set: doi:
 description_withforbidden = (
     f"a later version of the calibrated Floers+25 data set, with forbidden lines. It is not public. {reference}"
 )
+description_uncalibrated_withforbidden = (
+    f"a later version of the uncalibrated Floers+25 data set, with forbidden lines. It is not public. {reference}"
+)
 
 
 def get_basepath(withforbidden: bool) -> Path:
@@ -239,24 +242,14 @@ def read_transitions_file(filepath: Path) -> pl.DataFrame:
     )
 
 
-def read_levels_and_transitions(
-    atomic_number: int, ion_stage: int, flog, calibrated: bool, withforbidden: bool = False
-):
-    """Read one ion from the Floers+25 data set.
+def find_levels_file(atomic_number: int, ion_stage: int, *, calibrated: bool, withforbidden: bool) -> Path:
+    """Find the levels file of one ion. The transitions files of the ion are in the same directory.
 
-    The ionisation energy comes from NIST rather than the file. Configurations are not unique
-    (levels of one configuration differ by J), so level names combine the configuration, J and
-    the file's index. The function checks the level indices, because a gap would silently
-    misattach transitions. The function discards a transition to a level that the levels file
-    does not list, with a warning in the log.
+    The handler name selects the directory. The floers25uncalib handler has no "withforbidden"
+    variant, so it searches the private directory and then the public directory.
     """
-    elsym = elsymbols[atomic_number]
-    ion_stage_roman = roman_numerals[ion_stage]
+    ionstr = f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
     calibstr = "calib" if calibrated else "uncalib"
-    ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
-
-    # the handler name selects the directory. The floers25uncalib handler has no "withforbidden"
-    # variant, so it searches the private directory and then the public directory.
     if withforbidden or calibrated or TESTMODE:
         basepaths = [get_basepath(withforbidden=withforbidden)]
     else:
@@ -274,6 +267,39 @@ def read_levels_and_transitions(
         searched = " or ".join(str(searchpath / f"{ionstr}_levels_{calibstr}.txt*") for searchpath in basepaths)
         msg = f"Found no Floers+25 levels file for {ionstr}. Searched {searched}"
         raise FileNotFoundError(msg)
+    return levels_file
+
+
+def description_uncalibrated(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of the floers25uncalib handler for one ion.
+
+    That handler reads the private directory before the public one, and the Zenodo data set
+    holds only the public data.
+    """
+    levels_file = find_levels_file(atomic_number, ion_stage, calibrated=False, withforbidden=False)
+    # in the test mode both directories are test_sample, which holds only public data
+    if not TESTMODE and levels_file.parent == get_basepath(withforbidden=True):
+        return description_uncalibrated_withforbidden
+    return description.format(variant="uncalibrated")
+
+
+def read_levels_and_transitions(
+    atomic_number: int, ion_stage: int, flog, calibrated: bool, withforbidden: bool = False
+):
+    """Read one ion from the Floers+25 data set.
+
+    The ionisation energy comes from NIST rather than the file. Configurations are not unique
+    (levels of one configuration differ by J), so level names combine the configuration, J and
+    the file's index. The function checks the level indices, because a gap would silently
+    misattach transitions. The function discards a transition to a level that the levels file
+    does not list, with a warning in the log.
+    """
+    elsym = elsymbols[atomic_number]
+    ion_stage_roman = roman_numerals[ion_stage]
+    calibstr = "calib" if calibrated else "uncalib"
+    ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
+
+    levels_file = find_levels_file(atomic_number, ion_stage, calibrated=calibrated, withforbidden=withforbidden)
     basepath = levels_file.parent
 
     # the original Floers+25 format has a single transitions file. The newer format has one
@@ -282,10 +308,21 @@ def read_levels_and_transitions(
 
     # a file can exist in a plain form and in a compressed form at the same time. Keep one path
     # for each name. The extension list is in priority order, so the plain form wins.
+    # The glob also finds a copy that a sync client made, for example "..._E1 (1).txt". The reader
+    # would add the A values of the copy to the A values of its original, so it skips such a name.
+    pertype_name_pattern = re.compile(rf"{ionstr}_transitions_{calibstr}_[A-Za-z0-9]+\.txt")
     pertype_file_of_name: dict[str, Path] = {}
     for ext in compression_extensions:
         for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
-            pertype_file_of_name.setdefault(filepath.name.removesuffix(ext), filepath)
+            name = filepath.name.removesuffix(ext)
+            if pertype_name_pattern.fullmatch(name) is None:
+                log_and_print(
+                    flog,
+                    f"WARNING: The file name {filepath.name} is not {ionstr}_transitions_{calibstr}_<type>.txt."
+                    " The reader skips it.",
+                )
+                continue
+            pertype_file_of_name.setdefault(name, filepath)
     pertype_files = [pertype_file_of_name[name] for name in sorted(pertype_file_of_name)]
 
     if lines_file is not None and pertype_files:
