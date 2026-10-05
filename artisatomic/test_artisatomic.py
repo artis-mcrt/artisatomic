@@ -1101,6 +1101,23 @@ def test_log_deltaj_contradictions_judges_f_and_a_separately():
     # a transition that keeps the rule is never reported, however strong it is
     assert not warnings_for(pl.DataFrame({**breaksrule, "breaksdeltaj": [False], "A": [1.9e8]}))
 
+    # the Laporte rule keeps a transition between two levels of the same parity forbidden, so it
+    # gets its own line and not the line that says "stay permitted"
+    twokinds = pl.DataFrame(
+        {
+            "lowerlevel": [0, 0, 1],
+            "upperlevel": [1, 2, 2],
+            "breaksdeltaj": [True, True, True],
+            "A": [1.9e8, 5.0e5, 2.0e6],
+            "forbidden": [False, True, True],
+        }
+    )
+    log = warnings_for(twokinds)
+    assert "WARNING: 1 transitions of Test II break the delta J rule" in log
+    assert "so these transitions stay permitted" in log
+    assert "WARNING: 2 transitions of Test II break the delta J rule but carry A > 100000 (largest 2e+06)" in log
+    assert "the same parity, so the output writes it as forbidden" in log
+
 
 def test_add_level_ids_forbidden_delta_j_needs_both_levels():
     """A level with no J turns off the dJ rule for its transitions. It does not undo the parities."""
