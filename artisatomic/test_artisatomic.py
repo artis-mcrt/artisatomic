@@ -2116,6 +2116,7 @@ def test_read_adf04():
     ionization_energy_ev, energylevels, upsilondict, _ = readadasdata.read_adf04(
         adf04_sample_path(), flog, 5010.0, 27, 3
     )
+    # the value of the file header. read_adas_levels_and_transitions() replaces it for Co III.
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
     assert len(upsilondict) == 235
@@ -2585,6 +2586,18 @@ def test_read_adas_sr1():
     assert len(upsilondict) == 1596
     assert len(transitions) == 1372
     assert energylevels[0].levelname.startswith("4p65s2")
+
+
+def test_read_adas_co3_takes_the_nist_ionisation_energy(monkeypatch):
+    """The QUB Co III header gives 40.96 eV, but NIST and the CMFGEN data give 33.50 eV."""
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", adf04_sample_path().parent)
+    flog = io.StringIO()
+    ionization_energy_ev, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
+        27, 3, flog, argparse.Namespace(electrontemperature=5000.0)
+    )
+    assert ionization_energy_ev == pytest.approx(33.50)
+    assert len(energylevels) == 262
+    assert "The NIST table gives an ionisation energy of" in flog.getvalue()
 
 
 def test_write_adata_level_comment():
@@ -5826,3 +5839,34 @@ def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
     tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
     with np.errstate(all="ignore"), pytest.raises(ValueError, match="have a value that is not finite"):
         reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
+
+
+def test_write_output_files_counts_the_term_markers_apart_from_the_collision_strengths(tmp_path):
+    """A -2 upsilon is a mark of the reader for a pair of J levels of one term, and not a collision strength."""
+    import dataclasses
+
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    tmpargs = phixs_args(output_folder=str(tmp_path), nophixs=True)
+    iondata = dataclasses.replace(
+        make_iondata(1, is_top_ion=True),
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0, 1, 2],
+                "energyabovegsinpercm": [0.0, 10.0, 1000.0],
+                "g": [1.0, 3.0, 5.0],
+                "parity": [0, 0, 1],
+                "levelname": ["a_3Pe[0]", "a_3Pe[1]", "b_3Do[1]"],
+            }
+        ),
+        upsilondict={(0, 1): -2.0, (0, 2): 0.5, (1, 2): 0.25},
+    )
+    clear_files(tmpargs)
+    write_output_files(26, [iondata], tmpargs)
+
+    transitiontext = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert (
+        "# artisatomic added 2 transitions with A = 0, for level pairs that have a collision strength" in transitiontext
+    )
+    assert "# artisatomic added 1 transitions with A = 0 and coll_str -2, for pairs of J levels" in transitiontext

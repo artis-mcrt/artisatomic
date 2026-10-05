@@ -466,7 +466,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 # a reader with no transitions gives a frame with no columns, which the joins in
                 # add_level_ids_forbidden() cannot take. No transition uses an upsilon pair then,
                 # so the upsilon-only mechanism below still writes the ion's collision strengths.
-                dfupsilon_only_transitions = dfupsilon.select("lowerlevel", "upperlevel")
+                dfupsilon_only_transitions = dfupsilon
             else:
                 dftransitions_ion = add_level_ids_forbidden(dfenergylevels_ion, dftransitions_ion).with_columns(
                     pl.col("lowerlevel").cast(pl.Int64), pl.col("upperlevel").cast(pl.Int64)
@@ -474,22 +474,32 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
                 # an anti join, not set.difference() over iter_rows(): that built a Python tuple
                 # for each of the millions of transitions of a cmfgen ion
-                dfupsilon_only_transitions = dfupsilon.select("lowerlevel", "upperlevel").join(
+                dfupsilon_only_transitions = dfupsilon.join(
                     dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
                 )
 
+            # a negative upsilon is a mark of the reader and not a collision strength (see resolve_coll_str())
+            nadded_marked = dfupsilon_only_transitions.filter(pl.col("upsilon") < 0.0).height
+            nadded_upsilon = dfupsilon_only_transitions.height - nadded_marked
             addedtext = (
-                f"artisatomic added {dfupsilon_only_transitions.height:d} transitions with A = 0, for level pairs that"
+                f"artisatomic added {nadded_upsilon:d} transitions with A = 0, for level pairs that"
                 " have a collision strength but no transition in the data source."
             )
             # a count of zero tells nothing about the data, so only the log gets it
-            if dfupsilon_only_transitions.is_empty():
+            if nadded_upsilon == 0:
                 log_and_print(flog, addedtext)
             else:
                 log_comment(flog, ("transitiondata",), addedtext)
+            if nadded_marked > 0:
+                log_comment(
+                    flog,
+                    ("transitiondata",),
+                    f"artisatomic added {nadded_marked:d} transitions with A = 0 and coll_str -2, for pairs of J levels"
+                    " of one term. The data source gives no collision strength for such a pair.",
+                )
 
             if not dfupsilon_only_transitions.is_empty():
-                dfupsilon_only_transitions = dfupsilon_only_transitions.with_columns(A=0.0)
+                dfupsilon_only_transitions = dfupsilon_only_transitions.select("lowerlevel", "upperlevel", A=0.0)
                 dfupsilon_only_transitions = add_level_ids_forbidden(dfenergylevels_ion, dfupsilon_only_transitions)
                 dftransitions_ion = pl.concat([dftransitions_ion, dfupsilon_only_transitions], how="diagonal_relaxed")
 
