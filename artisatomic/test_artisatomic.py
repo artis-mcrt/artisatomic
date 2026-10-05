@@ -5540,6 +5540,48 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
 
 
+def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
+    """A second run must not change the files of the output folder while the first run moves its files."""
+    import fcntl
+    import os
+
+    from artisatomic import cli
+
+    original_install_files = cli.install_files
+    lockheld = []
+
+    def install_files(workfolder, outputfolder, *install_args: t.Any) -> None:
+        folderfd = os.open(outputfolder, os.O_RDONLY)
+        try:
+            fcntl.flock(folderfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            lockheld.append(True)
+        finally:
+            os.close(folderfd)
+        original_install_files(workfolder, outputfolder, *install_args)
+
+    monkeypatch.setattr(cli, "install_files", install_files)
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    assert lockheld == [True]
+    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
+
+
+def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
+    """Windows has no fcntl. The command must still start, and a run must still write its files."""
+    import builtins
+
+    original_import = builtins.__import__
+
+    def import_without_fcntl(name: str, *import_args: t.Any, **import_kwargs: t.Any) -> t.Any:
+        if name == "fcntl":
+            raise ImportError(name)
+        return original_import(name, *import_args, **import_kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_fcntl)
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
+
+
 def test_cli_replaces_the_earlier_output_when_the_run_succeeds(tmp_path, monkeypatch):
     """A run with --nophixs removes phixsdata_v2.txt of the earlier run, because its level ids belong to that run."""
     (tmp_path / "artis_files").mkdir()
@@ -5633,6 +5675,27 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
         " (the first of 4 such lines in the log file)"
     ) in flog.comments["phixsdata"]
     assert "The cross sections of level 3 come from atomic-data-adas/co_tyndall/3." in stream.getvalue()
+
+
+def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
+    """A cross section is never negative, so a negative value in a target column is an error in the file."""
+    import gzip
+
+    energies = np.linspace(0.6, 3.0, 200)
+    for levelnumber in range(1, 9):
+        # level 3 has only negative values in its target columns
+        scale = -1.0 if levelnumber == 3 else 1.0
+        rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
+        with gzip.open(tmp_path / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
+            fout.write("\n".join(rows) + "\n")
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+
+    args = build_parser().parse_args([])
+    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
+    with pytest.raises(ValueError, match=r"3\.gz has 800 negative cross sections in the columns of the 4 targets"):
+        readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
+            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+        )
 
 
 # Two components of the Li I 670.8 nm line (2s 2S1/2 - 2p 2P3/2, isotope 7) and one whole line

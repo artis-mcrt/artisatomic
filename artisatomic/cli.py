@@ -3,12 +3,13 @@
 """Command-line entry point: build an ARTIS atomic database from the configured ions and handlers."""
 
 import argparse
-import fcntl
 import json
 import math
 import os
 import shutil
 import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import argcomplete
@@ -167,39 +168,65 @@ def main() -> None:
     # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
     workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
     earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
-    installednames: list[str] = []
-    outputfolderlock: int | None = None
     try:
         write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
-        # Two runs into one output folder can end at the same time. The lock lets only one run move
-        # or restore its files, so the folder holds the files of one run. The close below releases it.
-        outputfolderlock = os.open(outputfolder, os.O_RDONLY)
-        fcntl.flock(outputfolderlock, fcntl.LOCK_EX)
-        install_files(workfolder, outputfolder, earlierfolder, installednames)
     except BaseException:
-        for name in installednames:
-            (outputfolder / name).replace(workfolder / name)
-        for earlierfile in earlierfolder.iterdir():
-            earlierfile.replace(outputfolder / earlierfile.name)
-        earlierfolder.rmdir()
-        if log_path(workfolder).is_file():
-            log_path(workfolder).replace(outputfolder / failedlogname)
-        shutil.rmtree(workfolder)
-        print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
+        with output_folder_lock(outputfolder):
+            discard_run(workfolder, outputfolder, earlierfolder)
         raise
-    finally:
-        if outputfolderlock is not None:
-            os.close(outputfolderlock)
 
-    # The output folder holds the full new output now. A failure of the cleanup must not make the
-    # run fail, because the files of the earlier run are gone from the output folder.
+    # Two runs into one output folder can end at the same time. The lock lets only one run change
+    # the files in the output folder, so the folder holds the files of one run.
+    with output_folder_lock(outputfolder):
+        installednames: list[str] = []
+        try:
+            install_files(workfolder, outputfolder, earlierfolder, installednames)
+        except BaseException:
+            for name in installednames:
+                (outputfolder / name).replace(workfolder / name)
+            for earlierfile in earlierfolder.iterdir():
+                earlierfile.replace(outputfolder / earlierfile.name)
+            discard_run(workfolder, outputfolder, earlierfolder)
+            raise
+
+        # The output folder holds the full new output now. A failure of the cleanup must not make
+        # the run fail, because the files of the earlier run are gone from the output folder.
+        try:
+            shutil.rmtree(earlierfolder)
+            workfolder.rmdir()
+            (outputfolder / failedlogname).unlink(missing_ok=True)
+            remove_old_log_folder(outputfolder)
+        except OSError as error:
+            print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+
+
+@contextmanager
+def output_folder_lock(outputfolder: Path) -> Generator[None]:
+    """Hold an exclusive lock on the output folder. A second run waits until the first run releases it.
+
+    The operating system releases the lock when the process stops, so a run that crashes leaves no
+    lock. Windows has no flock(), so there the function gives no lock.
+    """
     try:
-        shutil.rmtree(earlierfolder)
-        workfolder.rmdir()
-        (outputfolder / failedlogname).unlink(missing_ok=True)
-        remove_old_log_folder(outputfolder)
-    except OSError as error:
-        print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+        import fcntl
+    except ImportError:
+        yield
+        return
+    folderfd = os.open(outputfolder, os.O_RDONLY)
+    try:
+        fcntl.flock(folderfd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(folderfd)
+
+
+def discard_run(workfolder: Path, outputfolder: Path, earlierfolder: Path) -> None:
+    """Remove the folders of a run that failed. Keep its log as failedlogname in the output folder."""
+    earlierfolder.rmdir()
+    if log_path(workfolder).is_file():
+        log_path(workfolder).replace(outputfolder / failedlogname)
+    shutil.rmtree(workfolder)
+    print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
 
 
 def install_files(workfolder: Path, outputfolder: Path, earlierfolder: Path, installednames: list[str]) -> None:

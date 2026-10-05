@@ -871,6 +871,11 @@ def _fill_co2_phixs(
         if photdata.null_count().sum_horizontal().item() > 0:
             msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
             raise ValueError(msg)
+        # a cross section is never negative, so a negative value is an error in the file
+        nnegative = photdata.select(pl.sum_horizontal((pl.col(name) < 0.0).sum() for name in columnnames[1:])).item()
+        if nnegative > 0:
+            msg = f"{filename} has {nnegative} negative cross sections in the columns of the {ntargets} targets."
+            raise ValueError(msg)
         phixstables = {}
 
         # column n of the file holds the cross section to the upper ion's level id n - 1
