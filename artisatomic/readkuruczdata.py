@@ -271,6 +271,9 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
             "energyabovegsinpercm_upper",
             "j_upper",
             "label_upper",
+            # each component carries the gf value of its whole line, so two lines between the same
+            # levels stay two transitions, as two whole lines do
+            "loggf",
             maintain_order=True,
         )
         .agg(pl.col("gf").sum())

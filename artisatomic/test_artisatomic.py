@@ -5552,6 +5552,18 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
     deltae = dflevels["energyabovegsinpercm"][1] - dflevels["energyabovegsinpercm"][0]
     assert dftransitions["A"].item() == pytest.approx(gf / (gf_to_a_coefficient * 4 * (1e8 / deltae) ** 2))
 
+    # the components of two lines between the same levels give two transitions, one for each line
+    otherline = component2.replace("670.7773  0.002", "670.7773 -0.500")
+    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, otherline])
+    assert dflevels.height == 2
+    deltae = dflevels["energyabovegsinpercm"][1] - dflevels["energyabovegsinpercm"][0]
+    assert sorted(dftransitions["A"].to_list()) == pytest.approx(
+        sorted(
+            gf / (gf_to_a_coefficient * 4 * (1e8 / deltae) ** 2)
+            for gf in (10**0.002 * 10**-0.806 * 10**-0.034, 10**-0.500 * 10**-0.359 * 10**-0.034)
+        )
+    )
+
     # two levels with the same label and J stay two levels
     otherlevel = [line.replace("14903.983", "15100.000") for line in (component1, component2)]
     dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2, *otherlevel])
