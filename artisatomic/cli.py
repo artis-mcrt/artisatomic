@@ -4,6 +4,7 @@
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 import argcomplete
@@ -125,12 +126,13 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
-    # These checks come before clear_files(), because a bad value fails only deep in the run. A
-    # negative temperature even gives NaN cross sections and no error.
+    # These checks come before clear_files(). A bad value can stop the run after the earlier output
+    # is gone. It can also give NaN cross sections, or the collision strengths of the lowest
+    # temperature, with no error.
     for name in ("nphixspoints", "phixsnuincrement", "optimaltemperature", "electrontemperature"):
         value = getattr(args, name)
-        if not value > 0:
-            msg = f"-{name} must be more than 0, got {value}"
+        if not (math.isfinite(value) and value > 0):
+            msg = f"-{name} must be a finite number more than 0, got {value}"
             raise ValueError(msg)
 
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first

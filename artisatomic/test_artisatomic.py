@@ -5411,6 +5411,7 @@ def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_pat
         ("-optimaltemperature", "0"),
         ("-optimaltemperature", "-1"),
         ("-electrontemperature", "0"),
+        ("-phixsnuincrement", "inf"),
     ],
 )
 def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, option, value):
@@ -5422,7 +5423,7 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     outputfolder.mkdir()
     (outputfolder / "adata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), option, value])
-    with pytest.raises(ValueError, match=f"{option} must be more than 0"):
+    with pytest.raises(ValueError, match=f"{option} must be a finite number more than 0"):
         main()
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
@@ -5604,3 +5605,12 @@ def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
     # the same rule for the two other readers with a fixed folder below their data folder
     assert readtanakajpltdata.jpltpath == readtanakajpltdata.jpltfolder.resolve() / "data_v2.1"
     assert readadasdata.tyndall_co3_path.parent == readadasdata.adaspath
+
+
+def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
+    """A very large -phixsnuincrement makes the weights overflow, and the output must not get NaN values."""
+    from artisatomic.phixs import reduce_phixs_tables
+
+    tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
+    with np.errstate(all="ignore"), pytest.raises(ValueError, match="have a value that is not finite"):
+        reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
