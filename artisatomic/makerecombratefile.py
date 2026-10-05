@@ -4,6 +4,7 @@
 import argparse
 import importlib
 import re
+import secrets
 import typing as t
 from pathlib import Path
 
@@ -175,11 +176,12 @@ def main():
             )
 
     # A failure during the write, for example a full disk, must also leave the previous file. The
-    # replace of a file in the same folder is atomic.
+    # replace of a file in the same folder is atomic. Each run writes its own temporary file, so
+    # two runs into one folder do not write into the same file.
     outputpath = artis_files_path / "recombrates.txt"
-    temppath = outputpath.with_name(f"{outputpath.name}.tmp")
+    temppath = outputpath.with_name(f"{outputpath.name}.{secrets.token_hex(8)}.tmp")
     try:
-        with temppath.open(mode="w", encoding="utf-8") as frecombrates:
+        with temppath.open(mode="x", encoding="utf-8") as frecombrates:
             frecombrates.writelines(outputlines)
     except BaseException:
         temppath.unlink(missing_ok=True)

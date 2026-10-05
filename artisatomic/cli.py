@@ -3,8 +3,10 @@
 """Command-line entry point: build an ARTIS atomic database from the configured ions and handlers."""
 
 import argparse
+import fcntl
 import json
 import math
+import os
 import shutil
 import tempfile
 from pathlib import Path
@@ -166,8 +168,13 @@ def main() -> None:
     workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
     earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     installednames: list[str] = []
+    outputfolderlock: int | None = None
     try:
         write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
+        # Two runs into one output folder can end at the same time. The lock lets only one run move
+        # or restore its files, so the folder holds the files of one run. The close below releases it.
+        outputfolderlock = os.open(outputfolder, os.O_RDONLY)
+        fcntl.flock(outputfolderlock, fcntl.LOCK_EX)
         install_files(workfolder, outputfolder, earlierfolder, installednames)
     except BaseException:
         for name in installednames:
@@ -180,6 +187,9 @@ def main() -> None:
         shutil.rmtree(workfolder)
         print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
         raise
+    finally:
+        if outputfolderlock is not None:
+            os.close(outputfolderlock)
 
     # The output folder holds the full new output now. A failure of the cleanup must not make the
     # run fail, because the files of the earlier run are gone from the output folder.
