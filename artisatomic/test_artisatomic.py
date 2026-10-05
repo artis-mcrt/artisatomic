@@ -5359,3 +5359,34 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     plainstream = io.StringIO()
     log_detail(plainstream, ("adata",), "kind", "a detail line")
     assert plainstream.getvalue() == "a detail line\n"
+
+
+def test_write_output_files_counts_the_term_markers_apart_from_the_collision_strengths(tmp_path):
+    """A -2 upsilon is a mark of the reader for a pair of J levels of one term, and not a collision strength."""
+    import dataclasses
+
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    tmpargs = phixs_args(output_folder=str(tmp_path), nophixs=True)
+    iondata = dataclasses.replace(
+        make_iondata(1, is_top_ion=True),
+        dfenergylevels=pl.DataFrame(
+            {
+                "levelid": [0, 1, 2],
+                "energyabovegsinpercm": [0.0, 10.0, 1000.0],
+                "g": [1.0, 3.0, 5.0],
+                "parity": [0, 0, 1],
+                "levelname": ["a_3Pe[0]", "a_3Pe[1]", "b_3Do[1]"],
+            }
+        ),
+        upsilondict={(0, 1): -2.0, (0, 2): 0.5, (1, 2): 0.25},
+    )
+    clear_files(tmpargs)
+    write_output_files(26, [iondata], tmpargs)
+
+    transitiontext = (tmp_path / "transitiondata.txt").read_text(encoding="utf-8")
+    assert (
+        "# artisatomic added 2 transitions with A = 0, for level pairs that have a collision strength" in transitiontext
+    )
+    assert "# artisatomic added 1 transitions with A = 0 and coll_str -2, for pairs of J levels" in transitiontext
