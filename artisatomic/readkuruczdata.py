@@ -18,6 +18,7 @@ from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
@@ -98,11 +99,33 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # each field starts after the fields before it, so the last width starts no field
     field_offsets = list(itertools.accumulate(field_widths[:-1], initial=0))
 
+    # gfall08oct17 (and the 2016 and 2017 versions before it) writes the loggf of the Fe I line at
+    # 448.8906 nm as "-1 72". The space is at the position of the decimal point of the F7.3 field.
+    # The source of the line gives log gf = -1.72 (Den Hartog, E. A., Ruffoni, M. P., Lawler, J. E.,
+    # Pickering, J. C., Lind, K., & Brewer, N. R. 2014, ApJS, 215, 23, doi:10.1088/0067-0049/215/2/23).
+    # So the reader reads a space at that position, between two digits, as the decimal point. A Fortran
+    # read ignores the space and gives -0.172, and gfallvac08oct17 has that value.
+    loggf_offset, loggf_width = field_offsets[1], field_widths[1]
+    loggf_text = pl.col("line").str.slice(loggf_offset, loggf_width)
+    loggf_point_missing = loggf_text.str.contains(r"^..\d \d")
+    loggf_point_repaired = (
+        pl.when(loggf_point_missing)
+        .then(loggf_text.str.slice(0, 3) + "." + loggf_text.str.slice(4))
+        .otherwise(loggf_text)
+        .str.strip_chars()
+    )
+
     # read each line whole, then cut the fixed-width fields out of it
     gfall = scan_file_lines(fname).select(
-        # a blank field, and a line too short to reach the field, both give a null
-        fixed_width_column(offset, width).replace("", None).cast(dtype).alias(name)
-        for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
+        *(
+            # a blank field, and a line too short to reach the field, both give a null
+            (loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
+            .replace("", None)
+            .cast(dtype)
+            .alias(name)
+            for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
+        ),
+        loggf_point_missing=loggf_point_missing,
     )
 
     gfall = gfall.drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
@@ -388,8 +411,20 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             "isotope",
             "log_f_hyperfine",
             "log_iso_abundance",
+            "loggf_point_missing",
         ]
     ).collect()
+
+    for row in dfgfall.filter(pl.col("loggf_point_missing")).iter_rows(named=True):
+        log_detail(
+            flog,
+            ("transitiondata",),
+            "loggf decimal point",
+            f"The loggf field of the line between the levels at {row['energyabovegsinpercm_lower']} and"
+            f" {row['energyabovegsinpercm_upper']} cm^-1 has a space in place of the decimal point. The reader"
+            f" reads it as {row['loggf']}.",
+        )
+    dfgfall = dfgfall.drop("loggf_point_missing")
 
     # One file holds one ion. The atomic number and the ion charge both come from the file's
     # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows in

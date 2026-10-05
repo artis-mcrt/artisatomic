@@ -5739,6 +5739,35 @@ def test_readkuruczdata_drops_combined_lines_that_repeat_a_line(tmp_path, monkey
     assert dftransitions.height == 2
 
 
+def test_readkuruczdata_reads_a_space_in_place_of_the_loggf_decimal_point(tmp_path, monkeypatch):
+    """The Fe I line of gfall08oct17 with the loggf "-1 72" gets -1.72, and the comment block records it."""
+    from artisatomic.base import IonLog
+
+    groundline = (
+        "   152.4610 -5.661 26.00       0.000  4.0 4s2 a5D      65590.540  3.0 (2F)4p 3F   8.43 -3.78 -6.99K17  0 0  "
+        "0 0.000  0 0.000                     1500 1050     0"
+    )
+    nopointline = (
+        "   448.8906 -1 72  26.00   51739.920  2.0 4s4D5s e3D   29469.024  2.0 5Dsp3P z5P  8.23 -5.45 -7.57DRLP 0 0  "
+        "0 0.000  0 0.000                     1125 1835     0"
+    )
+    (tmp_path / "zztar").mkdir()
+    (tmp_path / "zztar" / "gf2600.all").write_text(f"{groundline}\n{nopointline}\n", encoding="utf-8")
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+    flog = IonLog(io.StringIO())
+    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(26, 1, flog)
+
+    assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 29469.024, 51739.92, 65590.54]
+    row = dftransitions.filter(pl.col("upperlevel") == 2)
+    assert row["lowerlevel"].item() == 1
+    expected_a = 10**-1.72 / (gf_to_a_coefficient * 5 * (1e8 / (51739.920 - 29469.024)) ** 2)
+    assert row["A"].item() == pytest.approx(expected_a, rel=1e-12)
+    assert any(
+        "has a space in place of the decimal point. The reader reads it as -1.72." in line
+        for line in flog.comments["transitiondata"]
+    )
+
+
 def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):
     """A file whose ground level has only n-averaged lines must stop the run, because ARTIS takes the first level as the ground."""
     (tmp_path / "zztar").mkdir()
