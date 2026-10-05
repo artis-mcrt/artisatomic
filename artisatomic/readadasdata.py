@@ -748,6 +748,11 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
             contents="The levels and the collision strengths",
             origin=origin,
         )
+        # The header of adf04_v1 gives 330397 cm^-1 (40.96 eV). NIST and the CMFGEN data of Co III
+        # give 33.50 eV, so the header value is wrong.
+        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+        log_comment(flog, ("adata",), nist_ionization_energy_comment)
+        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
 
         adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
         transitionfile = tyndall_co3_path / "adf04rad_v1"
