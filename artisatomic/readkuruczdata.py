@@ -171,25 +171,29 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
-# a component level is at most this far from the level that it belongs to. The hyperfine shifts
-# and the isotope shifts of gfall are much smaller.
+# a component level is at most this far from the level that it belongs to. In gfall08oct17, the
+# energies of the components of one level spread over 0.6 cm^-1 at most (Li I 7f 2F7/2).
 component_shift_tolerance_percm = 1.0
 
 
 def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     """Combine the isotope and hyperfine components of each line into one line.
 
-    gfall gives a component the gf value of the whole line, with the log of its isotope fraction
-    and of its hyperfine fraction in two more fields. A component names its isotope. The level
-    energies of a component include its isotope shift and its hyperfine shift, and a negative
-    energy there is a shift below the level and not a predicted level. Without this function, each
+    gfall gives a component the gf value of the whole line. Two more fields give the log of its
+    isotope fraction and the log of its hyperfine fraction. A component names its isotope. The
+    level energies of a component include its isotope shift and its hyperfine shift. A negative
+    energy there is a shift below the level, and not a predicted level. Without this function, each
     component is a full line between two sublevels of its own. ARTIS adds the A values of the
     transitions of a level pair, and it has no isotope or hyperfine levels.
 
     A component level gets the energy of the nearest level with the same label and J in the lines
-    that are not split, if that level is near enough. The labels are not unique, so the label and
-    J alone cannot identify a level. Each other group of component levels with the same label and
-    J and near energies gets the mean energy of the group, weighted by gf.
+    that are not split. That level must be near enough. The labels are not unique, so the label
+    and J alone cannot identify a level. Each other group of component levels with the same label
+    and J and near energies gets the mean energy of the group, weighted by gf.
+
+    Some files give a line as a whole line and also as the components of one isotope. The function
+    then keeps the whole line. It also drops a combined line between two sublevels of one level,
+    because such a line joins a level to itself.
     """
     fractions = [pl.col(column).fill_null(0.0) for column in ("log_f_hyperfine", "log_iso_abundance")]
     # a fraction of one gives a log of 0, so the isotope also marks a component
@@ -245,7 +249,7 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
             .cum_sum()
         )
         .with_columns(
-            # the precision of the energies in gfall, so the ground level of a group comes out at 0
+            # rounded to the precision of the energies in gfall (0.001 cm^-1)
             mergedenergy=((pl.col("energy") * pl.col("gf")).sum() / pl.col("gf").sum()).over("group").round(3).abs()
         )
         .select("componentrow", "side", "mergedenergy")
@@ -278,24 +282,41 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         )
         .agg(pl.col("gf").sum())
         .with_columns(
+            lineloggf=pl.col("loggf"),
             loggf=pl.col("gf").log10(),
             energyabovegsinpercm_lower_predicted=pl.lit(value=False),
             energyabovegsinpercm_upper_predicted=pl.lit(value=False),
         )
     )
-    # the fields that tell the components apart are null in a combined line
-    combined = combined.select(
-        pl.col(column).cast(dtype) if column in combined.columns else pl.lit(None, dtype=dtype).alias(column)
-        for column, dtype in wholelines.schema.items()
+    ncombined = combined.height
+    levelpair = ["energyabovegsinpercm_lower", "j_lower", "energyabovegsinpercm_upper", "j_upper"]
+    combined = combined.filter(
+        (pl.col("energyabovegsinpercm_lower") != pl.col("energyabovegsinpercm_upper"))
+        | (pl.col("j_lower") != pl.col("j_upper"))
     )
+    nselfline = ncombined - combined.height
+    combined = combined.join(
+        wholelines.select(*levelpair, wholelineloggf=pl.col("loggf")),
+        left_on=[*levelpair, "lineloggf"],
+        right_on=[*levelpair, "wholelineloggf"],
+        how="anti",
+    )
+    nrepeat = ncombined - nselfline - combined.height
     log_comment(
         flog,
         ("adata", "transitiondata"),
-        f"The reader combined {components.height:d} isotope and hyperfine components into {combined.height:d}"
+        f"The reader combined {components.height:d} isotope and hyperfine components into {ncombined:d}"
         " lines. A component has the gf value of the whole line times its isotope fraction and its hyperfine"
         " fraction.",
     )
-    return pl.concat([wholelines, combined])
+    if nrepeat > 0 or nselfline > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The reader dropped {nrepeat:d} combined lines that the file also gives as a whole line, and"
+            f" {nselfline:d} combined lines that join a level to itself.",
+        )
+    return pl.concat([wholelines, combined.drop("lineloggf")], how="diagonal_relaxed").select(wholelines.columns)
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
@@ -335,22 +356,19 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         # kept only for the duplicate-line test below, and dropped by the final select
         "label_lower",
         "label_upper",
-        "isotope",
-        "isotope2",
-        "log_f_hyperfine",
-        "hyperfine_f_lower",
-        "hyperfine_f_upper",
-        "hyper_shift_lower",
-        "hyper_shift_upper",
     ]
     # The levels and the transitions come from the same rows, so read those rows once. Each
     # collect() of the lazy frame reads and parses the file again, and the file can be 150 MB.
-    # The levels need the two columns below as well, and the transitions need no other column.
+    # The levels need the predicted flags as well, and combine_line_components() needs the
+    # isotope fields. The reader reads no other field. gfall08oct17 writes F = 10 as "A" in the
+    # hyperfine F fields, so a read of those fields stops the read of V I, Mn I, Co I and Nb I-II.
     dfgfall = gfall.select(
         [
             *transition_columns,
             "energyabovegsinpercm_lower_predicted",
             "energyabovegsinpercm_upper_predicted",
+            "isotope",
+            "log_f_hyperfine",
             "log_iso_abundance",
         ]
     ).collect()
@@ -473,15 +491,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             "label_lower",
             "label_upper",
             "loggf",
-            # an isotope or hyperfine component is its own line and can share everything above
-            # with another. So the fields that tell them apart belong in the identity too.
-            "isotope",
-            "isotope2",
-            "log_f_hyperfine",
-            "hyperfine_f_lower",
-            "hyperfine_f_upper",
-            "hyper_shift_lower",
-            "hyper_shift_upper",
         ],
         keep="first",
         maintain_order=True,

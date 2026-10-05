@@ -4600,16 +4600,11 @@ def test_readhillierdata_rejects_a_file_with_no_ionization_energy(monkeypatch, t
         readhillierdata.read_levels_and_transitions(1, 1, io.StringIO())
 
 
-def test_clear_files_removes_phixsdata_with_nophixs(tmp_path):
-    """--nophixs writes no cross sections, so clear_files() removes phixsdata_v2.txt of an earlier run.
-
-    The level ids in that file belong to the earlier adata.txt, so the file must not stay beside a
-    new one.
-    """
+def test_clear_files_writes_no_phixsdata_with_nophixs(tmp_path):
+    """--nophixs writes no cross sections, so clear_files() writes no phixsdata_v2.txt."""
     from artisatomic.output import clear_files
 
     phixspath = tmp_path / "phixsdata_v2.txt"
-    phixspath.write_text("100\n 3.0000000e-02\n26 2 0 1 10 1.0\n", encoding="utf-8")
     (tmp_path / "adata.txt").write_text("an earlier run\n", encoding="utf-8")
 
     clear_files(phixs_args(nophixs=True, output_folder=str(tmp_path)))
@@ -5364,6 +5359,7 @@ def test_log_detail_gives_one_count_line_for_each_kind():
 def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_path):
     """A copy such as "..._E1 (1).txt" is not one more transition type, so its A values must not add to the original."""
     from artisatomic import readfloers25data
+    from artisatomic.base import IonLog
 
     header = "Test table\n--\n--\n--\n"
     (tmp_path / "57LaII_levels_calib.txt").write_text(
@@ -5374,10 +5370,30 @@ def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_p
     (tmp_path / "57LaII_transitions_calib_E1 (1).txt").write_text(transitions)
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
-    flog = io.StringIO()
+    flog = IonLog(io.StringIO())
     _, _, dftransitions = readfloers25data.read_levels_and_transitions(57, 2, flog, calibrated=True, withforbidden=True)
     assert dftransitions["A"].to_list() == [1.0e6]
-    assert "57LaII_transitions_calib_E1 (1).txt is not" in flog.getvalue()
+    assert (
+        f"WARNING: The reader skipped the file {tmp_path.name}/57LaII_transitions_calib_E1 (1).txt, because its name"
+        " does not end with the transition types of the file."
+    ) in flog.comments["transitiondata"]
+
+
+def test_readfloers25data_stops_for_a_type_that_the_file_name_does_not_give(monkeypatch, tmp_path):
+    """A copy such as "..._E12.txt" of "..._E1.txt" has a valid name, but its E1 rows must not add to the original."""
+    from artisatomic import readfloers25data
+
+    header = "Test table\n--\n--\n--\n"
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
+    )
+    transitions = header + " Lower Upper A Type\n 0 1 1.0e+06 E1\n"
+    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transitions)
+    (tmp_path / "57LaII_transitions_calib_E12.txt").write_text(transitions)
+
+    monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    with pytest.raises(ValueError, match=r"type E1, but its name gives only \['E12'\]"):
+        readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
 
 
 def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_path):
@@ -5428,6 +5444,55 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 
+def cli_run_with_stub_writer(tmp_path, monkeypatch, *, fail: bool, extraargs: list[str]) -> Path:
+    """Run main() of the CLI with a writer that writes adata.txt and a log line, and then fails if fail is True."""
+    from artisatomic import cli
+    from artisatomic.base import log_path
+
+    def write_files(_ion_handlers, args):
+        Path(args.output_folder, "adata.txt").write_text("the output of the new run\n", encoding="utf-8")
+        log_path(args.output_folder).write_text("the log of the new run\n", encoding="utf-8")
+        if fail:
+            msg = "the reader failed"
+            raise ValueError(msg)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    monkeypatch.setattr(cli, "write_files", write_files)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir(exist_ok=True)
+    for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
+        (outputfolder / filename).write_text("the output of an earlier run\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), *extraargs])
+    if fail:
+        with pytest.raises(ValueError, match="the reader failed"):
+            cli.main()
+    else:
+        cli.main()
+    # the work folder is gone in each case
+    assert sorted(path.name for path in outputfolder.iterdir() if path.name.startswith(".")) == []
+    return outputfolder
+
+
+def test_cli_keeps_the_earlier_output_when_the_run_fails(tmp_path, monkeypatch):
+    """A failed run must leave the output of the earlier run, and keep its own log under a different name."""
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=True, extraargs=[])
+    for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
+    assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
+
+
+def test_cli_replaces_the_earlier_output_when_the_run_succeeds(tmp_path, monkeypatch):
+    """A run with --nophixs removes phixsdata_v2.txt of the earlier run, because its level ids belong to that run."""
+    (tmp_path / "artis_files").mkdir()
+    (tmp_path / "artis_files" / "artisatomiclog_failed.txt").write_text("an earlier failure\n", encoding="utf-8")
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=["--nophixs"])
+    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
+    assert (outputfolder / "artisatomiclog.txt").read_text(encoding="utf-8") == "the log of the new run\n"
+    assert not (outputfolder / "phixsdata_v2.txt").exists()
+    assert not (outputfolder / "artisatomiclog_failed.txt").exists()
+
+
 def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monkeypatch):
     """A failure at the second ion must leave the recombrates.txt of the earlier run, and no truncated file."""
     from artisatomic import makerecombratefile
@@ -5461,31 +5526,55 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
     assert (outputfolder / "recombrates.txt").read_text(encoding="utf-8") == "the rates of an earlier run\n"
 
 
+def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):
+    """A copy such as "fe2.rrc (1).txt" sorts before "fe2.rrc.txt", but the original must win."""
+    from artisatomic.makerecombratefile import find_nahar_file
+
+    for name in ("fe2.rrc (1).txt", "fe2.rrc.txt", "fe2.rrc.ls.txt", "fe21.rrc.txt"):
+        (tmp_path / name).write_text("", encoding="utf-8")
+    assert find_nahar_file(tmp_path, 26, 2) == tmp_path / "fe2.rrc.ls.txt"
+    assert "skipped the file fe2.rrc (1).txt" in capsys.readouterr().out
+    assert find_nahar_file(tmp_path, 26, 3) is None
+
+
 def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
     """A Co II level with zeros in its four target columns gets a warning and no table, and the run continues."""
     import gzip
 
     from artisatomic.base import IonLog
 
+    datapath = tmp_path / "otherdisk"
+    datapath.mkdir()
     energies = np.linspace(0.6, 3.0, 200)
     for levelnumber in range(1, 9):
         # level 3 has no positive value in a target column
         scale = 0.0 if levelnumber == 3 else 1.0
         rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
-        with gzip.open(tmp_path / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
+        with gzip.open(datapath / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
             fout.write("\n".join(rows) + "\n")
-    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+    # a link below the data folder, so the test also checks that the log keeps the path of the link
+    adasfolder = tmp_path / "atomic-data-adas"
+    adasfolder.mkdir()
+    (adasfolder / "co_tyndall").symlink_to(datapath)
+    monkeypatch.setattr(readadasdata, "adasfolder", adasfolder)
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", readadasdata.get_tyndall_co3_path(adasfolder, testmode=False))
 
     args = build_parser().parse_args([])
     crosssections = np.zeros((8, args.nphixspoints))
     thresholds = np.zeros(8)
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
-    flog = IonLog(io.StringIO())
+    stream = io.StringIO()
+    flog = IonLog(stream)
     readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, thresholds, targetfractions)  # ruff: ignore[private-member-access]
 
     assert targetfractions[2] == []
     assert all(targetfractions[levelid] for levelid in range(8) if levelid != 2)
     assert any("level 3 has a zero cross section to each target" in line for line in flog.comments["phixsdata"])
+    assert (
+        "WARNING: level 3 has no positive cross section to the upper level 1, so the reader drops that target."
+        " (the first of 4 such lines in the log file)"
+    ) in flog.comments["phixsdata"]
+    assert "The cross sections of level 3 come from atomic-data-adas/co_tyndall/3." in stream.getvalue()
 
 
 # Two components of the Li I 670.8 nm line (2s 2S1/2 - 2p 2P3/2, isotope 7) and one whole line
@@ -5572,6 +5661,33 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
     assert dftransitions.height == 2
 
 
+def test_readkuruczdata_drops_combined_lines_that_repeat_a_line(tmp_path, monkeypatch):
+    """A combined line that repeats a whole line of the file, or that joins a level to itself, does not reach the output."""
+    from artisatomic.base import IonLog
+
+    wholeline = li_gfall_lines[2]
+    # the same 2s - 3p line, also given as a component of isotope 7 (gfall08oct17 has 83 such lines in K I)
+    repeat = wholeline.replace("0 0.000  0 0.000", "7-0.300  7-0.034")
+    # a component between two sublevels of 3p 2P3/2, which merge into one level
+    selfline = repeat.replace("       0.000  0.5 2s  2S", "   30925.640  1.5 3p  2P").replace(
+        "30925.633  1.5 3p  2P", "30925.620  1.5 3p  2P"
+    )
+    (tmp_path / "zztar").mkdir()
+    (tmp_path / "zztar" / "gf0300.all").write_text(f"{wholeline}\n{repeat}\n{selfline}\n", encoding="utf-8")
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
+    flog = IonLog(io.StringIO())
+    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, flog)
+
+    assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 30925.633]
+    gf = 10**-2.253
+    assert dftransitions["A"].to_list() == pytest.approx([gf / (gf_to_a_coefficient * 4 * (1e8 / 30925.633) ** 2)])
+    assert any(
+        "dropped 1 combined lines that the file also gives as a whole line, and 1 combined lines that join a level"
+        in line
+        for line in flog.comments["transitiondata"]
+    )
+
+
 def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):
     """A file whose ground level has only n-averaged lines must stop the run, because ARTIS takes the first level as the ground."""
     (tmp_path / "zztar").mkdir()
@@ -5602,9 +5718,25 @@ def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", datafolder.resolve())
 
     assert path_in_data_folder(readkuruczdata.find_gfall(38, 1), datafolder) == "atomic-data-kurucz/zztar/gf3801.all"
-    # the same rule for the two other readers with a fixed folder below their data folder
-    assert readtanakajpltdata.jpltpath == readtanakajpltdata.jpltfolder.resolve() / "data_v2.1"
-    assert readadasdata.tyndall_co3_path.parent == readadasdata.adaspath
+
+
+def test_jplt_and_qub_paths_keep_a_link_below_the_data_folder(tmp_path):
+    """The JPLT and QUB readers have a fixed folder below their data folder. A link there must stay in the path."""
+    from artisatomic.base import path_in_data_folder
+
+    elsewhere = tmp_path / "otherdisk"
+    elsewhere.mkdir()
+    jpltfolder = tmp_path / "atomic-data-tanaka-jplt"
+    jpltfolder.mkdir()
+    (jpltfolder / "data_v2.1").symlink_to(elsewhere)
+    jpltpath = readtanakajpltdata.get_jpltpath(jpltfolder)
+    assert path_in_data_folder(jpltpath / "26_1.txt", jpltfolder) == "atomic-data-tanaka-jplt/data_v2.1/26_1.txt"
+
+    adasfolder = tmp_path / "atomic-data-adas"
+    adasfolder.mkdir()
+    (adasfolder / "co_tyndall").symlink_to(elsewhere)
+    tyndallpath = readadasdata.get_tyndall_co3_path(adasfolder, testmode=False)
+    assert path_in_data_folder(tyndallpath / "1.gz", adasfolder) == "atomic-data-adas/co_tyndall/1"
 
 
 def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():

@@ -5,6 +5,8 @@
 import argparse
 import json
 import math
+import shutil
+import tempfile
 from pathlib import Path
 
 import argcomplete
@@ -22,6 +24,8 @@ from artisatomic.output import write_output_files
 
 # the record of the ions and the handlers of a run, in the output folder
 handlersrecordname = "artisatomicionhandlers_used.json"
+# the log of a run that failed, in the output folder. The log of the earlier run stays beside its output.
+failedlogname = "artisatomiclog_failed.txt"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -126,9 +130,8 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
-    # These checks come before clear_files(). A bad value can stop the run after the earlier output
-    # is gone. It can also give NaN cross sections, or the collision strengths of the lowest
-    # temperature, with no error.
+    # A bad value can give NaN cross sections, or the collision strengths of the lowest temperature,
+    # with no error
     for name in ("nphixspoints", "phixsnuincrement", "optimaltemperature", "electrontemperature"):
         value = getattr(args, name)
         if not (math.isfinite(value) and value > 0):
@@ -152,14 +155,39 @@ def main() -> None:
 
     # The readers can offer an element that has a gap in its ion stages. -maxionstage 6 gives
     # Sr I-IV and Sr VI, because no data source here holds Sr V. write_compositionfile() rejects
-    # such a gap. This check runs first, because the code below deletes the logs of the last run.
+    # such a gap. This check runs first, because the read of the ions can take hours.
     check_ion_stages_contiguous(ion_handlers)
 
-    Path(args.output_folder).mkdir(exist_ok=True, parents=True)
+    outputfolder = Path(args.output_folder)
+    outputfolder.mkdir(exist_ok=True, parents=True)
 
-    # this empties the log of the last run. The passes of each ion append to the file.
+    # The run writes into a new folder in the output folder, and moves the files at the end. A run
+    # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
+    workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
+    try:
+        write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
+    except BaseException:
+        if log_path(workfolder).is_file():
+            log_path(workfolder).replace(outputfolder / failedlogname)
+        shutil.rmtree(workfolder)
+        print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
+        raise
+
+    # the option --nophixs writes no phixsdata_v2.txt. Its level ids belong to the adata.txt of
+    # the earlier run.
+    if args.nophixs:
+        (outputfolder / "phixsdata_v2.txt").unlink(missing_ok=True)
+    for newfile in sorted(workfolder.iterdir()):
+        newfile.replace(outputfolder / newfile.name)
+    workfolder.rmdir()
+    (outputfolder / failedlogname).unlink(missing_ok=True)
+    remove_old_log_folder(outputfolder)
+
+
+def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
+    """Write all output files of the run, the log file, and the record of the ion handlers to args.output_folder."""
+    # this makes the log file. The passes of each ion append to the file.
     log_path(args.output_folder).write_text("", encoding="utf-8")
-    remove_old_log_folder(Path(args.output_folder))
 
     # A record of what this run used, beside the output files. Its name is not the name of the
     # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working

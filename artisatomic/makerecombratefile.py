@@ -3,6 +3,7 @@
 
 import argparse
 import importlib
+import re
 import typing as t
 from pathlib import Path
 
@@ -55,6 +56,24 @@ def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
     return records
+
+
+def find_nahar_file(naharpath: Path, atomic_number: int, lowerionstage: int) -> Path | None:
+    """Give the Nahar file of the recombination to the ion stage lowerionstage, or None if there is none.
+
+    The glob also finds a copy that a sync client made, for example "fe2.rrc (1).txt". Such a copy
+    can have an earlier version of the data, so the function skips a name with a space or a
+    bracket, with a warning. sorted() makes the choice deterministic when more than one file remains.
+    """
+    prefix = f"{elsymbols[atomic_number].lower()}{lowerionstage}"
+    name_regex = re.compile(rf"{re.escape(prefix)}\.rrc[A-Za-z0-9._-]*\.txt")
+    rrcfiles = []
+    for rrcfile in sorted(naharpath.glob(f"{prefix}.rrc*.txt")):
+        if name_regex.fullmatch(rrcfile.name) is None:
+            print(f"WARNING: The program skipped the file {rrcfile.name}, because the name is not {prefix}.rrc*.txt")
+            continue
+        rrcfiles.append(rrcfile)
+    return rrcfiles[0] if rrcfiles else None
 
 
 def import_chianti_core(firstion: str) -> t.Any:
@@ -110,12 +129,12 @@ def main():
         "Z", "lowermost_ion_stage", "uppermost_ion_stage"
     ).iter_rows():
         atomic_number = int(Z)
-        for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage)):
-            # the glob starts at the repository, so the entry point finds the Nahar files
-            # from any working directory. sorted() makes the choice deterministic when
-            # more than one file matches.
-            rrcfiles = sorted(naharpath.glob(f"{elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"))
-            ionsources.append((atomic_number, lowerionstage, rrcfiles[0] if rrcfiles else None))
+        # naharpath starts at the repository, so the entry point finds the Nahar files from any
+        # working directory
+        ionsources.extend(
+            (atomic_number, lowerionstage, find_nahar_file(naharpath, atomic_number, lowerionstage))
+            for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage))
+        )
 
     firstchiantiion = next(
         (
@@ -155,8 +174,17 @@ def main():
                 f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
             )
 
-    with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
-        frecombrates.writelines(outputlines)
+    # A failure during the write, for example a full disk, must also leave the previous file. The
+    # replace of a file in the same folder is atomic.
+    outputpath = artis_files_path / "recombrates.txt"
+    temppath = outputpath.with_name(f"{outputpath.name}.tmp")
+    try:
+        with temppath.open(mode="w", encoding="utf-8") as frecombrates:
+            frecombrates.writelines(outputlines)
+    except BaseException:
+        temppath.unlink(missing_ok=True)
+        raise
+    temppath.replace(outputpath)
 
 
 if __name__ == "__main__":

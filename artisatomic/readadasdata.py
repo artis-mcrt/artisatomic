@@ -37,7 +37,6 @@ from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
 from artisatomic.base import nist_ionization_energy_comment
-from artisatomic.base import path_for_log
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -121,8 +120,16 @@ def rename_old_adas_directory() -> None:
     rename_old_data_directory(old_adaspath, adaspath)
 
 
-# not resolved: a link there must not put its target into a comment line
-tyndall_co3_path = adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
+def get_tyndall_co3_path(datafolder: Path, *, testmode: bool) -> Path:
+    """Give the folder of the QUB data of Co II and Co III in datafolder.
+
+    The function resolves datafolder, but not a link in datafolder. The target of such a link must not go
+    into a comment line.
+    """
+    return datafolder.resolve() / ("co_tyndall_test_sample" if testmode else "co_tyndall")
+
+
+tyndall_co3_path = get_tyndall_co3_path(adasfolder, testmode=TESTMODE)
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -842,7 +849,10 @@ def _fill_co2_phixs(
         # the name of a cross section file is the level's number in the source data, which
         # counts from one
         filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
-        log_and_print(flog, f"The cross sections of level {lowerlevelid + 1} come from {path_for_log(filename)}.")
+        log_and_print(
+            flog,
+            f"The cross sections of level {lowerlevelid + 1} come from {path_in_data_folder(filename, adasfolder)}.",
+        )
         ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
         # One space separates the columns, and every field is a number. So a null means that
         # the columns are not where the read expects them. A read of the first five columns
@@ -863,33 +873,28 @@ def _fill_co2_phixs(
             targetname = f"target{targetcolumn}"
             phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
             if len(phixstable) == 0:
-                # nothing positive in this column, so there is no table to downsample. A skip
-                # here leaves the target out of the fractions below, which is what a zero cross
-                # section means. reduce_phixs_tables() would index an empty array and fail.
+                # reduce_phixs_tables() gives zeros for an empty table, and combine_phixs_routes()
+                # then leaves the target out of the fractions
                 log_detail(
                     flog,
                     ("phixsdata",),
                     "target with no positive cross section",
-                    f"WARNING: level {lowerlevelid} has no positive cross section to target"
-                    f" {targetcolumn - 1}, so the reader drops that target",
+                    f"WARNING: level {lowerlevelid + 1} has no positive cross section to the upper level"
+                    f" {targetcolumn}, so the reader drops that target.",
                 )
-                continue
             phixstables[targetcolumn] = phixstable
 
-        # combine_phixs_routes() stops the run for a level with no table, so test this first
-        combined = None
-        if phixstables:
-            reduced_phixs_dict = reduce_phixs_tables(
-                phixstables,
-                args.optimaltemperature,
-                args.nphixspoints,
-                args.phixsnuincrement,
-                label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
-            )
-            combined = combine_phixs_routes(
-                [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
-            )
-        if combined is None or not combined.fractions:
+        reduced_phixs_dict = reduce_phixs_tables(
+            phixstables,
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
+        )
+        combined = combine_phixs_routes(
+            [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
+        )
+        if not combined.fractions:
             # the code assigns nothing for this level, so write_phixs_data() will skip it
             log_detail(
                 flog,
