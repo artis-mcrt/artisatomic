@@ -276,8 +276,10 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     parse as a number, and for a NaN J. polars orders NaN above each number, so a NaN J would break
     the delta J rule. Each case disables only its own rule.
 
-    A level that is an LS term has no J, and a reader can give its L in the column lsterm_l. The
-    delta J rule then uses that L, because E1 in LS coupling has |delta L| <= 1 and no L = 0 -> 0.
+    A level that is an LS term has no J. A reader can give its L and its 2S + 1 in the columns
+    lsterm_l and lsterm_twosplusone. Between two such levels, the rules of LS coupling apply in place
+    of the delta J rule: |delta L| <= 1, no L = 0 -> 0, and delta S = 0. A strong line wins over
+    them in the same way.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -309,8 +311,15 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False).fill_nan(None) if hasj else pl.lit(None, dtype=pl.Float64)
-        if "lsterm_l" in dfenergylevels_ion.columns:
-            knownj = pl.coalesce(knownj, pl.col("lsterm_l").cast(pl.Float64))
+        hasls = "lsterm_l" in dfenergylevels_ion.columns
+
+        def lscolumns(side: str) -> list[pl.Expr]:
+            if not hasls:
+                return []
+            return [
+                pl.col("lsterm_l").cast(pl.Float64).alias(f"{side}_lsl"),
+                pl.col("lsterm_twosplusone").alias(f"{side}_lss"),
+            ]
 
         assertse1 = strength_asserts_e1(dftransitions_ion)
 
@@ -320,6 +329,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
                 pl.col("levelid").alias("lowerlevel"),
                 knownparity.alias("lower_parity"),
                 knownj.alias("lower_j"),
+                *lscolumns("lower"),
             ),
             on="lowerlevel",
             maintain_order="left",
@@ -328,6 +338,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
                 pl.col("levelid").alias("upperlevel"),
                 knownparity.alias("upper_parity"),
                 knownj.alias("upper_j"),
+                *lscolumns("upper"),
             ),
             on="upperlevel",
             maintain_order="left",
@@ -342,25 +353,30 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
             )
             raise ValueError(msg)
 
-        dftransitions_ion = (
-            dftransitions_ion
-            # The delta J rule gets its own column, because log_deltaj_contradictions() reports
-            # the transitions that break it while the source still gives them an f.
-            .with_columns(
-                breaksdeltaj=(
-                    ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
-                    | ((pl.col("lower_j") == 0) & (pl.col("upper_j") == 0))
-                ).fill_null(False)
-            )
-            # Each rule gets fill_null(False) on its own, before the or. A null would otherwise
-            # spread and make forbidden itself null, which "{forbidden:d}" cannot format. A level
-            # with no J would also undo what the two parities had already settled.
-            .with_columns(
-                forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False)
-                | (pl.col("breaksdeltaj") & ~assertse1)
-            )
-            .drop("lower_j", "upper_j")
+        # Each rule gets its own column, because log_deltaj_contradictions() reports the transitions
+        # that break it while the source still gives them an f.
+        dftransitions_ion = dftransitions_ion.with_columns(
+            breaksdeltaj=(
+                ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
+                | ((pl.col("lower_j") == 0) & (pl.col("upper_j") == 0))
+            ).fill_null(False)
         )
+        breaksrule = pl.col("breaksdeltaj")
+        if hasls:
+            dftransitions_ion = dftransitions_ion.with_columns(
+                breakslsrule=(
+                    ((pl.col("lower_lsl") - pl.col("upper_lsl")).abs() > 1)
+                    | ((pl.col("lower_lsl") == 0) & (pl.col("upper_lsl") == 0))
+                    | (pl.col("lower_lss") != pl.col("upper_lss"))
+                ).fill_null(False)
+            ).drop("lower_lsl", "upper_lsl", "lower_lss", "upper_lss")
+            breaksrule |= pl.col("breakslsrule")
+        # Each rule gets fill_null(False) on its own, before the or. A null would otherwise spread
+        # and make forbidden itself null, which "{forbidden:d}" cannot format. A level with no J
+        # would also undo what the two parities had already settled.
+        dftransitions_ion = dftransitions_ion.with_columns(
+            forbidden=(pl.col("lower_parity") == pl.col("upper_parity")).fill_null(False) | (breaksrule & ~assertse1)
+        ).drop("lower_j", "upper_j")
     return dftransitions_ion
 
 
@@ -375,26 +391,29 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
     CMFGEN's provisional F III set is the known example. It splits a term by a nominal 0.8 cm-1
     and shares the term's f over all the J pairs. A delta J = 2 line can then carry f = 0.116.
     """
-    if "breaksdeltaj" not in dftransitions_ion.columns:
-        return
-
     hasf = "f" in dftransitions_ion.columns
     strengthcol = "f" if hasf else "A"
     minstrength = min_f_asserts_e1 if hasf else min_a_asserts_e1
-    # the same test the rule used, so this reports exactly the transitions it let through
-    contradictions = dftransitions_ion.filter(pl.col("breaksdeltaj") & strength_asserts_e1(dftransitions_ion))
-    if contradictions.is_empty():
-        return
+    for rulecolumn, rulename in (
+        ("breaksdeltaj", "the delta J rule"),
+        ("breakslsrule", "the delta L or delta S rule of LS coupling"),
+    ):
+        if rulecolumn not in dftransitions_ion.columns:
+            continue
+        # the same test the rule used, so this reports exactly the transitions it let through
+        contradictions = dftransitions_ion.filter(pl.col(rulecolumn) & strength_asserts_e1(dftransitions_ion))
+        if contradictions.is_empty():
+            continue
 
-    largest = contradictions[strengthcol].abs().max()
-    log_comment(
-        flog,
-        ("transitiondata",),
-        f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
-        f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
-        f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
-        f" these transitions stay permitted.",
-    )
+        largest = contradictions[strengthcol].abs().max()
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {contradictions.height:d} transitions of {ionstr} break {rulename} but"
+            f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
+            f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
+            f" these transitions stay permitted.",
+        )
 
 
 def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:

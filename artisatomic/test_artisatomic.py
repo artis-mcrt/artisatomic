@@ -2621,15 +2621,39 @@ def test_read_adf04_singlet_s_and_p_terms_keep_their_j(tmp_path):
     assert [level.lsterm_l for level in energylevels] == [None, None]
 
 
-def test_add_level_ids_forbidden_uses_the_l_of_an_ls_term():
-    """A level that is an LS term has no J. The delta J rule then uses L, because E1 in LS coupling has |delta L| <= 1."""
+def test_add_level_ids_forbidden_uses_the_rules_of_ls_coupling():
+    """A level that is an LS term has no J. E1 in LS coupling has |delta L| <= 1, no L = 0 -> 0, and delta S = 0."""
+    from artisatomic.output import log_deltaj_contradictions
+
     dflevels = pl.DataFrame(
-        {"levelid": [0, 1, 2], "parity": [0, 1, 1], "j": [None, None, None], "lsterm_l": [0, 1, 3]},
-        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64, "lsterm_l": pl.Int64},
+        {
+            "levelid": [0, 1, 2, 3],
+            "parity": [0, 1, 1, 1],
+            "j": [None, None, None, None],
+            "lsterm_l": [0, 1, 3, 1],
+            "lsterm_twosplusone": [1, 1, 1, 3],
+        },
+        schema={
+            "levelid": pl.Int64,
+            "parity": pl.Int64,
+            "j": pl.Float64,
+            "lsterm_l": pl.Int64,
+            "lsterm_twosplusone": pl.Int64,
+        },
     )
-    dftransitions = pl.DataFrame({"lowerlevel": [0, 0], "upperlevel": [1, 2], "A": [1.0, 1.0]})
-    # 1S -> 1Po keeps the rule, and 1S -> 1Fo has delta L = 3
-    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, True]
+    # 1S -> 1Po keeps the rules, 1S -> 1Fo has delta L = 3, and 1S -> 3Po has delta S = 1
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0, 0], "upperlevel": [1, 2, 3], "A": [1.0, 1.0, 1.0]})
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    assert result["forbidden"].to_list() == [False, True, True]
+    assert result["breaksdeltaj"].to_list() == [False, False, False]
+
+    # a strong line wins over the rules, and the warning names the rules of LS coupling
+    strong = add_level_ids_forbidden(dflevels, dftransitions.with_columns(A=pl.lit(1.0e8)))
+    assert strong["forbidden"].to_list() == [False, False, False]
+    flog = io.StringIO()
+    log_deltaj_contradictions(flog, strong, "Ca III")
+    assert "2 transitions of Ca III break the delta L or delta S rule of LS coupling" in flog.getvalue()
+    assert "delta J rule" not in flog.getvalue()
 
 
 def test_add_level_ids_forbidden_ignores_a_nan_j():
