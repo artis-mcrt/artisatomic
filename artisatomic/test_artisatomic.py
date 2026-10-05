@@ -2590,8 +2590,8 @@ def test_read_adas_sr1():
 def test_read_adas_ls_resolved_file_gives_no_j():
     """In an LS-resolved adf04 file, XJ is (g - 1) / 2 of the term and not a J value.
 
-    The committed Ca III file names its first excited term 3Po with XJ = 4. A J of 4 is not
-    possible for a 3P term, so a J from that field would break the delta J rule for LS-allowed lines.
+    The committed Ca III file names its first excited term 3Po with XJ = 4. A 3P term cannot have
+    J = 4. A J from that field would therefore break the delta J rule for LS-allowed lines.
     """
     flog = io.StringIO()
     _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
@@ -2601,15 +2601,35 @@ def test_read_adas_ls_resolved_file_gives_no_j():
     assert energylevels[1].levelname == "2s22p63s23p53d1_3Po_id=2"
     assert energylevels[1].g == 9.0
     assert all(level.j is None for level in energylevels)
+    assert energylevels[1].lsterm_l == 1
     assert not any("[" in level.levelname for level in energylevels)
 
-    # a J-resolved file keeps its J values
     flog = io.StringIO()
     _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
         38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
     )
     assert "LS term" not in flog.getvalue()
     assert all(level.j is not None for level in energylevels)
+
+
+def test_read_adf04_singlet_s_and_p_terms_keep_their_j(tmp_path):
+    """For a term with S = 0 or L = 0, XJ = (g - 1) / 2 is also the J. Such terms alone cannot show LS coupling."""
+    levels = ("    1 1S                 (1)0( 0.0)        0.", "    2 2P                 (1)1( 1.0)    82303.")
+    filepath = write_hydrogen_adf04(tmp_path, [], levels=levels)
+    _, energylevels, _, _ = readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)
+    assert [level.j for level in energylevels] == [0.0, 1.0]
+    assert [level.lsterm_l for level in energylevels] == [None, None]
+
+
+def test_add_level_ids_forbidden_uses_the_l_of_an_ls_term():
+    """A level that is an LS term has no J. The delta J rule then uses L, because E1 in LS coupling has |delta L| <= 1."""
+    dflevels = pl.DataFrame(
+        {"levelid": [0, 1, 2], "parity": [0, 1, 1], "j": [None, None, None], "lsterm_l": [0, 1, 3]},
+        schema={"levelid": pl.Int64, "parity": pl.Int64, "j": pl.Float64, "lsterm_l": pl.Int64},
+    )
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0], "upperlevel": [1, 2], "A": [1.0, 1.0]})
+    # 1S -> 1Po keeps the rule, and 1S -> 1Fo has delta L = 3
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, True]
 
 
 def test_add_level_ids_forbidden_ignores_a_nan_j():

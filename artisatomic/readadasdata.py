@@ -185,6 +185,8 @@ class ADASEnergyLevel(t.NamedTuple):
     energyabovegsinpercm: float
     g: float
     parity: int | None  # None where the configuration determines no parity
+    # L of a level that is an LS term (the file has no J). add_level_ids_forbidden() takes it in place of J.
+    lsterm_l: int | None = None
 
 
 def extend_ion_list(
@@ -519,17 +521,21 @@ def read_adf04(
         )
 
         # In an LS-resolved file, each level is a term, and XJ is (statistical weight - 1) / 2 of the
-        # term. That value is more than S + L, the largest J, for each term with S > 0 and L > 0.
-        ls_resolved = bool(levelrows) and all(
+        # term. That value is more than S + L, the largest J, for each term with S > 0 and L > 0. For
+        # a term with S = 0 or L = 0 it is the only J, so such a term alone cannot show the coupling.
+        ls_resolved = all(
             float(j) == (int(multiplicity) * (2 * int(l_hex, 16) + 1) - 1) / 2
             for _index, _config, multiplicity, l_hex, j, _energy in levelrows
+        ) and any(
+            int(multiplicity) > 1 and int(l_hex, 16) > 0
+            for _index, _config, multiplicity, l_hex, _j, _energy in levelrows
         )
         if ls_resolved:
             log_comment(
                 flog,
                 ("adata",),
                 "Each level of the file is an LS term, so the XJ field gives the statistical weight of the term and"
-                " not a J value. The levels have no J value.",
+                " not a J value. The levels have no J value. The delta J rule uses the L of each term.",
             )
 
         for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
@@ -545,6 +551,7 @@ def read_adf04(
                 float(energy_percm),
                 2 * xj + 1,
                 0,
+                int(l_hex, 16) if ls_resolved else None,
             )
 
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and

@@ -275,6 +275,9 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     A null J means the same. The casts below give null for a text value that a reader could not
     parse as a number, and for a NaN J. polars orders NaN above each number, so a NaN J would break
     the delta J rule. Each case disables only its own rule.
+
+    A level that is an LS term has no J, and a reader can give its L in the column lsterm_l. The
+    delta J rule then uses that L, because E1 in LS coupling has |delta L| <= 1 and no L = 0 -> 0.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -306,6 +309,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         hasj = "j" in dfenergylevels_ion.columns
         knownj = pl.col("j").cast(pl.Float64, strict=False).fill_nan(None) if hasj else pl.lit(None, dtype=pl.Float64)
+        if "lsterm_l" in dfenergylevels_ion.columns:
+            knownj = pl.coalesce(knownj, pl.col("lsterm_l").cast(pl.Float64))
 
         assertse1 = strength_asserts_e1(dftransitions_ion)
 
