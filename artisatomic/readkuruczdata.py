@@ -172,8 +172,8 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
-# the LS term at the end of a level label, for example "3D" of "d5s a3D", "3P" of "s4p *3P", "2F" of
-# "(3F)9p 2F?", or "2F" of the extendedatoms label "B(1D)2F 2", which ends with the number of the term
+# the LS term at the end of a level label, for example "3D" of "d5s a3D" or "3P" of "s4p *3P". The term
+# can have a "?" after it, as in "(3F)9p 2F?". An extendedatoms label can end with a number, as in "B(1D)2F 2".
 label_term_regex = re.compile(rf"(\d{{1,2}})([{lchars}])\??(?: \d+)?$")
 
 
