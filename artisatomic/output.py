@@ -278,8 +278,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
     A level that is an LS term has no J. A reader can give its L and its 2S + 1 in the columns
     lsterm_l and lsterm_twosplusone. Between two such levels, the rules of LS coupling apply in place
-    of the delta J rule: |delta L| <= 1, no L = 0 -> 0, and delta S = 0. A strong line wins over
-    them in the same way.
+    of the delta J rule. These rules are |delta L| <= 1, no L = 0 -> 0, and delta S = 0. A strong
+    line wins over them in the same way.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -381,12 +381,14 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
 
 def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str) -> None:
-    """Report the transitions whose J labels and oscillator strength contradict each other.
+    """Report the transitions whose J or LS labels and oscillator strength contradict each other.
 
     A transition with |delta J| > 1, or with J = 0 at both ends, is not an electric dipole
     transition. A large oscillator strength says that it is. The function add_level_ids_forbidden()
-    lets the oscillator strength win, so the transition stays permitted. This function reports how
-    often a data set needed that.
+    lets the oscillator strength win over the delta J rule and over the rules of LS coupling. This
+    function reports how often a data set needed that, with one line for each rule. A transition
+    between two levels of the same parity stays forbidden by the Laporte rule, so the function
+    reports such transitions with their own line.
 
     CMFGEN's provisional F III set is the known example. It splits a term by a nominal 0.8 cm-1
     and shares the term's f over all the J pairs. A delta J = 2 line can then carry f = 0.116.
@@ -394,6 +396,8 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
     hasf = "f" in dftransitions_ion.columns
     strengthcol = "f" if hasf else "A"
     minstrength = min_f_asserts_e1 if hasf else min_a_asserts_e1
+    # the Laporte rule makes a transition between two levels of the same parity forbidden, whatever its strength
+    sameparity = pl.col("forbidden") if "forbidden" in dftransitions_ion.columns else pl.lit(value=False)
     for rulecolumn, rulename in (
         ("breaksdeltaj", "the delta J rule"),
         ("breakslsrule", "the delta L or delta S rule of LS coupling"),
@@ -402,18 +406,25 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
             continue
         # the same test the rule used, so this reports exactly the transitions it let through
         contradictions = dftransitions_ion.filter(pl.col(rulecolumn) & strength_asserts_e1(dftransitions_ion))
-        if contradictions.is_empty():
-            continue
-
-        largest = contradictions[strengthcol].abs().max()
-        log_comment(
-            flog,
-            ("transitiondata",),
-            f"WARNING: {contradictions.height:d} transitions of {ionstr} break {rulename} but"
-            f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
-            f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
-            f" these transitions stay permitted.",
-        )
+        for kept_permitted, rows in (
+            (True, contradictions.filter(sameparity.not_())),
+            (False, contradictions.filter(sameparity)),
+        ):
+            if rows.is_empty():
+                continue
+            largest = rows[strengthcol].abs().max()
+            outcome = (
+                f"The output keeps the {strengthcol} values, so these transitions stay permitted."
+                if kept_permitted
+                else "The two levels of each transition have the same parity, so the output writes it as forbidden."
+            )
+            log_comment(
+                flog,
+                ("transitiondata",),
+                f"WARNING: {rows.height:d} transitions of {ionstr} break {rulename} but"
+                f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
+                f" {strengthcol} values of this data set disagree. {outcome}",
+            )
 
 
 def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:

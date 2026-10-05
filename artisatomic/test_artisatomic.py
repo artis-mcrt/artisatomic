@@ -2655,6 +2655,17 @@ def test_add_level_ids_forbidden_uses_the_rules_of_ls_coupling():
     assert "2 transitions of Ca III break the delta L or delta S rule of LS coupling" in flog.getvalue()
     assert "delta J rule" not in flog.getvalue()
 
+    # the Laporte rule keeps a strong line between two levels of the same parity forbidden
+    sameparity = add_level_ids_forbidden(
+        dflevels.with_columns(parity=pl.lit(0, dtype=pl.Int64)), dftransitions.with_columns(A=pl.lit(1.0e8))
+    )
+    assert sameparity["forbidden"].to_list() == [True, True, True]
+    flog = io.StringIO()
+    log_deltaj_contradictions(flog, sameparity, "Ca III")
+    assert "stay permitted" not in flog.getvalue()
+    assert "2 transitions of Ca III break the delta L or delta S rule" in flog.getvalue()
+    assert "the same parity, so the output writes it as forbidden" in flog.getvalue()
+
 
 def test_add_level_ids_forbidden_ignores_a_nan_j():
     """Polars orders NaN above each number, so a NaN J must not break the delta J rule."""
