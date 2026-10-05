@@ -181,7 +181,7 @@ class ADASEnergyLevel(t.NamedTuple):
     adas_id: int
     twosplusone: int
     l: int
-    j: float
+    j: float | None  # None for a level that is an LS term
     energyabovegsinpercm: float
     g: float
     parity: int | None  # None where the configuration determines no parity
@@ -518,10 +518,33 @@ def read_adf04(
             flog,
         )
 
+        # In an LS-resolved file, each level is a term, and XJ is (statistical weight - 1) / 2 of the
+        # term. That value is more than S + L, the largest J, for each term with S > 0 and L > 0.
+        ls_resolved = bool(levelrows) and all(
+            float(j) == (int(multiplicity) * (2 * int(l_hex, 16) + 1) - 1) / 2
+            for _index, _config, multiplicity, l_hex, j, _energy in levelrows
+        )
+        if ls_resolved:
+            log_comment(
+                flog,
+                ("adata",),
+                "Each level of the file is an LS term, so the XJ field gives the statistical weight of the term and"
+                " not a J value. The levels have no J value.",
+            )
+
         for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
             config = _standardise_config(config, eissner_order=eissner_order)
+            xj = float(j)
+            # a null J turns off the delta J rule of add_level_ids_forbidden() for the level
             energylevel = ADASEnergyLevel(
-                config, int(adas_id), int(multiplicity), int(l_hex, 16), float(j), float(energy_percm), 0.0, 0
+                config,
+                int(adas_id),
+                int(multiplicity),
+                int(l_hex, 16),
+                None if ls_resolved else xj,
+                float(energy_percm),
+                2 * xj + 1,
+                0,
             )
 
             # hasterm=False: an adf04 name is all configuration, because the file keeps 2S+1 and
@@ -530,18 +553,18 @@ def read_adf04(
             # and not as an orbital. That is how every level of some files came out even.
             parity = get_config_parity(config, hasterm=False)
 
-            levelname = energylevel.levelname + "_{:d}{:}{:}[{:d}/2]_id={:}".format(
+            levelname = "{:}_{:d}{:}{:}{:}_id={:}".format(
+                energylevel.levelname,
                 energylevel.twosplusone,
                 lchars[energylevel.l],
                 # the name keeps the old even/odd letter where the parity is unknown. So
                 # adata.txt does not depend on a distinction that the parity column now makes.
                 ["e", "o"][parity if parity is not None else 0],
-                int(2 * energylevel.j),
+                "" if ls_resolved else f"[{int(2 * xj):d}/2]",
                 energylevel.adas_id,
             )
 
-            g = 2 * energylevel.j + 1
-            energylevel = energylevel._replace(g=g, parity=parity, levelname=levelname)
+            energylevel = energylevel._replace(parity=parity, levelname=levelname)
             energylevels.append(energylevel)
 
             # the transition and upsilon tables use these file indices and the rest of the code

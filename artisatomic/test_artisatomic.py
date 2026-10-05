@@ -2587,6 +2587,40 @@ def test_read_adas_sr1():
     assert energylevels[0].levelname.startswith("4p65s2")
 
 
+def test_read_adas_ls_resolved_file_gives_no_j():
+    """In an LS-resolved adf04 file, XJ is (g - 1) / 2 of the term and not a J value.
+
+    The committed Ca III file names its first excited term 3Po with XJ = 4. A J of 4 is not
+    possible for a 3P term, so a J from that field would break the delta J rule for LS-allowed lines.
+    """
+    flog = io.StringIO()
+    _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
+        20, 3, flog, argparse.Namespace(electrontemperature=5000.0)
+    )
+    assert "Each level of the file is an LS term" in flog.getvalue()
+    assert energylevels[1].levelname == "2s22p63s23p53d1_3Po_id=2"
+    assert energylevels[1].g == 9.0
+    assert all(level.j is None for level in energylevels)
+    assert not any("[" in level.levelname for level in energylevels)
+
+    # a J-resolved file keeps its J values
+    flog = io.StringIO()
+    _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
+        38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
+    )
+    assert "LS term" not in flog.getvalue()
+    assert all(level.j is not None for level in energylevels)
+
+
+def test_add_level_ids_forbidden_ignores_a_nan_j():
+    """Polars orders NaN above each number, so a NaN J must not break the delta J rule."""
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": [0, 1], "j": [float("nan"), 1.0]})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [0.0]})
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    assert result["breaksdeltaj"].to_list() == [False]
+    assert result["forbidden"].to_list() == [False]
+
+
 def test_write_adata_level_comment():
     """The level comment is the level's name, with no padding.
 

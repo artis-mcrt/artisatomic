@@ -273,8 +273,8 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     sentinel number to spell it.
 
     A null J means the same. The casts below give null for a text value that a reader could not
-    parse as a number. A NaN J stays NaN, and every comparison with NaN gives false. Each case
-    disables only its own rule.
+    parse as a number, and for a NaN J. polars orders NaN above each number, so a NaN J would break
+    the delta J rule. Each case disables only its own rule.
     """
     if dftransitions_ion.is_empty():
         return dftransitions_ion
@@ -302,10 +302,10 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
     if "forbidden" not in dftransitions_ion.columns:
         # The cast gives null for a text value, so a string column cannot raise in a comparison
-        # with numbers. A NaN survives the float cast, and a comparison with NaN gives false.
+        # with numbers. fill_nan() makes a NaN J null, because polars orders NaN above each number.
         knownparity = pl.col("parity").cast(pl.Int64, strict=False)
         hasj = "j" in dfenergylevels_ion.columns
-        knownj = pl.col("j").cast(pl.Float64, strict=False) if hasj else pl.lit(None, dtype=pl.Float64)
+        knownj = pl.col("j").cast(pl.Float64, strict=False).fill_nan(None) if hasj else pl.lit(None, dtype=pl.Float64)
 
         assertse1 = strength_asserts_e1(dftransitions_ion)
 
