@@ -29,6 +29,7 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
+from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
@@ -37,6 +38,7 @@ from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
+from artisatomic.base import ryd_to_hz
 from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import xopen_check_extension
@@ -2036,6 +2038,40 @@ def test_reduce_phixs_tables_worker():
     selection = (energyryd >= interval_edges[0]) & (energyryd <= interval_edges[-1])
     integral_input = recomb_integral(energyryd[selection], tablein[selection, 1])
     assert abs(integral_reduced / integral_input - 1) < 0.01
+
+
+def test_reduce_phixs_tables_worker_keeps_a_narrow_peak():
+    """A narrow peak of the table adds its area to its bin, wherever it is in the bin.
+
+    A resample of each bin at a fixed set of points lost a peak between two points, and spread a
+    peak at one point over a whole step of the set.
+    """
+    temperature = 6000.0
+    xgrid = output_xgrid(100, 0.03)
+    threshold = 0.5
+    # the low edge, the high edge and the width of bin 10
+    enlow = 0.5 * (xgrid[9] + xgrid[10]) * threshold
+    enhigh = 0.5 * (xgrid[10] + xgrid[11]) * threshold
+    step = (enhigh - enlow) / 50
+
+    def bin_average(table: np.ndarray) -> float:
+        energies = np.union1d(
+            np.linspace(enlow, enhigh, 200001), table[:, 0][(table[:, 0] > enlow) & (table[:, 0] < enhigh)]
+        )
+        sigma = np.interp(energies, table[:, 0], table[:, 1])
+        nu = energies * ryd_to_hz
+        weight = nu**2 * np.exp(-h_over_kb_in_K_sec / temperature * (nu - nu[0]))
+        return np.trapezoid(sigma * weight, energies) / np.trapezoid(weight, energies)
+
+    for peakcentre in (enlow + 20.5 * step, enlow + 20 * step):
+        halfwidth = step / 100
+        energies = [threshold, peakcentre - halfwidth, peakcentre, peakcentre + halfwidth, 4 * threshold]
+        table = np.array([[energy, 1.0] for energy in energies])
+        table[2, 1] = 1000.0
+        reduced = reduce_phixs_tables_worker(temperature, xgrid, table)
+        assert reduced[10] == pytest.approx(bin_average(table), rel=1e-4)
+        assert reduced[9] == pytest.approx(1.0)
+        assert reduced[11] == pytest.approx(1.0)
 
 
 def test_reduce_phixs_tables_worker_weight_does_not_underflow():
