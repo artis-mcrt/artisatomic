@@ -5444,17 +5444,34 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 
-def cli_run_with_stub_writer(tmp_path, monkeypatch, *, fail: bool, extraargs: list[str]) -> Path:
-    """Run main() of the CLI with a writer that writes adata.txt and a log line, and then fails if fail is True."""
+def cli_run_with_stub_writer(
+    tmp_path, monkeypatch, *, fail: bool, extraargs: list[str], failmove: str | None = None
+) -> Path:
+    """Run main() of the CLI with a stub writer.
+
+    The writer writes adata.txt, transitiondata.txt and a log line, and then fails if fail is True.
+    If failmove is a file name, the move of that new file into the output folder fails.
+    """
     from artisatomic import cli
     from artisatomic.base import log_path
 
     def write_files(_ion_handlers, args):
-        Path(args.output_folder, "adata.txt").write_text("the output of the new run\n", encoding="utf-8")
+        for filename in ("adata.txt", "transitiondata.txt"):
+            Path(args.output_folder, filename).write_text("the output of the new run\n", encoding="utf-8")
         log_path(args.output_folder).write_text("the log of the new run\n", encoding="utf-8")
         if fail:
             msg = "the reader failed"
             raise ValueError(msg)
+
+    original_replace = Path.replace
+
+    def replace(self, target):
+        if failmove is not None and self.name == failmove and self.parent.name.startswith(".artisatomic_run_"):
+            msg = "the move failed"
+            raise OSError(msg)
+        return original_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
@@ -5466,6 +5483,9 @@ def cli_run_with_stub_writer(tmp_path, monkeypatch, *, fail: bool, extraargs: li
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), *extraargs])
     if fail:
         with pytest.raises(ValueError, match="the reader failed"):
+            cli.main()
+    elif failmove is not None:
+        with pytest.raises(OSError, match="the move failed"):
             cli.main()
     else:
         cli.main()
@@ -5479,6 +5499,17 @@ def test_cli_keeps_the_earlier_output_when_the_run_fails(tmp_path, monkeypatch):
     outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=True, extraargs=[])
     for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
         assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
+    assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
+
+
+def test_cli_restores_the_earlier_output_when_a_move_fails(tmp_path, monkeypatch):
+    """A failed move after two good moves must not leave a mix of the files of two runs."""
+    outputfolder = cli_run_with_stub_writer(
+        tmp_path, monkeypatch, fail=False, extraargs=[], failmove="transitiondata.txt"
+    )
+    for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
+    assert not (outputfolder / "transitiondata.txt").exists()
     assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
 
 

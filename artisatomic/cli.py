@@ -164,24 +164,43 @@ def main() -> None:
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
     # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
     workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
+    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
+    installednames: list[str] = []
     try:
         write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
+        install_files(workfolder, outputfolder, earlierfolder, installednames)
     except BaseException:
+        for name in installednames:
+            (outputfolder / name).replace(workfolder / name)
+        for earlierfile in earlierfolder.iterdir():
+            earlierfile.replace(outputfolder / earlierfile.name)
+        earlierfolder.rmdir()
         if log_path(workfolder).is_file():
             log_path(workfolder).replace(outputfolder / failedlogname)
         shutil.rmtree(workfolder)
         print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
         raise
 
-    # the option --nophixs writes no phixsdata_v2.txt. Its level ids belong to the adata.txt of
-    # the earlier run.
-    if args.nophixs:
-        (outputfolder / "phixsdata_v2.txt").unlink(missing_ok=True)
-    for newfile in sorted(workfolder.iterdir()):
-        newfile.replace(outputfolder / newfile.name)
+    shutil.rmtree(earlierfolder)
     workfolder.rmdir()
     (outputfolder / failedlogname).unlink(missing_ok=True)
     remove_old_log_folder(outputfolder)
+
+
+def install_files(workfolder: Path, outputfolder: Path, earlierfolder: Path, installednames: list[str]) -> None:
+    """Move the files of the run from workfolder into outputfolder.
+
+    The files of the earlier run go to earlierfolder first, so the caller can restore them after a
+    failed move. phixsdata_v2.txt goes there also, because --nophixs writes no new one. Its level
+    ids belong to the adata.txt of the earlier run. installednames gets the name of each moved file.
+    """
+    newnames = sorted(newfile.name for newfile in workfolder.iterdir())
+    for name in sorted({*newnames, "phixsdata_v2.txt"}):
+        if (outputfolder / name).exists():
+            (outputfolder / name).replace(earlierfolder / name)
+    for name in newnames:
+        (workfolder / name).replace(outputfolder / name)
+        installednames.append(name)
 
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
