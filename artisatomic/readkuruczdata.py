@@ -172,8 +172,9 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     raise FileNotFoundError(msg)
 
 
-# the LS term at the end of a level label, for example "3D" of "d5s a3D", "3P" of "s4p *3P", or "2F" of "(3F)9p 2F?"
-label_term_regex = re.compile(rf"(\d{{1,2}})([{lchars}])\??$")
+# the LS term at the end of a level label, for example "3D" of "d5s a3D", "3P" of "s4p *3P", "2F" of
+# "(3F)9p 2F?", or "2F" of the extendedatoms label "B(1D)2F 2", which ends with the number of the term
+label_term_regex = re.compile(rf"(\d{{1,2}})([{lchars}])\??(?: \d+)?$")
 
 
 def possible_j_expr(side: str, nelectrons: int) -> pl.Expr:
@@ -195,20 +196,24 @@ def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
     """Give a level a possible J where a gfall row gives it a J that it cannot have.
 
     Some rows give a known level a J of 0.0 in place of its J. The reader keys the levels on the
-    energy and J, so such a row made an extra level with g = 1 at the energy of the real level. The
-    row then took an A from the wrong g. If exactly one level with a possible J has the same
-    energy, the row takes that J. If more than one has (an unresolved fine structure), the reader
+    energy and J. Such a row therefore made an extra level with g = 1 at the energy of the real
+    level, and the row took an A from the wrong g. If exactly one level with a possible J has the
+    same energy, the row takes that J and the label of that level. If more than one has (an unresolved fine structure), the reader
     cannot tell the level of the row, and it drops the row.
     """
     sides = ("lower", "upper")
     possible_levels = pl.concat(
         dfgfall.filter(possible_j_expr(side, nelectrons)).select(
-            energy=pl.col(f"energyabovegsinpercm_{side}"), possiblej=pl.col(f"j_{side}")
+            energy=pl.col(f"energyabovegsinpercm_{side}"),
+            possiblej=pl.col(f"j_{side}"),
+            possiblelabel=pl.col(f"label_{side}"),
         )
         for side in sides
-    ).unique()
-    candidates = possible_levels.group_by("energy").agg(
-        pl.col("possiblej").first(), pl.col("possiblej").n_unique().alias("ncandidates")
+    ).unique(maintain_order=True)
+    candidates = possible_levels.group_by("energy", maintain_order=True).agg(
+        pl.col("possiblej").first(),
+        pl.col("possiblelabel").first(),
+        pl.col("possiblej").n_unique().alias("ncandidates"),
     )
 
     dfgfall = dfgfall.with_row_index("gfallrow")
@@ -222,12 +227,17 @@ def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
         kept_levels.update(impossible.join(candidates, on="energy", how="anti").select("energy", "j").iter_rows())
         impossible = impossible.join(candidates, on="energy", how="inner")
         ambiguousrows.update(impossible.filter(pl.col("ncandidates") > 1)["gfallrow"].to_list())
-        newj = impossible.filter(pl.col("ncandidates") == 1).select("gfallrow", newj=pl.col("possiblej"))
+        newj = impossible.filter(pl.col("ncandidates") == 1).select(
+            "gfallrow", newj=pl.col("possiblej"), newlabel=pl.col("possiblelabel")
+        )
         nchanged += newj.height
         dfgfall = (
             dfgfall.join(newj, on="gfallrow", how="left", maintain_order="left")
-            .with_columns(pl.coalesce("newj", f"j_{side}").alias(f"j_{side}"))
-            .drop("newj")
+            .with_columns(
+                pl.coalesce("newj", f"j_{side}").alias(f"j_{side}"),
+                pl.coalesce("newlabel", f"label_{side}").alias(f"label_{side}"),
+            )
+            .drop("newj", "newlabel")
         )
 
     if nchanged > 0:
@@ -240,7 +250,7 @@ def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
     if kept_levels:
         log_comment(
             flog,
-            ("adata",),
+            ("adata", "transitiondata"),
             f"WARNING: {len(kept_levels):d} levels keep a J that they cannot have, because no other level has the same"
             " energy.",
         )

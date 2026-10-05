@@ -5388,3 +5388,28 @@ def test_readkuruczdata_gives_a_level_a_possible_j(tmp_path, monkeypatch):
     _, dflevels, _ = readkuruczdata.read_levels_and_transitions(38, 2, flog)
     assert sorted(dflevels.filter(pl.col("energyabovegsinpercm") == 60991.7)["j"].to_list()) == [2.5, 3.5]
     assert any("The reader dropped 15 lines" in line for line in flog.comments["transitiondata"])
+
+
+def test_fix_impossible_j_takes_the_label_of_the_level():
+    """A row with an impossible J takes the J and the label of the level, so the bad label cannot name the level."""
+    from artisatomic.base import IonLog
+
+    dfgfall = pl.DataFrame(
+        {
+            "energyabovegsinpercm_lower": [100.0, 100.0],
+            "j_lower": [0.0, 1.5],
+            "label_lower": ["uncl ??", "d25s b2D"],
+            "energyabovegsinpercm_upper": [5000.0, 6000.0],
+            "j_upper": [0.5, 0.5],
+            "label_upper": ["s5p z2P", "s6p y2P"],
+        }
+    )
+    flog = IonLog(io.StringIO())
+    fixed = readkuruczdata.fix_impossible_j(dfgfall, 39, flog)
+    assert fixed["j_lower"].to_list() == [1.5, 1.5]
+    assert fixed["label_lower"].to_list() == ["d25s b2D", "d25s b2D"]
+
+    # an extendedatoms label ends with the number of the term, and the term still limits J
+    dfterm = pl.DataFrame({"j_lower": [0.0, 2.5], "label_lower": ["B(1D)2F 2", "B(1D)2F 2"]})
+    assert dfterm.select(possible=readkuruczdata.possible_j_expr("lower", 38))["possible"].to_list() == [False, False]
+    assert dfterm.select(possible=readkuruczdata.possible_j_expr("lower", 37))["possible"].to_list() == [False, True]
