@@ -45,11 +45,6 @@ description_uncalibrated_withforbidden = description_withforbidden_template.form
 transition_type_regex = re.compile(r"[EM][0-9]+")
 
 
-def ion_string(atomic_number: int, ion_stage: int) -> str:
-    """Give the start of the file names of one ion, for example "70YbIII"."""
-    return f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
-
-
 def get_basepath(withforbidden: bool) -> Path:
     """Directory that holds the Floers+25 level and transitions files.
 
@@ -257,7 +252,7 @@ def find_levels_file(atomic_number: int, ion_stage: int, *, calibrated: bool, wi
     The handler name selects the directory. The floers25uncalib handler has no "withforbidden"
     variant, so it searches the private directory and then the public directory.
     """
-    ionstr = ion_string(atomic_number, ion_stage)
+    ionstr = f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
     calibstr = "calib" if calibrated else "uncalib"
     if withforbidden or calibrated or TESTMODE:
         basepaths = [get_basepath(withforbidden=withforbidden)]
@@ -304,7 +299,7 @@ def read_levels_and_transitions(
     does not list, with a warning in the log.
     """
     calibstr = "calib" if calibrated else "uncalib"
-    ionstr = ion_string(atomic_number, ion_stage)
+    ionstr = f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
 
     levels_file = find_levels_file(atomic_number, ion_stage, calibrated=calibrated, withforbidden=withforbidden)
     basepath = levels_file.parent
