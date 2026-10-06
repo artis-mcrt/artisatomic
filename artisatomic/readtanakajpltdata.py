@@ -11,7 +11,6 @@ import re
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
-from artisatomic.base import data_subfolder
 from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
@@ -23,7 +22,8 @@ from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
 jpltfolder = PYDIR / ".." / "atomic-data-tanaka-jplt"
-jpltpath = data_subfolder(jpltfolder, "data_v2.1")
+# not resolved below the data folder: a link there must not put its target into a comment line
+jpltpath = jpltfolder.resolve() / "data_v2.1"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (

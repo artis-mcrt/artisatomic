@@ -5659,7 +5659,6 @@ def write_qub_co2_phixs_files(folder: Path, level3scale: float) -> None:
 
 def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
     """A Co II level with zeros in its four target columns gets a warning and no table, and the run continues."""
-    from artisatomic.base import data_subfolder
     from artisatomic.base import IonLog
 
     datapath = tmp_path / "otherdisk"
@@ -5670,7 +5669,7 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
     adasfolder.mkdir()
     (adasfolder / "co_tyndall").symlink_to(datapath)
     monkeypatch.setattr(readadasdata, "adasfolder", adasfolder)
-    monkeypatch.setattr(readadasdata, "tyndall_co3_path", data_subfolder(adasfolder, "co_tyndall"))
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", adasfolder.resolve() / "co_tyndall")
 
     args = build_parser().parse_args([])
     crosssections = np.zeros((8, args.nphixspoints))
@@ -5869,20 +5868,6 @@ def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", datafolder.resolve())
 
     assert path_in_data_folder(readkuruczdata.find_gfall(38, 1), datafolder) == "atomic-data-kurucz/zztar/gf3801.all"
-
-
-def test_data_subfolder_keeps_a_link_below_the_data_folder(tmp_path):
-    """The JPLT and QUB readers have a fixed folder below their data folder. A link there must stay in the path."""
-    from artisatomic.base import data_subfolder
-    from artisatomic.base import path_in_data_folder
-
-    elsewhere = tmp_path / "otherdisk"
-    elsewhere.mkdir()
-    jpltfolder = tmp_path / "atomic-data-tanaka-jplt"
-    jpltfolder.mkdir()
-    (jpltfolder / "data_v2.1").symlink_to(elsewhere)
-    jpltpath = data_subfolder(jpltfolder, "data_v2.1")
-    assert path_in_data_folder(jpltpath / "26_1.txt", jpltfolder) == "atomic-data-tanaka-jplt/data_v2.1/26_1.txt"
 
 
 def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():

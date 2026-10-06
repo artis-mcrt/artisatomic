@@ -518,16 +518,6 @@ def open_for_atomic_write(path: Path) -> Generator[t.TextIO]:
     temppath.replace(path)
 
 
-def data_subfolder(datafolder: Path, name: str) -> Path:
-    """Give the folder with this name in a data folder of the repository.
-
-    The function resolves datafolder, but not a link in datafolder. path_in_data_folder() then
-    gives a file in the folder with the name of the link. The target of the link depends on the
-    machine, so it must not go into a comment line.
-    """
-    return datafolder.resolve() / name
-
-
 def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     """Render the path of a file in a data folder of the repository, for a comment line.
 

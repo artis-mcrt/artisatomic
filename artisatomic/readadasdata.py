@@ -24,7 +24,6 @@ import polars as pl
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import compression_extensions
-from artisatomic.base import data_subfolder
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
@@ -121,7 +120,8 @@ def rename_old_adas_directory() -> None:
     rename_old_data_directory(old_adaspath, adaspath)
 
 
-tyndall_co3_path = data_subfolder(adasfolder, "co_tyndall_test_sample" if TESTMODE else "co_tyndall")
+# not resolved below the data folder: a link there must not put its target into a comment line
+tyndall_co3_path = adaspath / ("co_tyndall_test_sample" if TESTMODE else "co_tyndall")
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
