@@ -130,7 +130,7 @@ handlers: dict[str, Handler] = {
         readfloers25data.get_level_valence_n,
     ),
     "floers25uncalib": Handler(
-        readfloers25data.description.format(variant="uncalibrated"),
+        readfloers25data.description_uncalibrated,
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
     ),
