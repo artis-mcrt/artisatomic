@@ -363,8 +363,9 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
 
     A transition with |delta J| > 1, or with J = 0 at both ends, is not an electric dipole
     transition. A large oscillator strength says that it is. The function add_level_ids_forbidden()
-    lets the oscillator strength win, so the transition stays permitted. This function reports how
-    often a data set needed that.
+    lets the oscillator strength win over the delta J rule. This function reports how often a data
+    set needed that. A transition between two levels of the same parity stays forbidden by the
+    Laporte rule, so the function reports such transitions with their own line.
 
     CMFGEN's provisional F III set is the known example. It splits a term by a nominal 0.8 cm-1
     and shares the term's f over all the J pairs. A delta J = 2 line can then carry f = 0.116.
@@ -377,18 +378,27 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
     minstrength = min_f_asserts_e1 if hasf else min_a_asserts_e1
     # the same test the rule used, so this reports exactly the transitions it let through
     contradictions = dftransitions_ion.filter(pl.col("breaksdeltaj") & strength_asserts_e1(dftransitions_ion))
-    if contradictions.is_empty():
-        return
-
-    largest = contradictions[strengthcol].abs().max()
-    log_comment(
-        flog,
-        ("transitiondata",),
-        f"WARNING: {contradictions.height:d} transitions of {ionstr} break the delta J rule but"
-        f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
-        f" {strengthcol} values of this data set disagree. The output keeps the {strengthcol} values, so"
-        f" these transitions stay permitted.",
-    )
+    # the Laporte rule makes a transition between two levels of the same parity forbidden, whatever its strength
+    sameparity = pl.col("forbidden") if "forbidden" in contradictions.columns else pl.lit(value=False)
+    for kept_permitted, rows in (
+        (True, contradictions.filter(sameparity.not_())),
+        (False, contradictions.filter(sameparity)),
+    ):
+        if rows.is_empty():
+            continue
+        largest = rows[strengthcol].abs().max()
+        outcome = (
+            f"The output keeps the {strengthcol} values, so these transitions stay permitted."
+            if kept_permitted
+            else "The two levels of each transition have the same parity, so the output writes it as forbidden."
+        )
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {rows.height:d} transitions of {ionstr} break the delta J rule but"
+            f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
+            f" {strengthcol} values of this data set disagree. {outcome}",
+        )
 
 
 def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
