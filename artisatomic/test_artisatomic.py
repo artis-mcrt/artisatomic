@@ -926,9 +926,11 @@ def test_read_coldata_term_to_j_redistribution():
         levelids_of_term = defaultdict(list)
         for levelid, levelname in enumerate(dflevels["levelname"]):
             levelids_of_term[levelname.split("[")[0]].append(levelid)
-        return dflevels["g"].to_list(), upsilondict, levelids_of_term
+        return dflevels["g"].to_list(), upsilondict, levelids_of_term, flog.getvalue()
 
-    gvalues, upsilondict, levelids_of_term = read_ion(8, 3)
+    gvalues, upsilondict, levelids_of_term, log = read_ion(8, 3)
+    # every line of the O III file names a term
+    assert "948 lines of the collision data file name a term and no J value" in log
 
     lower_ids = levelids_of_term["2s2_2p2_3Pe"]  # J = 0, 1, 2 with g = 1, 3, 5
     upper_ids = levelids_of_term["2s_2p3_3Do"]
@@ -948,9 +950,14 @@ def test_read_coldata_term_to_j_redistribution():
 
     # Fe II collision data is already J-resolved, so every value passes through unscaled. The
     # first row of col_data, a6De[9/2] -> a6De[7/2], gives 3.230 in the T = 0.5e4 K column
-    _, upsilondict_fe2, _ = read_ion(26, 2)
+    _, upsilondict_fe2, _, log = read_ion(26, 2)
     assert sum(1 for v in upsilondict_fe2.values() if v > 0.0) == 10601
     assert upsilondict_fe2[0, 1] == pytest.approx(3.23)
+    assert "name a term and no J value" not in log
+
+    # the O II level list has levels with no J, but its collision data file names each level with its J
+    _, _, _, log = read_ion(8, 2)
+    assert "name a term and no J value" not in log
 
 
 def test_add_level_ids_forbidden_rejects_an_unknown_level_id():
