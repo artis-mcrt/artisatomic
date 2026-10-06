@@ -217,16 +217,12 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     return dftable.drop(countcol)
 
 
-def read_transitions_file(filepath: Path, nametypes: list[str] | None = None) -> pl.DataFrame:
+def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
     """Read one Floers+25 transitions file into the lowerlevel, upperlevel, A and forbidden columns.
 
     The Type column decides the forbidden flag, so this function keeps a row for each line and
     does not merge the rows yet. It drops the Type strings, because a large file has millions of
-    rows.
-
-    nametypes are the transition types in the name of a per-type file. Each type in the file must be
-    one of them. A copy with a changed name, for example "..._E12.txt" from "..._E1.txt", then stops the
-    run, and its A values do not add to those of the original.
+    rows. It also gives the transition types of the file.
     """
     dffile = read_dashed_table(filepath, usecols=["Lower", "Upper", "A", "Type"])
 
@@ -239,21 +235,20 @@ def read_transitions_file(filepath: Path, nametypes: list[str] | None = None) ->
 
     # the forbidden flag below trusts the Type column, so an unknown type must stop the run
     # rather than count as forbidden. A file has few distinct types, so test those and not each row.
-    for transitiontype in dffile["Type"].unique().to_list():
+    transitiontypes = sorted(dffile["Type"].unique().to_list())
+    for transitiontype in transitiontypes:
         if transition_type_regex.fullmatch(transitiontype) is None:
             msg = f"Unknown transition type {transitiontype!r} in {filepath}"
             raise ValueError(msg)
-        if nametypes is not None and transitiontype not in nametypes:
-            msg = f"{filepath} holds transitions of the type {transitiontype}, but its name gives only {nametypes}"
-            raise ValueError(msg)
 
     # Int32 holds every level index of the data set, and it halves the memory of the two columns
-    return dffile.select(
+    dftransitions = dffile.select(
         lowerlevel=pl.col("Lower").cast(pl.Int32),
         upperlevel=pl.col("Upper").cast(pl.Int32),
         A=pl.col("A").cast(pl.Float64),
         forbidden=pl.col("Type") != "E1",
     )
+    return dftransitions, transitiontypes
 
 
 def find_levels_file(atomic_number: int, ion_stage: int, *, calibrated: bool, withforbidden: bool) -> Path:
@@ -322,14 +317,12 @@ def read_levels_and_transitions(
     # for each name. The extension list is in priority order, so the plain form wins.
     # The glob also finds a copy that a sync client made, for example "..._E1 (1).txt". The reader
     # would add the A values of the copy to the A values of its original, so it skips such a name.
-    pertype_name_regex = re.compile(rf"{ionstr}_transitions_{calibstr}_((?:{transition_type_regex.pattern})+)\.txt")
+    pertype_name_regex = re.compile(rf"{ionstr}_transitions_{calibstr}_(?:{transition_type_regex.pattern})+\.txt")
     pertype_file_of_name: dict[str, Path] = {}
-    nametypes_of_name: dict[str, list[str]] = {}
     for ext in compression_extensions:
         for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
             name = filepath.name.removesuffix(ext)
-            namematch = pertype_name_regex.fullmatch(name)
-            if namematch is None:
+            if pertype_name_regex.fullmatch(name) is None:
                 log_comment(
                     flog,
                     ("transitiondata",),
@@ -338,7 +331,6 @@ def read_levels_and_transitions(
                 )
                 continue
             pertype_file_of_name.setdefault(name, filepath)
-            nametypes_of_name[name] = transition_type_regex.findall(namematch[1])
     pertype_files = [pertype_file_of_name[name] for name in sorted(pertype_file_of_name)]
 
     if lines_file is not None and pertype_files:
@@ -404,16 +396,20 @@ def read_levels_and_transitions(
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
-    dftransitions = pl.concat(
-        [
-            read_transitions_file(
-                transition_file,
-                nametypes_of_name.get(without_compression_extension(transition_file.name)),
-            )
-            for transition_file in transition_files
-        ],
-        rechunk=False,
-    )
+    filetransitions = [read_transitions_file(transition_file) for transition_file in transition_files]
+    # Each transition type must come from one file. A second file of a type, for example the copy
+    # "..._E12.txt" of "..._E1.txt", would add its A values to those of the first file.
+    file_of_type: dict[str, Path] = {}
+    for transition_file, (_, transitiontypes) in zip(transition_files, filetransitions, strict=True):
+        for transitiontype in transitiontypes:
+            if transitiontype in file_of_type:
+                msg = (
+                    f"{file_of_type[transitiontype].name} and {transition_file.name} both hold transitions of the"
+                    f" type {transitiontype}. Remove one of the files."
+                )
+                raise ValueError(msg)
+            file_of_type[transitiontype] = transition_file
+    dftransitions = pl.concat([dffile for dffile, _ in filetransitions], rechunk=False)
 
     log_and_print(flog, f"The reader got {dftransitions.height} transitions.")
 

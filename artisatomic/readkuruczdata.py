@@ -298,30 +298,6 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
             maintain_order="left",
         )
 
-    combined = (
-        components.group_by(
-            "atomic_number",
-            "ion_charge",
-            "energyabovegsinpercm_lower",
-            "j_lower",
-            "label_lower",
-            "energyabovegsinpercm_upper",
-            "j_upper",
-            "label_upper",
-            # each component carries the gf value of its whole line, so two lines between the same
-            # levels stay two transitions, as two whole lines do
-            "loggf",
-            maintain_order=True,
-        )
-        .agg(pl.col("gf").sum())
-        .with_columns(
-            lineloggf=pl.col("loggf"),
-            loggf=pl.col("gf").log10(),
-            energyabovegsinpercm_lower_predicted=pl.lit(value=False),
-            energyabovegsinpercm_upper_predicted=pl.lit(value=False),
-        )
-    )
-    ncombined = combined.height
     # with the labels: the reader keeps two levels with the same energy and J but other labels
     linekey = [
         "energyabovegsinpercm_lower",
@@ -331,17 +307,18 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         "j_upper",
         "label_upper",
     ]
+    # each component carries the gf value of its whole line, so two lines between the same levels
+    # stay two transitions, as two whole lines do
+    combined = components.group_by("atomic_number", "ion_charge", *linekey, "loggf", maintain_order=True).agg(
+        pl.col("gf").sum()
+    )
+    ncombined = combined.height
     combined = combined.filter(
         (pl.col("energyabovegsinpercm_lower") != pl.col("energyabovegsinpercm_upper"))
         | (pl.col("j_lower") != pl.col("j_upper"))
     )
     nselfline = ncombined - combined.height
-    combined = combined.join(
-        wholelines.select(*linekey, wholelineloggf=pl.col("loggf")),
-        left_on=[*linekey, "lineloggf"],
-        right_on=[*linekey, "wholelineloggf"],
-        how="anti",
-    )
+    combined = combined.join(wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti")
     nrepeat = ncombined - nselfline - combined.height
     log_comment(
         flog,
@@ -357,7 +334,12 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
             f"The reader dropped {nrepeat:d} combined lines that the file also gives as a whole line, and"
             f" {nselfline:d} combined lines that join a level to itself.",
         )
-    return pl.concat([wholelines, combined.drop("lineloggf")], how="diagonal_relaxed").select(wholelines.columns)
+    combined = combined.with_columns(
+        loggf=pl.col("gf").log10(),
+        energyabovegsinpercm_lower_predicted=pl.lit(value=False),
+        energyabovegsinpercm_upper_predicted=pl.lit(value=False),
+    )
+    return pl.concat([wholelines, combined], how="diagonal_relaxed").select(wholelines.columns)
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:

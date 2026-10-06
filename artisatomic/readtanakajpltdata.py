@@ -7,11 +7,11 @@ The second line of each data file names the paper of that ion.
 """
 
 import re
-from pathlib import Path
 
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import data_subfolder
 from artisatomic.base import fixed_width_column
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
@@ -22,18 +22,8 @@ from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 
-
-def get_jpltpath(datafolder: Path) -> Path:
-    """Give the folder of the data files in datafolder.
-
-    The function resolves datafolder, but not a link in datafolder. The target of such a link must not go
-    into a comment line.
-    """
-    return datafolder.resolve() / "data_v2.1"
-
-
 jpltfolder = PYDIR / ".." / "atomic-data-tanaka-jplt"
-jpltpath = get_jpltpath(jpltfolder)
+jpltpath = data_subfolder(jpltfolder, "data_v2.1")
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (

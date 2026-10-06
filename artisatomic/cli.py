@@ -167,26 +167,20 @@ def main() -> None:
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
     # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
     workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
-    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     try:
         write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
     except BaseException:
         with output_folder_lock(outputfolder):
-            discard_run(workfolder, outputfolder, earlierfolder)
+            discard_run(workfolder, outputfolder)
         raise
 
     # Two runs into one output folder can end at the same time. The lock lets only one run change
     # the files in the output folder, so the folder holds the files of one run.
     with output_folder_lock(outputfolder):
-        installednames: list[str] = []
         try:
-            install_files(workfolder, outputfolder, earlierfolder, installednames)
+            earlierfolder = install_files(workfolder, outputfolder)
         except BaseException:
-            for name in installednames:
-                (outputfolder / name).replace(workfolder / name)
-            for earlierfile in earlierfolder.iterdir():
-                earlierfile.replace(outputfolder / earlierfile.name)
-            discard_run(workfolder, outputfolder, earlierfolder)
+            discard_run(workfolder, outputfolder)
             raise
 
         # The output folder holds the full new output now. A failure of the cleanup must not make
@@ -220,29 +214,40 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
         os.close(folderfd)
 
 
-def discard_run(workfolder: Path, outputfolder: Path, earlierfolder: Path) -> None:
-    """Remove the folders of a run that failed. Keep its log as failedlogname in the output folder."""
-    earlierfolder.rmdir()
+def discard_run(workfolder: Path, outputfolder: Path) -> None:
+    """Remove the work folder of a run that failed. Keep its log as failedlogname in the output folder."""
     if log_path(workfolder).is_file():
         log_path(workfolder).replace(outputfolder / failedlogname)
     shutil.rmtree(workfolder)
     print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
 
 
-def install_files(workfolder: Path, outputfolder: Path, earlierfolder: Path, installednames: list[str]) -> None:
-    """Move the files of the run from workfolder into outputfolder.
+def install_files(workfolder: Path, outputfolder: Path) -> Path:
+    """Move the files of the run from workfolder into outputfolder. Give the folder that holds the earlier files.
 
-    The files of the earlier run go to earlierfolder first, so the caller can restore them after a
-    failed move. phixsdata_v2.txt goes there also, because --nophixs writes no new one. Its level
-    ids belong to the adata.txt of the earlier run. installednames gets the name of each moved file.
+    The files of the earlier run go to a new folder first. If a move fails, the function moves the
+    new files back to workfolder, restores the earlier files, and raises the error again.
+    phixsdata_v2.txt goes to the new folder also, because --nophixs writes no new one. Its level
+    ids belong to the adata.txt of the earlier run.
     """
+    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     newnames = sorted(newfile.name for newfile in workfolder.iterdir())
-    for name in sorted({*newnames, "phixsdata_v2.txt"}):
-        if (outputfolder / name).exists():
-            (outputfolder / name).replace(earlierfolder / name)
-    for name in newnames:
-        (workfolder / name).replace(outputfolder / name)
-        installednames.append(name)
+    installednames: list[str] = []
+    try:
+        for name in sorted({*newnames, "phixsdata_v2.txt"}):
+            if (outputfolder / name).exists():
+                (outputfolder / name).replace(earlierfolder / name)
+        for name in newnames:
+            (workfolder / name).replace(outputfolder / name)
+            installednames.append(name)
+    except BaseException:
+        for name in installednames:
+            (outputfolder / name).replace(workfolder / name)
+        for earlierfile in earlierfolder.iterdir():
+            earlierfile.replace(outputfolder / earlierfile.name)
+        earlierfolder.rmdir()
+        raise
+    return earlierfolder
 
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

@@ -9,6 +9,7 @@ import io
 import json
 import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
+import re
 import typing as t
 from pathlib import Path
 
@@ -5369,19 +5370,23 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     assert plainstream.getvalue() == "a detail line\n"
 
 
+def write_floers25_lanthanum_files(tmp_path: Path, transitionfiles: dict[str, str]) -> None:
+    """Write the levels file of La II and a per-type transitions file for each name suffix, with its types."""
+    header = "Test table\n--\n--\n--\n"
+    (tmp_path / "57LaII_levels_calib.txt").write_text(
+        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
+    )
+    for suffix, transitiontypes in transitionfiles.items():
+        rows = "".join(f" 0 1 1.0e+06 {transitiontype}\n" for transitiontype in transitiontypes.split())
+        (tmp_path / f"57LaII_transitions_calib_{suffix}.txt").write_text(header + " Lower Upper A Type\n" + rows)
+
+
 def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_path):
     """A copy such as "..._E1 (1).txt" is not one more transition type, so its A values must not add to the original."""
     from artisatomic import readfloers25data
     from artisatomic.base import IonLog
 
-    header = "Test table\n--\n--\n--\n"
-    (tmp_path / "57LaII_levels_calib.txt").write_text(
-        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
-    )
-    transitions = header + " Lower Upper A Type\n 0 1 1.0e+06 E1\n"
-    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transitions)
-    (tmp_path / "57LaII_transitions_calib_E1 (1).txt").write_text(transitions)
-
+    write_floers25_lanthanum_files(tmp_path, {"E1": "E1", "E1 (1)": "E1"})
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
     flog = IonLog(io.StringIO())
     _, _, dftransitions = readfloers25data.read_levels_and_transitions(57, 2, flog, calibrated=True, withforbidden=True)
@@ -5392,20 +5397,25 @@ def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_p
     ) in flog.comments["transitiondata"]
 
 
-def test_readfloers25data_stops_for_a_type_that_the_file_name_does_not_give(monkeypatch, tmp_path):
-    """A copy such as "..._E12.txt" of "..._E1.txt" has a valid name, but its E1 rows must not add to the original."""
+@pytest.mark.parametrize(
+    ("transitionfiles", "message"),
+    [
+        # a copy with a valid name
+        ({"E1": "E1", "E12": "E1"}, "E1.txt and 57LaII_transitions_calib_E12.txt both hold transitions of the type E1"),
+        # a file of two types beside a file of one of them
+        (
+            {"E2M1": "E2 M1", "M1": "M1"},
+            "E2M1.txt and 57LaII_transitions_calib_M1.txt both hold transitions of the type M1",
+        ),
+    ],
+)
+def test_readfloers25data_stops_for_a_type_in_two_files(monkeypatch, tmp_path, transitionfiles, message):
+    """The A values of one transition type must come from one file only."""
     from artisatomic import readfloers25data
 
-    header = "Test table\n--\n--\n--\n"
-    (tmp_path / "57LaII_levels_calib.txt").write_text(
-        header + " Index Energy J Parity Configuration\n 0 0.0 0 0 5d1\n 1 100.0 1 1 5p1\n"
-    )
-    transitions = header + " Lower Upper A Type\n 0 1 1.0e+06 E1\n"
-    (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transitions)
-    (tmp_path / "57LaII_transitions_calib_E12.txt").write_text(transitions)
-
+    write_floers25_lanthanum_files(tmp_path, transitionfiles)
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
-    with pytest.raises(ValueError, match=r"type E1, but its name gives only \['E12'\]"):
+    with pytest.raises(ValueError, match=re.escape(message)):
         readfloers25data.read_levels_and_transitions(57, 2, io.StringIO(), calibrated=True, withforbidden=True)
 
 
@@ -5458,7 +5468,7 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
 
 
 def cli_run_with_stub_writer(
-    tmp_path, monkeypatch, *, fail: bool, extraargs: list[str], failmove: str | None = None
+    tmp_path, monkeypatch, *, fail: bool = False, failmove: str | None = None, extraargs: tuple[str, ...] = ()
 ) -> Path:
     """Run main() of the CLI with a stub writer.
 
@@ -5509,7 +5519,7 @@ def cli_run_with_stub_writer(
 
 def test_cli_keeps_the_earlier_output_when_the_run_fails(tmp_path, monkeypatch):
     """A failed run must leave the output of the earlier run, and keep its own log under a different name."""
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=True, extraargs=[])
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=True)
     for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
         assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
     assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
@@ -5517,9 +5527,7 @@ def test_cli_keeps_the_earlier_output_when_the_run_fails(tmp_path, monkeypatch):
 
 def test_cli_restores_the_earlier_output_when_a_move_fails(tmp_path, monkeypatch):
     """A failed move after two good moves must not leave a mix of the files of two runs."""
-    outputfolder = cli_run_with_stub_writer(
-        tmp_path, monkeypatch, fail=False, extraargs=[], failmove="transitiondata.txt"
-    )
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, failmove="transitiondata.txt")
     for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
         assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
     assert not (outputfolder / "transitiondata.txt").exists()
@@ -5535,7 +5543,7 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
         raise OSError(msg)
 
     monkeypatch.setattr(cli, "remove_old_log_folder", remove_old_log_folder)
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
     assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
 
@@ -5550,7 +5558,7 @@ def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkey
     original_install_files = cli.install_files
     lockheld = []
 
-    def install_files(workfolder, outputfolder, *install_args: t.Any) -> None:
+    def install_files(workfolder: Path, outputfolder: Path) -> Path:
         folderfd = os.open(outputfolder, os.O_RDONLY)
         try:
             fcntl.flock(folderfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -5558,10 +5566,10 @@ def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkey
             lockheld.append(True)
         finally:
             os.close(folderfd)
-        original_install_files(workfolder, outputfolder, *install_args)
+        return original_install_files(workfolder, outputfolder)
 
     monkeypatch.setattr(cli, "install_files", install_files)
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
     assert lockheld == [True]
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
 
@@ -5578,7 +5586,7 @@ def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
         return original_import(name, *import_args, **import_kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_without_fcntl)
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=[])
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
 
 
@@ -5586,7 +5594,7 @@ def test_cli_replaces_the_earlier_output_when_the_run_succeeds(tmp_path, monkeyp
     """A run with --nophixs removes phixsdata_v2.txt of the earlier run, because its level ids belong to that run."""
     (tmp_path / "artis_files").mkdir()
     (tmp_path / "artis_files" / "artisatomiclog_failed.txt").write_text("an earlier failure\n", encoding="utf-8")
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, fail=False, extraargs=["--nophixs"])
+    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch, extraargs=("--nophixs",))
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
     assert (outputfolder / "artisatomiclog.txt").read_text(encoding="utf-8") == "the log of the new run\n"
     assert not (outputfolder / "phixsdata_v2.txt").exists()
@@ -5637,27 +5645,32 @@ def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):
     assert find_nahar_file(tmp_path, 26, 3) is None
 
 
-def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
-    """A Co II level with zeros in its four target columns gets a warning and no table, and the run continues."""
+def write_qub_co2_phixs_files(folder: Path, level3scale: float) -> None:
+    """Write the QUB Co II cross section files 1.gz to 8.gz. The 40 target columns of level 3 have the given scale."""
     import gzip
 
+    energies = np.linspace(0.6, 3.0, 200)
+    for levelnumber in range(1, 9):
+        scale = level3scale if levelnumber == 3 else 1.0
+        rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
+        with gzip.open(folder / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
+            fout.write("\n".join(rows) + "\n")
+
+
+def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
+    """A Co II level with zeros in its four target columns gets a warning and no table, and the run continues."""
+    from artisatomic.base import data_subfolder
     from artisatomic.base import IonLog
 
     datapath = tmp_path / "otherdisk"
     datapath.mkdir()
-    energies = np.linspace(0.6, 3.0, 200)
-    for levelnumber in range(1, 9):
-        # level 3 has no positive value in a target column
-        scale = 0.0 if levelnumber == 3 else 1.0
-        rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
-        with gzip.open(datapath / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
-            fout.write("\n".join(rows) + "\n")
+    write_qub_co2_phixs_files(datapath, level3scale=0.0)
     # a link below the data folder, so the test also checks that the log keeps the path of the link
     adasfolder = tmp_path / "atomic-data-adas"
     adasfolder.mkdir()
     (adasfolder / "co_tyndall").symlink_to(datapath)
     monkeypatch.setattr(readadasdata, "adasfolder", adasfolder)
-    monkeypatch.setattr(readadasdata, "tyndall_co3_path", readadasdata.get_tyndall_co3_path(adasfolder, testmode=False))
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", data_subfolder(adasfolder, "co_tyndall"))
 
     args = build_parser().parse_args([])
     crosssections = np.zeros((8, args.nphixspoints))
@@ -5679,15 +5692,7 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
 
 def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     """A cross section is never negative, so a negative value in a target column is an error in the file."""
-    import gzip
-
-    energies = np.linspace(0.6, 3.0, 200)
-    for levelnumber in range(1, 9):
-        # level 3 has only negative values in its target columns
-        scale = -1.0 if levelnumber == 3 else 1.0
-        rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
-        with gzip.open(tmp_path / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
-            fout.write("\n".join(rows) + "\n")
+    write_qub_co2_phixs_files(tmp_path, level3scale=-1.0)
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
 
     args = build_parser().parse_args([])
@@ -5720,11 +5725,8 @@ def test_readkuruczdata_combines_isotope_and_hyperfine_components(tmp_path, monk
     """The components of a line become one line, with the sum of their gf fractions and no sublevel."""
     from artisatomic.base import IonLog
 
-    (tmp_path / "zztar").mkdir()
-    (tmp_path / "zztar" / "gf0300.all").write_text("\n".join(li_gfall_lines) + "\n", encoding="utf-8")
-    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
     flog = IonLog(io.StringIO())
-    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, flog)
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, li_gfall_lines, flog=flog)
 
     # the ground level takes its energy from the whole line, and not from the shifted components
     assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 14903.983, 30925.633]
@@ -5736,12 +5738,16 @@ def test_readkuruczdata_combines_isotope_and_hyperfine_components(tmp_path, monk
     assert any("combined 2 isotope and hyperfine components into 1 lines" in line for line in flog.comments["adata"])
 
 
-def read_li_gfall_lines(tmp_path, monkeypatch, lines: list[str]) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Read gfall lines as the Kurucz file of Li I, and return the levels and the transitions."""
+def read_gfall_lines(
+    tmp_path, monkeypatch, lines: list[str], *, atomic_number: int = 3, flog: t.Any = None
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Read gfall lines as the Kurucz file of a neutral atom (Li I by default). Give the levels and the transitions."""
     (tmp_path / "zztar").mkdir(exist_ok=True)
-    (tmp_path / "zztar" / "gf0300.all").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (tmp_path / "zztar" / f"gf{atomic_number:02d}00.all").write_text("\n".join(lines) + "\n", encoding="utf-8")
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
-    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(
+        atomic_number, 1, io.StringIO() if flog is None else flog
+    )
     return dflevels, dftransitions
 
 
@@ -5750,14 +5756,14 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
     component1, component2, _ = li_gfall_lines
 
     # no whole line names the ground level, so the mean of its components is a shift above 0
-    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2])
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [component1, component2])
     assert dflevels.height == 2
     assert dflevels["energyabovegsinpercm"][0] == 0.0
     assert dftransitions.height == 1
 
     # a component with a fraction of one has a log of 0.000, but its isotope still marks it
     fractionone = component2.replace("7-0.359  7-0.034", "7 0.000  7 0.000")
-    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, fractionone])
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [component1, fractionone])
     assert dflevels.height == 2
     gf = 10**0.002 * (10**-0.806 * 10**-0.034 + 1.0)
     deltae = dflevels["energyabovegsinpercm"][1] - dflevels["energyabovegsinpercm"][0]
@@ -5765,7 +5771,7 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
 
     # the components of two lines between the same levels give two transitions, one for each line
     otherline = component2.replace("670.7773  0.002", "670.7773 -0.500")
-    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, otherline])
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [component1, otherline])
     assert dflevels.height == 2
     deltae = dflevels["energyabovegsinpercm"][1] - dflevels["energyabovegsinpercm"][0]
     assert sorted(dftransitions["A"].to_list()) == pytest.approx(
@@ -5777,7 +5783,7 @@ def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
 
     # two levels with the same label and J stay two levels
     otherlevel = [line.replace("14903.983", "15100.000") for line in (component1, component2)]
-    dflevels, dftransitions = read_li_gfall_lines(tmp_path, monkeypatch, [component1, component2, *otherlevel])
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [component1, component2, *otherlevel])
     assert dflevels["energyabovegsinpercm"].to_list()[1:] == [14903.983, 15100.0]
     assert dftransitions.height == 2
 
@@ -5793,11 +5799,8 @@ def test_readkuruczdata_drops_combined_lines_that_repeat_a_line(tmp_path, monkey
     selfline = repeat.replace("       0.000  0.5 2s  2S", "   30925.640  1.5 3p  2P").replace(
         "30925.633  1.5 3p  2P", "30925.620  1.5 3p  2P"
     )
-    (tmp_path / "zztar").mkdir()
-    (tmp_path / "zztar" / "gf0300.all").write_text(f"{wholeline}\n{repeat}\n{selfline}\n", encoding="utf-8")
-    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
     flog = IonLog(io.StringIO())
-    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, flog)
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [wholeline, repeat, selfline], flog=flog)
 
     assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 30925.633]
     gf = 10**-2.253
@@ -5810,8 +5813,7 @@ def test_readkuruczdata_drops_combined_lines_that_repeat_a_line(tmp_path, monkey
 
     # a component with another upper label is another line, although the energies, J and gf agree
     relabelled = repeat.replace("1.5 3p  2P", "1.5 3d  2P")
-    (tmp_path / "zztar" / "gf0300.all").write_text(f"{wholeline}\n{relabelled}\n", encoding="utf-8")
-    _, _, dftransitions = readkuruczdata.read_levels_and_transitions(3, 1, IonLog(io.StringIO()))
+    _, dftransitions = read_gfall_lines(tmp_path, monkeypatch, [wholeline, relabelled])
     assert dftransitions.height == 2
 
 
@@ -5827,11 +5829,10 @@ def test_readkuruczdata_reads_a_space_in_place_of_the_loggf_decimal_point(tmp_pa
         "   448.8906 -1 72  26.00   51739.920  2.0 4s4D5s e3D   29469.024  2.0 5Dsp3P z5P  8.23 -5.45 -7.57DRLP 0 0  "
         "0 0.000  0 0.000                     1125 1835     0"
     )
-    (tmp_path / "zztar").mkdir()
-    (tmp_path / "zztar" / "gf2600.all").write_text(f"{groundline}\n{nopointline}\n", encoding="utf-8")
-    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
     flog = IonLog(io.StringIO())
-    _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(26, 1, flog)
+    dflevels, dftransitions = read_gfall_lines(
+        tmp_path, monkeypatch, [groundline, nopointline], atomic_number=26, flog=flog
+    )
 
     assert dflevels["energyabovegsinpercm"].to_list() == [0.0, 29469.024, 51739.92, 65590.54]
     row = dftransitions.filter(pl.col("upperlevel") == 2)
@@ -5846,19 +5847,13 @@ def test_readkuruczdata_reads_a_space_in_place_of_the_loggf_decimal_point(tmp_pa
 
 def test_readkuruczdata_rejects_an_ion_with_no_ground_level(tmp_path, monkeypatch):
     """A file whose ground level has only n-averaged lines must stop the run, because ARTIS takes the first level as the ground."""
-    (tmp_path / "zztar").mkdir()
-    gfallpath = tmp_path / "zztar" / "gf0300.all"
-    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
-
     shiftedline = li_gfall_lines[2].replace("       0.000  0.5 2s  2S", "   14903.983  1.5 2p  2P")
-    gfallpath.write_text(shiftedline + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match=r"is at 14903.983 cm\^-1 and not at 0"):
-        readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+        read_gfall_lines(tmp_path, monkeypatch, [shiftedline])
 
     averagedline = li_gfall_lines[2].replace("2s  2S    ", "AVERAGE   ")
-    gfallpath.write_text(averagedline + "\n", encoding="utf-8")
     with pytest.raises(ValueError, match="has no line between two levels that the reader can use"):
-        readkuruczdata.read_levels_and_transitions(3, 1, io.StringIO())
+        read_gfall_lines(tmp_path, monkeypatch, [averagedline])
 
 
 def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
@@ -5876,8 +5871,9 @@ def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
     assert path_in_data_folder(readkuruczdata.find_gfall(38, 1), datafolder) == "atomic-data-kurucz/zztar/gf3801.all"
 
 
-def test_jplt_and_qub_paths_keep_a_link_below_the_data_folder(tmp_path):
+def test_data_subfolder_keeps_a_link_below_the_data_folder(tmp_path):
     """The JPLT and QUB readers have a fixed folder below their data folder. A link there must stay in the path."""
+    from artisatomic.base import data_subfolder
     from artisatomic.base import path_in_data_folder
 
     elsewhere = tmp_path / "otherdisk"
@@ -5885,14 +5881,8 @@ def test_jplt_and_qub_paths_keep_a_link_below_the_data_folder(tmp_path):
     jpltfolder = tmp_path / "atomic-data-tanaka-jplt"
     jpltfolder.mkdir()
     (jpltfolder / "data_v2.1").symlink_to(elsewhere)
-    jpltpath = readtanakajpltdata.get_jpltpath(jpltfolder)
+    jpltpath = data_subfolder(jpltfolder, "data_v2.1")
     assert path_in_data_folder(jpltpath / "26_1.txt", jpltfolder) == "atomic-data-tanaka-jplt/data_v2.1/26_1.txt"
-
-    adasfolder = tmp_path / "atomic-data-adas"
-    adasfolder.mkdir()
-    (adasfolder / "co_tyndall").symlink_to(elsewhere)
-    tyndallpath = readadasdata.get_tyndall_co3_path(adasfolder, testmode=False)
-    assert path_in_data_folder(tyndallpath / "1.gz", adasfolder) == "atomic-data-adas/co_tyndall/1"
 
 
 def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
