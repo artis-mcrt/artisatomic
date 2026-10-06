@@ -148,8 +148,8 @@ def clear_files(args: argparse.Namespace) -> None:
     transitiondata.txt. It reads the first two numbers of phixsdata_v2.txt with no comment skip,
     so the file comment of that file comes after them.
 
-    The option --nophixs writes no phixsdata_v2.txt. The run removes the file of an earlier run in
-    the same folder, because its level ids belong to that run's adata.txt.
+    The option --nophixs writes no phixsdata_v2.txt. main() in cli.py removes the file of an earlier
+    run in the output folder, because its level ids belong to the adata.txt of that run.
     """
     outdir = Path(args.output_folder)
     # one time for the three files of the run
@@ -176,7 +176,6 @@ def clear_files(args: argparse.Namespace) -> None:
         )
 
     if args.nophixs:
-        (outdir / "phixsdata_v2.txt").unlink(missing_ok=True)
         return
 
     with (outdir / "phixsdata_v2.txt").open("w", encoding="utf-8") as fphixs:

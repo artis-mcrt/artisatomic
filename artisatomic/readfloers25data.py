@@ -35,9 +35,14 @@ reference = (
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = f"the Floers+25 data set, {{variant}}. {reference}. Data set: doi:10.5281/zenodo.15835360"
 # OutputFiles_withforbidden holds a later version of the data, which the Zenodo record does not have
-description_withforbidden = (
-    f"a later version of the calibrated Floers+25 data set, with forbidden lines. It is not public. {reference}"
+description_withforbidden_template = (
+    f"a later version of the {{variant}} Floers+25 data set, with forbidden lines. It is not public. {reference}"
 )
+description_withforbidden = description_withforbidden_template.format(variant="calibrated")
+description_uncalibrated_withforbidden = description_withforbidden_template.format(variant="uncalibrated")
+
+# a transition type of the Type column, for example E1, E2 or M1
+transition_type_regex = re.compile(r"[EM][0-9]+")
 
 
 def get_basepath(withforbidden: bool) -> Path:
@@ -207,12 +212,12 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     return dftable.drop(countcol)
 
 
-def read_transitions_file(filepath: Path) -> pl.DataFrame:
+def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
     """Read one Floers+25 transitions file into the lowerlevel, upperlevel, A and forbidden columns.
 
     The Type column decides the forbidden flag, so this function keeps a row for each line and
     does not merge the rows yet. It drops the Type strings, because a large file has millions of
-    rows.
+    rows. It also gives the transition types of the file.
     """
     dffile = read_dashed_table(filepath, usecols=["Lower", "Upper", "A", "Type"])
 
@@ -225,38 +230,30 @@ def read_transitions_file(filepath: Path) -> pl.DataFrame:
 
     # the forbidden flag below trusts the Type column, so an unknown type must stop the run
     # rather than count as forbidden. A file has few distinct types, so test those and not each row.
-    for transitiontype in dffile["Type"].unique().to_list():
-        if re.fullmatch(r"[EM][0-9]+", transitiontype) is None:
+    transitiontypes = sorted(dffile["Type"].unique().to_list())
+    for transitiontype in transitiontypes:
+        if transition_type_regex.fullmatch(transitiontype) is None:
             msg = f"Unknown transition type {transitiontype!r} in {filepath}"
             raise ValueError(msg)
 
     # Int32 holds every level index of the data set, and it halves the memory of the two columns
-    return dffile.select(
+    dftransitions = dffile.select(
         lowerlevel=pl.col("Lower").cast(pl.Int32),
         upperlevel=pl.col("Upper").cast(pl.Int32),
         A=pl.col("A").cast(pl.Float64),
         forbidden=pl.col("Type") != "E1",
     )
+    return dftransitions, transitiontypes
 
 
-def read_levels_and_transitions(
-    atomic_number: int, ion_stage: int, flog, calibrated: bool, withforbidden: bool = False
-):
-    """Read one ion from the Floers+25 data set.
+def find_levels_file(atomic_number: int, ion_stage: int, *, calibrated: bool, withforbidden: bool) -> Path:
+    """Find the levels file of one ion. The transitions files of the ion are in the same directory.
 
-    The ionisation energy comes from NIST rather than the file. Configurations are not unique
-    (levels of one configuration differ by J), so level names combine the configuration, J and
-    the file's index. The function checks the level indices, because a gap would silently
-    misattach transitions. The function discards a transition to a level that the levels file
-    does not list, with a warning in the log.
+    The handler name selects the directory. The floers25uncalib handler has no "withforbidden"
+    variant, so it searches the private directory and then the public directory.
     """
-    elsym = elsymbols[atomic_number]
-    ion_stage_roman = roman_numerals[ion_stage]
+    ionstr = f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
     calibstr = "calib" if calibrated else "uncalib"
-    ionstr = f"{atomic_number}{elsym}{ion_stage_roman}"
-
-    # the handler name selects the directory. The floers25uncalib handler has no "withforbidden"
-    # variant, so it searches the private directory and then the public directory.
     if withforbidden or calibrated or TESTMODE:
         basepaths = [get_basepath(withforbidden=withforbidden)]
     else:
@@ -274,6 +271,37 @@ def read_levels_and_transitions(
         searched = " or ".join(str(searchpath / f"{ionstr}_levels_{calibstr}.txt*") for searchpath in basepaths)
         msg = f"Found no Floers+25 levels file for {ionstr}. Searched {searched}"
         raise FileNotFoundError(msg)
+    return levels_file
+
+
+def description_uncalibrated(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of the floers25uncalib handler for one ion.
+
+    That handler reads the private directory before the public one, and the Zenodo data set
+    holds only the public data.
+    """
+    levels_file = find_levels_file(atomic_number, ion_stage, calibrated=False, withforbidden=False)
+    # in the test mode both directories are test_sample, which holds only public data
+    if not TESTMODE and levels_file.parent == get_basepath(withforbidden=True):
+        return description_uncalibrated_withforbidden
+    return description.format(variant="uncalibrated")
+
+
+def read_levels_and_transitions(
+    atomic_number: int, ion_stage: int, flog, calibrated: bool, withforbidden: bool = False
+):
+    """Read one ion from the Floers+25 data set.
+
+    The ionisation energy comes from NIST rather than the file. Configurations are not unique
+    (levels of one configuration differ by J), so level names combine the configuration, J and
+    the file's index. The function checks the level indices, because a gap would silently
+    misattach transitions. The function discards a transition to a level that the levels file
+    does not list, with a warning in the log.
+    """
+    calibstr = "calib" if calibrated else "uncalib"
+    ionstr = f"{atomic_number}{elsymbols[atomic_number]}{roman_numerals[ion_stage]}"
+
+    levels_file = find_levels_file(atomic_number, ion_stage, calibrated=calibrated, withforbidden=withforbidden)
     basepath = levels_file.parent
 
     # the original Floers+25 format has a single transitions file. The newer format has one
@@ -282,10 +310,22 @@ def read_levels_and_transitions(
 
     # a file can exist in a plain form and in a compressed form at the same time. Keep one path
     # for each name. The extension list is in priority order, so the plain form wins.
+    # The glob also finds a copy that a sync client made, for example "..._E1 (1).txt". The reader
+    # would add the A values of the copy to the A values of its original, so it skips such a name.
+    pertype_name_regex = re.compile(rf"{ionstr}_transitions_{calibstr}_(?:{transition_type_regex.pattern})+\.txt")
     pertype_file_of_name: dict[str, Path] = {}
     for ext in compression_extensions:
         for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
-            pertype_file_of_name.setdefault(filepath.name.removesuffix(ext), filepath)
+            name = filepath.name.removesuffix(ext)
+            if pertype_name_regex.fullmatch(name) is None:
+                log_comment(
+                    flog,
+                    ("transitiondata",),
+                    f"WARNING: The reader skipped the file {basepath.name}/{name}, because its name does not end"
+                    " with the transition types of the file.",
+                )
+                continue
+            pertype_file_of_name.setdefault(name, filepath)
     pertype_files = [pertype_file_of_name[name] for name in sorted(pertype_file_of_name)]
 
     if lines_file is not None and pertype_files:
@@ -351,9 +391,20 @@ def read_levels_and_transitions(
 
     # the files keep their order, so the merge below adds the A values in the same order for
     # each run. rechunk=False: the merge reads the rows once, so a copy into one chunk gains nothing
-    dftransitions = pl.concat(
-        [read_transitions_file(transition_file) for transition_file in transition_files], rechunk=False
-    )
+    filetransitions = [read_transitions_file(transition_file) for transition_file in transition_files]
+    # Each transition type must come from one file. A second file of a type, for example the copy
+    # "..._E12.txt" of "..._E1.txt", would add its A values to those of the first file.
+    file_of_type: dict[str, Path] = {}
+    for transition_file, (_, transitiontypes) in zip(transition_files, filetransitions, strict=True):
+        for transitiontype in transitiontypes:
+            if transitiontype in file_of_type:
+                msg = (
+                    f"{file_of_type[transitiontype].name} and {transition_file.name} both hold transitions of the"
+                    f" type {transitiontype}. Remove one of the files."
+                )
+                raise ValueError(msg)
+            file_of_type[transitiontype] = transition_file
+    dftransitions = pl.concat([dffile for dffile, _ in filetransitions], rechunk=False)
 
     log_and_print(flog, f"The reader got {dftransitions.height} transitions.")
 
