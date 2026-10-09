@@ -24,10 +24,10 @@ dynamic = ["version"]
 readme = { file = "README.md", content-type = 'text/markdown' }
 dependencies = [
     "argcomplete>=3.5.1",
-    "artistools>=2026.8.21",
+    "artistools>=2026.10.8",
     "h5py>=3.10.0",
     "numpy>=2.2.6",
-    "polars>=1.43.2",
+    "polars>=2.0.0",
     "requests>=2.34.0",
     "tqdm>=4.70.0",
     # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
