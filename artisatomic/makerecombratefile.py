@@ -3,6 +3,7 @@
 
 import argparse
 import importlib
+import re
 import typing as t
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import numpy as np
 from artistools.atomic import get_composition_data
 
 from artisatomic.base import elsymbols
+from artisatomic.base import open_for_atomic_write
 from artisatomic.base import PYDIR
 
 
@@ -55,6 +57,24 @@ def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
 
     return records
+
+
+def find_nahar_file(naharpath: Path, atomic_number: int, lowerionstage: int) -> Path | None:
+    """Give the Nahar file of the recombination to the ion stage lowerionstage, or None if there is none.
+
+    The glob also finds a copy that a sync client made, for example "fe2.rrc (1).txt". Such a copy
+    can have an earlier version of the data, so the function skips a name with a space or a
+    bracket, with a warning. sorted() makes the choice deterministic when more than one file remains.
+    """
+    prefix = f"{elsymbols[atomic_number].lower()}{lowerionstage}"
+    name_regex = re.compile(rf"{re.escape(prefix)}\.rrc[A-Za-z0-9._-]*\.txt")
+    rrcfiles = []
+    for rrcfile in sorted(naharpath.glob(f"{prefix}.rrc*.txt")):
+        if name_regex.fullmatch(rrcfile.name) is None:
+            print(f"WARNING: The program skipped the file {rrcfile.name}, because the name is not {prefix}.rrc*.txt")
+            continue
+        rrcfiles.append(rrcfile)
+    return rrcfiles[0] if rrcfiles else None
 
 
 def import_chianti_core(firstion: str) -> t.Any:
@@ -103,19 +123,18 @@ def main():
 
     dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
-    # The source of every ion comes first, and the output file opens after it. A glob is cheap,
-    # and an absent python module must leave no truncated recombrates.txt behind.
+    # the source of every ion comes first, so the program imports ChiantiPy only if an ion needs it
     ionsources: list[tuple[int, int, Path | None]] = []
     for Z, lowermost_ion_stage, uppermost_ion_stage in dfcomposition.select(
         "Z", "lowermost_ion_stage", "uppermost_ion_stage"
     ).iter_rows():
         atomic_number = int(Z)
-        for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage)):
-            # the glob starts at the repository, so the entry point finds the Nahar files
-            # from any working directory. sorted() makes the choice deterministic when
-            # more than one file matches.
-            rrcfiles = sorted(naharpath.glob(f"{elsymbols[atomic_number].lower()}{lowerionstage}.rrc*.txt"))
-            ionsources.append((atomic_number, lowerionstage, rrcfiles[0] if rrcfiles else None))
+        # naharpath starts at the repository, so the entry point finds the Nahar files from any
+        # working directory
+        ionsources.extend(
+            (atomic_number, lowerionstage, find_nahar_file(naharpath, atomic_number, lowerionstage))
+            for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage))
+        )
 
     firstchiantiion = next(
         (
@@ -127,7 +146,8 @@ def main():
     )
     ch = import_chianti_core(firstchiantiion) if firstchiantiion is not None else None
 
-    with Path(artis_files_path / "recombrates.txt").open(mode="w", encoding="utf-8") as frecombrates:
+    # the earlier recombrates.txt stays if a reader or Chianti fails
+    with open_for_atomic_write(artis_files_path / "recombrates.txt") as frecombrates:
         for atomic_number, lowerionstage, naharfilename in ionsources:
             upperionstage = lowerionstage + 1
             print(f"Z={atomic_number} {elsymbols[atomic_number]} {upperionstage}->{lowerionstage}")
@@ -140,13 +160,13 @@ def main():
                 assert ch is not None
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 arr_temperature = 10**arr_logT_e
                 ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
                 ion.rrRate()
                 arr_rrc = ion.RrRate["rate"]
                 ion.drRate()
                 arr_drc = ion.DrRate["rate"]
+                frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 # the third column is the total recombination rate, the same as RRC(total) of
                 # the Nahar files above, so the sum must include dielectronic recombination
                 frecombrates.writelines(
