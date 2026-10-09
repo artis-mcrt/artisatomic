@@ -19,7 +19,7 @@ from artisatomic.base import log_comment
 from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
-from artisatomic.base import resolve_transition_levelids
+from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import roman_numerals
 from artisatomic.base import split_levels_above_ionization
 from artisatomic.base import Transition
@@ -149,17 +149,20 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     after the reader resolves the ids. It is not the g of the level that the file labels "Upper".
     The file can list a pair in the reverse order, and the swap must not leave A with the wrong g.
     """
-    transitions = []
-
-    for row in dflines.iter_rows(named=True):
-        lowerlevel, upperlevel = resolve_transition_levelids(
-            row["level_index_lower"], row["level_index_upper"], levelid_of_fileindex, "the Lisbon transitions file"
+    dflevelids = resolve_transition_levelid_columns(
+        dflines, "level_index_lower", "level_index_upper", levelid_of_fileindex, "the Lisbon transitions file"
+    )
+    # Python computes A, and not polars: wavelength ** 2 in Python and in polars can differ in the last bit
+    return [
+        Transition(
+            lowerlevel=lowerlevel,
+            upperlevel=upperlevel,
+            A=gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * wavelength**2),
         )
-
-        A = row["gf"] / (gf_to_a_coefficient * energy_levels[upperlevel].g * row["wavelength"] ** 2)
-        transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=A))
-
-    return transitions
+        for lowerlevel, upperlevel, gf, wavelength in dflevelids.with_columns(
+            dflines["gf"], dflines["wavelength"]
+        ).iter_rows()
+    ]
 
 
 class EnergyLevelTuple(t.NamedTuple):

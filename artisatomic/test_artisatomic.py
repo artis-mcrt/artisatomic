@@ -36,6 +36,7 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import output_xgrid
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
+from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
@@ -1414,6 +1415,31 @@ def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
     transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
     assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
     assert pytest.approx(0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)) == transitions[0].A
+
+
+def test_resolve_transition_levelid_columns():
+    """The function maps each file index to its level id, puts the lower id first, and names the first bad row."""
+    levelid_of_fileindex = {10: 0, 20: 1, 30: 2}
+    dflines = pl.DataFrame({"lo": [30, 10, 20], "up": [10, 20, 30]})
+    result = resolve_transition_levelid_columns(dflines, "lo", "up", levelid_of_fileindex, "the test file")
+    assert result.rows() == [(0, 2), (0, 1), (1, 2)]
+    assert result.schema == pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64})
+
+    # int() reads a text index with spaces at the ends, so the function reads it also
+    dftext = pl.DataFrame({"lo": [" 20", "10 "], "up": ["30", "20"]})
+    assert resolve_transition_levelid_columns(dftext, "lo", "up", levelid_of_fileindex, "the test file").rows() == [
+        (1, 2),
+        (0, 1),
+    ]
+
+    dfunknown = pl.DataFrame({"lo": [10, 99, 20], "up": [20, 30, 40]})
+    with pytest.raises(ValueError, match="Transition 99 -> 30 in the test file names file index 99"):
+        resolve_transition_levelid_columns(dfunknown, "lo", "up", levelid_of_fileindex, "the test file")
+
+    # int() reads "1_0", but the polars cast does not
+    dfodd = pl.DataFrame({"lo": ["1_0"], "up": ["20"]})
+    with pytest.raises(ValueError, match="has a file index that is not an integer"):
+        resolve_transition_levelid_columns(dfodd, "lo", "up", levelid_of_fileindex, "the test file")
 
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
@@ -2891,7 +2917,7 @@ def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
 
     dflines = readfacdata.GetLines(tmp_path / "fac.tr.asc")
     transitions = readfacdata.read_lines_data(dflines, levelid_of_fileindex)
-    assert [(tr.lowerlevel, tr.upperlevel, tr.A) for tr in transitions] == [
+    assert transitions.rows() == [
         (0, 1, 3.14e7),
         (0, 2, 1.0e6),
         (1, 2, -7.77e4),
@@ -2901,7 +2927,7 @@ def test_readfacdata_maps_file_indices_to_energy_sorted_ids(tmp_path):
     flog = io.StringIO()
     dfkeptlines = drop_transitions_of_levels(dflines, "Lower", "Upper", {2}, "The FAC transitions file", flog)
     transitions = readfacdata.read_lines_data(dfkeptlines, levelid_of_fileindex)
-    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
+    assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1)]
     assert "skipped 2 transitions" in flog.getvalue()
 
     # a transition that names an Ilev the levels file does not have means the two files disagree
@@ -2951,7 +2977,7 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
 
     # the ion keeps its bound levels and goes to the output with no line
     assert len(energy_levels) == 2
-    assert transitions == []
+    assert transitions.is_empty()
     assert "The reader skipped all 2 transitions" in flog.getvalue()
     assert "The reader dropped 1 levels that are above the ionisation energy." in flog.getvalue()
 

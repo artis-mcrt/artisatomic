@@ -271,6 +271,43 @@ def resolve_transition_levelids(
     return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
 
 
+def resolve_transition_levelid_columns(
+    dflines: pl.DataFrame,
+    lowercolumn: str,
+    uppercolumn: str,
+    levelid_of_fileindex: dict[int, int],
+    sourcename: str,
+) -> pl.DataFrame:
+    """Resolve the file indices of all transitions to zero-based level ids, lower id first.
+
+    This is resolve_transition_levelids() for each row of dflines at the same time. The result
+    has the columns lowerlevel and upperlevel, in the row order of dflines. For the first row with
+    an unknown file index, the function raises the error of resolve_transition_levelids().
+    """
+
+    def levelid(column: str) -> pl.Expr:
+        # int() accepts a text index with spaces at the ends, and the polars cast does not
+        fileindex = pl.col(column).str.strip_chars() if dflines.schema[column] == pl.String else pl.col(column)
+        return fileindex.cast(pl.Int64, strict=False).replace_strict(
+            levelid_of_fileindex, default=None, return_dtype=pl.Int64
+        )
+
+    dflevelids = dflines.select(lowerlevel=levelid(lowercolumn), upperlevel=levelid(uppercolumn))
+    unresolved = dflevelids["lowerlevel"].is_null() | dflevelids["upperlevel"].is_null()
+    if unresolved.any():
+        rowindex = unresolved.arg_true()[0]
+        fileindex_lower, fileindex_upper = dflines.select(lowercolumn, uppercolumn).row(rowindex)
+        resolve_transition_levelids(fileindex_lower, fileindex_upper, levelid_of_fileindex, sourcename)
+        # resolve_transition_levelids() accepts an index that int() can read, e.g. the text " 3"
+        msg = f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} has a file index that is not an integer."
+        raise ValueError(msg)
+
+    return dflevelids.select(
+        lowerlevel=pl.min_horizontal("lowerlevel", "upperlevel"),
+        upperlevel=pl.max_horizontal("lowerlevel", "upperlevel"),
+    )
+
+
 def creation_time_utc() -> str:
     """Give the creation time for the file comments, in UTC, for example 2026-09-21T12:34:56Z.
 
