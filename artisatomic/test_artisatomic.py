@@ -2466,6 +2466,23 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
     assert "could not parse" not in flog.getvalue()
 
 
+def test_read_adf04_keeps_the_first_upsilon_of_a_pair(tmp_path):
+    """A second row of a level pair, also in the opposite order, gives a log line and no new value."""
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   1   2 6.27+08 3.00-01 3.00-01", "   2   1 6.27+08 2.00-01 2.00-01"]
+    flog = io.StringIO()
+    upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
+    assert upsilondict == {(0, 1): pytest.approx(0.429)}
+    assert "transition 1 to 2. The reader keeps 4.29e-01 and ignores 3.00e-01" in flog.getvalue()
+    assert "transition 1 to 2. The reader keeps 4.29e-01 and ignores 2.00e-01" in flog.getvalue()
+
+
+def test_read_adf04_stops_at_a_collision_pair_outside_the_levels(tmp_path):
+    """The error names the first collision pair that is outside the levels or that has two equal file indices."""
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   2   2 6.27+08 4.29-01 5.29-01", "   3   1 6.27+08 4.29-01 5.29-01"]
+    with pytest.raises(ValueError, match=r"collision strength file indices 2, 2 in .* are outside the file's 2 levels"):
+        read_hydrogen_adf04(tmp_path, rows)
+
+
 def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
     """The caller makes a transition from each returned row, so a row with values in the wrong columns must not be there."""
     rows = [
@@ -2498,11 +2515,20 @@ def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
     assert "WARNING: no collision row has an upsilon at the selected temperature" in flog.getvalue()
 
 
-def test_append_adas_transition_rejects_equal_file_indices():
+def test_adas_transitions_frame_rejects_equal_file_indices():
     """A transition from a level to itself stops the run in the reader, and the message names the file."""
     levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
-    with pytest.raises(ValueError, match="same file index 2"):
-        readadasdata.append_adas_transition(levels, [], 2, 2, 1e8, "x.adf04")
+    pairs = pl.DataFrame({"upper": [2, 2], "lower": [1, 2], "avalue": [1e8, 1e8]})
+    with pytest.raises(ValueError, match=r"x\.adf04 has the same file index 2"):
+        readadasdata.adas_transitions_frame(levels, pairs, "x.adf04")
+
+
+def test_adas_transitions_frame_names_the_first_bad_row():
+    """The error names the first bad row, and a pair outside the levels gives its own message."""
+    levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
+    pairs = pl.DataFrame({"upper": [2, 3, 2], "lower": [1, 2, 2], "avalue": [1e8, 1e8, 1e8]})
+    with pytest.raises(ValueError, match=r"transition file indices 2, 3 in x\.adf04 are outside the file's 2 levels"):
+        readadasdata.adas_transitions_frame(levels, pairs, "x.adf04")
 
 
 def test_standardise_config():
@@ -4739,8 +4765,7 @@ def test_read_adas_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypa
 
     # the ids are zero-based in memory, and both the transition and the upsilon name the same pair
     assert list(upsilondict) == [(0, 1)]
-    assert not isinstance(adas_transitions, pl.DataFrame)  # this reader returns a list of rows
-    assert [(tr.lowerlevel, tr.upperlevel) for tr in adas_transitions] == [(0, 1)]
+    assert adas_transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1)]
 
 
 def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):

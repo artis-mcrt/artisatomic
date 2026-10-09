@@ -188,8 +188,7 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     )
 
     try:
-        # the streaming engine halves the peak memory of a multi-gigabyte file. It is also faster.
-        dftable = lftable.collect(engine="streaming")
+        dftable = lftable.collect()
     except pl.exceptions.NoDataError:
         # a table can hold a header and no data row, e.g. an ion with no line of one type
         dftable = pl.DataFrame(schema={countcol: pl.UInt32} | dict.fromkeys(usecols, pl.String))
@@ -361,17 +360,14 @@ def read_levels_and_transitions(
             msg = f"Unreadable {colname} values in {levels_file}"
             raise ValueError(msg)
 
-    # every expression here reads the input frame, so g reads the file's own J string
+    # every expression here reads the input frame, so g reads the file's own J string. J is "5/2"
+    # for a half-integer value and "2" for an integer value.
+    j_number = pl.col("J").str.strip_suffix("/2").cast(pl.Int32)
     dflevels = dflevels.with_columns(
         pl.col("Index").cast(pl.Int64),
         pl.col("Energy").cast(pl.Float64),
         pl.col("Parity").cast(pl.Int64),
-        pl.when(pl.col("J").str.ends_with("/2"))
-        .then(pl.col("J").str.strip_suffix("/2").cast(pl.Int32) + 1)
-        .otherwise(
-            pl.col("J").str.strip_suffix("/2").cast(pl.Int32) * 2 + 1
-        )  # the strip_suffix is not necessary here (J does not end in "/2") but it prevents a polars error
-        .alias("g"),
+        g=pl.when(pl.col("J").str.ends_with("/2")).then(j_number + 1).otherwise(j_number * 2 + 1),
     )
 
     # the file indexes the levels from zero in file order, and the transitions refer to those
