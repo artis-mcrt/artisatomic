@@ -11,6 +11,7 @@ from pathlib import Path
 
 import polars as pl
 
+from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
@@ -20,10 +21,12 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
 
 kuruczfolder = PYDIR / ".." / "atomic-data-kurucz"
@@ -119,8 +122,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     gfall = scan_file_lines(fname).select(
         *(
             # a blank field, and a line too short to reach the field, both give a null
-            (loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
-            .replace("", None)
+            null_if_blank(loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
             .cast(dtype)
             .alias(name)
             for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
@@ -133,20 +135,10 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 
     # compare the magnitudes: a negative energy marks a predicted level, and the sign does not
     # order the levels
+    first_is_lower = pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     gfall = gfall.with_columns(
-        order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
-    )
-    gfall = gfall.with_columns(
-        pl.when(pl.col("order_lower_upper"))
-        .then(f"{column}_first")
-        .otherwise(f"{column}_second")
-        .alias(f"{column}_lower")
-        for column in double_columns
-    ).with_columns(
-        pl.when(pl.col("order_lower_upper"))
-        .then(f"{column}_second")
-        .otherwise(f"{column}_first")
-        .alias(f"{column}_upper")
+        pl.when(first_is_lower).then(f"{column}_{then}").otherwise(f"{column}_{other}").alias(f"{column}_{side}")
+        for side, then, other in (("lower", "first", "second"), ("upper", "second", "first"))
         for column in double_columns
     )
 
@@ -155,22 +147,18 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # columns ('s4d  1D'). fill_null(""): a blank label parses to null, and a null is_in() result
     # makes filter() drop the row. The filter removes only the three pseudo-level labels.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
-    gfall = gfall.with_columns(
+    atomic_number = pl.col("z_dot_ioncharge").cast(pl.Int64)
+    return gfall.with_columns(
         pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
         pl.col("label_upper").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
-    ).filter(
-        (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
-    )
-
-    gfall = gfall.with_columns(
         energyabovegsinpercm_lower_predicted=pl.col("energyabovegsinpercm_lower") < 0,
         energyabovegsinpercm_lower=pl.col("energyabovegsinpercm_lower").abs(),
         energyabovegsinpercm_upper_predicted=pl.col("energyabovegsinpercm_upper") < 0,
         energyabovegsinpercm_upper=pl.col("energyabovegsinpercm_upper").abs(),
-    )
-
-    return gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
-        ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
+        atomic_number=atomic_number,
+        ion_charge=((pl.col("z_dot_ioncharge") - atomic_number) * 100).round().cast(pl.Int64),
+    ).filter(
+        (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
     )
 
 
@@ -192,6 +180,248 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 
     msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
     raise FileNotFoundError(msg)
+
+
+# the LS term at the end of a level label, for example "3D" of "d5s a3D" or "3P" of "s4p *3P". An
+# extendedatoms label can end with the number of the term, as in "B(1D)2F 2". A label has no clear
+# term if a digit comes before the multiplicity (Na I "3s3P7s 24P"), or if a "?" follows the term.
+label_term_regex = re.compile(rf"(?:^|\D)(\d)([{lchars}])(?: \d+)?$")
+
+# the configuration part of a label, for example "s5p" (5s 5p), "d25s" (4d2 5s) or "4f"
+label_configuration_regex = re.compile(r"\d*(?:[spdfgh]\d*)+")
+orbital_l = {letter: l for l, letter in enumerate("spdfgh")}
+
+
+def kurucz_label_parity(label: str) -> int | None:
+    """Give the parity of a Kurucz level label: 1 for odd, 0 for even, or None if the label does not give it.
+
+    A "*" in the term part marks an odd level. A label often leaves out the core electrons, as in
+    O I "3s *5S" for 2p3 3s. So without a "*", the parity comes from the orbitals of the
+    configuration part. A digit run between two orbitals can be the count of the first orbital and
+    the n of the next one. For example, "p25s" can be p2 5s or p 25s. The function tries each
+    reading, and it gives None if the readings give different parities.
+    """
+    configuration, _, term = label.partition(" ")
+    if "*" in term:
+        return 1
+    if not term or label_configuration_regex.fullmatch(configuration) is None:
+        return None
+    orbitals = re.findall(r"([spdfgh])(\d*)", configuration)
+    parities = {0}
+    for index, (letter, digits) in enumerate(orbitals):
+        l = orbital_l[letter]
+        isnotlast = index < len(orbitals) - 1
+        orbitalparities = set()
+        for countlength in range(len(digits) + 1) if isnotlast else [len(digits)]:
+            count = int(digits[:countlength]) if countlength > 0 else 1
+            if digits[countlength:].startswith("0") or not 1 <= count <= 4 * l + 2:
+                continue
+            orbitalparities.add(count * l % 2)
+        parities = {(a + b) % 2 for a in parities for b in orbitalparities}
+    return parities.pop() if len(parities) == 1 else None
+
+
+def is_line_component() -> pl.Expr:
+    """Give True for a gfall row that is an isotope or hyperfine component of a line."""
+    fractions = [pl.col(column).fill_null(0.0) for column in ("log_f_hyperfine", "log_iso_abundance")]
+    # a fraction of one gives a log of 0, so the isotope also marks a component
+    return (pl.col("isotope").fill_null(0) != 0) | pl.any_horizontal(fraction != 0.0 for fraction in fractions)
+
+
+def with_j_limits(dfgfall: pl.DataFrame, nelectrons: int) -> pl.DataFrame:
+    """Add the columns twoj, twojmin, twojmax and possible for each side of the gfall rows.
+
+    A level of an ion with an odd number of electrons has an odd 2J, and other levels have an even
+    2J. Where the label ends with a clear LS term, J is also in the range |L - S| to L + S.
+    twojmin and twojmax give that range, and they are null for a label with no clear term.
+    possible is True where the J satisfies these limits.
+    """
+    columns: list[pl.Expr] = []
+    for side in ("lower", "upper"):
+        twoj = (2 * pl.col(f"j_{side}")).round().cast(pl.Int64)
+        term = pl.col(f"label_{side}").str.extract_groups(label_term_regex.pattern)
+        twos = term.struct.field("1").cast(pl.Int64, strict=False) - 1
+        twol = 2 * term.struct.field("2").replace_strict(list(lchars), list(range(len(lchars))), default=None)
+        columns += [
+            twoj.alias(f"twoj_{side}"),
+            (twol - twos).abs().alias(f"twojmin_{side}"),
+            (twol + twos).alias(f"twojmax_{side}"),
+        ]
+    dfgfall = dfgfall.with_columns(columns)
+    return dfgfall.with_columns(
+        (
+            (pl.col(f"twoj_{side}") % 2 == nelectrons % 2)
+            & pl.col(f"twoj_{side}").is_between(f"twojmin_{side}", f"twojmax_{side}").fill_null(value=True)
+        ).alias(f"possible_{side}")
+        for side in ("lower", "upper")
+    )
+
+
+def lines_text(count: int) -> str:
+    """Give "1 line" or "N lines"."""
+    return f"{count:d} line" if count == 1 else f"{count:d} lines"
+
+
+def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
+    """Give a level its J where a gfall row gives J = 0.0 and the level cannot have J = 0.
+
+    Such a J means that the row gives no J for the level. The reader keys the levels on the
+    energy and J, so the row would make an extra level with g = 1. A J that is not 0.0 does not
+    change, because a wrong label can also cause it.
+
+    The function changes a row only if all of these conditions are true:
+    - The row is a whole line, and not an isotope or hyperfine component.
+    - The label of the level has a clear LS term.
+    - The labels of the two levels give two different parities, so the line is an E1 line.
+    - The J of the other level is reliable. A J of 0.0 is reliable only if another row also gives
+      that level J = 0. That row must have a J other than 0.0 on its other level.
+    - The file gives a level with the same energy and label for each J of the term that the delta J
+      rule permits.
+
+    If the rule permits one J, the level gets that J. If it permits more than one, the function
+    divides the gf value of the line between those levels in proportion to g = 2J + 1. The sum of
+    the gf values does not change. Sr II shows the need. The file gives 4f 2F J = 5/2 and
+    7/2 at one energy, and J = 0.0 on the lines from 4f to nd.
+    """
+    sides = ("lower", "upper")
+    dfgfall = with_j_limits(dfgfall.with_row_index("gfallrow"), nelectrons)
+    targets = {
+        side: (pl.col(f"j_{side}") == 0.0) & pl.col(f"possible_{side}").not_() & is_line_component().not_()
+        for side in sides
+    }
+    if dfgfall.filter(pl.any_horizontal(targets.values())).is_empty():
+        return dfgfall.select(pl.exclude("gfallrow", "^twoj.*$", "^possible_.*$"))
+
+    labels = pl.concat([dfgfall["label_lower"], dfgfall["label_upper"]]).unique().to_list()
+    parities = {label: kurucz_label_parity(label) for label in labels}
+    dfgfall = dfgfall.with_columns(
+        pl.col(f"label_{side}").replace_strict(parities, return_dtype=pl.Int64).alias(f"parity_{side}")
+        for side in sides
+    )
+    known_levels = pl.concat(
+        dfgfall.filter(pl.col(f"possible_{side}")).select(
+            energy=pl.col(f"energyabovegsinpercm_{side}"), label=pl.col(f"label_{side}"), knownj=pl.col(f"j_{side}")
+        )
+        for side in sides
+    ).unique()
+    # the levels with J = 0 that a row gives together with a J other than 0.0 on its other level
+    supported_zero_j = pl.concat(
+        dfgfall.filter(
+            (pl.col(f"j_{side}") == 0.0) & pl.col(f"possible_{side}") & (pl.col(f"j_{other}") != 0.0)
+        ).select(energy=pl.col(f"energyabovegsinpercm_{side}"), label=pl.col(f"label_{side}"))
+        for side, other in (sides, sides[::-1])
+    ).unique()
+
+    changes = []
+    for side, other in (sides, sides[::-1]):
+        rows = dfgfall.filter(
+            targets[side] & pl.col(f"possible_{other}") & (pl.col(f"parity_{side}") != pl.col(f"parity_{other}"))
+        ).select(
+            "gfallrow",
+            energy=pl.col(f"energyabovegsinpercm_{side}"),
+            label=pl.col(f"label_{side}"),
+            otherenergy=pl.col(f"energyabovegsinpercm_{other}"),
+            otherlabel=pl.col(f"label_{other}"),
+            otherj=pl.col(f"j_{other}"),
+            knownj=pl.int_ranges(f"twojmin_{side}", pl.col(f"twojmax_{side}") + 1, step=2),
+        )
+        rows = pl.concat(
+            [
+                rows.filter(pl.col("otherj") != 0.0),
+                rows.filter(pl.col("otherj") == 0.0).join(
+                    supported_zero_j, left_on=["otherenergy", "otherlabel"], right_on=["energy", "label"], how="semi"
+                ),
+            ]
+        )
+        termj = (
+            rows.explode("knownj")
+            .with_columns(knownj=pl.col("knownj") / 2)
+            .filter(breaks_deltaj_rule(pl.col("knownj"), pl.col("otherj")).not_())
+            .join(known_levels.with_columns(given=pl.lit(value=True)), on=["energy", "label", "knownj"], how="left")
+        )
+        sidechanges = (
+            termj.group_by("gfallrow")
+            .agg(pl.col("knownj"), allgiven=pl.col("given").is_not_null().all())
+            .filter(pl.col("allgiven") & (pl.col("knownj").list.len() > 0))
+            .explode("knownj")
+            .with_columns(
+                weight=(2 * pl.col("knownj") + 1) / (2 * pl.col("knownj") + 1).sum().over("gfallrow"),
+                side=pl.lit(side),
+            )
+            .select("gfallrow", "side", "knownj", "weight")
+        )
+        changes.append(sidechanges)
+    dfchanges = pl.concat(changes)
+
+    ndivided = dfchanges.filter(pl.col("weight") < 1.0)["gfallrow"].n_unique()
+    nassigned = dfchanges["gfallrow"].n_unique() - ndivided
+    dfgfall = dfgfall.join(dfchanges, on="gfallrow", how="left", maintain_order="left").with_columns(
+        *(
+            pl.when(pl.col("side") == side).then(pl.col("knownj")).otherwise(pl.col(f"j_{side}")).alias(f"j_{side}")
+            for side in sides
+        ),
+        loggf=pl.col("loggf") + pl.col("weight").fill_null(1.0).log10(),
+    )
+
+    if nassigned > 0:
+        log_comment(
+            flog,
+            ("adata", "transitiondata"),
+            f"On {lines_text(nassigned)}, the file gives J = 0.0 for a level that cannot have J = 0. The LS term of"
+            " the label and the delta J rule permit only one J. The reader gave the level that J.",
+        )
+    if ndivided > 0:
+        log_comment(
+            flog,
+            ("adata", "transitiondata"),
+            f"On {lines_text(ndivided)}, the file gives J = 0.0 for a level that cannot have J = 0. The LS term and"
+            " the delta J rule permit more than one J, and the file gives a level for each one. The reader divided"
+            " the gf value of the line between these levels in proportion to g = 2J + 1.",
+        )
+    return dfgfall.select(
+        pl.exclude("gfallrow", "side", "knownj", "weight", "^twoj.*$", "^possible_.*$", "^parity_.*$")
+    )
+
+
+def warn_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> None:
+    """Log a warning for each level that keeps a J that it cannot have."""
+    dfgfall = with_j_limits(dfgfall, nelectrons)
+    keptlevels = (
+        pl.concat(
+            dfgfall.filter(pl.col(f"possible_{side}").not_()).select(
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+                j=pl.col(f"j_{side}"),
+                label=pl.col(f"label_{side}"),
+                parityok=pl.col(f"twoj_{side}") % 2 == nelectrons % 2,
+            )
+            for side in ("lower", "upper")
+        )
+        .unique()
+        .sort("energy", "j", "label")
+    )
+    for row in keptlevels.iter_rows(named=True):
+        reason = (
+            "the LS term of the label cannot have this J"
+            if row["parityok"]
+            else f"a level of an ion with {nelectrons:d} electrons cannot have this J"
+        )
+        level = f"The file gives the level '{row['label']}' at {row['energy']} cm^-1"
+        if row["j"] == 0.0:
+            log_detail(
+                flog,
+                ("adata", "transitiondata"),
+                "J = 0.0 kept",
+                f"WARNING: {level} J = 0.0, but {reason}. J = 0.0 means that the line gives no J for the level."
+                " The reader keeps J = 0.0, because the label and the line do not give a J that it can use.",
+            )
+        else:
+            log_detail(
+                flog,
+                ("adata", "transitiondata"),
+                "impossible J kept",
+                f"WARNING: {level} a J of {row['j']}, but {reason}. A wrong label can also cause this. The reader"
+                " changes only J = 0.0, so it keeps this J.",
+            )
 
 
 # a component level is at most this far from the level that it belongs to. In gfall08oct17, the
@@ -219,8 +449,7 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     because such a line joins a level to itself.
     """
     fractions = [pl.col(column).fill_null(0.0) for column in ("log_f_hyperfine", "log_iso_abundance")]
-    # a fraction of one gives a log of 0, so the isotope also marks a component
-    is_component = (pl.col("isotope").fill_null(0) != 0) | pl.any_horizontal(fraction != 0.0 for fraction in fractions)
+    is_component = is_line_component()
     components = dfgfall.filter(is_component)
     if components.is_empty():
         return dfgfall
@@ -261,7 +490,8 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     )
     unmatched = (
         occurrences.join(matched, on=["componentrow", "side"], how="anti")
-        .sort("label", "j", "energy")
+        # the last two keys fix the order of the rows in the weighted mean below
+        .sort("label", "j", "energy", "componentrow", "side")
         .with_columns(
             group=(
                 (pl.col("label") != pl.col("label").shift())
@@ -318,7 +548,9 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         | (pl.col("j_lower") != pl.col("j_upper"))
     )
     nselfline = ncombined - combined.height
-    combined = combined.join(wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti")
+    combined = combined.join(
+        wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti", maintain_order="left"
+    )
     nrepeat = ncombined - nselfline - combined.height
     log_comment(
         flog,
@@ -421,7 +653,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)
 
+    dfgfall = assign_missing_j(dfgfall, atomic_number - ion_charge, flog)
     dfgfall = combine_line_components(dfgfall, flog)
+    warn_impossible_j(dfgfall, atomic_number - ion_charge, flog)
     gfall = dfgfall.lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})

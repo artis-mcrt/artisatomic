@@ -26,13 +26,13 @@ from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import null_if_blank
 from artisatomic.base import path_for_log
-from artisatomic.base import resolve_transition_levelids
+from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import split_levels_above_ionization
-from artisatomic.base import Transition
 from artisatomic.levelnames import parse_orbital_n
 from artisatomic.readfloers25data import reference as floers25_reference
 
@@ -89,7 +89,7 @@ def parse_fixed_width(
         .slice(skip_lines)
         .select(
             # a blank field, and a line too short to reach the field, both give a null
-            fixed_width_column(start, end - start).replace("", None).cast(dtype).alias(name)
+            null_if_blank(fixed_width_column(start, end - start)).cast(dtype).alias(name)
             for name, start, end, dtype in columns
         )
         .collect()
@@ -280,7 +280,7 @@ def read_levels_data(dflevels):
     return energy_levels, levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
 
 
-def read_lines_data(dflines, ilev_enlevelindex_map):
+def read_lines_data(dflines, ilev_enlevelindex_map) -> pl.DataFrame:
     """Convert FAC lines to transitions referencing zero-based level ids.
 
     A line that names an Ilev that the level file does not have is an error. The two files then
@@ -289,18 +289,9 @@ def read_lines_data(dflines, ilev_enlevelindex_map):
 
     The caller removes the lines that name a level above the ionisation energy first.
     """
-    transitions = []
-
-    for row in dflines.iter_rows(named=True):
-        # not an assert: this decides between which levels the output writes a transition, so it
-        # must survive python -O. It also names the offending Ilev values instead of a bare failure
-        lowerlevel, upperlevel = resolve_transition_levelids(
-            row["Lower"], row["Upper"], ilev_enlevelindex_map, "the FAC transitions file"
-        )
-
-        transitions.append(Transition(lowerlevel=lowerlevel, upperlevel=upperlevel, A=row["A"]))
-
-    return transitions
+    return resolve_transition_levelid_columns(
+        dflines, "Lower", "Upper", ilev_enlevelindex_map, "the FAC transitions file"
+    ).with_columns(dflines["A"])
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
@@ -359,7 +350,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(dflines, ilev_enlevelindex_map)
 
-    log_and_print(flog, f"The reader got {len(transitions)} transitions.")
+    log_and_print(flog, f"The reader got {transitions.height} transitions.")
 
     return ionization_energy_in_ev, energy_levels, transitions
 

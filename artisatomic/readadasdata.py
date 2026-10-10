@@ -14,6 +14,7 @@ import re
 import string
 import typing as t
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +42,7 @@ from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import TESTMODE
+from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import convert_eissner_to_standard
 from artisatomic.levelnames import eissner_shell_orders
@@ -157,21 +159,6 @@ qub_cobalt_phixs_description = "the Co cross sections of Queen's University Belf
 
 # the name of a data file, e.g. 26_2.adf04 or 26_2.adf04.zst
 adas_filename_pattern = ion_filename_pattern(".adf04")
-
-
-class ADASTransitionRow(t.NamedTuple):
-    """One ADAS bound-bound transition.
-
-    nameto is the name of the upper level, and namefrom is the name of the lower level. The row
-    carries the level ids, so add_level_ids_forbidden() does not join on the names.
-    """
-
-    lowerlevel: int
-    upperlevel: int
-    A: float
-    nameto: str
-    namefrom: str
-    lambdaangstrom: float
 
 
 class ADASEnergyLevel(t.NamedTuple):
@@ -465,7 +452,7 @@ def read_adf04(
     *,
     contents: str = "The levels, the transitions and the collision strengths",
     origin: str | None = None,
-) -> tuple[float, list[ADASEnergyLevel], dict[tuple[int, int], float], pl.DataFrame]:
+) -> tuple[float, list[ADASEnergyLevel], pl.DataFrame, pl.DataFrame]:
     """Read levels and effective collision strengths from an ADAS adf04 file.
 
     The collision strengths come from the tabulated temperature nearest to electrontemperature,
@@ -477,15 +464,14 @@ def read_adf04(
     Returns four values:
     - the ionisation energy in eV;
     - the levels;
-    - a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids;
+    - a frame of upsilon values (see base.upsilon_schema), with one row for each pair of level ids;
     - the parsed collision rows.
 
-    The caller takes the A-values from that frame, which saves a second read and a second parse
-    of the file. The file numbers levels from one, and the rest of the code looks up id n at
+    The caller takes the A-values from the collision rows, which saves a second read and a second
+    parse of the file. The file numbers levels from one, and the rest of the code looks up id n at
     list index n - 1. The reader therefore checks that the file indices are contiguous and 1-based.
     """
     energylevels: list[ADASEnergyLevel] = []
-    upsilondict: dict[tuple[int, int], float] = {}
     ionization_energy_ev = 0.0
     log_comment(flog, ("adata", "transitiondata"), f"{contents} come from {path_in_data_folder(filepath, adasfolder)}.")
     if origin is not None:
@@ -624,7 +610,7 @@ def read_adf04(
         is_short = has_indices & (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0)
         rowcount = len(collision_lines)
         collisiondf = (
-            pl.DataFrame({"line": collision_lines}, schema={"line": pl.String})
+            pl.LazyFrame({"line": collision_lines}, schema={"line": pl.String})
             .with_columns(
                 adf04_upper_file_index(len(energylevels)).alias("upper"),
                 adf04_file_index(adf04_index_width, adf04_index_width).alias("lower"),
@@ -635,6 +621,7 @@ def read_adf04(
             # cannot parse must not be in it.
             .filter(is_short | (has_indices & pl.col("upsilon").is_not_null()))
             .select("upper", "lower", "avalue", "upsilon")
+            .collect()
         )
         goodrows = collisiondf.drop_nulls(subset=["upsilon"])
         short_rows = collisiondf.height - goodrows.height
@@ -647,30 +634,29 @@ def read_adf04(
             )
             raise ValueError(msg)
 
-        for lower, upper, upsilon in goodrows.select("lower", "upper", "upsilon").iter_rows():
-            lower, upper = min(lower, upper), max(lower, upper)
-            # a raise rather than an assert: this validates an input file, and the check
-            # must survive python -O. Equal ids would store a self-transition.
-            if not 1 <= lower < upper <= len(energylevels):
-                msg = (
-                    f"collision strength file indices {lower}, {upper} in {filepath} are outside"
-                    f" the file's {len(energylevels)} levels"
-                )
-                raise ValueError(msg)
+        upsilons = sorted_file_index_pairs(
+            goodrows.select("lower", "upper", "upsilon"), len(energylevels), "collision strength", filepath
+        )
 
-            # the file index starts at one; level ids are zero-based in memory. The log
-            # messages keep the file indices, because they are about the file's contents.
-            levelidpair = (lower - 1, upper - 1)
-            if levelidpair not in upsilondict:
-                upsilondict[levelidpair] = upsilon
-            else:
+        isfirst = pl.struct("lower", "upper").is_first_distinct()
+        firstupsilons = upsilons.filter(isfirst)
+        if firstupsilons.height < upsilons.height:
+            duplicates = upsilons.filter(~isfirst).join(
+                firstupsilons.rename({"upsilon": "kept"}), on=["lower", "upper"], how="left", maintain_order="left"
+            )
+            # the log messages keep the file indices, because they are about the file's contents
+            for lower, upper, upsilon, kept in duplicates.iter_rows():
                 log_detail(
                     flog,
                     ("transitiondata",),
                     "duplicate upsilon",
                     f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
-                    f" {upsilondict[levelidpair]:5.2e} and ignores {upsilon:5.2e}",
+                    f" {kept:5.2e} and ignores {upsilon:5.2e}",
                 )
+        # the file index starts at one; level ids are zero-based in memory
+        dfupsilon = firstupsilons.select(
+            lowerlevel=pl.col("lower") - 1, upperlevel=pl.col("upper") - 1, upsilon=pl.col("upsilon")
+        )
 
     log_and_print(flog, f"The reader got {len(energylevels):d} levels.")
     if skipped_rows:
@@ -684,56 +670,59 @@ def read_adf04(
             flog, ("transitiondata",), f"The reader skipped {unreadable_rows:d} collision rows that it could not parse."
         )
     if short_rows:
-        warning = "" if upsilondict else "WARNING: no collision row has an upsilon at the selected temperature. "
+        warning = (
+            "WARNING: no collision row has an upsilon at the selected temperature. " if dfupsilon.is_empty() else ""
+        )
         log_comment(
             flog,
             ("transitiondata",),
             f"{warning}{short_rows:d} collision rows have no value at the selected temperature.",
         )
 
-    return ionization_energy_ev, energylevels, upsilondict, collisiondf
+    return ionization_energy_ev, energylevels, dfupsilon, collisiondf
 
 
-def append_adas_transition(adas_energylevels, adas_transitions, id_lower, id_upper, A, filepath) -> None:
-    """Validate one radiative transition row and append it to the transition list.
+def sorted_file_index_pairs(dfpairs: pl.DataFrame, levelcount: int, kind: str, filepath) -> pl.DataFrame:
+    """Put the lower file index first in each pair, and check that each pair connects two levels of the file.
 
-    The ids are the file indices, which start at 1. The columns of a file do not always give the lower
-    level first, so the function sorts the pair. read_adf04() sorts each collision pair the same
-    way. A reversed pair would give a transition that the upsilon join misses.
+    dfpairs has the file indices "lower" and "upper", which start at 1, and other columns, which do
+    not change. A file does not always give the lower level first. kind names the rows in the
+    message, for example "transition". A raise rather than an assert: this validates an input file,
+    and the check must survive python -O.
+
+    A missing file index, or a file index below 1 or above levelcount, names no level. Two equal
+    file indices name a transition from a level to itself. The writer would stop at such a
+    transition only after adata.txt holds the ion.
     """
-    id_lower, id_upper = min(id_lower, id_upper), max(id_lower, id_upper)
-    # a raise rather than an assert: this validates an input file. A non-positive
-    # id would wrap to the wrong level through a negative index. An id one past the
-    # end would raise a bare IndexError that names neither the file nor the transition.
-    if not 1 <= id_lower <= len(adas_energylevels) or not 1 <= id_upper <= len(adas_energylevels):
-        msg = (
-            f"transition file indices {id_lower}, {id_upper} in {filepath} are outside"
-            f" the file's {len(adas_energylevels)} levels"
-        )
+    if dfpairs.select(pl.any_horizontal(pl.col("lower", "upper").is_null()).any()).item():
+        msg = f"A {kind} row in {filepath} has no file index for one of its two levels"
         raise ValueError(msg)
-    # read_adf04() makes the same check for a collision pair. Without it, the failure comes from
-    # the writer, after adata.txt already holds the ion.
-    if id_lower == id_upper:
-        msg = f"transition in {filepath} has the same file index {id_lower} for the two levels"
-        raise ValueError(msg)
-    # the file numbers levels from one; level ids are zero-based in memory
-    id_lower -= 1
-    id_upper -= 1
-    level_upper = adas_energylevels[id_upper]
-    level_lower = adas_energylevels[id_lower]
-    levelname_upper = level_upper.levelname
-    levelname_lower = level_lower.levelname
-    delta_percm = level_upper.energyabovegsinpercm - level_lower.energyabovegsinpercm
-    lamdaangstrom = 1.0e8 / delta_percm if delta_percm != 0.0 else -1.0
-    transition = ADASTransitionRow(
-        lowerlevel=id_lower,
-        upperlevel=id_upper,
-        A=A,
-        nameto=levelname_upper,
-        namefrom=levelname_lower,
-        lambdaangstrom=lamdaangstrom,
+    dfsorted = dfpairs.with_columns(
+        lower=pl.min_horizontal("lower", "upper"), upper=pl.max_horizontal("lower", "upper")
     )
-    adas_transitions.append(transition)
+    badrows = dfsorted.filter(
+        (pl.col("lower") < 1) | (pl.col("upper") > levelcount) | (pl.col("lower") == pl.col("upper"))
+    )
+    if not badrows.is_empty():
+        lower, upper = badrows.select("lower", "upper").row(0)
+        if lower == upper and 1 <= lower <= levelcount:
+            msg = f"{kind} in {filepath} has the same file index {lower} for the two levels"
+        else:
+            msg = f"{kind} file indices {lower}, {upper} in {filepath} are outside the file's {levelcount} levels"
+        raise ValueError(msg)
+    return dfsorted
+
+
+def adas_transitions_frame(levelcount: int, dfpairs: pl.DataFrame, filepath) -> pl.DataFrame:
+    """Validate the radiative transition rows and return the transitions with zero-based level ids.
+
+    dfpairs has the file indices "upper" and "lower", which start at 1, and the A-value "avalue".
+    sorted_file_index_pairs() puts the lower level first, as for the collision pairs of read_adf04().
+    A reversed pair would give a transition that the upsilon join misses.
+    """
+    dfsorted = sorted_file_index_pairs(dfpairs.select("lower", "upper", A="avalue"), levelcount, "transition", filepath)
+    # the file numbers levels from one; level ids are zero-based in memory
+    return dfsorted.select(lowerlevel=pl.col("lower") - 1, upperlevel=pl.col("upper") - 1, A=pl.col("A"))
 
 
 def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
@@ -759,9 +748,8 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     args gives -electrontemperature, which picks the tabulated collision strengths.
 
     The function reads the per-ion adf04 files, the Co III files in the co_tyndall directory, and
-    the single level of Co IV. The Co III and the Co IV data have their own layouts. Also returns
-    the effective collision strengths, so this reader
-    supplies an upsilondict. Most other readers leave another module to fill it.
+    the single level of Co IV. The Co III and the Co IV data have their own layouts. It also
+    returns the effective collision strengths as a frame of base.upsilon_schema.
     """
     # the plain name, not the found path: read_adf04() logs the name that it receives. The
     # tested log file carries the plain name for a plain file and for a compressed file.
@@ -771,7 +759,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
     if (atomic_number == 27) and (ion_stage == 3):
         # Co III takes its A-values from a separate file, so the collision rows are not needed
-        ionization_energy_ev, adas_energylevels, upsilondict, _ = read_adf04(
+        ionization_energy_ev, adas_energylevels, dfupsilon, _ = read_adf04(
             tyndall_co3_path / "adf04_v1",
             flog,
             args.electrontemperature,
@@ -786,26 +774,29 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         log_comment(flog, ("adata",), nist_ionization_energy_comment)
         log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
 
-        adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
         transitionfile = tyndall_co3_path / "adf04rad_v1"
         log_comment(
             flog, ("transitiondata",), f"The transitions come from {path_in_data_folder(transitionfile, adasfolder)}."
         )
+        pairrows: list[tuple[int, int, float]] = []
         with xopen_check_extension(transitionfile) as ftrans:
-            for line in ftrans:
+            for linenumber, line in enumerate(ftrans, start=1):
                 row = line.split()
-                id_upper = int(row[0])
-                id_lower = int(row[1])
-                A = float(row[2])
-                if A > 2e-30:
-                    append_adas_transition(
-                        adas_energylevels,
-                        adas_transitions,
-                        id_lower,
-                        id_upper,
-                        A,
-                        transitionfile,
-                    )
+                try:
+                    pairrow = (int(row[0]), int(row[1]), float(row[2]))
+                except (IndexError, ValueError) as exc:
+                    msg = f"Line {linenumber} of {transitionfile} does not hold two file indices and an A-value: {line.rstrip()!r}"
+                    raise ValueError(msg) from exc
+                if pairrow[2] > 2e-30:
+                    pairrows.append(pairrow)
+        try:
+            dfpairs = pl.DataFrame(
+                pairrows, schema={"upper": pl.Int64, "lower": pl.Int64, "avalue": pl.Float64}, orient="row"
+            )
+        except pl.exceptions.ComputeError as exc:
+            msg = f"{transitionfile} has a file index that is too large for a 64-bit integer"
+            raise ValueError(msg) from exc
+        adas_transitions = adas_transitions_frame(len(adas_energylevels), dfpairs, transitionfile)
 
     elif (atomic_number == 27) and (ion_stage == 4):
         # one level, the 3d6 5D4 ground state, with g = 2J + 1 as read_adf04() derives it
@@ -816,7 +807,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
             "The reader holds the single level of Co IV, with no transition. No file gives it.",
         )
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
-        upsilondict: dict[tuple[int, int], float] = {}
+        dfupsilon = pl.DataFrame(schema=upsilon_schema)
         ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
         log_comment(flog, ("adata",), nist_ionization_energy_comment)
         log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
@@ -824,30 +815,18 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
         # adaspath. So an adf04 file that discovery registers is one that this reader accepts.
-        ionization_energy_ev, adas_energylevels, upsilondict, collisiondf = read_adf04(
+        ionization_energy_ev, adas_energylevels, dfupsilon, collisiondf = read_adf04(
             atom_filepath, flog, args.electrontemperature, atomic_number, ion_stage, origin=origin
         )
 
-        adas_transitions: list[ADASTransitionRow] | pl.DataFrame = []
-
-        # a radiative transition is a collision row with both file indices and an A-value. The width
-        # of a line does not identify such a row, because a row can be one character shorter than
-        # the widest.
-        transitiondf = collisiondf.filter(
-            pl.col("upper").is_not_null(), pl.col("lower").is_not_null(), pl.col("avalue") > 2e-30
+        # a radiative transition is a collision row with an A-value, and read_adf04() returns only
+        # the rows with both file indices. The width of a line does not identify such a row, because
+        # a row can be one character shorter than the widest. adas_transitions_frame() sorts each
+        # pair of file indices, so a file that gives the two columns in the opposite order needs no
+        # special case here. The W II file does that.
+        adas_transitions = adas_transitions_frame(
+            len(adas_energylevels), collisiondf.filter(pl.col("avalue") > 2e-30), atom_filepath
         )
-
-        # append_adas_transition() sorts each pair of file indices. So a file that gives the two
-        # columns in the opposite order needs no special case here. The W II file does that.
-        for id_upper, id_lower, A in transitiondf.select("upper", "lower", "avalue").iter_rows():
-            append_adas_transition(
-                adas_energylevels,
-                adas_transitions,
-                id_lower,
-                id_upper,
-                A,
-                atom_filepath,
-            )
 
     else:
         msg = f"No ADAS data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
@@ -855,7 +834,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
 
     log_and_print(flog, f"The reader got {len(adas_transitions):d} transitions.")
 
-    return ionization_energy_ev, adas_energylevels, adas_transitions, upsilondict
+    return ionization_energy_ev, adas_energylevels, adas_transitions, dfupsilon
 
 
 def _fill_co2_phixs(
@@ -874,24 +853,36 @@ def _fill_co2_phixs(
         ("phixsdata",),
         f"The cross sections come from the files 1 to 8 in {path_in_data_folder(tyndall_co3_path, adasfolder)}.",
     )
-    for lowerlevelid in range(8):
-        # the name of a cross section file is the level's number in the source data, which
-        # counts from one
-        filename = tyndall_co3_path / f"{lowerlevelid + 1:d}.gz"
+    # the name of a cross section file is the level's number in the source data, which counts from one
+    filenames = [tyndall_co3_path / f"{lowerlevelid + 1:d}.gz" for lowerlevelid in range(8)]
+    ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
+    # One space separates the columns, and every field is a number. So a null means that
+    # the columns are not where the read expects them. A read of the first five columns
+    # of the 41 costs a third of the time of a cut of every line into its parts.
+    columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
+
+    def read_table(filename: Path) -> pl.DataFrame:
+        try:
+            return (
+                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
+                .collect()
+            )
+        except (pl.exceptions.PolarsError, OSError) as exc:
+            # The error does not name the file. The first line of a polars error gives the cause.
+            msg = f"artisatomic cannot read {filename}: {str(exc).partition(chr(10))[0]}"
+            raise ValueError(msg) from exc
+
+    # The threads read the files at the same time. The loop takes the tables in file order, so the
+    # first bad file in that order stops the run.
+    with ThreadPoolExecutor(max_workers=len(filenames)) as executor:
+        tablereads = [executor.submit(read_table, filename) for filename in filenames]
+    for lowerlevelid, (filename, tableread) in enumerate(zip(filenames, tablereads, strict=True)):
         log_and_print(
             flog,
             f"The cross sections of level {lowerlevelid + 1} come from {path_in_data_folder(filename, adasfolder)}.",
         )
-        ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
-        # One space separates the columns, and every field is a number. So a null means that
-        # the columns are not where the read expects them. A read of the first five columns
-        # of the 41 costs a third of the time of a cut of every line into its parts.
-        columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
-        photdata = (
-            pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
-            .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
-            .collect()
-        )
+        photdata = tableread.result()
         if photdata.null_count().sum_horizontal().item() > 0:
             msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
             raise ValueError(msg)

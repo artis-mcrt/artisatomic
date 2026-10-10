@@ -10,6 +10,7 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import atomic_weights
+from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.base import comment_lines
 from artisatomic.base import creation_time_utc
@@ -355,10 +356,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         # Each rule gets its own column, because log_deltaj_contradictions() reports the transitions
         # that break it while the source still gives them an f.
         dftransitions_ion = dftransitions_ion.with_columns(
-            breaksdeltaj=(
-                ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
-                | ((pl.col("lower_j") == 0) & (pl.col("upper_j") == 0))
-            ).fill_null(False)
+            breaksdeltaj=breaks_deltaj_rule(pl.col("lower_j"), pl.col("upper_j")).fill_null(False)
         )
         breaksrule = pl.col("breaksdeltaj")
         if hasls:
@@ -442,14 +440,14 @@ def resolve_coll_str(dftransitions_ion: pl.DataFrame) -> pl.DataFrame:
     coll_str then repeats what the flag says: -2 forbidden, -1 unknown. Only a missing upsilon
     reaches the -1, because a negative one has already made the flag true.
     """
-    # the fill_null keeps the outer condition free of nulls: polars 1.44.0 sends a null-condition
-    # row past the inner when to the innermost otherwise (pola-rs/polars#28498)
     return (
         dftransitions_ion.with_columns(forbidden=pl.col("forbidden") | (pl.col("upsilon") < 0.0).fill_null(False))
         .with_columns(
-            coll_str=pl.when(pl.col("upsilon").fill_null(-1.0) >= 0.0)
+            coll_str=pl.when(pl.col("upsilon") >= 0.0)
             .then(pl.col("upsilon"))
-            .otherwise(pl.when(pl.col("forbidden")).then(-2.0).otherwise(-1.0))
+            .when(pl.col("forbidden"))
+            .then(-2.0)
+            .otherwise(-1.0)
         )
         .drop("upsilon")
     )
@@ -474,7 +472,6 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
     for iondata in iondatalist:
         ion_stage = iondata.ion_stage
-        upsilondict = iondata.upsilondict
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
         ionlabel = ion_label(atomic_number, ion_stage)
 
@@ -489,13 +486,16 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             dfenergylevels_ion = iondata.dfenergylevels
             dftransitions_ion = iondata.dftransitions
 
-            # One frame of the upsilon pairs for the whole ion. The anti join below finds the
-            # pairs with no transition, and the left join after it attaches the values.
-            dfupsilon = pl.DataFrame(
-                [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
-                schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
-                orient="row",
-            )
+            dfupsilon = iondata.dfupsilon
+            # not an assert: the joins below would write a transition more than once for a pair with two rows
+            duplicatepairs = dfupsilon.filter(pl.struct("lowerlevel", "upperlevel").is_duplicated())
+            if not duplicatepairs.is_empty():
+                lower, upper, _ = duplicatepairs.row(0)
+                msg = (
+                    f"{ionstr}: the {iondata.handler} handler gives more than one upsilon value for a pair of levels,"
+                    f" for example for the level ids {lower} -> {upper}"
+                )
+                raise ValueError(msg)
 
             if dftransitions_ion.is_empty():
                 # a reader with no transitions gives a frame with no columns, which the joins in
@@ -541,9 +541,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             if not dftransitions_ion.is_empty():
                 # A left join and not a per-row map_elements(). This runs over every transition
                 # of the ion (2.6M of them for the cmfgen set). A Python callback for each row
-                # would cost more than the whole rest of the write. The keys of upsilondict are
-                # unique, so the join cannot duplicate rows. maintain_order keeps the frame in the
-                # order the reader produced it.
+                # would cost more than the whole rest of the write. maintain_order keeps the
+                # frame in the order the reader produced it.
                 dftransitions_ion = dftransitions_ion.join(
                     dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
                 ).pipe(resolve_coll_str)
