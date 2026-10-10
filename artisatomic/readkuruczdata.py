@@ -24,6 +24,7 @@ from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
+from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
 
 kuruczfolder = PYDIR / ".." / "atomic-data-kurucz"
@@ -192,6 +193,127 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
 
     msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
     raise FileNotFoundError(msg)
+
+
+# the LS term at the end of a level label, for example "3D" of "d5s a3D" or "3P" of "s4p *3P". An
+# extendedatoms label can end with the number of the term, as in "B(1D)2F 2". A label has no clear
+# term if a digit comes before the multiplicity (Na I "3s3P7s 24P"), or if a "?" follows the term.
+label_term_regex = re.compile(rf"(?:^|\D)(\d)([{lchars}])(?: \d+)?$")
+
+
+def j_has_possible_parity(side: str, nelectrons: int) -> pl.Expr:
+    """Give True where 2J of the level of one side of a gfall row is odd for an odd number of electrons, or even."""
+    twoj = (2 * pl.col(f"j_{side}")).round().cast(pl.Int64)
+    return twoj % 2 == nelectrons % 2
+
+
+def label_term_twoj_range(side: str) -> tuple[pl.Expr, pl.Expr]:
+    """Give the smallest and the largest 2J of the LS term of the label of one side, or null for a label with no clear term."""
+    term = pl.col(f"label_{side}").str.extract_groups(label_term_regex.pattern)
+    twos = term.struct.field("1").cast(pl.Int64, strict=False) - 1
+    twol = 2 * term.struct.field("2").replace_strict(list(lchars), list(range(len(lchars))), default=None)
+    return (twol - twos).abs(), twol + twos
+
+
+def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
+    """Give a level of a gfall row its J where the row gives J = 0.0 and the level cannot have J = 0.
+
+    A level of an ion with an odd number of electrons has an odd 2J, and other levels have an even
+    2J. Where the label ends with an LS term, J is also in the range |L - S| to L + S. A J of 0.0
+    outside these limits means that the row gives no J for the level. The reader keys the levels on
+    the energy and J. So the row makes an extra level at the energy of the real level. Another J
+    outside the limits can come from a wrong label, as in Y I "s26s e2D" J = 1/2 (5s2 6s has no 2D
+    term). So such a J does not change.
+
+    The level takes a J only if the label has a clear LS term, and exactly one J of that term
+    satisfies |delta J| <= 1 with the other level of the row. The file must also give a level with
+    that J, the same energy and the same label. Sr II shows why the test of delta J is necessary.
+    The file gives 4f 2F J = 5/2 and 7/2 at one energy, and J = 0.0 on the lines from 4f to nd.
+    Each of those lines is one fine-structure component. So the two lines to a 2D5/2 level keep
+    J = 0.0. The function drops no row. A level that keeps a J that it cannot have gets a warning.
+    """
+    sides = ("lower", "upper")
+    twoj = {side: (2 * pl.col(f"j_{side}")).round().cast(pl.Int64) for side in sides}
+    possible = {}
+    for side in sides:
+        twojmin, twojmax = label_term_twoj_range(side)
+        in_term = ((twojmin <= twoj[side]) & (twoj[side] <= twojmax)).fill_null(value=True)
+        possible[side] = j_has_possible_parity(side, nelectrons) & in_term
+    known_levels = pl.concat(
+        dfgfall.filter(possible[side]).select(
+            energy=pl.col(f"energyabovegsinpercm_{side}"), label=pl.col(f"label_{side}"), knownj=pl.col(f"j_{side}")
+        )
+        for side in sides
+    ).unique()
+
+    dfgfall = dfgfall.with_row_index("gfallrow")
+    nassigned = 0
+    for side, otherside in (sides, sides[::-1]):
+        twojmin, twojmax = label_term_twoj_range(side)
+        newj = (
+            dfgfall.filter((pl.col(f"j_{side}") == 0.0) & possible[side].not_() & possible[otherside])
+            .select(
+                "gfallrow",
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+                label=pl.col(f"label_{side}"),
+                twojother=twoj[otherside],
+                twojterm=pl.int_ranges(twojmin, twojmax + 1, step=2),
+            )
+            .explode("twojterm", empty_as_null=False)
+            .filter(
+                ((pl.col("twojterm") - pl.col("twojother")).abs() <= 2)
+                & ((pl.col("twojterm") != 0) | (pl.col("twojother") != 0))
+            )
+            .group_by("gfallrow", "energy", "label")
+            .agg(pl.col("twojterm").first(), ncandidates=pl.len())
+            .filter(pl.col("ncandidates") == 1)
+            .select("gfallrow", "energy", "label", knownj=pl.col("twojterm") / 2)
+            .join(known_levels, on=["energy", "label", "knownj"], how="semi")
+            .select("gfallrow", "knownj")
+        )
+        nassigned += newj.height
+        dfgfall = (
+            dfgfall.join(newj, on="gfallrow", how="left", maintain_order="left")
+            .with_columns(pl.coalesce("knownj", f"j_{side}").alias(f"j_{side}"))
+            .drop("knownj")
+        )
+
+    if nassigned > 0:
+        log_comment(
+            flog,
+            ("adata", "transitiondata"),
+            f"On {nassigned:d} lines, the file gives a level J = 0.0, but the level cannot have J = 0. Each of these"
+            " levels got the only J of its LS term that satisfies |delta J| <= 1. The file gives a level with that J, energy and"
+            " label.",
+        )
+
+    keptlevels = (
+        pl.concat(
+            dfgfall.filter(possible[side].not_()).select(
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+                j=pl.col(f"j_{side}"),
+                label=pl.col(f"label_{side}"),
+                parityok=j_has_possible_parity(side, nelectrons),
+            )
+            for side in sides
+        )
+        .unique()
+        .sort("energy", "j", "label")
+    )
+    for row in keptlevels.iter_rows(named=True):
+        reason = (
+            "the LS term of the label cannot have this J"
+            if row["parityok"]
+            else f"a level of an ion with {nelectrons:d} electrons cannot have this J"
+        )
+        log_detail(
+            flog,
+            ("adata", "transitiondata"),
+            "impossible J",
+            f"WARNING: The file gives the level '{row['label']}' at {row['energy']} cm^-1 a J of {row['j']}, but"
+            f" {reason}. The reader keeps this J, because the label and the line do not identify one J.",
+        )
+    return dfgfall.drop("gfallrow")
 
 
 # a component level is at most this far from the level that it belongs to. In gfall08oct17, the
@@ -422,6 +544,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         raise ValueError(msg)
 
     dfgfall = combine_line_components(dfgfall, flog)
+    dfgfall = assign_missing_j(dfgfall, atomic_number - ion_charge, flog)
     gfall = dfgfall.lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})

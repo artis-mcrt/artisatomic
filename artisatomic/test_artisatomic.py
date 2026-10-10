@@ -5483,6 +5483,81 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     assert plainstream.getvalue() == "a detail line\n"
 
 
+def test_assign_missing_j_keeps_every_line():
+    """A level with a J that it cannot have takes a J only where the line allows exactly one J of the same level."""
+    from artisatomic.base import IonLog
+
+    # Sr II: the file gives 4f 2F J = 5/2 and 7/2 at one energy, and J = 0.0 on the lines from 4f to nd
+    dfgfall = pl.DataFrame(
+        {
+            "energyabovegsinpercm_lower": [14555.9, 14836.24, 60991.7, 60991.7, 60991.7],
+            "j_lower": [1.5, 2.5, 0.0, 0.0, 0.0],
+            "label_lower": ["4d  2D", "4d  2D", "4f  2F", "4f  2F", "4f  2F"],
+            "energyabovegsinpercm_upper": [60991.7, 60991.7, 78702.4, 78702.4, 78688.8],
+            "j_upper": [2.5, 3.5, 2.5, 2.5, 1.5],
+            "label_upper": ["4f  2F", "4f  2F", "8d  2D", "8d  2D", "8d  2D"],
+            "loggf": [0.318, 0.398, -2.848, -1.547, -1.618],
+        }
+    )
+    flog = IonLog(io.StringIO())
+    assigned = readkuruczdata.assign_missing_j(dfgfall, 37, flog)
+    assert assigned.drop("j_lower").equals(dfgfall.drop("j_lower"))
+    # only 2F5/2 can go to 2D3/2. Both 2F5/2 and 2F7/2 can go to 2D5/2.
+    assert assigned["j_lower"].to_list() == [1.5, 2.5, 0.0, 0.0, 2.5]
+    assert any("WARNING: The file gives the level '4f  2F'" in line for line in flog.comments["adata"])
+
+    # 6d 2P has J = 0.0 on a line from 4S3/2. Both J = 1/2 and J = 3/2 of 2P satisfy |delta J| <= 1, so the
+    # level keeps its J, although the file gives only J = 1/2 at this energy.
+    dfgfall = pl.DataFrame(
+        {
+            "energyabovegsinpercm_lower": [0.0, 11361.02],
+            "j_lower": [1.5, 1.5],
+            "label_lower": ["3p3 4S", "3p3 2D"],
+            "energyabovegsinpercm_upper": [81516.73, 81516.73],
+            "j_upper": [0.0, 0.5],
+            "label_upper": ["6d  2P", "6d  2P"],
+        }
+    )
+    assert readkuruczdata.assign_missing_j(dfgfall, 15, io.StringIO()).equals(dfgfall)
+
+
+def test_readkuruczdata_assigns_missing_j_only_from_the_same_level(monkeypatch):
+    """A Kurucz level takes the J of a level with the same energy and label, and no other J."""
+    from artisatomic.base import IonLog
+
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    # Y II: d5s a3D has J = 0.0 on a line to z3P J = 0. d5d e3G has J = 2 on a line to y3P J = 2, but a J
+    # that is not 0.0 can come from a wrong label, so it stays.
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 2, io.StringIO())
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 840.213)["j"].to_list() == [1.0]
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 59179.554)["j"].to_list() == [2.0, 3.0]
+
+    # Y I: "uncl ??" has the energy of d25s b2D J = 3/2, but not its label. 5s2 6s has no 2D term, so
+    # the label "s26s e2D" is wrong, and the reader keeps the J = 1/2.
+    flog = IonLog(io.StringIO())
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 1, flog)
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 15994.045)["j"].to_list() == [0.0, 1.5]
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 31671.539)["j"].to_list() == [0.5]
+    assert any("(the first of 3 such lines in the log file)" in line for line in flog.comments["adata"])
+
+
+def test_label_term_regex_reads_only_a_clear_term():
+    """The term range applies only to a label that ends with a clear LS term."""
+    terms = {
+        label: match.groups() if (match := readkuruczdata.label_term_regex.search(label)) else None
+        for label in ("d5s a3D", "s4p *3P", "B(1D)2F 2", "3s3P7s 24P", "(3F)9p 2F?", "4f  2F")
+    }
+    assert terms == {
+        "d5s a3D": ("3", "D"),
+        "s4p *3P": ("3", "P"),
+        "B(1D)2F 2": ("2", "F"),
+        "3s3P7s 24P": None,
+        "(3F)9p 2F?": None,
+        "4f  2F": ("2", "F"),
+    }
+
+
 def write_floers25_lanthanum_files(tmp_path: Path, transitionfiles: dict[str, str]) -> None:
     """Write the levels file of La II and a per-type transitions file for each name suffix, with its types."""
     header = "Test table\n--\n--\n--\n"
