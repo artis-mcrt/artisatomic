@@ -29,7 +29,6 @@ dependencies = [
     "numpy>=2.2.6",
     "polars>=2.0.0",
     "requests>=2.34.0",
-    "tqdm>=4.70.0",
     # download_gammaspec_betaminus_alpha imports urllib3 directly, for the retry policy
     "urllib3>=2.2.0",
     "xopen>=2.1.0",
@@ -52,7 +51,6 @@ dev = [
     "ruff>=0.16.4",
     "ty>=0.0.74",
     "types-requests>=2.32.0.20241016",
-    "types-tqdm>=4.70.0.20260731",
 ]
 
 [project.urls]

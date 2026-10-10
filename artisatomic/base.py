@@ -18,6 +18,7 @@ from collections.abc import Generator
 from collections.abc import Iterable
 from collections.abc import Iterator
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
@@ -1031,16 +1032,14 @@ def parallel_map[ResultType](
     *iterables: Iterable[t.Any],
     chunksize: int | None = None,
 ) -> list[ResultType]:
-    """Execute a parallel map with a progress bar, with threads on a free-threading python and processes otherwise.
+    """Execute a parallel map, with threads on a free-threading python and processes otherwise.
 
-    Every iterable must have the same length. Executor.map() and thread_map() stop at the
-    shortest iterable, as zip() does. A short iterable would therefore drop the tail of the work
-    without an error, and the three paths below would not drop the same items.
+    Every iterable must have the same length. Executor.map() stops at the shortest iterable, as
+    zip() does. A short iterable would therefore drop the tail of the work without an error, and
+    the three paths below would not drop the same items.
 
-    The signature accepts no other keywords. thread_map() accepts a dozen more that shape the
-    pool it builds (max_workers, timeout, mp_context, ...). The run-wide pool from
-    get_process_pool() cannot honour them, and tqdm() on the other path rejects them. A forwarded
-    keyword would apply the caller's intent on a free-threading build and raise on a stock one.
+    The signature accepts no other keywords. A call cannot give its own pool settings, such as
+    max_workers, because the processes come from the run-wide pool of get_process_pool().
     """
     # use a thread pool if we have no GIL (free threading)
     use_multiprocessing = sys._is_gil_enabled()  # ruff: ignore[private-member-access]
@@ -1065,23 +1064,11 @@ def parallel_map[ResultType](
         # costs more than the work.
         chunksize = max(1, nitems // (mp.cpu_count() * 4))
 
-    # disable=None means "disable on non-TTY". The bar is for a person who watches a build, and
-    # it redraws by carriage return. A redirected run or a CI capture therefore got a line of
-    # partial bars mixed with the real output for every call. The thread_map() path forwards this
-    # to tqdm.
     if use_multiprocessing:
-        from tqdm import tqdm
+        return list(get_process_pool().map(fn, *lists, chunksize=chunksize))
 
-        results = list(
-            tqdm(get_process_pool().map(fn, *lists, chunksize=chunksize), total=nitems, disable=None)  # ty:ignore[no-matching-overload]
-        )
-    else:
-        from tqdm.contrib.concurrent import thread_map
-
-        results = thread_map(fn, *lists, chunksize=chunksize, total=nitems, disable=None)
-
-    assert isinstance(results, list)
-    return results
+    with ThreadPoolExecutor() as executor:
+        return list(executor.map(fn, *lists))
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:

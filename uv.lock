@@ -21,7 +21,6 @@ dependencies = [
     { name = "numpy" },
     { name = "polars" },
     { name = "requests" },
-    { name = "tqdm" },
     { name = "urllib3" },
     { name = "xopen" },
 ]
@@ -45,7 +44,6 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
     { name = "types-requests" },
-    { name = "types-tqdm" },
 ]
 
 [package.metadata]
@@ -59,7 +57,6 @@ requires-dist = [
     { name = "polars", specifier = ">=2.0.0" },
     { name = "requests", specifier = ">=2.34.0" },
     { name = "scipy", marker = "extra == 'chianti'", specifier = ">=1.15.3" },
-    { name = "tqdm", specifier = ">=4.70.0" },
     { name = "urllib3", specifier = ">=2.2.0" },
     { name = "xopen", specifier = ">=2.1.0" },
 ]
@@ -75,7 +72,6 @@ dev = [
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "ty", specifier = ">=0.0.74" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },
-    { name = "types-tqdm", specifier = ">=4.70.0.20260731" },
 ]
 
 [[package]]
@@ -1241,15 +1237,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c0/18/4c2c0290953f8b3b9612adfcb07b57f144ade3ad32a76764fca42b77c5f3/types_requests-2.33.0.20260906.tar.gz", hash = "sha256:76ab8a0fb736744a0c3deee7aa57b2927e301f078d9e61f5391b3e92002416b9", size = 25263, upload-time = "2026-09-06T06:35:47.707Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/60/4c/51ec821d22a45b4162fa3f3e9e94ea4c0f8c49e82363b10955baa5438391/types_requests-2.33.0.20260906-py3-none-any.whl", hash = "sha256:9f53622652bd921ead7a54d665be1b8d518165c8b51cc9d68d944cd6b6bfa8fb", size = 21461, upload-time = "2026-09-06T06:35:45.856Z" },
-]
-
-[[package]]
-name = "types-tqdm"
-version = "4.70.0.20260906"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/fe/92/517d71d5a399cd2f8ead3b4328d987262478f22fbbe7f8312360d4c321d0/types_tqdm-4.70.0.20260906.tar.gz", hash = "sha256:6581dc996152a87d51ce2ea169169187ffc0a96dacdb8adbdef29cbee8c1e631", size = 19309, upload-time = "2026-09-06T06:35:31.916Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/ea/d12697988ab2c672877796ecaea69666e2379ee7b40f01f4540250d5a97b/types_tqdm-4.70.0.20260906-py3-none-any.whl", hash = "sha256:c3b88c694928515d601f73fa6646aa43adc0ef735bedbeebf0cc543f6a201ae8", size = 25181, upload-time = "2026-09-06T06:35:30.931Z" },
 ]
 
 [[package]]
