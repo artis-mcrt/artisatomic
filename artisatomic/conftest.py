@@ -12,4 +12,8 @@ def pytest_sessionfinish(session: pytest.Session) -> None:
     """
     terminalreporter = session.config.pluginmanager.get_plugin("terminalreporter")
     if terminalreporter is not None and terminalreporter.stats.get("warnings") and session.exitstatus == 0:
+        terminalreporter.write("\n")
+        terminalreporter.write_sep(
+            "=", "the run fails, because a test gave a warning (see the warnings summary)", red=True
+        )
         session.exitstatus = pytest.ExitCode.TESTS_FAILED

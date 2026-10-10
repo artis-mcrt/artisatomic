@@ -66,8 +66,8 @@ def read_csv_past_provenance(
         else:
             table = pl.read_csv(filepath, **csv_options)
     except pl.exceptions.ComputeError as exc:
-        # the parser names the column and the value, but not the file
-        msg = f"{sourcename} {filepath} has a value that does not parse: {exc}"
+        # the error of polars does not name the file
+        msg = f"polars cannot read {filepath} ({sourcename}): {exc}"
         raise ValueError(msg) from exc
 
     return check_row_count(table, headerlines, countkey, ":", sourcename)

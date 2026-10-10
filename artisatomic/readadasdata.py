@@ -749,9 +749,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
                 try:
                     pairrow = (int(row[0]), int(row[1]), float(row[2]))
                 except (IndexError, ValueError) as exc:
-                    msg = (
-                        f"Line {linenumber} of {transitionfile} does not hold two file indices and an A-value: {line!r}"
-                    )
+                    msg = f"Line {linenumber} of {transitionfile} does not hold two file indices and an A-value: {line.rstrip()!r}"
                     raise ValueError(msg) from exc
                 if pairrow[2] > 2e-30:
                     pairrows.append(pairrow)

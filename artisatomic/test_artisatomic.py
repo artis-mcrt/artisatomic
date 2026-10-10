@@ -1689,7 +1689,7 @@ def test_readlisbondata_stops_on_a_level_index_that_is_not_an_integer(tmp_path, 
     linesfile.write_text(linesfile.read_text(encoding="utf-8").replace("1,0,0.1", "1.5,0,0.1"), encoding="utf-8")
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
-    with pytest.raises(ValueError, match=r"NdIII_Transitions\.csv has a value that does not parse.*1\.5"):
+    with pytest.raises(ValueError, match=r"polars cannot read .*NdIII_Transitions\.csv.*1\.5"):
         readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
 
@@ -5806,6 +5806,54 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match=r"3\.gz has 800 negative cross sections in the columns of the 4 targets"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
             27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+        )
+
+
+def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monkeypatch):
+    """A read error of polars names no file, so the log line that names the file comes directly before the error.
+
+    A missing later file must not hide the error of an earlier file.
+    """
+    import gzip
+
+    write_qub_co2_phixs_files(tmp_path, level3scale=1.0)
+    with gzip.open(tmp_path / "3.gz", "rt", encoding="utf-8") as fin:
+        lines = fin.read().splitlines()
+    lines[5] = "abc " + lines[5].split(maxsplit=1)[1]
+    with gzip.open(tmp_path / "3.gz", "wt", encoding="utf-8") as fout:
+        fout.write("\n".join(lines) + "\n")
+    (tmp_path / "5.gz").unlink()
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+
+    args = build_parser().parse_args([])
+    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
+    flog = io.StringIO()
+    with pytest.raises(pl.exceptions.InvalidOperationError):
+        readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
+            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+        )
+    assert "The cross sections of level 3 come from" in flog.getvalue().splitlines()[-1]
+
+
+def test_read_adas_co3_names_the_file_and_the_line_of_a_bad_radiative_row(tmp_path, monkeypatch):
+    """A short row of adf04rad_v1 stops the run, and the message names the file and the line."""
+    import gzip
+    import shutil
+
+    sample = adf04_sample_path().parent
+    shutil.copy(sample / "adf04_v1.gz", tmp_path)
+    with gzip.open(sample / "adf04rad_v1.gz", "rt", encoding="utf-8") as fin:
+        lines = fin.read().splitlines()
+    with gzip.open(tmp_path / "adf04rad_v1.gz", "wt", encoding="utf-8") as fout:
+        fout.write("\n".join([*lines, "4 1"]) + "\n")
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+
+    with pytest.raises(
+        ValueError,
+        match=rf"Line {len(lines) + 1} of .*adf04rad_v1 does not hold two file indices and an A-value: '4 1'$",
+    ):
+        readadasdata.read_adas_levels_and_transitions(
+            27, 3, io.StringIO(), argparse.Namespace(electrontemperature=5000.0)
         )
 
 
