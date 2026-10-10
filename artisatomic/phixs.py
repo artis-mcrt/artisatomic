@@ -243,7 +243,7 @@ def reduce_phixs_tables[KeyType](
     # One call reduces many tables onto one grid. The worker gets that grid and builds none.
     xgrid = output_xgrid(nphixspoints, phixsnuincrement)
 
-    reduced = dict(
+    return dict(
         zip(
             dicttables.keys(),
             parallel_map(
@@ -254,27 +254,6 @@ def reduce_phixs_tables[KeyType](
             strict=True,
         )
     )
-    # A very large -phixsnuincrement gives a grid whose weights overflow. write_phixs_data() would
-    # then write NaN values, and ARTIS would fail only when it reads them.
-    notfinite = [key for key, table in reduced.items() if not np.all(np.isfinite(table))]
-    if notfinite:
-        labeltext = "" if label is None else f" The tables come from {label}."
-        msg = (
-            f"{len(notfinite):d} reduced photoionisation tables have a value that is not finite, for example the"
-            f" table of key {notfinite[0]!r}. Check -phixsnuincrement and -optimaltemperature.{labeltext}"
-        )
-        raise ValueError(msg)
-    return reduced
-
-
-def trapezoid_with_widths(arr_y: npt.NDArray[np.float64], arr_dx: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
-    """Integrate each row of arr_y with the trapezoid rule, over the sample widths arr_dx.
-
-    np.trapezoid computes the widths from the x values at each call. The caller integrates two
-    functions over one set of x values, so it computes the widths once. The result of this
-    function is bit-identical to the result of np.trapezoid.
-    """
-    return np.sum(arr_dx * (arr_y[:, 1:] + arr_y[:, :-1]) / 2.0, axis=1)
 
 
 def reduce_phixs_tables_worker(
@@ -330,98 +309,60 @@ def reduce_phixs_tables_worker(
     table_energy_last = tablein_energyryd[-1]
     table_sigma_last = tablein_sigma[-1]
 
-    def weighted_averages(arr_energyryd: np.ndarray, arr_sigma_megabarns: np.ndarray) -> np.ndarray:
-        """Average the cross section of each row over that row's bin, with the weight above.
-
-        Each row holds the samples of one bin in energy order. The first sample gives nu_low.
-        """
-        arr_nu = arr_energyryd * ryd_to_hz
-        integrand_vals = arr_nu**2 * np.exp(minus_h_over_kb_t * (arr_nu - arr_nu[:, :1]))
-        # The two integrals cover one set of x values, so compute the sample widths once.
-        arr_dx = np.diff(arr_energyryd, axis=1)
-        integralnosigma = trapezoid_with_widths(integrand_vals, arr_dx)
-        integralwithsigma = trapezoid_with_widths(arr_sigma_megabarns * integrand_vals, arr_dx)
-        # The weight is positive, so integralnosigma is positive. A negative cross section is the
-        # only way to get a negative integralwithsigma, and the input must not contain one.
-        if np.any(integralwithsigma < 0.0) or np.any(integralnosigma <= 0.0):
-            msg = (
-                f"A photoionisation bin integral is not positive. The table shape is {tablein.shape},"
-                f" the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted integral is"
-                f" {integralwithsigma.min():.6e} and the smallest weight integral is"
-                f" {integralnosigma.min():.6e}.{labeltext}{keytext}"
-            )
-            raise ValueError(msg)
-        return integralwithsigma / integralnosigma
-
-    # x is nu/nu_edge. The interval edges depend only on the grid, so compute all of them at once.
+    # x is nu/nu_edge. The bins touch, so the high edge of a bin is the low edge of the next bin.
     arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
     arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
-    # The table is in energy order, so a bisection finds the samples of each interval. The code
-    # does not rebuild a boolean mask over the whole column for each output point.
-    arr_startindex = np.searchsorted(tablein_energyryd, arr_enlow, side="left")
-    arr_endindex = np.searchsorted(tablein_energyryd, arr_enhigh, side="right")
-    arr_nsamples_table = arr_endindex - arr_startindex
 
-    # An interval gets an interpolated point at each edge that its own samples do not reach.
-    arr_first = tablein_energyryd[np.minimum(arr_startindex, len(tablein_energyryd) - 1)]
-    arr_add_low = (arr_nsamples_table == 0) | (((arr_first - arr_enlow) / arr_enlow) > 1e-20)
-    arr_last = np.where(arr_nsamples_table > 0, tablein_energyryd[np.maximum(arr_endindex - 1, 0)], arr_enlow)
-    arr_add_high = ((arr_enhigh - arr_last) / arr_last) > 1e-20
-    arr_nsamples = arr_nsamples_table + arr_add_low + arr_add_high
+    # The integrals use the piecewise-linear table exactly: the grid holds each table sample. Each
+    # bin also gets 51 points from one edge to the other, because the weight is not linear. A
+    # resample at the 51 points alone loses a narrow peak between two points, and spreads a peak
+    # at one point over a whole step. The high edge of a bin is the first point of the next bin.
+    lin_energyryd = np.append(np.linspace(arr_enlow, arr_enhigh, num=50, endpoint=False, axis=-1), arr_enhigh[-1])
+    # np.interp holds the last cross section constant past the table's end, so apply the power-law
+    # decay there instead
+    lin_sigma = np.interp(lin_energyryd, tablein_energyryd, tablein_sigma)
+    beyond = lin_energyryd > table_energy_last
+    lin_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, lin_energyryd[beyond])
+    # The table is in energy order, so the samples in the range of the grid come first
+    ntable_in_range = np.searchsorted(tablein_energyryd, arr_enhigh[-1], side="right")
+    table_energyryd_in_range = tablein_energyryd[:ntable_in_range]
+    # A table can give two cross sections at one energy (a step). The table samples keep their
+    # order, and a point of the uniform grid at the energy of a sample would split the step.
+    keep_lin = ~np.isin(lin_energyryd, table_energyryd_in_range)
+    grid_energyryd = np.concatenate((table_energyryd_in_range, lin_energyryd[keep_lin]))
+    grid_sigma = np.concatenate((tablein_sigma[:ntable_in_range], lin_sigma[keep_lin]))
+    order = np.argsort(grid_energyryd, kind="stable")
+    grid_energyryd = grid_energyryd[order]
+    grid_sigma = grid_sigma[order]
 
-    # Three groups of intervals, and the code does each group at once:
-    # - past: the whole interval lies above the table, and the two edges are the only samples;
-    # - dense: the table gives 50 samples or more, and the code keeps them;
-    # - the rest: the code resamples the interval onto 51 points.
-    arr_past = arr_enlow > table_energy_last
-    arr_dense = (arr_nsamples >= 50) & ~arr_past
-    arr_resample = ~(arr_past | arr_dense)
-
-    arr_sigma_out = np.empty(nphixspoints)
-
-    if np.any(arr_past):
-        # assume power law decay after the last point
-        edges_energyryd = np.stack([arr_enlow[arr_past], arr_enhigh[arr_past]], axis=1)
-        edges_sigma = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, edges_energyryd)
-        arr_sigma_out[arr_past] = weighted_averages(edges_energyryd, edges_sigma)
-
-    if np.any(arr_resample):
-        # 51 points from one bin edge to the other, so the integrals cover the whole bin
-        grid_energyryd = np.linspace(arr_enlow[arr_resample], arr_enhigh[arr_resample], num=51, axis=-1)
-        # np.interp holds the last cross section constant past the table's end. Apply the same
-        # power-law decay that the interval edges use, so a bin that straddles the table end
-        # does not overweight its tail.
-        # np.asarray() only names the type of the interpolated grid. np.interp() returns that
-        # array of float64 already, so the call copies nothing.
-        grid_sigma = np.asarray(np.interp(grid_energyryd, tablein_energyryd, tablein_sigma), dtype=np.float64)
-        # Almost every table reaches past the highest resampled energy, so the power law applies
-        # to no point at all. The grid increases along both axes, so its last value is its
-        # largest one. That scalar test keeps the power law off the whole grid in that case.
-        if grid_energyryd[-1, -1] > table_energy_last:
-            beyond = grid_energyryd > table_energy_last
-            grid_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, grid_energyryd[beyond])
-        arr_sigma_out[arr_resample] = weighted_averages(grid_energyryd, grid_sigma)
-
-    # Each dense interval keeps its own samples, so the number of samples changes from one
-    # interval to the next. Such intervals are rare, and this loop handles them one at a time.
-    for i in np.flatnonzero(arr_dense):
-        enlow = arr_enlow[i]
-        enhigh = arr_enhigh[i]
-        sample_energyryd = tablein_energyryd[arr_startindex[i] : arr_endindex[i]]
-        sample_sigma = tablein_sigma[arr_startindex[i] : arr_endindex[i]]
-        if arr_add_low[i]:
-            # np.interp and not scipy: scipy is an optional extra of this package
-            sample_energyryd = np.concatenate(([enlow], sample_energyryd))
-            sample_sigma = np.concatenate(([np.interp(enlow, tablein_energyryd, tablein_sigma)], sample_sigma))
-        if arr_add_high[i]:
-            new_crosssection = (
-                np.interp(enhigh, tablein_energyryd, tablein_sigma)
-                if enhigh <= table_energy_last
-                else phixs_nu_cubed_tail(table_sigma_last, table_energy_last, enhigh)
-            )
-            sample_energyryd = np.concatenate((sample_energyryd, [enhigh]))
-            sample_sigma = np.concatenate((sample_sigma, [new_crosssection]))
-
-        arr_sigma_out[i] = weighted_averages(sample_energyryd[np.newaxis, :], sample_sigma[np.newaxis, :])[0]
-
-    return arr_sigma_out
+    # Each segment between two neighbouring grid points belongs to the bin of its low end. The
+    # weight of a segment is relative to nu_low of its bin, so both ends use that bin's nu_low.
+    # a step at the last edge gives a segment of zero width that starts there
+    arr_bin = np.minimum(np.searchsorted(arr_enhigh, grid_energyryd[:-1], side="right"), nphixspoints - 1)
+    arr_nu = grid_energyryd * ryd_to_hz
+    arr_nu_low = arr_enlow[arr_bin] * ryd_to_hz
+    # The weight is positive, so a negative average comes only from a negative cross section, and the
+    # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
+    # average is then NaN or infinite, and ARTIS would fail only when it reads the table. The check
+    # below stops the run for these cases, so numpy gives no warning about them.
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        weight_low = arr_nu[:-1] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[:-1] - arr_nu_low))
+        weight_high = arr_nu[1:] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[1:] - arr_nu_low))
+        half_dx = 0.5 * np.diff(grid_energyryd)
+        integralnosigma = np.bincount(arr_bin, weights=half_dx * (weight_low + weight_high), minlength=nphixspoints)
+        integralwithsigma = np.bincount(
+            arr_bin,
+            weights=half_dx * (grid_sigma[:-1] * weight_low + grid_sigma[1:] * weight_high),
+            minlength=nphixspoints,
+        )
+        averages = integralwithsigma / integralnosigma
+    if not (np.all(integralnosigma > 0.0) and np.all(np.isfinite(averages)) and np.all(averages >= 0.0)):
+        msg = (
+            f"A photoionisation bin average is not a finite number of 0 or more. The table shape is"
+            f" {tablein.shape}, the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted"
+            f" integral is {integralwithsigma.min():.6e} and the smallest weight integral is"
+            f" {integralnosigma.min():.6e}. Check the cross sections, -phixsnuincrement and"
+            f" -optimaltemperature.{labeltext}{keytext}"
+        )
+        raise ValueError(msg)
+    return averages

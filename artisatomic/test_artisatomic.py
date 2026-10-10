@@ -32,6 +32,7 @@ from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
+from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import leveltuples_to_pldataframe
@@ -41,6 +42,7 @@ from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
+from artisatomic.base import ryd_to_hz
 from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import upsilon_frame
@@ -1941,7 +1943,7 @@ def test_parallel_map_rejects_iterables_of_different_lengths():
     """parallel_map() refuses a short iterable, whichever path the call would otherwise have taken."""
     from artisatomic.base import parallel_map
 
-    # Executor.map() and thread_map() stop at the shortest iterable, while the serial shortcut's
+    # Executor.map() stops at the shortest iterable, while the serial shortcut's
     # zip(strict=True) raises. The check therefore has to happen before the choice of the path. 4 items
     # take the shortcut and 40 the pool, and neither may silently do less work than the caller asked for.
     for nitems in (4, 40):
@@ -2144,6 +2146,39 @@ def test_reduce_phixs_tables_worker():
     assert abs(integral_reduced / integral_input - 1) < 0.01
 
 
+def test_reduce_phixs_tables_worker_keeps_a_narrow_peak():
+    """A narrow peak of the table adds its area to its bin, wherever it is in the bin.
+
+    A resample of each bin at a fixed set of points lost a peak between two points. It also spread
+    a peak at one point over a whole step of the set.
+    """
+    temperature = 6000.0
+    xgrid = output_xgrid(100, 0.03)
+    threshold = 0.5
+    enlow = 0.5 * (xgrid[9] + xgrid[10]) * threshold
+    enhigh = 0.5 * (xgrid[10] + xgrid[11]) * threshold
+    step = (enhigh - enlow) / 50
+
+    def bin_average(table: np.ndarray) -> float:
+        energies = np.union1d(
+            np.linspace(enlow, enhigh, 200001), table[:, 0][(table[:, 0] > enlow) & (table[:, 0] < enhigh)]
+        )
+        sigma = np.interp(energies, table[:, 0], table[:, 1])
+        nu = energies * ryd_to_hz
+        weight = nu**2 * np.exp(-h_over_kb_in_K_sec / temperature * (nu - nu[0]))
+        return np.trapezoid(sigma * weight, energies) / np.trapezoid(weight, energies)
+
+    for peakcentre in (enlow + 20.5 * step, enlow + 20 * step):
+        halfwidth = step / 100
+        energies = [threshold, peakcentre - halfwidth, peakcentre, peakcentre + halfwidth, 4 * threshold]
+        table = np.array([[energy, 1.0] for energy in energies])
+        table[2, 1] = 1000.0
+        reduced = reduce_phixs_tables_worker(temperature, xgrid, table)
+        assert reduced[10] == pytest.approx(bin_average(table), rel=1e-4)
+        assert reduced[9] == pytest.approx(1.0)
+        assert reduced[11] == pytest.approx(1.0)
+
+
 def test_reduce_phixs_tables_worker_weight_does_not_underflow():
     """A high threshold at a low temperature must still give the weighted average of the bin.
 
@@ -2194,7 +2229,7 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
 
     energyryd = np.linspace(1.0, 20.0, 500)
     tablein = np.column_stack([energyryd, np.full_like(energyryd, -1.0)])
-    with pytest.raises(ValueError, match=r"bin integral is not positive.*'Fe I 3d7 a4F'"):
+    with pytest.raises(ValueError, match=r"bin average is not a finite number of 0 or more.*'Fe I 3d7 a4F'"):
         reduce_phixs_tables({"Fe I 3d7 a4F": tablein}, 6000.0, 100, 0.03)
 
     # a key alone does not say which ion or which file the table came from, so a caller can
@@ -2207,7 +2242,7 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
     goodtable = np.column_stack([energyryd, np.full_like(energyryd, 1.0)])
     tables = {f"level {i}": goodtable for i in range(40)}
     tables["bad level"] = tablein
-    with pytest.raises(ValueError, match=r"bin integral is not positive.*'bad level'"):
+    with pytest.raises(ValueError, match=r"bin average is not a finite number of 0 or more.*'bad level'"):
         reduce_phixs_tables(tables, 6000.0, 100, 0.03)
 
 
@@ -6317,7 +6352,7 @@ def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
     from artisatomic.phixs import reduce_phixs_tables
 
     tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
-    with np.errstate(all="ignore"), pytest.raises(ValueError, match="have a value that is not finite"):
+    with pytest.raises(ValueError, match=r"bin average is not a finite number.*Z=26 Fe I test"):
         reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
 
 
