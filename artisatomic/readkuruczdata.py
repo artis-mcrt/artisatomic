@@ -20,6 +20,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
@@ -120,8 +121,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     gfall = scan_file_lines(fname).select(
         *(
             # a blank field, and a line too short to reach the field, both give a null
-            (loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
-            .replace("", None)
+            null_if_blank(loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
             .cast(dtype)
             .alias(name)
             for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
@@ -134,20 +134,10 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 
     # compare the magnitudes: a negative energy marks a predicted level, and the sign does not
     # order the levels
+    first_is_lower = pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     gfall = gfall.with_columns(
-        order_lower_upper=pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
-    )
-    gfall = gfall.with_columns(
-        pl.when(pl.col("order_lower_upper"))
-        .then(f"{column}_first")
-        .otherwise(f"{column}_second")
-        .alias(f"{column}_lower")
-        for column in double_columns
-    ).with_columns(
-        pl.when(pl.col("order_lower_upper"))
-        .then(f"{column}_second")
-        .otherwise(f"{column}_first")
-        .alias(f"{column}_upper")
+        pl.when(first_is_lower).then(f"{column}_{then}").otherwise(f"{column}_{other}").alias(f"{column}_{side}")
+        for side, then, other in (("lower", "first", "second"), ("upper", "second", "first"))
         for column in double_columns
     )
 
@@ -156,22 +146,18 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # columns ('s4d  1D'). fill_null(""): a blank label parses to null, and a null is_in() result
     # makes filter() drop the row. The filter removes only the three pseudo-level labels.
     ignored_labels = ["AVERAGE", "ENERGIES", "CONTINUUM"]
-    gfall = gfall.with_columns(
+    atomic_number = pl.col("z_dot_ioncharge").cast(pl.Int64)
+    return gfall.with_columns(
         pl.col("label_lower").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
         pl.col("label_upper").str.strip_chars().str.replace_all(r"\s+", " ").fill_null(""),
-    ).filter(
-        (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
-    )
-
-    gfall = gfall.with_columns(
         energyabovegsinpercm_lower_predicted=pl.col("energyabovegsinpercm_lower") < 0,
         energyabovegsinpercm_lower=pl.col("energyabovegsinpercm_lower").abs(),
         energyabovegsinpercm_upper_predicted=pl.col("energyabovegsinpercm_upper") < 0,
         energyabovegsinpercm_upper=pl.col("energyabovegsinpercm_upper").abs(),
-    )
-
-    return gfall.with_columns(atomic_number=pl.col("z_dot_ioncharge").cast(pl.Int64)).with_columns(
-        ion_charge=((pl.col("z_dot_ioncharge") - pl.col("atomic_number")) * 100).round().cast(pl.Int64),
+        atomic_number=atomic_number,
+        ion_charge=((pl.col("z_dot_ioncharge") - atomic_number) * 100).round().cast(pl.Int64),
+    ).filter(
+        (pl.col("label_lower").is_in(ignored_labels).not_()) & (pl.col("label_upper").is_in(ignored_labels).not_())
     )
 
 
@@ -383,7 +369,8 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     )
     unmatched = (
         occurrences.join(matched, on=["componentrow", "side"], how="anti")
-        .sort("label", "j", "energy")
+        # the last two keys fix the order of the rows in the weighted mean below
+        .sort("label", "j", "energy", "componentrow", "side")
         .with_columns(
             group=(
                 (pl.col("label") != pl.col("label").shift())
@@ -440,7 +427,9 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
         | (pl.col("j_lower") != pl.col("j_upper"))
     )
     nselfline = ncombined - combined.height
-    combined = combined.join(wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti")
+    combined = combined.join(
+        wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti", maintain_order="left"
+    )
     nrepeat = ncombined - nselfline - combined.height
     log_comment(
         flog,
