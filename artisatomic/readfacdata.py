@@ -280,7 +280,7 @@ def read_levels_data(dflevels):
     return energy_levels, levelid_of_fileindex_map(dflevels["Ilev"], "the FAC levels file")
 
 
-def read_lines_data(dflines, ilev_enlevelindex_map):
+def read_lines_data(dflines, ilev_enlevelindex_map) -> pl.DataFrame:
     """Convert FAC lines to transitions referencing zero-based level ids.
 
     A line that names an Ilev that the level file does not have is an error. The two files then

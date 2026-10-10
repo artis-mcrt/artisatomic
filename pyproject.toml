@@ -48,7 +48,7 @@ dev = [
     { include-group = "coverage" },
     "prek>=0.4.14",
     "pyrefly>=1.2.0",
-    "pytest>=8.3.3",
+    "pytest>=9.1.0",
     "ruff>=0.16.4",
     "ty>=0.0.74",
     "types-requests>=2.32.0.20241016",
@@ -85,6 +85,13 @@ python-interpreter-path = ".venv/bin/python3"
 # and individual exceptions are suppressed at the line that needs them
 implicit-any-parameter = false
 implicit-any-lambda = false
+
+[tool.pytest.ini_options]
+# A test that gives a warning fails the run. "always" records each warning and raises none. An
+# error filter cannot work here, because polars gives some deprecations from its Rust core, and
+# polars hides an error that such a warning raises.
+filterwarnings = ["always"]
+max_warnings = "0"
 
 [tool.ruff]
 line-length = 120

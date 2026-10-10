@@ -84,7 +84,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
 - `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
 - `tests/` contains test configurations and reference checksums for the data sources that CI covers. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
-- `artisatomic/conftest.py` fails the pytest run if a test gives a warning. Do not use `filterwarnings = ["error"]` for this. polars gives some deprecations from its Rust core, and that filter hides them.
+- The pytest settings in `pyproject.toml` fail the run if a test gives a warning (`max_warnings = "0"`). Do not use `filterwarnings = ["error"]` for this. polars gives some deprecations from its Rust core, and that filter hides them.
 
 ## Code style
 

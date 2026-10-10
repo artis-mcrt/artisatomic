@@ -71,7 +71,7 @@ dev = [
     { name = "coverage", specifier = ">=7.15.3" },
     { name = "prek", specifier = ">=0.4.14" },
     { name = "pyrefly", specifier = ">=1.2.0" },
-    { name = "pytest", specifier = ">=8.3.3" },
+    { name = "pytest", specifier = ">=9.1.0" },
     { name = "ruff", specifier = ">=0.16.4" },
     { name = "ty", specifier = ">=0.0.74" },
     { name = "types-requests", specifier = ">=2.32.0.20241016" },

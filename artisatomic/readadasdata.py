@@ -634,10 +634,9 @@ def read_adf04(
             )
             raise ValueError(msg)
 
-        upsilons = goodrows.select(
-            lower=pl.min_horizontal("lower", "upper"), upper=pl.max_horizontal("lower", "upper"), upsilon="upsilon"
+        upsilons = sorted_file_index_pairs(
+            goodrows.select("lower", "upper", "upsilon"), len(energylevels), "collision strength", filepath
         )
-        check_file_index_pairs(upsilons, len(energylevels), "collision strength", filepath)
 
         isfirst = pl.struct("lower", "upper").is_first_distinct()
         firstupsilons = upsilons.filter(isfirst)
@@ -682,42 +681,45 @@ def read_adf04(
     return ionization_energy_ev, energylevels, dfupsilon, collisiondf
 
 
-def check_file_index_pairs(dfpairs: pl.DataFrame, levelcount: int, kind: str, filepath) -> None:
-    """Stop the run at the first pair of file indices that is not a transition between two levels of the file.
+def sorted_file_index_pairs(dfpairs: pl.DataFrame, levelcount: int, kind: str, filepath) -> pl.DataFrame:
+    """Put the lower file index first in each pair, and check that each pair connects two levels of the file.
 
-    dfpairs has the sorted file indices "lower" and "upper", which start at 1. kind names the rows
-    in the message, for example "transition". A raise rather than an assert: this validates an
-    input file, and the check must survive python -O.
+    dfpairs has the file indices "lower" and "upper", which start at 1, and other columns, which do
+    not change. A file does not always give the lower level first. kind names the rows in the
+    message, for example "transition". A raise rather than an assert: this validates an input file,
+    and the check must survive python -O.
 
-    A file index below 1 or above levelcount names no level. Two equal file indices name a
-    transition from a level to itself. The writer would stop at such a transition only after
-    adata.txt holds the ion.
+    A missing file index, or a file index below 1 or above levelcount, names no level. Two equal
+    file indices name a transition from a level to itself. The writer would stop at such a
+    transition only after adata.txt holds the ion.
     """
-    badrows = dfpairs.filter(
+    if dfpairs.select(pl.any_horizontal(pl.col("lower", "upper").is_null()).any()).item():
+        msg = f"A {kind} row in {filepath} has no file index for one of its two levels"
+        raise ValueError(msg)
+    dfsorted = dfpairs.with_columns(
+        lower=pl.min_horizontal("lower", "upper"), upper=pl.max_horizontal("lower", "upper")
+    )
+    badrows = dfsorted.filter(
         (pl.col("lower") < 1) | (pl.col("upper") > levelcount) | (pl.col("lower") == pl.col("upper"))
     )
-    if badrows.is_empty():
-        return
-    lower, upper = badrows.select("lower", "upper").row(0)
-    if lower == upper and 1 <= lower <= levelcount:
-        msg = f"{kind} in {filepath} has the same file index {lower} for the two levels"
-    else:
-        msg = f"{kind} file indices {lower}, {upper} in {filepath} are outside the file's {levelcount} levels"
-    raise ValueError(msg)
+    if not badrows.is_empty():
+        lower, upper = badrows.select("lower", "upper").row(0)
+        if lower == upper and 1 <= lower <= levelcount:
+            msg = f"{kind} in {filepath} has the same file index {lower} for the two levels"
+        else:
+            msg = f"{kind} file indices {lower}, {upper} in {filepath} are outside the file's {levelcount} levels"
+        raise ValueError(msg)
+    return dfsorted
 
 
 def adas_transitions_frame(levelcount: int, dfpairs: pl.DataFrame, filepath) -> pl.DataFrame:
     """Validate the radiative transition rows and return the transitions with zero-based level ids.
 
     dfpairs has the file indices "upper" and "lower", which start at 1, and the A-value "avalue".
-    The columns of a file do not always give the lower level first, so the function sorts each
-    pair. read_adf04() sorts each collision pair the same way. A reversed pair would give a
-    transition that the upsilon join misses.
+    sorted_file_index_pairs() puts the lower level first, as for the collision pairs of read_adf04().
+    A reversed pair would give a transition that the upsilon join misses.
     """
-    dfsorted = dfpairs.select(
-        lower=pl.min_horizontal("upper", "lower"), upper=pl.max_horizontal("upper", "lower"), A="avalue"
-    )
-    check_file_index_pairs(dfsorted, levelcount, "transition", filepath)
+    dfsorted = sorted_file_index_pairs(dfpairs.select("lower", "upper", A="avalue"), levelcount, "transition", filepath)
     # the file numbers levels from one; level ids are zero-based in memory
     return dfsorted.select(lowerlevel=pl.col("lower") - 1, upperlevel=pl.col("upper") - 1, A=pl.col("A"))
 
@@ -787,11 +789,14 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
                     raise ValueError(msg) from exc
                 if pairrow[2] > 2e-30:
                     pairrows.append(pairrow)
-        adas_transitions = adas_transitions_frame(
-            len(adas_energylevels),
-            pl.DataFrame(pairrows, schema={"upper": pl.Int64, "lower": pl.Int64, "avalue": pl.Float64}, orient="row"),
-            transitionfile,
-        )
+        try:
+            dfpairs = pl.DataFrame(
+                pairrows, schema={"upper": pl.Int64, "lower": pl.Int64, "avalue": pl.Float64}, orient="row"
+            )
+        except pl.exceptions.ComputeError as exc:
+            msg = f"{transitionfile} has a file index that is too large for a 64-bit integer"
+            raise ValueError(msg) from exc
+        adas_transitions = adas_transitions_frame(len(adas_energylevels), dfpairs, transitionfile)
 
     elif (atomic_number == 27) and (ion_stage == 4):
         # one level, the 3d6 5D4 ground state, with g = 2J + 1 as read_adf04() derives it
@@ -857,14 +862,19 @@ def _fill_co2_phixs(
     columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
 
     def read_table(filename: Path) -> pl.DataFrame:
-        return (
-            pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
-            .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
-            .collect()
-        )
+        try:
+            return (
+                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
+                .collect()
+            )
+        except (pl.exceptions.PolarsError, OSError) as exc:
+            # The error does not name the file. The first line of a polars error gives the cause.
+            msg = f"artisatomic cannot read {filename}: {str(exc).partition(chr(10))[0]}"
+            raise ValueError(msg) from exc
 
-    # the threads read the files at the same time. The loop takes each table after the log line that
-    # names its file, because a read error of polars does not name the file.
+    # The threads read the files at the same time. The loop takes the tables in file order, so the
+    # first bad file in that order stops the run.
     with ThreadPoolExecutor(max_workers=len(filenames)) as executor:
         tablereads = [executor.submit(read_table, filename) for filename in filenames]
     for lowerlevelid, (filename, tableread) in enumerate(zip(filenames, tablereads, strict=True)):

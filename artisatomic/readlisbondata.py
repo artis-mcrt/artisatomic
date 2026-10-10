@@ -32,42 +32,41 @@ PROVENANCE_LINES = 8
 description = "the Lisbon Atomic Group data set"
 
 
-def read_csv_past_provenance(
-    filename: Path | str, countkey: str, sourcename: str, schema: pl.Schema | None = None
-) -> pl.DataFrame:
-    """Read a Lisbon CSV past the provenance lines, and check the row count that its header gives.
+def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: str, schema: pl.Schema) -> pl.DataFrame:
+    """Read the columns of the schema from a Lisbon CSV past the provenance lines, and check the row count.
 
     The provenance lines hold a "<countkey>: N" line. A copy of a shared-drive file can stop
     between two rows, and the count finds such a file.
 
     skip_lines, not skip_rows: skip_rows reads CSV rows, so a quote character in the provenance
-    text would swallow the header. With no schema, infer_schema_length=None reads the whole column,
-    as pandas did. A sample of the first rows can give Int64 to a float column. With a schema, the
-    function reads only the columns of the schema, with their dtypes. That read is much faster
-    than the inference over a file with millions of rows.
+    text would swallow the header. The schema gives the dtype of each column. An inference from the
+    first rows can give Int64 to a float column, and an inference from all rows is slow for a file
+    with millions of rows.
 
     polars reads a plain, a gzip, or a zstd file itself. It cannot read the xz form, which xopen
     decompresses into memory instead, as scan_file_lines() does.
     """
     filepath = find_file_check_extension_or_raise(filename)
-    with xopen_check_extension(filepath, mode="rt", encoding="utf-8") as fin:
-        headerlines = [fin.readline() for _ in range(PROVENANCE_LINES)]
+    csv_options: dict[str, t.Any] = {
+        "skip_lines": PROVENANCE_LINES,
+        "columns": list(schema),
+        "schema_overrides": schema,
+    }
 
-    csv_options: dict[str, t.Any] = {"skip_lines": PROVENANCE_LINES}
-    if schema is None:
-        csv_options["infer_schema_length"] = None
-    else:
-        csv_options |= {"columns": list(schema), "schema_overrides": schema}
-
-    try:
+    def read_header_and_table() -> tuple[list[str], pl.DataFrame]:
+        with xopen_check_extension(filepath, mode="rt", encoding="utf-8") as fin:
+            headerlines = [fin.readline() for _ in range(PROVENANCE_LINES)]
         if filepath.suffix == ".xz":
             with xopen_check_extension(filepath, mode="rb") as fbin:
-                table = pl.read_csv(io.BytesIO(fbin.read()), **csv_options)
-        else:
-            table = pl.read_csv(filepath, **csv_options)
-    except pl.exceptions.ComputeError as exc:
-        # the error of polars does not name the file
-        msg = f"polars cannot read {filepath} ({sourcename}): {exc}"
+                return headerlines, pl.read_csv(io.BytesIO(fbin.read()), **csv_options)
+        return headerlines, pl.read_csv(filepath, **csv_options)
+
+    try:
+        headerlines, table = read_header_and_table()
+    except (pl.exceptions.PolarsError, OSError, EOFError) as exc:
+        # The error does not name the file. The first line of a polars error gives the cause, and the
+        # other lines give options of read_csv that do not apply here.
+        msg = f"artisatomic cannot read {filepath}: {str(exc).partition(chr(10))[0]}"
         raise ValueError(msg) from exc
 
     return check_row_count(table, headerlines, countkey, ":", sourcename)
@@ -85,7 +84,12 @@ def read_levels_csv(filename: Path | str) -> pl.DataFrame:
     energy.
     """
     return (
-        read_csv_past_provenance(filename, "Number Levels", "The Lisbon levels file")
+        read_csv_past_provenance(
+            filename,
+            "Number Levels",
+            "The Lisbon levels file",
+            pl.Schema({"RelConfig": pl.String, "g": pl.Float64, "Energy[cm^-1]": pl.Float64}),
+        )
         .select(
             energy=pl.col("Energy[cm^-1]"),
             j=0.5 * (pl.col("g") - 1),
@@ -98,7 +102,7 @@ def read_levels_csv(filename: Path | str) -> pl.DataFrame:
 def read_lines_csv(filename: Path | str) -> pl.DataFrame:
     """Read the transitions CSV of one ion, past the lines of provenance.
 
-    The level indices must be integers. A file index such as "3.5" names no level.
+    The file indices must be integers. A file index such as "3.5" names no level.
     """
     schema = pl.Schema({"Lower": pl.Int64, "Upper": pl.Int64, "gf": pl.Float64, "Wavelength[Ang]": pl.Float64})
     return read_csv_past_provenance(filename, "Number Transitions", "The Lisbon transitions file", schema).select(
@@ -175,18 +179,21 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex) -> pl.DataFram
     # Python ** calls pow() of the C library, and pow() can differ from the x * x of polars in the
     # last bit. So Python squares the wavelengths, as in the formula of the docstring.
     wavelength_squared = pl.Series([wavelength**2 for wavelength in dflines["wavelength"].to_list()], dtype=pl.Float64)
-    denominator = gf_to_a_coefficient * g_upper * wavelength_squared
-    iszero = denominator == 0.0
-    # not an assert: a zero denominator gives an infinite A, which must not go to the output
-    if iszero.any():
-        lowerlevel, upperlevel = dftransitions.row(iszero.arg_true()[0])
+    A = dflines["gf"] / (gf_to_a_coefficient * g_upper * wavelength_squared)
+    # not an assert: the writer would write an A that is not finite. An infinite wavelength gives
+    # A = 0, so the check also tests the wavelength.
+    isbad = ~(A.is_finite() & dflines["wavelength"].is_finite())
+    if isbad.any():
+        fileindex_lower, fileindex_upper = dflines.select("level_index_lower", "level_index_upper").row(
+            isbad.arg_true()[0]
+        )
         msg = (
-            f"The Lisbon transitions file gives the transition {lowerlevel} -> {upperlevel} (level ids) a zero"
-            " wavelength or an upper level with g = 0, so its A has no value."
+            f"Transition {fileindex_lower} -> {fileindex_upper} in the Lisbon transitions file gives no finite A."
+            " Its wavelength or the g of its upper level is zero, or a value is infinite or not a number (NaN)."
         )
         raise ValueError(msg)
 
-    return dftransitions.with_columns(A=dflines["gf"] / denominator)
+    return dftransitions.with_columns(A=A)
 
 
 class EnergyLevelTuple(t.NamedTuple):
