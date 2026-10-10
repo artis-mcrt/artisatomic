@@ -189,8 +189,10 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # add_level_ids_forbidden() without a message, while adata.txt still counts the transition.
     # Not an assert: input validation must survive python -O.
     if not dftransitions.is_empty():
-        levelid_min = int(dftransitions.select(pl.min_horizontal("lowerlevel", "upperlevel").min()).item())
-        levelid_max = int(dftransitions.select(pl.max_horizontal("lowerlevel", "upperlevel").max()).item())
+        levelid_min, levelid_max = dftransitions.select(
+            levelid_min=pl.min_horizontal("lowerlevel", "upperlevel").min(),
+            levelid_max=pl.max_horizontal("lowerlevel", "upperlevel").max(),
+        ).row(0)
         if levelid_min < 0 or levelid_max >= levelcount:
             msg = (
                 f"The JPLT transitions of Z={atomic_number} ion_stage {ion_stage} name level numbers"
