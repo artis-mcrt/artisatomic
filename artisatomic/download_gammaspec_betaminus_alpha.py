@@ -11,6 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from artisatomic.base import elsymbols
+from artisatomic.base import open_for_atomic_write
 from artisatomic.base import PYDIR
 
 colreplacements = {
@@ -213,14 +214,11 @@ def main():
                         }
                     ).sort("energy_mev")
                     if len(dfout) > 0:
-                        # write to a temporary name and then rename. A run that stops part way
-                        # through then leaves the previous file complete and not truncated.
-                        tmpoutfilepath = nucoutfilepath.with_suffix(".tmp")
-                        with tmpoutfilepath.open("w", encoding="utf-8") as fout:
+                        # a run that stops part way through leaves the previous file complete
+                        with open_for_atomic_write(nucoutfilepath) as fout:
                             fout.write(f"{len(dfout)}\n")
                             for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
                                 fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
-                        tmpoutfilepath.replace(nucoutfilepath)
                         print(f"Saved {nucoutfilepath.name}")
                     else:
                         print("empty DataFrame")

@@ -18,6 +18,7 @@ from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
@@ -99,11 +100,33 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # each field starts after the fields before it, so the last width starts no field
     field_offsets = list(itertools.accumulate(field_widths[:-1], initial=0))
 
+    # gfall08oct17 (and the 2016 and 2017 versions before it) writes the loggf of the Fe I line at
+    # 448.8906 nm as "-1 72". The space is at the position of the decimal point of the F7.3 field.
+    # The source of the line gives log gf = -1.72 (Den Hartog, E. A., Ruffoni, M. P., Lawler, J. E.,
+    # Pickering, J. C., Lind, K., & Brewer, N. R. 2014, ApJS, 215, 23, doi:10.1088/0067-0049/215/2/23).
+    # So the reader reads a space at that position, between two digits, as the decimal point. A Fortran
+    # read ignores the space and gives -0.172, and gfallvac08oct17 has that value.
+    loggf_offset, loggf_width = field_offsets[1], field_widths[1]
+    loggf_text = pl.col("line").str.slice(loggf_offset, loggf_width)
+    loggf_point_missing = loggf_text.str.contains(r"^..\d \d")
+    loggf_point_repaired = (
+        pl.when(loggf_point_missing)
+        .then(loggf_text.str.slice(0, 3) + "." + loggf_text.str.slice(4))
+        .otherwise(loggf_text)
+        .str.strip_chars()
+    )
+
     # read each line whole, then cut the fixed-width fields out of it
     gfall = scan_file_lines(fname).select(
-        # a blank field, and a line too short to reach the field, both give a null
-        fixed_width_column(offset, width).replace("", None).cast(dtype).alias(name)
-        for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
+        *(
+            # a blank field, and a line too short to reach the field, both give a null
+            (loggf_point_repaired if name == "loggf" else fixed_width_column(offset, width))
+            .replace("", None)
+            .cast(dtype)
+            .alias(name)
+            for name, offset, width, dtype in zip(gfall_columns, field_offsets, field_widths, field_types, strict=True)
+        ),
+        loggf_point_missing=loggf_point_missing,
     )
 
     gfall = gfall.drop_nulls(["z_dot_ioncharge", "energyabovegsinpercm_first", "energyabovegsinpercm_second"])
@@ -166,7 +189,7 @@ def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     for stem in stems:
         path_gfall = find_file_check_extension(stem)
         if path_gfall is not None:
-            return path_gfall.resolve()
+            return path_gfall
 
     msg = f"No Kurucz file for Z={atomic_number} ion_charge {ion_charge}."
     raise FileNotFoundError(msg)
@@ -264,6 +287,154 @@ def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
     return dfgfall.filter(pl.col("gfallrow").is_in(sorted(ambiguousrows)).not_()).drop("gfallrow")
 
 
+# a component level is at most this far from the level that it belongs to. In gfall08oct17, the
+# energies of the components of one level spread over 0.6 cm^-1 at most (Li I 7f 2F7/2).
+component_shift_tolerance_percm = 1.0
+
+
+def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
+    """Combine the isotope and hyperfine components of each line into one line.
+
+    gfall gives a component the gf value of the whole line. Two more fields give the log of its
+    isotope fraction and the log of its hyperfine fraction. A component names its isotope. The
+    level energies of a component include its isotope shift and its hyperfine shift. A negative
+    energy there is a shift below the level, and not a predicted level. Without this function, each
+    component is a full line between two sublevels of its own. ARTIS adds the A values of the
+    transitions of a level pair, and it has no isotope or hyperfine levels.
+
+    A component level gets the energy of the nearest level with the same label and J in the lines
+    that are not split. That level must be near enough. The labels are not unique, so the label
+    and J alone cannot identify a level. Each other group of component levels with the same label
+    and J and near energies gets the mean energy of the group, weighted by gf.
+
+    Some files give a line as a whole line and also as the components of one isotope. The function
+    then keeps the whole line. It also drops a combined line between two sublevels of one level,
+    because such a line joins a level to itself.
+    """
+    fractions = [pl.col(column).fill_null(0.0) for column in ("log_f_hyperfine", "log_iso_abundance")]
+    # a fraction of one gives a log of 0, so the isotope also marks a component
+    is_component = (pl.col("isotope").fill_null(0) != 0) | pl.any_horizontal(fraction != 0.0 for fraction in fractions)
+    components = dfgfall.filter(is_component)
+    if components.is_empty():
+        return dfgfall
+    wholelines = dfgfall.filter(is_component.not_())
+
+    components = components.with_row_index("componentrow").with_columns(
+        gf=10 ** (pl.col("loggf") + pl.sum_horizontal(fractions))
+    )
+    sides = ("lower", "upper")
+    occurrences = pl.concat(
+        components.select(
+            "componentrow",
+            "gf",
+            side=pl.lit(side),
+            label=pl.col(f"label_{side}"),
+            j=pl.col(f"j_{side}"),
+            energyabs=pl.col(f"energyabovegsinpercm_{side}"),
+            energy=pl.when(pl.col(f"energyabovegsinpercm_{side}_predicted"))
+            .then(-pl.col(f"energyabovegsinpercm_{side}"))
+            .otherwise(pl.col(f"energyabovegsinpercm_{side}")),
+        )
+        for side in sides
+    )
+    known_levels = pl.concat(
+        wholelines.select(
+            label=pl.col(f"label_{side}"), j=pl.col(f"j_{side}"), knownenergy=pl.col(f"energyabovegsinpercm_{side}")
+        )
+        for side in sides
+    ).unique()
+
+    matched = (
+        occurrences.join(known_levels, on=["label", "j"], how="inner")
+        .with_columns(distance=(pl.col("knownenergy") - pl.col("energyabs")).abs())
+        .filter(pl.col("distance") <= component_shift_tolerance_percm)
+        .sort("componentrow", "side", "distance", "knownenergy")
+        .group_by("componentrow", "side", maintain_order=True)
+        .agg(mergedenergy=pl.col("knownenergy").first())
+    )
+    unmatched = (
+        occurrences.join(matched, on=["componentrow", "side"], how="anti")
+        .sort("label", "j", "energy")
+        .with_columns(
+            group=(
+                (pl.col("label") != pl.col("label").shift())
+                | (pl.col("j") != pl.col("j").shift())
+                | (pl.col("energy") - pl.col("energy").shift() > component_shift_tolerance_percm)
+            )
+            .fill_null(value=True)
+            .cum_sum()
+        )
+        .with_columns(
+            # rounded to the precision of the energies in gfall (0.001 cm^-1)
+            mergedenergy=((pl.col("energy") * pl.col("gf")).sum() / pl.col("gf").sum()).over("group").round(3).abs()
+        )
+        .select("componentrow", "side", "mergedenergy")
+    )
+    # The ground level is at 0 cm^-1. If no whole line gives it, the mean of its component levels
+    # is a hyperfine shift above 0, so the lowest group of component levels gets 0.
+    hasgroundline = not wholelines.filter(
+        pl.any_horizontal(pl.col(f"energyabovegsinpercm_{side}") == 0.0 for side in sides)
+    ).is_empty()
+    lowestmerged = unmatched.select(pl.col("mergedenergy").min()).item()
+    if not hasgroundline and lowestmerged is not None and lowestmerged <= component_shift_tolerance_percm:
+        unmatched = unmatched.with_columns(
+            mergedenergy=pl.when(pl.col("mergedenergy") == lowestmerged).then(0.0).otherwise(pl.col("mergedenergy"))
+        )
+    mergedenergies = pl.concat([matched, unmatched])
+    for side in sides:
+        components = components.drop(f"energyabovegsinpercm_{side}").join(
+            mergedenergies.filter(pl.col("side") == side).select(
+                "componentrow", pl.col("mergedenergy").alias(f"energyabovegsinpercm_{side}")
+            ),
+            on="componentrow",
+            how="left",
+            maintain_order="left",
+        )
+
+    # with the labels: the reader keeps two levels with the same energy and J but other labels
+    linekey = [
+        "energyabovegsinpercm_lower",
+        "j_lower",
+        "label_lower",
+        "energyabovegsinpercm_upper",
+        "j_upper",
+        "label_upper",
+    ]
+    # each component carries the gf value of its whole line, so two lines between the same levels
+    # stay two transitions, as two whole lines do
+    combined = components.group_by("atomic_number", "ion_charge", *linekey, "loggf", maintain_order=True).agg(
+        pl.col("gf").sum()
+    )
+    ncombined = combined.height
+    combined = combined.filter(
+        (pl.col("energyabovegsinpercm_lower") != pl.col("energyabovegsinpercm_upper"))
+        | (pl.col("j_lower") != pl.col("j_upper"))
+    )
+    nselfline = ncombined - combined.height
+    combined = combined.join(wholelines.select(*linekey, "loggf"), on=[*linekey, "loggf"], how="anti")
+    nrepeat = ncombined - nselfline - combined.height
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"The reader combined {components.height:d} isotope and hyperfine components into {ncombined:d}"
+        " lines. A component has the gf value of the whole line times its isotope fraction and its hyperfine"
+        " fraction.",
+    )
+    if nrepeat > 0 or nselfline > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The reader dropped {nrepeat:d} combined lines that the file also gives as a whole line, and"
+            f" {nselfline:d} combined lines that join a level to itself.",
+        )
+    combined = combined.with_columns(
+        loggf=pl.col("gf").log10(),
+        energyabovegsinpercm_lower_predicted=pl.lit(value=False),
+        energyabovegsinpercm_upper_predicted=pl.lit(value=False),
+    )
+    return pl.concat([wholelines, combined], how="diagonal_relaxed").select(wholelines.columns)
+
+
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
@@ -301,32 +472,49 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         # kept only for the duplicate-line test below, and dropped by the final select
         "label_lower",
         "label_upper",
-        "isotope",
-        "isotope2",
-        "log_f_hyperfine",
-        "hyperfine_f_lower",
-        "hyperfine_f_upper",
-        "hyper_shift_lower",
-        "hyper_shift_upper",
     ]
     # The levels and the transitions come from the same rows, so read those rows once. Each
     # collect() of the lazy frame reads and parses the file again, and the file can be 150 MB.
-    # The levels need the two columns below as well, and the transitions need no other column.
+    # The levels need the predicted flags as well, and combine_line_components() needs the
+    # isotope fields. The reader reads no other field. gfall08oct17 writes F = 10 as "A" in the
+    # hyperfine F fields, so a read of those fields stops the read of V I, Mn I, Co I and Nb I-II.
     dfgfall = gfall.select(
         [
             *transition_columns,
             "energyabovegsinpercm_lower_predicted",
             "energyabovegsinpercm_upper_predicted",
+            "isotope",
+            "log_f_hyperfine",
+            "log_iso_abundance",
+            "loggf_point_missing",
         ]
     ).collect()
+
+    for row in dfgfall.filter(pl.col("loggf_point_missing")).iter_rows(named=True):
+        log_detail(
+            flog,
+            ("transitiondata",),
+            "loggf decimal point",
+            f"The loggf field of the line between the levels at {row['energyabovegsinpercm_lower']} and"
+            f" {row['energyabovegsinpercm_upper']} cm^-1 has a space in place of the decimal point. The reader"
+            f" reads it as {row['loggf']}.",
+        )
+    dfgfall = dfgfall.drop("loggf_point_missing")
 
     # One file holds one ion. The atomic number and the ion charge both come from the file's
     # z_dot_ioncharge column, so a second ion changes one of them. This test reads the rows in
     # memory. A test on the lazy frame would read and parse the whole file again.
+    if dfgfall.is_empty():
+        msg = (
+            f"{path_gfall} has no line between two levels that the reader can use. The reader ignores"
+            " the levels with the labels AVERAGE, ENERGIES and CONTINUUM."
+        )
+        raise ValueError(msg)
     if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)
 
+    dfgfall = combine_line_components(dfgfall, flog)
     dfgfall = fix_impossible_j(dfgfall, atomic_number - ion_charge, flog)
     gfall = dfgfall.lazy()
 
@@ -359,6 +547,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         # add_level_ids_forbidden() leaves every transition permitted
         parity=pl.lit(None, dtype=pl.Int64)
     )
+    # ARTIS takes the first level as the ground level. A hydrogenic ion has n-averaged levels with
+    # the label AVERAGE, and the filter of parse_gfall() removes all lines of its ground level.
+    lowestenergy = dflevels.select(pl.col("energyabovegsinpercm").min()).item()
+    if lowestenergy != 0.0:
+        msg = (
+            f"The lowest level of {path_gfall} that the reader can use is at {lowestenergy} cm^-1 and not at 0."
+            " The ion would have no ground level. The reader ignores the levels with the labels AVERAGE,"
+            " ENERGIES and CONTINUUM."
+        )
+        raise ValueError(msg)
     log_and_print(flog, f"The reader got {len(dflevels):d} levels.")
 
     transitions = (
@@ -422,15 +620,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             "label_lower",
             "label_upper",
             "loggf",
-            # an isotope or hyperfine component is its own line and can share everything above
-            # with another. So the fields that tell them apart belong in the identity too.
-            "isotope",
-            "isotope2",
-            "log_f_hyperfine",
-            "hyperfine_f_lower",
-            "hyperfine_f_upper",
-            "hyper_shift_lower",
-            "hyper_shift_upper",
         ],
         keep="first",
         maintain_order=True,
