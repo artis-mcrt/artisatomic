@@ -1059,14 +1059,14 @@ def parallel_map[ResultType](
     if nitems <= 32:
         return list(itertools.starmap(fn, zip(*lists, strict=True)))
 
-    if chunksize is None:
-        # Without a chunk size, items go to the workers one at a time, and the IPC for each item
-        # costs more than the work.
-        chunksize = max(1, nitems // (mp.cpu_count() * 4))
-
     if use_multiprocessing:
+        if chunksize is None:
+            # Without a chunk size, items go to the workers one at a time, and the IPC for each item
+            # costs more than the work.
+            chunksize = max(1, nitems // (mp.cpu_count() * 4))
         return list(get_process_pool().map(fn, *lists, chunksize=chunksize))
 
+    # ThreadPoolExecutor.map() ignores a chunk size
     with ThreadPoolExecutor() as executor:
         return list(executor.map(fn, *lists))
 

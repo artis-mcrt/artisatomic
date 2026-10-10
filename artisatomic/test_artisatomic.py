@@ -1943,7 +1943,7 @@ def test_parallel_map_rejects_iterables_of_different_lengths():
     """parallel_map() refuses a short iterable, whichever path the call would otherwise have taken."""
     from artisatomic.base import parallel_map
 
-    # Executor.map() and thread_map() stop at the shortest iterable, while the serial shortcut's
+    # Executor.map() stops at the shortest iterable, while the serial shortcut's
     # zip(strict=True) raises. The check therefore has to happen before the choice of the path. 4 items
     # take the shortcut and 40 the pool, and neither may silently do less work than the caller asked for.
     for nitems in (4, 40):
@@ -6352,7 +6352,7 @@ def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
     from artisatomic.phixs import reduce_phixs_tables
 
     tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
-    with np.errstate(all="ignore"), pytest.raises(ValueError, match="the smallest weighted integral is nan"):
+    with pytest.raises(ValueError, match=r"bin average is not a finite number.*Z=26 Fe I test"):
         reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
 
 

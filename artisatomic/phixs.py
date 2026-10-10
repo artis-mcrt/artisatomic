@@ -316,19 +316,21 @@ def reduce_phixs_tables_worker(
     # The integrals use the piecewise-linear table exactly: the grid holds each table sample. Each
     # bin also gets 51 points from one edge to the other, because the weight is not linear. A
     # resample at the 51 points alone loses a narrow peak between two points, and spreads a peak
-    # at one point over a whole step.
-    lin_energyryd = np.linspace(arr_enlow, arr_enhigh, num=51, axis=-1).ravel()
+    # at one point over a whole step. The high edge of a bin is the first point of the next bin.
+    lin_energyryd = np.append(np.linspace(arr_enlow, arr_enhigh, num=50, endpoint=False, axis=-1), arr_enhigh[-1])
     # np.interp holds the last cross section constant past the table's end, so apply the power-law
     # decay there instead
     lin_sigma = np.interp(lin_energyryd, tablein_energyryd, tablein_sigma)
     beyond = lin_energyryd > table_energy_last
     lin_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, lin_energyryd[beyond])
+    # The table is in energy order, so the samples in the range of the grid come first
+    ntable_in_range = np.searchsorted(tablein_energyryd, arr_enhigh[-1], side="right")
+    table_energyryd_in_range = tablein_energyryd[:ntable_in_range]
     # A table can give two cross sections at one energy (a step). The table samples keep their
     # order, and a point of the uniform grid at the energy of a sample would split the step.
-    keep_lin = ~np.isin(lin_energyryd, tablein_energyryd)
-    in_range = tablein_energyryd <= arr_enhigh[-1]
-    grid_energyryd = np.concatenate((tablein_energyryd[in_range], lin_energyryd[keep_lin]))
-    grid_sigma = np.concatenate((tablein_sigma[in_range], lin_sigma[keep_lin]))
+    keep_lin = ~np.isin(lin_energyryd, table_energyryd_in_range)
+    grid_energyryd = np.concatenate((table_energyryd_in_range, lin_energyryd[keep_lin]))
+    grid_sigma = np.concatenate((tablein_sigma[:ntable_in_range], lin_sigma[keep_lin]))
     order = np.argsort(grid_energyryd, kind="stable")
     grid_energyryd = grid_energyryd[order]
     grid_sigma = grid_sigma[order]
@@ -339,19 +341,20 @@ def reduce_phixs_tables_worker(
     arr_bin = np.minimum(np.searchsorted(arr_enhigh, grid_energyryd[:-1], side="right"), nphixspoints - 1)
     arr_nu = grid_energyryd * ryd_to_hz
     arr_nu_low = arr_enlow[arr_bin] * ryd_to_hz
-    weight_low = arr_nu[:-1] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[:-1] - arr_nu_low))
-    weight_high = arr_nu[1:] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[1:] - arr_nu_low))
-    half_dx = 0.5 * np.diff(grid_energyryd)
-    integralnosigma = np.bincount(arr_bin, weights=half_dx * (weight_low + weight_high), minlength=nphixspoints)
-    integralwithsigma = np.bincount(
-        arr_bin,
-        weights=half_dx * (grid_sigma[:-1] * weight_low + grid_sigma[1:] * weight_high),
-        minlength=nphixspoints,
-    )
     # The weight is positive, so a negative average comes only from a negative cross section, and the
     # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
-    # average is then NaN or infinite, and ARTIS would fail only when it reads the table.
-    with np.errstate(divide="ignore", invalid="ignore"):
+    # average is then NaN or infinite, and ARTIS would fail only when it reads the table. The check
+    # below stops the run for these cases, so numpy gives no warning about them.
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+        weight_low = arr_nu[:-1] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[:-1] - arr_nu_low))
+        weight_high = arr_nu[1:] ** 2 * np.exp(minus_h_over_kb_t * (arr_nu[1:] - arr_nu_low))
+        half_dx = 0.5 * np.diff(grid_energyryd)
+        integralnosigma = np.bincount(arr_bin, weights=half_dx * (weight_low + weight_high), minlength=nphixspoints)
+        integralwithsigma = np.bincount(
+            arr_bin,
+            weights=half_dx * (grid_sigma[:-1] * weight_low + grid_sigma[1:] * weight_high),
+            minlength=nphixspoints,
+        )
         averages = integralwithsigma / integralnosigma
     if not (np.all(integralnosigma > 0.0) and np.all(np.isfinite(averages)) and np.all(averages >= 0.0)):
         msg = (
