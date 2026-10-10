@@ -7,6 +7,7 @@ from pathlib import Path
 
 import polars as pl
 
+from artisatomic.base import check_no_nulls
 from artisatomic.base import check_row_count
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
@@ -22,7 +23,6 @@ from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import roman_numerals
 from artisatomic.base import split_levels_above_ionization
-from artisatomic.base import Transition
 from artisatomic.base import xopen_check_extension
 
 # the count of provenance lines at the top of every Lisbon CSV, before the header row
@@ -32,15 +32,19 @@ PROVENANCE_LINES = 8
 description = "the Lisbon Atomic Group data set"
 
 
-def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: str) -> pl.DataFrame:
+def read_csv_past_provenance(
+    filename: Path | str, countkey: str, sourcename: str, schema: pl.Schema | None = None
+) -> pl.DataFrame:
     """Read a Lisbon CSV past the provenance lines, and check the row count that its header gives.
 
     The provenance lines hold a "<countkey>: N" line. A copy of a shared-drive file can stop
     between two rows, and the count finds such a file.
 
     skip_lines, not skip_rows: skip_rows reads CSV rows, so a quote character in the provenance
-    text would swallow the header. infer_schema_length=None reads the whole column, as pandas did.
-    A sample of the first rows can give Int64 to a float column.
+    text would swallow the header. With no schema, infer_schema_length=None reads the whole column,
+    as pandas did. A sample of the first rows can give Int64 to a float column. With a schema, the
+    function reads only the columns of the schema, with their dtypes. That read is much faster
+    than the inference over a file with millions of rows.
 
     polars reads a plain, a gzip, or a zstd file itself. It cannot read the xz form, which xopen
     decompresses into memory instead, as scan_file_lines() does.
@@ -49,12 +53,22 @@ def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: st
     with xopen_check_extension(filepath, mode="rt", encoding="utf-8") as fin:
         headerlines = [fin.readline() for _ in range(PROVENANCE_LINES)]
 
-    csv_options: dict[str, t.Any] = {"skip_lines": PROVENANCE_LINES, "infer_schema_length": None}
-    if filepath.suffix == ".xz":
-        with xopen_check_extension(filepath, mode="rb") as fbin:
-            table = pl.read_csv(io.BytesIO(fbin.read()), **csv_options)
+    csv_options: dict[str, t.Any] = {"skip_lines": PROVENANCE_LINES}
+    if schema is None:
+        csv_options["infer_schema_length"] = None
     else:
-        table = pl.read_csv(filepath, **csv_options)
+        csv_options |= {"columns": list(schema), "schema_overrides": schema}
+
+    try:
+        if filepath.suffix == ".xz":
+            with xopen_check_extension(filepath, mode="rb") as fbin:
+                table = pl.read_csv(io.BytesIO(fbin.read()), **csv_options)
+        else:
+            table = pl.read_csv(filepath, **csv_options)
+    except pl.exceptions.ComputeError as exc:
+        # the parser names the column and the value, but not the file
+        msg = f"{sourcename} {filepath} has a value that does not parse: {exc}"
+        raise ValueError(msg) from exc
 
     return check_row_count(table, headerlines, countkey, ":", sourcename)
 
@@ -82,8 +96,12 @@ def read_levels_csv(filename: Path | str) -> pl.DataFrame:
 
 
 def read_lines_csv(filename: Path | str) -> pl.DataFrame:
-    """Read the transitions CSV of one ion, past the lines of provenance."""
-    return read_csv_past_provenance(filename, "Number Transitions", "The Lisbon transitions file").select(
+    """Read the transitions CSV of one ion, past the lines of provenance.
+
+    The level indices must be integers. A file index such as "3.5" names no level.
+    """
+    schema = pl.Schema({"Lower": pl.Int64, "Upper": pl.Int64, "gf": pl.Float64, "Wavelength[Ang]": pl.Float64})
+    return read_csv_past_provenance(filename, "Number Transitions", "The Lisbon transitions file", schema).select(
         level_index_lower=pl.col("Lower"),
         level_index_upper=pl.col("Upper"),
         gf=pl.col("gf"),
@@ -136,7 +154,7 @@ def read_levels_data(dflevels):
     return energy_levels, levelid_of_fileindex_map(dflevels["fileindex"], "the Lisbon levels file")
 
 
-def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
+def read_lines_data(energy_levels, dflines, levelid_of_fileindex) -> pl.DataFrame:
     """Convert Lisbon lines to transitions referencing zero-based level ids.
 
     The lines name their levels by their file index, and read_levels_data() sorted the levels by
@@ -149,20 +167,26 @@ def read_lines_data(energy_levels, dflines, levelid_of_fileindex):
     after the reader resolves the ids. It is not the g of the level that the file labels "Upper".
     The file can list a pair in the reverse order, and the swap must not leave A with the wrong g.
     """
-    dflevelids = resolve_transition_levelid_columns(
+    check_no_nulls(dflines.select("gf", "wavelength"), "The Lisbon transitions file")
+    dftransitions = resolve_transition_levelid_columns(
         dflines, "level_index_lower", "level_index_upper", levelid_of_fileindex, "the Lisbon transitions file"
     )
-    # Python computes A, and not polars: wavelength ** 2 in Python and in polars can differ in the last bit
-    return [
-        Transition(
-            lowerlevel=lowerlevel,
-            upperlevel=upperlevel,
-            A=gf / (gf_to_a_coefficient * energy_levels[upperlevel].g * wavelength**2),
+    g_upper = pl.Series([level.g for level in energy_levels], dtype=pl.Float64).gather(dftransitions["upperlevel"])
+    # Python ** calls pow() of the C library, and pow() can differ from the x * x of polars in the
+    # last bit. So Python squares the wavelengths, as in the formula of the docstring.
+    wavelength_squared = pl.Series([wavelength**2 for wavelength in dflines["wavelength"].to_list()], dtype=pl.Float64)
+    denominator = gf_to_a_coefficient * g_upper * wavelength_squared
+    iszero = denominator == 0.0
+    # not an assert: a zero denominator gives an infinite A, which must not go to the output
+    if iszero.any():
+        lowerlevel, upperlevel = dftransitions.row(iszero.arg_true()[0])
+        msg = (
+            f"The Lisbon transitions file gives the transition {lowerlevel} -> {upperlevel} (level ids) a zero"
+            " wavelength or an upper level with g = 0, so its A has no value."
         )
-        for lowerlevel, upperlevel, gf, wavelength in dflevelids.with_columns(
-            dflines["gf"], dflines["wavelength"]
-        ).iter_rows()
-    ]
+        raise ValueError(msg)
+
+    return dftransitions.with_columns(A=dflines["gf"] / denominator)
 
 
 class EnergyLevelTuple(t.NamedTuple):
@@ -254,6 +278,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     transitions = read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
-    log_and_print(flog, f"The reader got {len(transitions):d} transitions.")
+    log_and_print(flog, f"The reader got {transitions.height:d} transitions.")
 
     return ionization_energy_in_ev, energy_levels, transitions

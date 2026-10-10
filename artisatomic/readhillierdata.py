@@ -372,6 +372,11 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     return (twosplusone, l, parity)
 
 
+def fortran_float_expr(text: pl.Expr) -> pl.Expr:
+    """Parse a float that can have a Fortran D exponent in place of an E. A text that is not a float gives null."""
+    return text.str.replace_all("D", "E", literal=True).cast(pl.Float64, strict=False)
+
+
 def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFrame:
     """Read the oscillator strengths table of a CMFGEN file into a transition frame.
 
@@ -400,8 +405,7 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
         return pl.col("parts").list.get(index, null_on_oob=True)
 
     def as_float(index: int) -> pl.Expr:
-        # the files write an exponent as D as well as E
-        return part(index).str.replace_all("D", "E", literal=True).cast(pl.Float64, strict=False)
+        return fortran_float_expr(part(index))
 
     dftransitions = (
         dflines.filter(~from_second_title)
@@ -714,6 +718,7 @@ def read_levels_and_transitions_from_file(
 
     names_with_transitions = pl.concat([dftransitions["namefrom"], dftransitions["nameto"]])
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
+        # implode(): polars deprecates is_in() with a bare Series of the same dtype
         pl.col("levelname").is_in(names_with_transitions.implode())
     )
 
@@ -1029,29 +1034,22 @@ class PhotFileReader:
                 line,
                 is_event=line.str.contains("!", literal=True) | (line.str.strip_chars().str.len_chars() == 0),
                 ncols=parts.list.len(),
-                # Fortran writes a D exponent. A token that is not a float gives NaN.
-                **{
-                    f"f{column}": parts.list.get(column, null_on_oob=True)
-                    .str.replace("D", "E", literal=True)
-                    .cast(pl.Float64, strict=False)
-                    for column in (0, 1)
-                },
+                # to_numpy() below turns the null of a token that is not a float into NaN
+                **{f"f{column}": fortran_float_expr(parts.list.get(column, null_on_oob=True)) for column in (0, 1)},
             )
             .collect()
         )
         self.lines = dftokens["line"]
-        event_rows = np.flatnonzero(dftokens["is_event"].to_numpy())
-        event_lines: list[str] = self.lines.filter(dftokens["is_event"]).to_list()
         self.ncols = dftokens["ncols"].to_numpy()
         self.f0 = dftokens["f0"].to_numpy()
         self.f1 = dftokens["f1"].to_numpy()
 
         segment_start = 0
-        for event_row, line in zip(event_rows, event_lines, strict=True):
+        for event_row, event_line in dftokens.with_row_index().filter("is_event").select("index", "line").iter_rows():
             # the data rows between the previous event and this one belong to the current block
-            self.take_data_rows(segment_start, int(event_row))
-            segment_start = int(event_row) + 1
-            self.take_event_line(line)
+            self.take_data_rows(segment_start, event_row)
+            segment_start = event_row + 1
+            self.take_event_line(event_line)
 
         self.take_data_rows(segment_start, len(self.lines))
         self.finish_tabulated_block(validate=False)

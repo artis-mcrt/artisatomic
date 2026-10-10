@@ -20,6 +20,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import scan_file_lines
@@ -115,10 +116,6 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
         .str.strip_chars()
     )
 
-    def null_if_blank(text: pl.Expr) -> pl.Expr:
-        # this is faster than replace("", None), which maps each value through a general table
-        return pl.when(text.ne("")).then(text)
-
     # read each line whole, then cut the fixed-width fields out of it
     gfall = scan_file_lines(fname).select(
         *(
@@ -138,14 +135,9 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     # order the levels
     first_is_lower = pl.col("energyabovegsinpercm_first").abs() < pl.col("energyabovegsinpercm_second").abs()
     gfall = gfall.with_columns(
-        *(
-            pl.when(first_is_lower).then(f"{column}_first").otherwise(f"{column}_second").alias(f"{column}_lower")
-            for column in double_columns
-        ),
-        *(
-            pl.when(first_is_lower).then(f"{column}_second").otherwise(f"{column}_first").alias(f"{column}_upper")
-            for column in double_columns
-        ),
+        pl.when(first_is_lower).then(f"{column}_{then}").otherwise(f"{column}_{other}").alias(f"{column}_{side}")
+        for side, then, other in (("lower", "first", "second"), ("upper", "second", "first"))
+        for column in double_columns
     )
 
     # Clean labels. str.replace_all(), not Expr.replace(): the latter swaps whole values that

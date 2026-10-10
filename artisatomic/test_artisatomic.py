@@ -1413,8 +1413,9 @@ def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
     assert [level.g for level in energy_levels] == [1.0, 5.0]
 
     transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
-    assert [(tr.lowerlevel, tr.upperlevel) for tr in transitions] == [(0, 1)]
-    assert pytest.approx(0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)) == transitions[0].A
+    assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1)]
+    # the same bits as the Python formula
+    assert transitions["A"].to_list() == [0.25 / (gf_to_a_coefficient * 5.0 * 10000.0**2)]
 
 
 def test_resolve_transition_levelid_columns():
@@ -1425,21 +1426,13 @@ def test_resolve_transition_levelid_columns():
     assert result.rows() == [(0, 2), (0, 1), (1, 2)]
     assert result.schema == pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64})
 
-    # int() reads a text index with spaces at the ends, so the function reads it also
-    dftext = pl.DataFrame({"lo": [" 20", "10 "], "up": ["30", "20"]})
-    assert resolve_transition_levelid_columns(dftext, "lo", "up", levelid_of_fileindex, "the test file").rows() == [
-        (1, 2),
-        (0, 1),
-    ]
-
     dfunknown = pl.DataFrame({"lo": [10, 99, 20], "up": [20, 30, 40]})
     with pytest.raises(ValueError, match="Transition 99 -> 30 in the test file names file index 99"):
         resolve_transition_levelid_columns(dfunknown, "lo", "up", levelid_of_fileindex, "the test file")
 
-    # int() reads "1_0", but the polars cast does not
-    dfodd = pl.DataFrame({"lo": ["1_0"], "up": ["20"]})
-    with pytest.raises(ValueError, match="has a file index that is not an integer"):
-        resolve_transition_levelid_columns(dfodd, "lo", "up", levelid_of_fileindex, "the test file")
+    dfunknownupper = pl.DataFrame({"lo": [10, 20], "up": [20, 40]})
+    with pytest.raises(ValueError, match="Transition 20 -> 40 in the test file names file index 40"):
+        resolve_transition_levelid_columns(dfunknownupper, "lo", "up", levelid_of_fileindex, "the test file")
 
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
@@ -1485,16 +1478,12 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     transitions = readlisbondata.read_lines_data(energy_levels, dflines, levelid_of_fileindex)
 
     # ...which is level id 0 -> 2 after the sort, written with the lower id first, both times
-    assert len(transitions) == 2
-    assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 2), (0, 2)]
+    assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 2), (0, 2)]
     # A uses the g of the level that ended up as the upper one (J=2, g=5), whichever the file
     # called "Upper"
     expected_a = 1.0 / (gf_to_a_coefficient * 5.0 * 2000.0**2)
-    assert all(pytest.approx(expected_a) == transition.A for transition in transitions)
-    dftransitions = pl.DataFrame(
-        {"lowerlevel": [t.lowerlevel for t in transitions], "upperlevel": [t.upperlevel for t in transitions]}
-    )
-    assert transition_count_of_level(dftransitions, len(energy_levels)) == [2, 0, 2]
+    assert transitions["A"].to_list() == [expected_a, expected_a]
+    assert transition_count_of_level(transitions, len(energy_levels)) == [2, 0, 2]
     # the names carry the file index, so two levels with one label and J stay apart
     assert [level.levelname for level in energy_levels] == [
         "gs, j=0.0, index=2",
@@ -1509,6 +1498,23 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     )
     with pytest.raises(ValueError, match="names file index 99"):
         readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
+
+    # A has no value for a zero wavelength
+    dflines_zero = pl.DataFrame({"level_index_lower": [2], "level_index_upper": [0], "gf": [1.0], "wavelength": [0.0]})
+    with pytest.raises(ValueError, match="zero wavelength"):
+        readlisbondata.read_lines_data(energy_levels, dflines_zero, levelid_of_fileindex)
+
+    dflines_nogf = pl.DataFrame(
+        {"level_index_lower": [2], "level_index_upper": [0], "gf": [None], "wavelength": [2000.0]},
+        schema={
+            "level_index_lower": pl.Int64,
+            "level_index_upper": pl.Int64,
+            "gf": pl.Float64,
+            "wavelength": pl.Float64,
+        },
+    )
+    with pytest.raises(ValueError, match="gf"):
+        readlisbondata.read_lines_data(energy_levels, dflines_nogf, levelid_of_fileindex)
 
 
 def lisbon_provenance(countkey: str, rowcount: int) -> str:
@@ -1580,7 +1586,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
         "4f-3(9)2, j=1.0, index=2",
     ]
     # the four lines are 0-1, 1-2, 2-3 and 3-4. The last two name a dropped level
-    assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 1), (1, 2)]
+    assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1), (1, 2)]
     assert "The reader dropped 2 levels that are above the ionisation energy." in flog.getvalue()
     assert "skipped 2 transitions" in flog.getvalue()
 
@@ -1654,7 +1660,7 @@ def test_readlisbondata_reads_a_compressed_csv(tmp_path, monkeypatch, extension)
     _, energy_levels, transitions = readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
     assert [level.energyabovegsinpercm for level in energy_levels] == [0.0, 1000.0, 2000.0]
-    assert [(transition.lowerlevel, transition.upperlevel) for transition in transitions] == [(0, 1), (1, 2)]
+    assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1), (1, 2)]
 
 
 def test_readlisbondata_stops_on_a_transition_with_a_blank_level_index(tmp_path, monkeypatch):
@@ -1671,6 +1677,19 @@ def test_readlisbondata_stops_on_a_transition_with_a_blank_level_index(tmp_path,
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
     with pytest.raises(ValueError, match="level_index_lower"):
+        readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+
+def test_readlisbondata_stops_on_a_level_index_that_is_not_an_integer(tmp_path, monkeypatch):
+    """The reader reads the level indices as integers, and the message names the file and the value."""
+    from artisatomic import readlisbondata
+
+    write_lisbon_fixture(tmp_path, [0.0, 1000.0, 2000.0])
+    linesfile = tmp_path / "Nd" / "NdIII" / "NdIII_Transitions.csv"
+    linesfile.write_text(linesfile.read_text(encoding="utf-8").replace("1,0,0.1", "1.5,0,0.1"), encoding="utf-8")
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"NdIII_Transitions\.csv has a value that does not parse.*1\.5"):
         readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
 
@@ -2503,9 +2522,16 @@ def test_read_adf04_keeps_the_first_upsilon_of_a_pair(tmp_path):
 
 
 def test_read_adf04_stops_at_a_collision_pair_outside_the_levels(tmp_path):
-    """The error names the first collision pair that is outside the levels or that has two equal file indices."""
-    rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   2   2 6.27+08 4.29-01 5.29-01", "   3   1 6.27+08 4.29-01 5.29-01"]
-    with pytest.raises(ValueError, match=r"collision strength file indices 2, 2 in .* are outside the file's 2 levels"):
+    """The error names the first collision pair that is outside the levels."""
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   3   1 6.27+08 4.29-01 5.29-01", "   2   2 6.27+08 4.29-01 5.29-01"]
+    with pytest.raises(ValueError, match=r"collision strength file indices 1, 3 in .* are outside the file's 2 levels"):
+        read_hydrogen_adf04(tmp_path, rows)
+
+
+def test_read_adf04_stops_at_a_collision_pair_with_two_equal_file_indices(tmp_path):
+    """A collision row from a level to itself gets its own message, and not the message for a level outside the file."""
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   2   2 6.27+08 4.29-01 5.29-01"]
+    with pytest.raises(ValueError, match=r"collision strength in .* has the same file index 2 for the two levels"):
         read_hydrogen_adf04(tmp_path, rows)
 
 
@@ -2543,18 +2569,24 @@ def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
 
 def test_adas_transitions_frame_rejects_equal_file_indices():
     """A transition from a level to itself stops the run in the reader, and the message names the file."""
-    levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
     pairs = pl.DataFrame({"upper": [2, 2], "lower": [1, 2], "avalue": [1e8, 1e8]})
     with pytest.raises(ValueError, match=r"x\.adf04 has the same file index 2"):
-        readadasdata.adas_transitions_frame(levels, pairs, "x.adf04")
+        readadasdata.adas_transitions_frame(2, pairs, "x.adf04")
 
 
 def test_adas_transitions_frame_names_the_first_bad_row():
     """The error names the first bad row, and a pair outside the levels gives its own message."""
-    levels = [readadasdata.ADASEnergyLevel("a", 1, 1, 0, 0.0, 0.0, 1.0, 0)] * 2
     pairs = pl.DataFrame({"upper": [2, 3, 2], "lower": [1, 2, 2], "avalue": [1e8, 1e8, 1e8]})
     with pytest.raises(ValueError, match=r"transition file indices 2, 3 in x\.adf04 are outside the file's 2 levels"):
-        readadasdata.adas_transitions_frame(levels, pairs, "x.adf04")
+        readadasdata.adas_transitions_frame(2, pairs, "x.adf04")
+
+
+def test_adas_transitions_frame_gives_zero_based_level_ids_with_the_lower_level_first():
+    """The file indices start at 1, and a file can give the upper level first."""
+    pairs = pl.DataFrame({"upper": [2, 1], "lower": [1, 3], "avalue": [1e8, 2e8]})
+    result = readadasdata.adas_transitions_frame(3, pairs, "x.adf04")
+    assert result.rows() == [(0, 1, 1e8), (0, 2, 2e8)]
+    assert result.schema == pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
 
 
 def test_standardise_config():

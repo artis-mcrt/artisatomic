@@ -26,6 +26,7 @@ from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import null_if_blank
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelid_columns
 from artisatomic.base import roman_numerals
@@ -88,7 +89,7 @@ def parse_fixed_width(
         .slice(skip_lines)
         .select(
             # a blank field, and a line too short to reach the field, both give a null
-            fixed_width_column(start, end - start).replace("", None).cast(dtype).alias(name)
+            null_if_blank(fixed_width_column(start, end - start)).cast(dtype).alias(name)
             for name, start, end, dtype in columns
         )
         .collect()

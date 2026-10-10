@@ -246,31 +246,6 @@ def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> d
     return levelid_of_fileindex
 
 
-def resolve_transition_levelids(
-    fileindex_lower: t.Any, fileindex_upper: t.Any, levelid_of_fileindex: dict[int, int], sourcename: str
-) -> tuple[int, int]:
-    """Resolve one transition's file-numbered levels to zero-based level ids, lower id first.
-
-    The function raises on an index that names no level. A reader whose
-    transition and level files disagree about the numbering (0- or 1-based, for example) would
-    otherwise drop every transition. It would then write an empty ion without an error.
-    """
-    try:
-        lowerlevel = levelid_of_fileindex[int(fileindex_lower)]
-        upperlevel = levelid_of_fileindex[int(fileindex_upper)]
-    except KeyError as exc:
-        msg = (
-            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names file index {exc.args[0]}."
-            f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
-            " The transition file and the level file can disagree about the file indices."
-        )
-        raise ValueError(msg) from exc
-
-    # The reader re-sorted the levels by energy, so a transition can name them in either order.
-    # transitiondata.txt lists the lower id first.
-    return (lowerlevel, upperlevel) if lowerlevel < upperlevel else (upperlevel, lowerlevel)
-
-
 def resolve_transition_levelid_columns(
     dflines: pl.DataFrame,
     lowercolumn: str,
@@ -278,28 +253,31 @@ def resolve_transition_levelid_columns(
     levelid_of_fileindex: dict[int, int],
     sourcename: str,
 ) -> pl.DataFrame:
-    """Resolve the file indices of all transitions to zero-based level ids, lower id first.
+    """Resolve the integer file indices of the transitions to zero-based level ids, lower id first.
 
-    This is resolve_transition_levelids() for each row of dflines at the same time. The result
-    has the columns lowerlevel and upperlevel, in the row order of dflines. For the first row with
-    an unknown file index, the function raises the error of resolve_transition_levelids().
+    The result has the columns lowerlevel and upperlevel, in the row order of dflines. A reader that
+    re-sorted its levels by energy can name the two levels of a transition in either order, and
+    transitiondata.txt lists the lower id first.
+
+    The function raises on a file index that names no level, and the message names the first such
+    row. A reader whose transition file and level file disagree about the numbering (0- or 1-based,
+    for example) would otherwise drop every transition. It would then write an empty ion without an
+    error.
     """
 
     def levelid(column: str) -> pl.Expr:
-        # int() accepts a text index with spaces at the ends, and the polars cast does not
-        fileindex = pl.col(column).str.strip_chars() if dflines.schema[column] == pl.String else pl.col(column)
-        return fileindex.cast(pl.Int64, strict=False).replace_strict(
-            levelid_of_fileindex, default=None, return_dtype=pl.Int64
-        )
+        return pl.col(column).cast(pl.Int64).replace_strict(levelid_of_fileindex, default=None, return_dtype=pl.Int64)
 
     dflevelids = dflines.select(lowerlevel=levelid(lowercolumn), upperlevel=levelid(uppercolumn))
     unresolved = dflevelids["lowerlevel"].is_null() | dflevelids["upperlevel"].is_null()
     if unresolved.any():
-        rowindex = unresolved.arg_true()[0]
-        fileindex_lower, fileindex_upper = dflines.select(lowercolumn, uppercolumn).row(rowindex)
-        resolve_transition_levelids(fileindex_lower, fileindex_upper, levelid_of_fileindex, sourcename)
-        # resolve_transition_levelids() accepts an index that int() can read, e.g. the text " 3"
-        msg = f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} has a file index that is not an integer."
+        fileindex_lower, fileindex_upper = dflines.select(lowercolumn, uppercolumn).row(unresolved.arg_true()[0])
+        unknown = fileindex_upper if fileindex_lower in levelid_of_fileindex else fileindex_lower
+        msg = (
+            f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names file index {unknown}."
+            f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
+            " The transition file and the level file can disagree about the file indices."
+        )
         raise ValueError(msg)
 
     return dflevelids.select(
@@ -869,9 +847,17 @@ def fixed_width_column(offset: int, width: int | None = None) -> pl.Expr:
     """Return an expression for the fixed columns of the "line" column, with no whitespace at the ends.
 
     With no width, the columns go to the end of the line. A blank field, and a line too short to
-    reach the field, both give "". A cast with strict=False, or replace("", None), makes that a null.
+    reach the field, both give "". A cast with strict=False, or null_if_blank(), makes that a null.
     """
     return pl.col("line").str.slice(offset, width).str.strip_chars()
+
+
+def null_if_blank(text: pl.Expr) -> pl.Expr:
+    """Return the text, with a null in place of an empty text.
+
+    This is faster than replace("", None), which maps each value through a general table.
+    """
+    return pl.when(text.ne("")).then(text)
 
 
 def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
@@ -924,18 +910,12 @@ def parse_nist_ionization_table(text: str) -> tuple[list[str], dict[tuple[int, i
             datalines = datalines[:index]
             break
 
-    # read_csv(columns=) keeps the file's column order, so select() puts them in the order
-    # that the loop below unpacks
-    dfnist = (
-        pl.read_csv(
-            io.StringIO("\n".join(datalines)),
-            separator="\t",
-            columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
-            infer_schema=False,
-        )
-        .select("At. num", "Ion Charge", "Ionization Energy (a) (eV)")
-        .fill_null("")
-    )
+    dfnist = pl.read_csv(
+        io.StringIO("\n".join(datalines)),
+        separator="\t",
+        columns=["At. num", "Ion Charge", "Ionization Energy (a) (eV)"],
+        infer_schema=False,
+    ).fill_null("")
     energies = {}
     for atomic_number, ion_charge, ioniz_ev in dfnist.iter_rows():
         if not ioniz_ev:

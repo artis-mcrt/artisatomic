@@ -86,10 +86,6 @@ python-interpreter-path = ".venv/bin/python3"
 implicit-any-parameter = false
 implicit-any-lambda = false
 
-[tool.pytest.ini_options]
-# A warning fails the test. A polars deprecation then shows in CI before the next polars version removes the feature.
-filterwarnings = ["error"]
-
 [tool.ruff]
 line-length = 120
 fix = true

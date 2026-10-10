@@ -188,7 +188,9 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     )
 
     try:
-        dftable = lftable.collect()
+        # the streaming engine halves the peak memory of a multi-gigabyte file. The explicit engine
+        # also applies when a user sets the engine affinity of polars to "in-memory".
+        dftable = lftable.collect(engine="streaming")
     except pl.exceptions.NoDataError:
         # a table can hold a header and no data row, e.g. an ion with no line of one type
         dftable = pl.DataFrame(schema={countcol: pl.UInt32} | dict.fromkeys(usecols, pl.String))
