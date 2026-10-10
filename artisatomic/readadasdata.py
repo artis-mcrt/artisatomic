@@ -467,8 +467,8 @@ def read_adf04(
     - a frame of upsilon values (see base.upsilon_schema), with one row for each pair of level ids;
     - the parsed collision rows.
 
-    The caller takes the A-values from that frame, which saves a second read and a second parse
-    of the file. The file numbers levels from one, and the rest of the code looks up id n at
+    The caller takes the A-values from the collision rows, which saves a second read and a second
+    parse of the file. The file numbers levels from one, and the rest of the code looks up id n at
     list index n - 1. The reader therefore checks that the file indices are contiguous and 1-based.
     """
     energylevels: list[ADASEnergyLevel] = []
@@ -640,18 +640,19 @@ def read_adf04(
 
         isfirst = pl.struct("lower", "upper").is_first_distinct()
         firstupsilons = upsilons.filter(isfirst)
-        duplicates = upsilons.filter(~isfirst).join(
-            firstupsilons.rename({"upsilon": "kept"}), on=["lower", "upper"], how="left", maintain_order="left"
-        )
-        # the log messages keep the file indices, because they are about the file's contents
-        for lower, upper, upsilon, kept in duplicates.iter_rows():
-            log_detail(
-                flog,
-                ("transitiondata",),
-                "duplicate upsilon",
-                f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
-                f" {kept:5.2e} and ignores {upsilon:5.2e}",
+        if firstupsilons.height < upsilons.height:
+            duplicates = upsilons.filter(~isfirst).join(
+                firstupsilons.rename({"upsilon": "kept"}), on=["lower", "upper"], how="left", maintain_order="left"
             )
+            # the log messages keep the file indices, because they are about the file's contents
+            for lower, upper, upsilon, kept in duplicates.iter_rows():
+                log_detail(
+                    flog,
+                    ("transitiondata",),
+                    "duplicate upsilon",
+                    f"Duplicate upsilon value for transition {lower:d} to {upper:d}. The reader keeps"
+                    f" {kept:5.2e} and ignores {upsilon:5.2e}",
+                )
         # the file index starts at one; level ids are zero-based in memory
         dfupsilon = firstupsilons.select(
             lowerlevel=pl.col("lower") - 1, upperlevel=pl.col("upper") - 1, upsilon=pl.col("upsilon")
@@ -747,9 +748,8 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     args gives -electrontemperature, which picks the tabulated collision strengths.
 
     The function reads the per-ion adf04 files, the Co III files in the co_tyndall directory, and
-    the single level of Co IV. The Co III and the Co IV data have their own layouts. Also returns
-    the effective collision strengths as a frame of base.upsilon_schema. Most other readers leave
-    another module to give them.
+    the single level of Co IV. The Co III and the Co IV data have their own layouts. It also
+    returns the effective collision strengths as a frame of base.upsilon_schema.
     """
     # the plain name, not the found path: read_adf04() logs the name that it receives. The
     # tested log file carries the plain name for a plain file and for a compressed file.

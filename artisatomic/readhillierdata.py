@@ -35,6 +35,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
 from artisatomic.base import upsilon_frame
+from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
@@ -1899,11 +1900,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     term recovers the file's value.
     """
     t_scale_factor = 1e4  # Hillier gives the temperatures as T_4
-    upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
         log_comment(flog, ("transitiondata",), "CMFGEN has no collision data file for this ion.")
-        return upsilon_frame(upsilondict)
+        return pl.DataFrame(schema=upsilon_schema)
 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     gvalues: list[float] = dfenergy_levels["g"].to_list()
@@ -1917,6 +1917,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         # keep the level ids of states that differ by J only, for the case that the level names
         # in the collision file have no J
         level_ids_of_level_name.setdefault(levelnamenoJ, []).append(levelid)
+
+    upsilondict: dict[tuple[int, int], float] = {}
 
     # total statistical weight per term, to share a term-resolved collision strength over its
     # J levels. It depends only on the level list, so build it once.

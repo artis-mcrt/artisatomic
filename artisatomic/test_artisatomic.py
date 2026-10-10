@@ -44,6 +44,7 @@ from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
 from artisatomic.base import upsilon_frame
+from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
 from artisatomic.cli import build_parser
 from artisatomic.levelnames import convert_eissner_to_standard
@@ -71,8 +72,14 @@ def phixs_args(**overrides: t.Any) -> argparse.Namespace:
 
 
 def upsilon_dict(dfupsilon: pl.DataFrame) -> dict[tuple[int, int], float]:
-    """Convert a frame of base.upsilon_schema to a dict keyed by the pair of level ids, for a short comparison."""
-    return {(lower, upper): upsilon for lower, upper, upsilon in dfupsilon.iter_rows()}
+    """Convert a frame of base.upsilon_schema to a dict keyed by the pair of level ids, for a short comparison.
+
+    The dict keeps one value for each pair, so the function first checks the schema and that each pair has one row.
+    """
+    assert dfupsilon.schema == upsilon_schema
+    upsilons = {(lower, upper): upsilon for lower, upper, upsilon in dfupsilon.iter_rows()}
+    assert len(upsilons) == dfupsilon.height
+    return upsilons
 
 
 def test_interpret_term():
@@ -6191,3 +6198,40 @@ def test_write_output_files_counts_the_term_markers_apart_from_the_collision_str
         "# artisatomic added 2 transitions with A = 0, for level pairs that have a collision strength" in transitiontext
     )
     assert "# artisatomic added 1 transitions with A = 0 and coll_str -2, for pairs of J levels" in transitiontext
+
+
+def test_write_output_files_stops_for_two_upsilon_rows_of_one_pair(tmp_path):
+    """The joins of the writer would write the transition of such a pair more than once."""
+    import dataclasses
+
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    tmpargs = phixs_args(output_folder=str(tmp_path), nophixs=True)
+    iondata = dataclasses.replace(
+        make_iondata(1, is_top_ion=True),
+        dfupsilon=pl.DataFrame([(0, 1, 0.5), (0, 1, 0.7)], schema=upsilon_schema, orient="row"),
+    )
+    clear_files(tmpargs)
+    with pytest.raises(ValueError, match=r"more than one upsilon value .* level ids 0 -> 1"):
+        write_output_files(26, [iondata], tmpargs)
+
+
+def test_read_ion_data_takes_the_value_of_read_coldata_for_a_pair_of_both_sources(tmp_path, monkeypatch):
+    """The reader and read_coldata both give the pair (0, 1). The frame keeps one row, with the read_coldata value."""
+    from artisatomic import iondata
+    from artisatomic.base import EnergyLevel
+
+    levels = [EnergyLevel("a", 0.0, 1.0, 0), EnergyLevel("b", 10000.0, 3.0, 1), EnergyLevel("c", 20000.0, 5.0, 0)]
+
+    def read_levels_and_transitions(_atomic_number, _ion_stage, _flog):
+        transitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [1e8]})
+        return 10.0, levels, transitions, upsilon_frame({(0, 1): 0.3, (0, 2): 0.4})
+
+    def read_coldata(_atomic_number, _ion_stage, _dfenergylevels, _args, _flog):
+        return upsilon_frame({(0, 1): 5.0, (1, 2): 6.0})
+
+    handler = iondata.Handler("stub", read_levels_and_transitions, returns_upsilons=True, read_coldata=read_coldata)
+    monkeypatch.setitem(iondata.handlers, "stub", handler)
+    result = iondata.read_ion_data(1, (1, "stub"), True, phixs_args(output_folder=str(tmp_path), nophixs=True))
+    assert upsilon_dict(result.dfupsilon) == {(0, 1): 5.0, (0, 2): 0.4, (1, 2): 6.0}

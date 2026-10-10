@@ -125,7 +125,12 @@ upsilon_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "ups
 def upsilon_frame(upsilons: dict[tuple[int, int], float]) -> pl.DataFrame:
     """Convert upsilon values, keyed by a (lower, upper) pair of level ids, to a frame of upsilon_schema."""
     return pl.DataFrame(
-        [(lower, upper, upsilon) for (lower, upper), upsilon in upsilons.items()], schema=upsilon_schema, orient="row"
+        {
+            "lowerlevel": [lower for lower, _ in upsilons],
+            "upperlevel": [upper for _, upper in upsilons],
+            "upsilon": list(upsilons.values()),
+        },
+        schema=upsilon_schema,
     )
 
 

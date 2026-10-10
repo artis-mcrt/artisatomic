@@ -73,17 +73,19 @@ class Handler:
 
     read_levels_and_transitions takes (atomic_number, ion_stage, flog), and args as well when
     reader_takes_args is set. It returns (ionization_energy_ev, energy_levels, transitions), with
-    a frame of upsilon values (see base.upsilon_schema) appended when returns_upsilons is set. The writer counts the transitions of
-    each level itself, from the final transition frame, so a reader returns no counts. The shapes
-    differ by design, so the Callable stays untyped in its return.
+    a frame of upsilon values (see base.upsilon_schema) appended when returns_upsilons is set. The
+    writer counts the transitions of each level itself, from the final transition frame, so a
+    reader returns no counts. The shapes differ by design, so the Callable stays untyped in its
+    return.
 
     get_level_valence_n is the handler's own level-name parser. The hydrogenic photoionisation
     estimate uses it. None leaves the ion without cross sections, and match_hydrogenic_phixs()
     then writes a warning.
 
-    read_coldata, when set, takes (atomic_number, ion_stage, dfenergylevels, args, flog) and
-    returns the collision strengths of a data set that keeps them in their own file, as a frame of
-    base.upsilon_schema. Where the reader also gives a value for a pair, the value of read_coldata wins.
+    read_coldata, when set, takes (atomic_number, ion_stage, dfenergylevels, args, flog). It is for
+    a data set that keeps the collision strengths in their own file. It returns them as a frame of
+    base.upsilon_schema. Where the reader also gives a value for a pair, the value of read_coldata
+    wins.
 
     read_phixs, when set, takes the same arguments and returns the PhixsData of the ion. Without
     it, the hydrogenic estimate is the only source of cross sections.
@@ -231,15 +233,8 @@ def read_ion_data(
         dfenergylevels = leveltuples_to_pldataframe(energy_levels)
 
         if handlerspec.read_coldata is not None:
-            dfupsilon = pl.concat(
-                [dfupsilon, handlerspec.read_coldata(atomic_number, ion_stage, dfenergylevels, args, flog)]
-            ).unique(subset=["lowerlevel", "upperlevel"], keep="last", maintain_order=True)
-
-        # not an assert: the writer joins the upsilon values onto the transitions, and a second row
-        # for a pair would double a transition
-        if dfupsilon.select(pl.struct("lowerlevel", "upperlevel").is_duplicated().any()).item():
-            msg = f"The {handler} reader gives more than one upsilon value for a pair of levels"
-            raise ValueError(msg)
+            dfcoldata = handlerspec.read_coldata(atomic_number, ion_stage, dfenergylevels, args, flog)
+            dfupsilon = pl.concat([dfupsilon.join(dfcoldata, on=["lowerlevel", "upperlevel"], how="anti"), dfcoldata])
 
         # the top ion has no upper ion to photoionise to, so it gets no cross sections
         if not is_top_ion and not args.nophixs and handlerspec.read_phixs is not None:
