@@ -41,6 +41,7 @@ from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
 from artisatomic.base import transition_count_of_level
+from artisatomic.base import upsilon_frame
 from artisatomic.base import xopen_check_extension
 from artisatomic.cli import build_parser
 from artisatomic.levelnames import convert_eissner_to_standard
@@ -65,6 +66,11 @@ def phixs_args(**overrides: t.Any) -> argparse.Namespace:
     for name, value in overrides.items():
         setattr(args, name, value)
     return args
+
+
+def upsilon_dict(dfupsilon: pl.DataFrame) -> dict[tuple[int, int], float]:
+    """Convert a frame of base.upsilon_schema to a dict keyed by the pair of level ids, for a short comparison."""
+    return {(lower, upper): upsilon for lower, upper, upsilon in dfupsilon.iter_rows()}
 
 
 def test_interpret_term():
@@ -586,7 +592,7 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
             }
         ),
         dftransitions=pl.DataFrame(),
-        upsilondict={},
+        dfupsilon=upsilon_frame({}),
         photoion_targetconfigs=targetconfigs,
         photoionization_crosssections=np.empty((0, 100)),
         photoionization_targetfractions=targetfractions if targetfractions is not None else [],
@@ -923,7 +929,7 @@ def test_read_coldata_term_to_j_redistribution():
         flog = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()):
             _, dflevels, _ = readhillierdata.read_levels_and_transitions(atomic_number, ion_stage, flog)
-            upsilondict = readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog)
+            upsilondict = upsilon_dict(readhillierdata.read_coldata(atomic_number, ion_stage, dflevels, args, flog))
         levelids_of_term = defaultdict(list)
         for levelid, levelname in enumerate(dflevels["levelname"]):
             levelids_of_term[levelname.split("[")[0]].append(levelid)
@@ -2183,13 +2189,11 @@ def adf04_sample_path() -> Path:
 def test_read_adf04():
     """An adf04 file yields levels and effective collision strengths keyed by zero-based level ids."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, upsilondict, _ = readadasdata.read_adf04(
-        adf04_sample_path(), flog, 5010.0, 27, 3
-    )
+    ionization_energy_ev, energylevels, dfupsilon, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 5010.0, 27, 3)
     # the value of the file header. read_adas_levels_and_transitions() replaces it for Co III.
     assert abs(ionization_energy_ev - 40.964007) < 1e-5
     assert len(energylevels) == 262
-    assert len(upsilondict) == 235
+    assert len(dfupsilon) == 235
     level1 = energylevels[0]
     assert level1 is not None
     assert level1.levelname == "3s23p63d7(4F)_4Fe[9/2]_id=1"
@@ -2223,9 +2227,9 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     filepath.write_text("".join([*lines, processrow, *trailer]))
 
     flog = io.StringIO()
-    _, energylevels, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
+    _, energylevels, dfupsilon, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
     assert len(energylevels) == 262
-    assert len(upsilondict) == 235
+    assert len(dfupsilon) == 235
     assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "The levels, the transitions and the collision strengths come from " in flog.getvalue()
     assert "level pairs" not in flog.getvalue()
@@ -2239,8 +2243,8 @@ def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
     filepath.write_text("".join([*lines[:middle], "  -1.0E+00 no data for this pair\n", *lines[middle:]]))
 
     flog = io.StringIO()
-    _, _, upsilondict, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
-    assert len(upsilondict) == 235
+    _, _, dfupsilon, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
+    assert len(dfupsilon) == 235
 
 
 def test_rename_old_data_directory(tmp_path, capsys):
@@ -2394,7 +2398,9 @@ def write_hydrogen_adf04(
 
 def read_hydrogen_adf04(tmp_path: Path, rows: t.Sequence[str], **parts: t.Any) -> dict[tuple[int, int], float]:
     """Write a minimal H I adf04 file and return the upsilon values at 5000 K."""
-    return readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows, **parts), io.StringIO(), 5000.0, 1, 1)[2]
+    return upsilon_dict(
+        readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows, **parts), io.StringIO(), 5000.0, 1, 1)[2]
+    )
 
 
 def test_read_adf04_header():
@@ -2439,9 +2445,13 @@ def test_adf04_level_regex():
 def test_read_adf04_process_code_and_touching_values(tmp_path):
     """A row with the process code "1" in column 1 is a collision row, and fixed columns separate two values."""
     filepath = write_hydrogen_adf04(tmp_path, ["1  2   1 6.27+08 4.29-01 5.29-01-3.01-02"])
-    assert readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2] == {(0, 1): pytest.approx(0.429)}
+    assert upsilon_dict(readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]) == {
+        (0, 1): pytest.approx(0.429)
+    }
     # the last upsilon touches the Born limit
-    assert readadasdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2] == {(0, 1): pytest.approx(0.529)}
+    assert upsilon_dict(readadasdata.read_adf04(filepath, io.StringIO(), 1e6, 1, 1)[2]) == {
+        (0, 1): pytest.approx(0.529)
+    }
 
 
 def test_read_adf04_temperature_line(tmp_path):
@@ -2480,8 +2490,8 @@ def test_read_adf04_file_index_columns(tmp_path):
     values = " 6.27+08 4.29-01 5.29-01"
     # more than 999 levels: columns 1 to 4 are the file index, and "1 23" is a process code and a file index
     rows = ["1123   5 6.27+08 1.00-01 9.00-01", "1 23   9 6.27+08 2.00-01 9.00-01", "   7   5 6.27+08 3.00-01 9.00-01"]
-    upsilondict = read_hydrogen_adf04(tmp_path, rows, levels=levels, header=wide_header)
-    assert upsilondict == {(4, 1122): pytest.approx(0.1), (8, 22): pytest.approx(0.2), (4, 6): pytest.approx(0.3)}
+    upsilons = read_hydrogen_adf04(tmp_path, rows, levels=levels, header=wide_header)
+    assert upsilons == {(4, 1122): pytest.approx(0.1), (8, 22): pytest.approx(0.2), (4, 6): pytest.approx(0.3)}
     # a file index above the number of levels stops the run. It is not a process code and a smaller file index.
     with pytest.raises(ValueError, match="file indices 6, 3999"):
         read_hydrogen_adf04(tmp_path, ["3999   6" + values], levels=levels, header=wide_header)
@@ -2492,7 +2502,7 @@ def test_read_adf04_file_index_columns(tmp_path):
     rows = ["1123   5", "2005   1", "42     1", "4 12   1", "   9  +1"]
     filepath = write_hydrogen_adf04(tmp_path, [row + values for row in rows], levels=levels[:200])
     flog = io.StringIO()
-    assert sorted(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2]) == [(4, 122)]
+    assert sorted(upsilon_dict(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2])) == [(4, 122)]
     assert "The reader skipped 4 collision rows that it could not parse." in flog.getvalue()
 
 
@@ -2505,8 +2515,8 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
         "C a comment",
     ]
     flog = io.StringIO()
-    upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
-    assert upsilondict == {(0, 1): pytest.approx(0.429)}
+    upsilons = upsilon_dict(readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2])
+    assert upsilons == {(0, 1): pytest.approx(0.429)}
     assert "The reader skipped 3 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
@@ -2515,8 +2525,8 @@ def test_read_adf04_keeps_the_first_upsilon_of_a_pair(tmp_path):
     """A second row of a level pair, also in the opposite order, gives a log line and no new value."""
     rows = ["   2   1 6.27+08 4.29-01 5.29-01", "   1   2 6.27+08 3.00-01 3.00-01", "   2   1 6.27+08 2.00-01 2.00-01"]
     flog = io.StringIO()
-    upsilondict = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2]
-    assert upsilondict == {(0, 1): pytest.approx(0.429)}
+    upsilons = upsilon_dict(readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2])
+    assert upsilons == {(0, 1): pytest.approx(0.429)}
     assert "transition 1 to 2. The reader keeps 4.29e-01 and ignores 3.00e-01" in flog.getvalue()
     assert "transition 1 to 2. The reader keeps 4.29e-01 and ignores 2.00e-01" in flog.getvalue()
 
@@ -2543,8 +2553,8 @@ def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
         "   2   1 6.27+08 4.29-01",  # no upsilon at the second temperature
     ]
     flog = io.StringIO()
-    _, _, upsilondict, collisiondf = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 1e6, 1, 1)
-    assert upsilondict == {(0, 1): pytest.approx(0.5)}
+    _, _, dfupsilon, collisiondf = readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 1e6, 1, 1)
+    assert upsilon_dict(dfupsilon) == {(0, 1): pytest.approx(0.5)}
     assert collisiondf.columns == ["upper", "lower", "avalue", "upsilon"]
     assert collisiondf["avalue"].to_list() == [1e8, 6.27e8]
     assert "The reader skipped 1 collision rows that it could not parse." in flog.getvalue()
@@ -2561,9 +2571,11 @@ def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
     # A row that stops before the selected temperature is readable, so the reader does not stop. It gives a warning.
     rows = ["   2   1 6.27+08 4.29-01", "   1    2  6.27+08  4.29-01  5.29-01"]
     filepath = write_hydrogen_adf04(tmp_path, rows)
-    assert readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2] == {(0, 1): pytest.approx(0.429)}
+    assert upsilon_dict(readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)[2]) == {
+        (0, 1): pytest.approx(0.429)
+    }
     flog = io.StringIO()
-    assert readadasdata.read_adf04(filepath, flog, 1e6, 1, 1)[2] == {}
+    assert upsilon_dict(readadasdata.read_adf04(filepath, flog, 1e6, 1, 1)[2]) == {}
     assert "WARNING: no collision row has an upsilon at the selected temperature" in flog.getvalue()
 
 
@@ -2686,13 +2698,13 @@ def test_parse_ion_handlers_accepts_a_renamed_handler():
 def test_read_adas_sr1():
     """Sr I is a complete adf04 file: the collision block ends with a "-1" row and a comment block."""
     flog = io.StringIO()
-    ionization_energy_ev, energylevels, transitions, upsilondict = readadasdata.read_adas_levels_and_transitions(
+    ionization_energy_ev, energylevels, transitions, dfupsilon = readadasdata.read_adas_levels_and_transitions(
         38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
     )
     assert abs(ionization_energy_ev - 5.694867) < 1e-5
     assert len(energylevels) == 57
     # the file holds 1596 collision rows between the temperature header and the "-1" row
-    assert len(upsilondict) == 1596
+    assert len(dfupsilon) == 1596
     assert len(transitions) == 1372
     assert energylevels[0].levelname.startswith("4p65s2")
 
@@ -3874,7 +3886,7 @@ def test_fill_missing_phixs_thresholds():
             ionization_energy_ev=ionpot,
             dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
             dftransitions=pl.DataFrame(),
-            upsilondict={},
+            dfupsilon=upsilon_frame({}),
             photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
@@ -3966,7 +3978,7 @@ def test_fill_missing_phixs_thresholds_treats_a_negative_as_missing():
             ionization_energy_ev=ionpot,
             dfenergylevels=pl.DataFrame({"energyabovegsinpercm": energiespercm}),
             dftransitions=pl.DataFrame(),
-            upsilondict={},
+            dfupsilon=upsilon_frame({}),
             photoion_targetconfigs=None,
             photoionization_crosssections=np.zeros((len(energiespercm), 1)),
             photoionization_targetfractions=targets,
@@ -4203,7 +4215,7 @@ def test_iondata_handlers_registry():
     The parsers used to be a second table in phixs.py, and the length of the reader's result
     used to give the return shape. Both are registry fields now, so nothing else checks them. A
     parser registered against the wrong handler would give an ion the hydrogenic cross sections
-    of another data source. A wrong returns_upsilondict would make the unpack fail on the first
+    of another data source. A wrong returns_upsilons would make the unpack fail on the first
     run.
     """
     from artisatomic import groundstatesonlynist
@@ -4239,7 +4251,7 @@ def test_iondata_handlers_registry():
 
     # only the ADAS reader returns collision strengths beside the levels and the transitions. Only
     # it takes args, for the temperature that selects the tabulated collision strengths
-    assert {name for name, handler in handlers.items() if handler.returns_upsilondict} == {"adas"}
+    assert {name for name, handler in handlers.items() if handler.returns_upsilons} == {"adas"}
     assert {name for name, handler in handlers.items() if handler.reader_takes_args} == {"adas"}
 
     # CMFGEN is the one data source with collision strengths in its own file. CMFGEN and the QUB
@@ -4741,11 +4753,11 @@ def test_read_adf04_selects_the_nearest_temperature():
     per element chose 5010 K before, whatever the command line said.
     """
     flog = io.StringIO()
-    _, _, upsilons_6000, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)
+    upsilons_6000 = upsilon_dict(readadasdata.read_adf04(adf04_sample_path(), flog, 6000.0, 27, 3)[2])
     assert "The collision strengths are the values at 6030 K." in flog.getvalue()
 
     flog = io.StringIO()
-    _, _, upsilons_low, _ = readadasdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)
+    upsilons_low = upsilon_dict(readadasdata.read_adf04(adf04_sample_path(), flog, 1000.0, 27, 3)[2])
     assert "The collision strengths are the values at 3150 K." in flog.getvalue()
 
     assert set(upsilons_6000) == set(upsilons_low)
@@ -4906,12 +4918,12 @@ def test_read_adas_levels_and_transitions_sorts_the_level_ids(tmp_path, monkeypa
     monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
 
     with contextlib.redirect_stdout(io.StringIO()):
-        _, _, adas_transitions, upsilondict = readadasdata.read_adas_levels_and_transitions(
+        _, _, adas_transitions, dfupsilon = readadasdata.read_adas_levels_and_transitions(
             99, 1, io.StringIO(), phixs_args()
         )
 
     # the ids are zero-based in memory, and both the transition and the upsilon name the same pair
-    assert list(upsilondict) == [(0, 1)]
+    assert list(upsilon_dict(dfupsilon)) == [(0, 1)]
     assert adas_transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1)]
 
 
@@ -5067,7 +5079,7 @@ def two_level_iondata(ion_stage: int, nphixspoints: int, *, has_phixs: bool, is_
                 "levelname": [f"gs{ion_stage}", f"excited{ion_stage} # not a comment"],
             }
         ),
-        upsilondict={(0, 1): 0.5},
+        dfupsilon=upsilon_frame({(0, 1): 0.5}),
         photoionization_crosssections=np.ones((2, nphixspoints)) if has_phixs else np.empty((0, nphixspoints)),
         # one target for level id 0 and two targets for level id 1, so both table forms occur
         photoionization_targetfractions=[[(0, 1.0)], [(0, 0.25), (1, 0.75)]] if has_phixs else [],
@@ -6142,7 +6154,7 @@ def test_write_output_files_counts_the_term_markers_apart_from_the_collision_str
                 "levelname": ["a_3Pe[0]", "a_3Pe[1]", "b_3Do[1]"],
             }
         ),
-        upsilondict={(0, 1): -2.0, (0, 2): 0.5, (1, 2): 0.25},
+        dfupsilon=upsilon_frame({(0, 1): -2.0, (0, 2): 0.5, (1, 2): 0.25}),
     )
     clear_files(tmpargs)
     write_output_files(26, [iondata], tmpargs)

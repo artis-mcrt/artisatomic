@@ -474,7 +474,6 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
 
     for iondata in iondatalist:
         ion_stage = iondata.ion_stage
-        upsilondict = iondata.upsilondict
         ionstr = f"{elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
         ionlabel = ion_label(atomic_number, ion_stage)
 
@@ -489,13 +488,9 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             dfenergylevels_ion = iondata.dfenergylevels
             dftransitions_ion = iondata.dftransitions
 
-            # One frame of the upsilon pairs for the whole ion. The anti join below finds the
-            # pairs with no transition, and the left join after it attaches the values.
-            dfupsilon = pl.DataFrame(
-                [(lower, upper, upsilon) for (lower, upper), upsilon in upsilondict.items()],
-                schema={"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64},
-                orient="row",
-            )
+            # The anti join below finds the upsilon pairs with no transition, and the left join
+            # after it attaches the values.
+            dfupsilon = iondata.dfupsilon
 
             if dftransitions_ion.is_empty():
                 # a reader with no transitions gives a frame with no columns, which the joins in
@@ -541,8 +536,8 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
             if not dftransitions_ion.is_empty():
                 # A left join and not a per-row map_elements(). This runs over every transition
                 # of the ion (2.6M of them for the cmfgen set). A Python callback for each row
-                # would cost more than the whole rest of the write. The keys of upsilondict are
-                # unique, so the join cannot duplicate rows. maintain_order keeps the frame in the
+                # would cost more than the whole rest of the write. read_ion_data() gives each
+                # pair one row in dfupsilon, so the join cannot duplicate rows. maintain_order keeps the frame in the
                 # order the reader produced it.
                 dftransitions_ion = dftransitions_ion.join(
                     dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
