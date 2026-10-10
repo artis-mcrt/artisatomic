@@ -2068,13 +2068,12 @@ def test_reduce_phixs_tables_worker():
 def test_reduce_phixs_tables_worker_keeps_a_narrow_peak():
     """A narrow peak of the table adds its area to its bin, wherever it is in the bin.
 
-    A resample of each bin at a fixed set of points lost a peak between two points, and spread a
-    peak at one point over a whole step of the set.
+    A resample of each bin at a fixed set of points lost a peak between two points. It also spread
+    a peak at one point over a whole step of the set.
     """
     temperature = 6000.0
     xgrid = output_xgrid(100, 0.03)
     threshold = 0.5
-    # the low edge, the high edge and the width of bin 10
     enlow = 0.5 * (xgrid[9] + xgrid[10]) * threshold
     enhigh = 0.5 * (xgrid[10] + xgrid[11]) * threshold
     step = (enhigh - enlow) / 50
