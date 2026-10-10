@@ -4,6 +4,12 @@
 
 import argparse
 import json
+import math
+import os
+import shutil
+import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import argcomplete
@@ -21,6 +27,8 @@ from artisatomic.output import write_output_files
 
 # the record of the ions and the handlers of a run, in the output folder
 handlersrecordname = "artisatomicionhandlers_used.json"
+# the log of a run that failed, in the output folder. The log of the earlier run stays beside its output.
+failedlogname = "artisatomiclog_failed.txt"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -125,6 +133,14 @@ def main() -> None:
         msg = f"-nlevels_hydrogenic_for_unknown_phixs must not be negative, got {args.nlevels_hydrogenic_for_unknown_phixs}"
         raise ValueError(msg)
 
+    # A bad value can give NaN cross sections, or the collision strengths of the lowest temperature,
+    # with no error
+    for name in ("nphixspoints", "phixsnuincrement", "optimaltemperature", "electrontemperature"):
+        value = getattr(args, name)
+        if not (math.isfinite(value) and value > 0):
+            msg = f"-{name} must be a finite number more than 0, got {value}"
+            raise ValueError(msg)
+
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
     readadasdata.rename_old_adas_directory()
     ion_handlers = get_ion_handlers(
@@ -142,14 +158,102 @@ def main() -> None:
 
     # The readers can offer an element that has a gap in its ion stages. -maxionstage 6 gives
     # Sr I-IV and Sr VI, because no data source here holds Sr V. write_compositionfile() rejects
-    # such a gap. This check runs first, because the code below deletes the logs of the last run.
+    # such a gap. This check runs first, because the read of the ions can take hours.
     check_ion_stages_contiguous(ion_handlers)
 
-    Path(args.output_folder).mkdir(exist_ok=True, parents=True)
+    outputfolder = Path(args.output_folder)
+    outputfolder.mkdir(exist_ok=True, parents=True)
 
-    # this empties the log of the last run. The passes of each ion append to the file.
+    # The run writes into a new folder in the output folder, and moves the files at the end. A run
+    # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
+    workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
+    try:
+        write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
+    except BaseException:
+        with output_folder_lock(outputfolder):
+            discard_run(workfolder, outputfolder)
+        raise
+
+    # Two runs into one output folder can end at the same time. The lock lets only one run change
+    # the files in the output folder, so the folder holds the files of one run.
+    with output_folder_lock(outputfolder):
+        try:
+            earlierfolder = install_files(workfolder, outputfolder)
+        except BaseException:
+            discard_run(workfolder, outputfolder)
+            raise
+
+        # The output folder holds the full new output now. A failure of the cleanup must not make
+        # the run fail, because the files of the earlier run are gone from the output folder.
+        try:
+            shutil.rmtree(earlierfolder)
+            workfolder.rmdir()
+            (outputfolder / failedlogname).unlink(missing_ok=True)
+            remove_old_log_folder(outputfolder)
+        except OSError as error:
+            print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+
+
+@contextmanager
+def output_folder_lock(outputfolder: Path) -> Generator[None]:
+    """Hold an exclusive lock on the output folder. A second run waits until the first run releases it.
+
+    The operating system releases the lock when the process stops, so a run that crashes leaves no
+    lock. Windows has no flock(), so there the function gives no lock.
+    """
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    folderfd = os.open(outputfolder, os.O_RDONLY)
+    try:
+        fcntl.flock(folderfd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(folderfd)
+
+
+def discard_run(workfolder: Path, outputfolder: Path) -> None:
+    """Remove the work folder of a run that failed. Keep its log as failedlogname in the output folder."""
+    if log_path(workfolder).is_file():
+        log_path(workfolder).replace(outputfolder / failedlogname)
+    shutil.rmtree(workfolder)
+    print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
+
+
+def install_files(workfolder: Path, outputfolder: Path) -> Path:
+    """Move the files of the run from workfolder into outputfolder. Give the folder that holds the earlier files.
+
+    The files of the earlier run go to a new folder first. If a move fails, the function moves the
+    new files back to workfolder, restores the earlier files, and raises the error again.
+    phixsdata_v2.txt goes to the new folder also, because --nophixs writes no new one. Its level
+    ids belong to the adata.txt of the earlier run.
+    """
+    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
+    newnames = sorted(newfile.name for newfile in workfolder.iterdir())
+    installednames: list[str] = []
+    try:
+        for name in sorted({*newnames, "phixsdata_v2.txt"}):
+            if (outputfolder / name).exists():
+                (outputfolder / name).replace(earlierfolder / name)
+        for name in newnames:
+            (workfolder / name).replace(outputfolder / name)
+            installednames.append(name)
+    except BaseException:
+        for name in installednames:
+            (outputfolder / name).replace(workfolder / name)
+        for earlierfile in earlierfolder.iterdir():
+            earlierfile.replace(outputfolder / earlierfile.name)
+        earlierfolder.rmdir()
+        raise
+    return earlierfolder
+
+
+def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
+    """Write all output files of the run, the log file, and the record of the ion handlers to args.output_folder."""
+    # this makes the log file. The passes of each ion append to the file.
     log_path(args.output_folder).write_text("", encoding="utf-8")
-    remove_old_log_folder(Path(args.output_folder))
 
     # A record of what this run used, beside the output files. Its name is not the name of the
     # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working

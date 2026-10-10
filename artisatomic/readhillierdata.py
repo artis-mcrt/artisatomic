@@ -1920,20 +1920,11 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     gvalues: list[float] = dfenergy_levels["g"].to_list()
 
-    found_nonjsplit_level = False
     level_ids_of_level_name = {}
     for levelid, levelname in enumerate(levelnames):
         levelnamenoJ = levelname.split("[")[0]
         if levelname != levelnamenoJ:  # levels are J split
             level_ids_of_level_name[levelname] = [levelid]
-        elif not found_nonjsplit_level:
-            log_comment(
-                flog,
-                ("transitiondata",),
-                "Some level names of the collision data file have no J value. Such a collision strength applies to each"
-                " level of the term.",
-            )
-            found_nonjsplit_level = True
 
         # keep the level ids of states that differ by J only, for the case that the level names
         # in the collision file have no J
@@ -1955,6 +1946,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         flog, ("transitiondata",), f"The collision strengths come from {path_in_data_folder(filename, hillier_folder)}."
     )
     coll_lines_in = 0
+    # the lines that name a term with more than one J level, so that their value applies to each level of the term
+    termnamed_lines = 0
     number_expected_transitions = -1
     # the within-term pair loops below insert all of a name's pairs at its first mention, so
     # later mentions of the name can skip both loops
@@ -2090,6 +2083,9 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     )
                     namefrom, nameto = nameto, namefrom
 
+                if len(level_ids_of_level_name[namefrom]) > 1 or len(level_ids_of_level_name[nameto]) > 1:
+                    termnamed_lines += 1
+
                 # add forbidden collisions between states within lower and upper terms if
                 # the upper and lower levels have no J specified
                 for name in (namefrom, nameto):
@@ -2129,6 +2125,14 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                             )
                         else:
                             upsilondict[key] = upsilonscaled
+
+    if termnamed_lines > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"{termnamed_lines:d} lines of the collision data file name a term and no J value. Such a collision"
+            " strength applies to each level of the term.",
+        )
 
     if number_expected_transitions < 0:
         log_comment(flog, ("transitiondata",), "WARNING: The collision data file has no '!Number of transitions' line.")

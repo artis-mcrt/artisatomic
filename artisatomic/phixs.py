@@ -243,7 +243,7 @@ def reduce_phixs_tables[KeyType](
     # One call reduces many tables onto one grid. The worker gets that grid and builds none.
     xgrid = output_xgrid(nphixspoints, phixsnuincrement)
 
-    return dict(
+    reduced = dict(
         zip(
             dicttables.keys(),
             parallel_map(
@@ -254,6 +254,17 @@ def reduce_phixs_tables[KeyType](
             strict=True,
         )
     )
+    # A very large -phixsnuincrement gives a grid whose weights overflow. write_phixs_data() would
+    # then write NaN values, and ARTIS would fail only when it reads them.
+    notfinite = [key for key, table in reduced.items() if not np.all(np.isfinite(table))]
+    if notfinite:
+        labeltext = "" if label is None else f" The tables come from {label}."
+        msg = (
+            f"{len(notfinite):d} reduced photoionisation tables have a value that is not finite, for example the"
+            f" table of key {notfinite[0]!r}. Check -phixsnuincrement and -optimaltemperature.{labeltext}"
+        )
+        raise ValueError(msg)
+    return reduced
 
 
 def reduce_phixs_tables_worker(
