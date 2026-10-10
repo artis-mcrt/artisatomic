@@ -2613,6 +2613,95 @@ def test_read_adas_sr1():
     assert energylevels[0].levelname.startswith("4p65s2")
 
 
+def test_read_adas_ls_resolved_file_gives_no_j():
+    """In an LS-resolved adf04 file, XJ is (g - 1) / 2 of the term and not a J value.
+
+    The committed Ca III file names its first excited term 3Po with XJ = 4. A 3P term cannot have
+    J = 4. A J from that field would therefore break the delta J rule for LS-allowed lines.
+    """
+    flog = io.StringIO()
+    _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
+        20, 3, flog, argparse.Namespace(electrontemperature=5000.0)
+    )
+    assert "Each level of the file is an LS term" in flog.getvalue()
+    assert energylevels[1].levelname == "2s22p63s23p53d1_3Po_id=2"
+    assert energylevels[1].g == 9.0
+    assert all(level.j is None for level in energylevels)
+    assert energylevels[1].lsterm_l == 1
+    assert not any("[" in level.levelname for level in energylevels)
+
+    flog = io.StringIO()
+    _, energylevels, _, _ = readadasdata.read_adas_levels_and_transitions(
+        38, 1, flog, argparse.Namespace(electrontemperature=5000.0)
+    )
+    assert "LS term" not in flog.getvalue()
+    assert all(level.j is not None for level in energylevels)
+
+
+def test_read_adf04_singlet_s_and_p_terms_keep_their_j(tmp_path):
+    """For a term with S = 0 or L = 0, XJ = (g - 1) / 2 is also the J. Such terms alone cannot show LS coupling."""
+    levels = ("    1 1S                 (1)0( 0.0)        0.", "    2 2P                 (1)1( 1.0)    82303.")
+    filepath = write_hydrogen_adf04(tmp_path, [], levels=levels)
+    _, energylevels, _, _ = readadasdata.read_adf04(filepath, io.StringIO(), 5000.0, 1, 1)
+    assert [level.j for level in energylevels] == [0.0, 1.0]
+    assert [level.lsterm_l for level in energylevels] == [None, None]
+
+
+def test_add_level_ids_forbidden_uses_the_rules_of_ls_coupling():
+    """A level that is an LS term has no J. E1 in LS coupling has |delta L| <= 1, no L = 0 -> 0, and delta S = 0."""
+    from artisatomic.output import log_deltaj_contradictions
+
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1, 2, 3],
+            "parity": [0, 1, 1, 1],
+            "j": [None, None, None, None],
+            "lsterm_l": [0, 1, 3, 1],
+            "lsterm_twosplusone": [1, 1, 1, 3],
+        },
+        schema={
+            "levelid": pl.Int64,
+            "parity": pl.Int64,
+            "j": pl.Float64,
+            "lsterm_l": pl.Int64,
+            "lsterm_twosplusone": pl.Int64,
+        },
+    )
+    # 1S -> 1Po keeps the rules, 1S -> 1Fo has delta L = 3, and 1S -> 3Po has delta S = 1
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0, 0], "upperlevel": [1, 2, 3], "A": [1.0, 1.0, 1.0]})
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    assert result["forbidden"].to_list() == [False, True, True]
+    assert result["breaksdeltaj"].to_list() == [False, False, False]
+
+    # a strong line wins over the rules, and the warning names the rules of LS coupling
+    strong = add_level_ids_forbidden(dflevels, dftransitions.with_columns(A=pl.lit(1.0e8)))
+    assert strong["forbidden"].to_list() == [False, False, False]
+    flog = io.StringIO()
+    log_deltaj_contradictions(flog, strong, "Ca III")
+    assert "2 transitions of Ca III break the delta L or delta S rule of LS coupling" in flog.getvalue()
+    assert "delta J rule" not in flog.getvalue()
+
+    # the Laporte rule keeps a strong line between two levels of the same parity forbidden
+    sameparity = add_level_ids_forbidden(
+        dflevels.with_columns(parity=pl.lit(0, dtype=pl.Int64)), dftransitions.with_columns(A=pl.lit(1.0e8))
+    )
+    assert sameparity["forbidden"].to_list() == [True, True, True]
+    flog = io.StringIO()
+    log_deltaj_contradictions(flog, sameparity, "Ca III")
+    assert "stay permitted" not in flog.getvalue()
+    assert "2 transitions of Ca III break the delta L or delta S rule" in flog.getvalue()
+    assert "the same parity, so the output writes it as forbidden" in flog.getvalue()
+
+
+def test_add_level_ids_forbidden_ignores_a_nan_j():
+    """Polars orders NaN above each number, so a NaN J must not break the delta J rule."""
+    dflevels = pl.DataFrame({"levelid": [0, 1], "parity": [0, 1], "j": [float("nan"), 1.0]})
+    dftransitions = pl.DataFrame({"lowerlevel": [0], "upperlevel": [1], "A": [0.0]})
+    result = add_level_ids_forbidden(dflevels, dftransitions)
+    assert result["breaksdeltaj"].to_list() == [False]
+    assert result["forbidden"].to_list() == [False]
+
+
 def test_read_adas_co3_takes_the_nist_ionisation_energy(monkeypatch):
     """The QUB Co III header gives 40.96 eV, but NIST and the CMFGEN data give 33.50 eV."""
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", adf04_sample_path().parent)
