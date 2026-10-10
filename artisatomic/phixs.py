@@ -243,7 +243,7 @@ def reduce_phixs_tables[KeyType](
     # One call reduces many tables onto one grid. The worker gets that grid and builds none.
     xgrid = output_xgrid(nphixspoints, phixsnuincrement)
 
-    reduced = dict(
+    return dict(
         zip(
             dicttables.keys(),
             parallel_map(
@@ -254,17 +254,6 @@ def reduce_phixs_tables[KeyType](
             strict=True,
         )
     )
-    # A very large -phixsnuincrement gives a grid whose weights overflow. write_phixs_data() would
-    # then write NaN values, and ARTIS would fail only when it reads them.
-    notfinite = [key for key, table in reduced.items() if not np.all(np.isfinite(table))]
-    if notfinite:
-        labeltext = "" if label is None else f" The tables come from {label}."
-        msg = (
-            f"{len(notfinite):d} reduced photoionisation tables have a value that is not finite, for example the"
-            f" table of key {notfinite[0]!r}. Check -phixsnuincrement and -optimaltemperature.{labeltext}"
-        )
-        raise ValueError(msg)
-    return reduced
 
 
 def reduce_phixs_tables_worker(
@@ -359,15 +348,18 @@ def reduce_phixs_tables_worker(
         weights=half_dx * (grid_sigma[:-1] * weight_low + grid_sigma[1:] * weight_high),
         minlength=nphixspoints,
     )
-    # The weight is positive, so integralnosigma is positive. A negative cross section is the only
-    # way to get a negative integralwithsigma, and the input must not contain one. The "not" form
-    # also catches a NaN.
-    if not (np.all(integralwithsigma >= 0.0) and np.all(integralnosigma > 0.0)):
+    # The weight is positive, so a negative average comes only from a negative cross section, and the
+    # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
+    # average is then NaN or infinite, and ARTIS would fail only when it reads the table.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        averages = integralwithsigma / integralnosigma
+    if not (np.all(integralnosigma > 0.0) and np.all(np.isfinite(averages)) and np.all(averages >= 0.0)):
         msg = (
-            f"A photoionisation bin integral is not positive. The table shape is {tablein.shape},"
-            f" the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted integral is"
-            f" {integralwithsigma.min():.6e} and the smallest weight integral is"
-            f" {integralnosigma.min():.6e}.{labeltext}{keytext}"
+            f"A photoionisation bin average is not a finite number of 0 or more. The table shape is"
+            f" {tablein.shape}, the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted"
+            f" integral is {integralwithsigma.min():.6e} and the smallest weight integral is"
+            f" {integralnosigma.min():.6e}. Check the cross sections, -phixsnuincrement and"
+            f" -optimaltemperature.{labeltext}{keytext}"
         )
         raise ValueError(msg)
-    return integralwithsigma / integralnosigma
+    return averages
