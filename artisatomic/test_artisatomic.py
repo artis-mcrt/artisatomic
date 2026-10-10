@@ -28,6 +28,8 @@ from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import drop_transitions_of_levels
+from artisatomic.base import empty_transitions_schema
+from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
@@ -1434,6 +1436,15 @@ def test_resolve_transition_levelid_columns():
     with pytest.raises(ValueError, match="Transition 20 -> 40 in the test file names file index 40"):
         resolve_transition_levelid_columns(dfunknownupper, "lo", "up", levelid_of_fileindex, "the test file")
 
+    # a cast would cut 20.5 to 20, and the transition would go to a wrong level
+    dffloat = pl.DataFrame({"lo": [10.0, 20.5], "up": [20.0, 30.0]})
+    with pytest.raises(ValueError, match="The test file gives the file indices of the column lo as Float64 values"):
+        resolve_transition_levelid_columns(dffloat, "lo", "up", levelid_of_fileindex, "the test file")
+
+    dfsamelevel = pl.DataFrame({"lo": [10, 20], "up": [20, 20]})
+    with pytest.raises(ValueError, match="Transition 20 -> 20 in the test file names the same level two times"):
+        resolve_transition_levelid_columns(dfsamelevel, "lo", "up", levelid_of_fileindex, "the test file")
+
 
 def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     """Lisbon lines name their levels by position in the levels file, which the reader re-sorts by energy.
@@ -1499,19 +1510,18 @@ def test_readlisbondata_maps_file_indices_to_energy_sorted_ids():
     with pytest.raises(ValueError, match="names file index 99"):
         readlisbondata.read_lines_data(energy_levels, dflines_unknown, levelid_of_fileindex)
 
-    # A has no value for a zero wavelength
-    dflines_zero = pl.DataFrame({"level_index_lower": [2], "level_index_upper": [0], "gf": [1.0], "wavelength": [0.0]})
-    with pytest.raises(ValueError, match="zero wavelength"):
-        readlisbondata.read_lines_data(energy_levels, dflines_zero, levelid_of_fileindex)
+    # A has no finite value for a zero wavelength, and a NaN gf gives a NaN A. The message gives
+    # the file indices of the line, not the level ids.
+    for gf, wavelength in ((1.0, 0.0), (float("nan"), 2000.0), (1.0, float("inf"))):
+        dflines_bad = pl.DataFrame(
+            {"level_index_lower": [2], "level_index_upper": [0], "gf": [gf], "wavelength": [wavelength]}
+        )
+        with pytest.raises(ValueError, match="Transition 2 -> 0 in the Lisbon transitions file gives no finite A"):
+            readlisbondata.read_lines_data(energy_levels, dflines_bad, levelid_of_fileindex)
 
     dflines_nogf = pl.DataFrame(
         {"level_index_lower": [2], "level_index_upper": [0], "gf": [None], "wavelength": [2000.0]},
-        schema={
-            "level_index_lower": pl.Int64,
-            "level_index_upper": pl.Int64,
-            "gf": pl.Float64,
-            "wavelength": pl.Float64,
-        },
+        schema_overrides={"gf": pl.Float64},
     )
     with pytest.raises(ValueError, match="gf"):
         readlisbondata.read_lines_data(energy_levels, dflines_nogf, levelid_of_fileindex)
@@ -1681,7 +1691,7 @@ def test_readlisbondata_stops_on_a_transition_with_a_blank_level_index(tmp_path,
 
 
 def test_readlisbondata_stops_on_a_level_index_that_is_not_an_integer(tmp_path, monkeypatch):
-    """The reader reads the level indices as integers, and the message names the file and the value."""
+    """The reader reads the file indices as integers, and the message names the file and the value."""
     from artisatomic import readlisbondata
 
     write_lisbon_fixture(tmp_path, [0.0, 1000.0, 2000.0])
@@ -1689,7 +1699,20 @@ def test_readlisbondata_stops_on_a_level_index_that_is_not_an_integer(tmp_path, 
     linesfile.write_text(linesfile.read_text(encoding="utf-8").replace("1,0,0.1", "1.5,0,0.1"), encoding="utf-8")
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
-    with pytest.raises(ValueError, match=r"polars cannot read .*NdIII_Transitions\.csv.*1\.5"):
+    with pytest.raises(ValueError, match=r"artisatomic cannot read .*NdIII_Transitions\.csv: could not parse `1\.5`"):
+        readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
+
+
+def test_readlisbondata_names_a_file_that_stops_after_its_provenance_lines(tmp_path, monkeypatch):
+    """A copy of a shared-drive file can stop early. polars then gives an error that names no file."""
+    from artisatomic import readlisbondata
+
+    write_lisbon_fixture(tmp_path, [0.0, 1000.0, 2000.0])
+    linesfile = tmp_path / "Nd" / "NdIII" / "NdIII_Transitions.csv"
+    linesfile.write_text("".join(linesfile.read_text(encoding="utf-8").splitlines(keepends=True)[:8]), encoding="utf-8")
+    monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
+
+    with pytest.raises(ValueError, match=r"artisatomic cannot read .*NdIII_Transitions\.csv: empty CSV"):
         readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
 
@@ -2586,7 +2609,7 @@ def test_adas_transitions_frame_gives_zero_based_level_ids_with_the_lower_level_
     pairs = pl.DataFrame({"upper": [2, 1], "lower": [1, 3], "avalue": [1e8, 2e8]})
     result = readadasdata.adas_transitions_frame(3, pairs, "x.adf04")
     assert result.rows() == [(0, 1, 1e8), (0, 2, 2e8)]
-    assert result.schema == pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "A": pl.Float64})
+    assert result.schema == empty_transitions_schema
 
 
 def test_standardise_config():
@@ -5899,7 +5922,7 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
 
 
 def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monkeypatch):
-    """A read error of polars names no file, so the log line that names the file comes directly before the error.
+    """The error names the bad file, and the log line that names the file comes directly before it.
 
     A missing later file must not hide the error of an earlier file.
     """
@@ -5914,10 +5937,10 @@ def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monke
     (tmp_path / "5.gz").unlink()
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
 
-    args = build_parser().parse_args([])
+    args = phixs_args()
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     flog = io.StringIO()
-    with pytest.raises(pl.exceptions.InvalidOperationError):
+    with pytest.raises(ValueError, match=r"artisatomic cannot read .*3\.gz: conversion from `str` to `f64` failed"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
             27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
         )
@@ -5926,24 +5949,28 @@ def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monke
 
 def test_read_adas_co3_names_the_file_and_the_line_of_a_bad_radiative_row(tmp_path, monkeypatch):
     """A short row of adf04rad_v1 stops the run, and the message names the file and the line."""
-    import gzip
     import shutil
 
     sample = adf04_sample_path().parent
-    shutil.copy(sample / "adf04_v1.gz", tmp_path)
-    with gzip.open(sample / "adf04rad_v1.gz", "rt", encoding="utf-8") as fin:
+    shutil.copy(find_file_check_extension_or_raise(sample / "adf04_v1"), tmp_path)
+    with xopen_check_extension(sample / "adf04rad_v1") as fin:
         lines = fin.read().splitlines()
-    with gzip.open(tmp_path / "adf04rad_v1.gz", "wt", encoding="utf-8") as fout:
-        fout.write("\n".join([*lines, "4 1"]) + "\n")
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+    args = argparse.Namespace(electrontemperature=5000.0)
 
+    (tmp_path / "adf04rad_v1").write_text("\n".join([*lines, "4 1"]) + "\n", encoding="utf-8")
     with pytest.raises(
         ValueError,
         match=rf"Line {len(lines) + 1} of .*adf04rad_v1 does not hold two file indices and an A-value: '4 1'$",
     ):
-        readadasdata.read_adas_levels_and_transitions(
-            27, 3, io.StringIO(), argparse.Namespace(electrontemperature=5000.0)
-        )
+        readadasdata.read_adas_levels_and_transitions(27, 3, io.StringIO(), args)
+
+    # int() reads the index, but the frame of the file indices has 64-bit integers
+    (tmp_path / "adf04rad_v1").write_text(
+        "\n".join([*lines, "99999999999999999999 1 1.0E+08"]) + "\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match=r"adf04rad_v1 has a file index that is too large for a 64-bit integer"):
+        readadasdata.read_adas_levels_and_transitions(27, 3, io.StringIO(), args)
 
 
 # Two components of the Li I 670.8 nm line (2s 2S1/2 - 2p 2P3/2, isotope 7) and one whole line

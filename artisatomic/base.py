@@ -246,6 +246,21 @@ def levelid_of_fileindex_map(fileindices: Iterable[t.Any], sourcename: str) -> d
     return levelid_of_fileindex
 
 
+def check_integer_columns(table: pl.DataFrame, columns: Iterable[str], sourcename: str) -> None:
+    """Stop the run if a column of file indices does not hold integers.
+
+    A cast to an integer would cut a file index such as 3.5 to 3 without a message. The transition
+    would then go to a wrong level.
+    """
+    for column in columns:
+        if not table.schema[column].is_integer():
+            msg = (
+                f"{sourcename[:1].upper()}{sourcename[1:]} gives the file indices of the column {column} as"
+                f" {table.schema[column]} values. A file index must be an integer."
+            )
+            raise ValueError(msg)
+
+
 def resolve_transition_levelid_columns(
     dflines: pl.DataFrame,
     lowercolumn: str,
@@ -255,18 +270,20 @@ def resolve_transition_levelid_columns(
 ) -> pl.DataFrame:
     """Resolve the integer file indices of the transitions to zero-based level ids, lower id first.
 
-    The result has the columns lowerlevel and upperlevel, in the row order of dflines. A reader that
-    re-sorted its levels by energy can name the two levels of a transition in either order, and
+    The result has the columns lowerlevel and upperlevel, in the row order of dflines. A reader can
+    re-sort its levels by energy. A transition can then name its two levels in either order, but
     transitiondata.txt lists the lower id first.
 
     The function raises on a file index that names no level, and the message names the first such
-    row. A reader whose transition file and level file disagree about the numbering (0- or 1-based,
-    for example) would otherwise drop every transition. It would then write an empty ion without an
-    error.
+    row. A reader whose transition file and level file disagree about the file indices (0-based or
+    1-based, for example) would otherwise drop every transition. It would then write an empty ion
+    without an error. The function also raises on a transition from a level to itself, before
+    adata.txt gets the ion.
     """
+    check_integer_columns(dflines, (lowercolumn, uppercolumn), sourcename)
 
     def levelid(column: str) -> pl.Expr:
-        return pl.col(column).cast(pl.Int64).replace_strict(levelid_of_fileindex, default=None, return_dtype=pl.Int64)
+        return pl.col(column).replace_strict(levelid_of_fileindex, default=None, return_dtype=pl.Int64)
 
     dflevelids = dflines.select(lowerlevel=levelid(lowercolumn), upperlevel=levelid(uppercolumn))
     unresolved = dflevelids["lowerlevel"].is_null() | dflevelids["upperlevel"].is_null()
@@ -277,6 +294,15 @@ def resolve_transition_levelid_columns(
             f"Transition {fileindex_lower} -> {fileindex_upper} in {sourcename} names file index {unknown}."
             f" None of the {len(levelid_of_fileindex)} levels of the level file has that index."
             " The transition file and the level file can disagree about the file indices."
+        )
+        raise ValueError(msg)
+
+    samelevel = dflevelids["lowerlevel"] == dflevelids["upperlevel"]
+    if samelevel.any():
+        fileindex = dflines[lowercolumn][samelevel.arg_true()[0]]
+        msg = (
+            f"Transition {fileindex} -> {fileindex} in {sourcename} names the same level two times."
+            " A transition must connect two different levels."
         )
         raise ValueError(msg)
 
@@ -718,6 +744,8 @@ def drop_transitions_of_levels(
     the row and count it with the transitions above the ionisation energy.
     """
     check_no_nulls(dflines.select(lowercolumn, uppercolumn), sourcename)
+    # is_in() of a set of int raises for a column of floats, with a message that names no file
+    check_integer_columns(dflines, (lowercolumn, uppercolumn), sourcename)
 
     names_a_dropped_level = pl.col(lowercolumn).is_in(fileindices_dropped) | pl.col(uppercolumn).is_in(
         fileindices_dropped
