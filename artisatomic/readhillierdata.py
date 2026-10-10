@@ -34,6 +34,8 @@ from artisatomic.base import rewrite_file_as_utf8
 from artisatomic.base import roman_numerals
 from artisatomic.base import ryd_to_ev
 from artisatomic.base import scan_file_lines
+from artisatomic.base import upsilon_frame
+from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merged_orbital
@@ -1892,17 +1894,16 @@ def get_level_valence_n(levelname: str) -> int | None:
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
-    Returns a dict of upsilon values keyed by a (lower, upper) pair of zero-based level ids.
+    Returns a frame of upsilon values (see base.upsilon_schema).
     The file can give one value for a whole term where the level list is J-split. The reader
     then shares the value over the term's J levels in proportion to g_i * g_j. The sum over the
     term recovers the file's value.
     """
     t_scale_factor = 1e4  # Hillier gives the temperatures as T_4
-    upsilondict: dict[tuple[int, int], float] = {}
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
         log_comment(flog, ("transitiondata",), "CMFGEN has no collision data file for this ion.")
-        return upsilondict
+        return pl.DataFrame(schema=upsilon_schema)
 
     levelnames: list[str] = dfenergy_levels["levelname"].to_list()
     gvalues: list[float] = dfenergy_levels["g"].to_list()
@@ -1916,6 +1917,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         # keep the level ids of states that differ by J only, for the case that the level names
         # in the collision file have no J
         level_ids_of_level_name.setdefault(levelnamenoJ, []).append(levelid)
+
+    upsilondict: dict[tuple[int, int], float] = {}
 
     # total statistical weight per term, to share a term-resolved collision strength over its
     # J levels. It depends only on the level list, so build it once.
@@ -2134,7 +2137,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
             f" {coll_lines_in:d}.",
         )
 
-    return upsilondict
+    return upsilon_frame(upsilondict)
 
 
 def strip_name_separators(levelname: str) -> str:

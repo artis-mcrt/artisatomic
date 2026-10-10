@@ -116,6 +116,23 @@ empty_levels_schema = pl.Schema(
     {"levelname": pl.String, "energyabovegsinpercm": pl.Float64, "g": pl.Float64, "parity": pl.Int64}
 )
 
+# The effective collision strengths of an ion, with one row for each pair of level ids and the lower
+# id first. A negative upsilon is the mark of a reader for a forbidden pair with no value (see
+# output.resolve_coll_str()).
+upsilon_schema = pl.Schema({"lowerlevel": pl.Int64, "upperlevel": pl.Int64, "upsilon": pl.Float64})
+
+
+def upsilon_frame(upsilons: dict[tuple[int, int], float]) -> pl.DataFrame:
+    """Convert upsilon values, keyed by a (lower, upper) pair of level ids, to a frame of upsilon_schema."""
+    return pl.DataFrame(
+        {
+            "lowerlevel": [lower for lower, _ in upsilons],
+            "upperlevel": [upper for _, upper in upsilons],
+            "upsilon": list(upsilons.values()),
+        },
+        schema=upsilon_schema,
+    )
+
 
 class EnergyLevel(t.NamedTuple):
     """One energy level of a data set that gives no other per-level column."""
