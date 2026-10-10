@@ -220,9 +220,9 @@ def fix_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
 
     Some rows give a known level a J of 0.0 in place of its J. The reader keys the levels on the
     energy and J. Such a row therefore made an extra level with g = 1 at the energy of the real
-    level, and the row took an A from the wrong g. If exactly one level with a possible J has the
-    same energy, the row takes that J and the label of that level. If more than one has (an unresolved fine structure), the reader
-    cannot tell the level of the row, and it drops the row.
+    level. The row also took an A from the wrong g. If exactly one level with a possible J has the
+    same energy, the row takes that J and the label of that level. If more than one has (an
+    unresolved fine structure), the reader cannot tell the level of the row, and it drops the row.
     """
     sides = ("lower", "upper")
     possible_levels = pl.concat(
