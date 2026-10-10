@@ -6020,11 +6020,14 @@ def test_find_gfall_keeps_a_link_below_the_data_folder(tmp_path, monkeypatch):
 
 
 def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
-    """A very large -phixsnuincrement makes the weights overflow, and the output must not get NaN values."""
+    """A very large -phixsnuincrement makes the weights overflow, and the output must not get NaN values.
+
+    The bin integrals of the worker are then NaN, so the worker stops the run before the finite check.
+    """
     from artisatomic.phixs import reduce_phixs_tables
 
     tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
-    with np.errstate(all="ignore"), pytest.raises(ValueError, match="have a value that is not finite"):
+    with np.errstate(all="ignore"), pytest.raises(ValueError, match="the smallest weighted integral is nan"):
         reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
 
 
