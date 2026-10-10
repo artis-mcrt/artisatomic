@@ -245,7 +245,7 @@ def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
                 twojother=twoj[otherside],
                 twojterm=pl.int_ranges(twojmin, twojmax + 1, step=2),
             )
-            .explode("twojterm", empty_as_null=False)
+            .explode("twojterm")
             .filter(
                 ((pl.col("twojterm") - pl.col("twojother")).abs() <= 2)
                 & ((pl.col("twojterm") != 0) | (pl.col("twojother") != 0))
