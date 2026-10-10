@@ -209,6 +209,14 @@ def transition_count_of_level(dftransitions: pl.DataFrame, levelcount: int) -> l
     return np.bincount(levelids.to_numpy(), minlength=levelcount).tolist()
 
 
+def breaks_deltaj_rule(j_a: pl.Expr, j_b: pl.Expr) -> pl.Expr:
+    """Give True where an E1 line between two levels with these J values breaks the delta J rule.
+
+    The rule is |delta J| <= 1, and no line from J = 0 to J = 0.
+    """
+    return ((j_a - j_b).abs() > 1) | ((j_a == 0) & (j_b == 0))
+
+
 def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     """Convert a list of level tuples (or a DataFrame) into a DataFrame with a zero-based levelid column.
 

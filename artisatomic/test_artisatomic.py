@@ -5608,6 +5608,158 @@ def test_log_detail_gives_one_count_line_for_each_kind():
     assert plainstream.getvalue() == "a detail line\n"
 
 
+def kurucz_whole_lines(rows: list[tuple[float, float, str, float, float, str, float]]) -> pl.DataFrame:
+    """Make gfall rows of whole lines from (lower energy, lower J, lower label, upper energy, upper J, upper label, loggf)."""
+    columns = [
+        "energyabovegsinpercm_lower",
+        "j_lower",
+        "label_lower",
+        "energyabovegsinpercm_upper",
+        "j_upper",
+        "label_upper",
+        "loggf",
+    ]
+    return pl.DataFrame(rows, schema=columns, orient="row").with_columns(
+        isotope=pl.lit(0), log_f_hyperfine=pl.lit(0.0), log_iso_abundance=pl.lit(0.0)
+    )
+
+
+def test_assign_missing_j_gives_one_j_or_divides_the_line():
+    """A J = 0.0 level takes the one J that the line permits, or the reader divides the line between the J levels."""
+    from artisatomic.base import IonLog
+
+    # Sr II: the file gives 4f 2F J = 5/2 and 7/2 at one energy, and J = 0.0 on the lines from 4f to nd
+    dfgfall = kurucz_whole_lines(
+        [
+            (14555.9, 1.5, "4d 2D", 60991.7, 2.5, "4f 2F", 0.318),
+            (14836.24, 2.5, "4d 2D", 60991.7, 3.5, "4f 2F", 0.398),
+            (60991.7, 0.0, "4f 2F", 78702.4, 2.5, "8d 2D", -2.848),
+            (60991.7, 0.0, "4f 2F", 78702.4, 2.5, "8d 2D", -1.547),
+            (60991.7, 0.0, "4f 2F", 78688.8, 1.5, "8d 2D", -1.618),
+        ]
+    )
+    flog = IonLog(io.StringIO())
+    assigned = readkuruczdata.assign_missing_j(dfgfall, 37, flog)
+    assert assigned.columns == dfgfall.columns
+    # only 2F5/2 can go to 2D3/2. Both 2F5/2 and 2F7/2 can go to 2D5/2, so each of those lines is divided.
+    assert assigned["j_lower"].to_list() == [1.5, 2.5, 2.5, 3.5, 2.5, 3.5, 2.5]
+    gf = 10 ** assigned["loggf"]
+    assert gf[2:4].to_list() == pytest.approx([10**-2.848 * 6 / 14, 10**-2.848 * 8 / 14])
+    assert gf.sum() == pytest.approx((10 ** dfgfall["loggf"]).sum())
+    assert any(line.startswith("On 1 line, ") for line in flog.comments["transitiondata"])
+    assert any(line.startswith("On 2 lines, ") for line in flog.comments["transitiondata"])
+
+    # In II: the upper level s6p 1P has J = 0.0 on a line from s6s 3S J = 1, and 1P has only J = 1
+    dfgfall = kurucz_whole_lines(
+        [
+            (0.0, 0.0, "5s2 1S", 109775.39, 1.0, "s6p 1P", -1.777),
+            (93919.03, 1.0, "s6s 3S", 109775.39, 0.0, "s6p 1P", -1.186),
+        ]
+    )
+    assigned = readkuruczdata.assign_missing_j(dfgfall, 48, io.StringIO())
+    assert assigned["j_upper"].to_list() == [1.0, 1.0]
+    assert assigned["loggf"].to_list() == dfgfall["loggf"].to_list()
+
+
+def test_assign_missing_j_changes_no_doubtful_row():
+    """A row keeps J = 0.0 if the other J, the line type or the label leaves a doubt."""
+    # Y II: z3P has J = 0.0 on this row. That J can be a missing J too, unless another row gives z3P J = 0.
+    rows = [
+        (840.213, 1.0, "d5s a3D", 32283.403, 2.0, "s5p y3P", -1.52),
+        (840.213, 0.0, "d5s a3D", 23445.046, 0.0, "s5p z3P", -1.27),
+    ]
+    dfgfall = kurucz_whole_lines(rows)
+    assert readkuruczdata.assign_missing_j(dfgfall, 38, io.StringIO()).equals(dfgfall)
+    dfgfall = kurucz_whole_lines([*rows, (14018.26, 1.0, "4d2 a3P", 23445.046, 0.0, "s5p z3P", -0.1)])
+    assert readkuruczdata.assign_missing_j(dfgfall, 38, io.StringIO())["j_lower"].to_list() == [1.0, 1.0, 1.0]
+
+    # 5s 2S and 4d 2D are both even, so the line is not an E1 line, and delta J can be 2
+    dfgfall = kurucz_whole_lines(
+        [
+            (0.0, 0.5, "5s 2S", 14555.9, 1.5, "4d 2D", -7.0),
+            (0.0, 0.5, "5s 2S", 14555.9, 0.0, "4d 2D", -8.0),
+        ]
+    )
+    assert readkuruczdata.assign_missing_j(dfgfall, 37, io.StringIO()).equals(dfgfall)
+
+    # "p25s" can be p2 5s (even) or p 25s (odd), so the label gives no parity
+    dfgfall = kurucz_whole_lines(
+        [
+            (0.0, 0.5, "5s 2S", 30000.0, 1.5, "p25s 2D", -1.0),
+            (0.0, 0.5, "5s 2S", 30000.0, 0.0, "p25s 2D", -2.0),
+        ]
+    )
+    assert readkuruczdata.assign_missing_j(dfgfall, 39, io.StringIO()).equals(dfgfall)
+
+    # an isotope component keeps its J
+    dfgfall = kurucz_whole_lines(
+        [
+            (14555.9, 1.5, "4d 2D", 60991.7, 2.5, "4f 2F", 0.318),
+            (60991.7, 0.0, "4f 2F", 78688.8, 1.5, "8d 2D", -1.618),
+        ]
+    ).with_columns(isotope=pl.Series([0, 88]))
+    assert readkuruczdata.assign_missing_j(dfgfall, 37, io.StringIO()).equals(dfgfall)
+
+
+def test_kurucz_label_parity():
+    """The parity of a Kurucz label comes from a "*" or from its orbitals, and an unclear label gives none."""
+    parities = {
+        label: readkuruczdata.kurucz_label_parity(label)
+        for label in ("4f 2F", "8d 2D", "s5p z3P", "d25s b2D", "3p3 4S", "fd7s *4D", "3s *5S", "p25s e2D", "uncl ??")
+    }
+    assert parities == {
+        "4f 2F": 1,
+        "8d 2D": 0,
+        "s5p z3P": 1,
+        "d25s b2D": 0,
+        "3p3 4S": 1,
+        "fd7s *4D": 1,
+        # O I 2p3 3s: the label leaves out the 2p3 core, and the "*" gives the parity
+        "3s *5S": 1,
+        "p25s e2D": None,
+        "uncl ??": None,
+    }
+
+
+def test_readkuruczdata_fixes_only_a_missing_j(monkeypatch):
+    """A Kurucz level with J = 0.0 takes a J, and a level with another impossible J keeps it with a warning."""
+    from artisatomic.base import IonLog
+
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+
+    # Y II: d5s a3D has J = 0.0 on a line to z3P J = 0. d5d e3G has J = 2 on a line to y3P J = 2.
+    # A J that is not 0.0 can come from a wrong label, so it stays.
+    flog = IonLog(io.StringIO())
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 2, flog)
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 840.213)["j"].to_list() == [1.0]
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 59179.554)["j"].to_list() == [2.0, 3.0]
+    assert any("The reader changes only J = 0.0, so it keeps this J." in line for line in flog.comments["adata"])
+
+    # Y I: "uncl ??" has the energy of d25s b2D J = 3/2, but no LS term. 5s2 6s has no 2D term, so the
+    # label "s26s e2D" is wrong, and the reader keeps the J = 1/2.
+    flog = IonLog(io.StringIO())
+    _, dflevels, _ = readkuruczdata.read_levels_and_transitions(39, 1, flog)
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 15994.045)["j"].to_list() == [0.0, 1.5]
+    assert dflevels.filter(pl.col("energyabovegsinpercm") == 31671.539)["j"].to_list() == [0.5]
+    assert any("(the first of 2 such lines in the log file)" in line for line in flog.comments["adata"])
+
+
+def test_label_term_regex_reads_only_a_clear_term():
+    """The term range applies only to a label that ends with a clear LS term."""
+    terms = {
+        label: match.groups() if (match := readkuruczdata.label_term_regex.search(label)) else None
+        for label in ("d5s a3D", "s4p *3P", "B(1D)2F 2", "3s3P7s 24P", "(3F)9p 2F?", "4f  2F")
+    }
+    assert terms == {
+        "d5s a3D": ("3", "D"),
+        "s4p *3P": ("3", "P"),
+        "B(1D)2F 2": ("2", "F"),
+        "3s3P7s 24P": None,
+        "(3F)9p 2F?": None,
+        "4f  2F": ("2", "F"),
+    }
+
+
 def write_floers25_lanthanum_files(tmp_path: Path, transitionfiles: dict[str, str]) -> None:
     """Write the levels file of La II and a per-type transitions file for each name suffix, with its types."""
     header = "Test table\n--\n--\n--\n"

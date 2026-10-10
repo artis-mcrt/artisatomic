@@ -10,6 +10,7 @@ import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import atomic_weights
+from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.base import comment_lines
 from artisatomic.base import creation_time_utc
@@ -355,10 +356,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
         # Each rule gets its own column, because log_deltaj_contradictions() reports the transitions
         # that break it while the source still gives them an f.
         dftransitions_ion = dftransitions_ion.with_columns(
-            breaksdeltaj=(
-                ((pl.col("lower_j") - pl.col("upper_j")).abs() > 1)
-                | ((pl.col("lower_j") == 0) & (pl.col("upper_j") == 0))
-            ).fill_null(False)
+            breaksdeltaj=breaks_deltaj_rule(pl.col("lower_j"), pl.col("upper_j")).fill_null(False)
         )
         breaksrule = pl.col("breaksdeltaj")
         if hasls:
