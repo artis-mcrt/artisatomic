@@ -46,6 +46,7 @@ from collections import Counter
 from itertools import starmap
 from pathlib import Path
 from pathlib import PurePosixPath
+from pathlib import PureWindowsPath
 from types import ModuleType
 from typing import override
 
@@ -95,7 +96,24 @@ class ArrayUnpickler(pickle.Unpickler):  # ruff: ignore[suspicious-pickle-usage]
         if (module, name) not in self.permitted:
             msg = f"The pickle names {module}.{name}. The script unpickles only numpy arrays."
             raise pickle.UnpicklingError(msg)
-        return super().find_class(module, name)
+        found = super().find_class(module, name)
+        return checked_scalar(found) if name == "scalar" else found
+
+
+def checked_scalar(scalar):
+    """Give a version of numpy scalar() that refuses a numpy type that holds Python objects.
+
+    scalar() unpickles the data of such a type with pickle.loads(). That inner unpickle does not use
+    ArrayUnpickler, so it could call any function.
+    """
+
+    def scalar_of_no_objects(dtype: object, *args: object) -> object:
+        if not isinstance(dtype, np.dtype) or dtype.hasobject:
+            msg = f"The pickle has a numpy scalar of the type {dtype}. The script refuses a scalar of Python objects."
+            raise pickle.UnpicklingError(msg)
+        return scalar(dtype, *args)
+
+    return scalar_of_no_objects
 
 
 def unpickle(data: bytes):
@@ -424,7 +442,14 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     if clashes:
         msg = f"{path} has tables whose names differ only in case: {', '.join(clashes)}."
         raise ValueError(msg)
-    unsafe = [relativepath for relativepath in relativepaths if {".", ".."} & set(PurePosixPath(relativepath).parts)]
+    # the two path types: Windows also reads a backslash as a separator, and C: as a drive
+    unsafe = [
+        relativepath
+        for relativepath in relativepaths
+        if PurePosixPath(relativepath).is_absolute()
+        or PureWindowsPath(relativepath).anchor
+        or {".", ".."} & {*PurePosixPath(relativepath).parts, *PureWindowsPath(relativepath).parts}
+    ]
     if unsafe:
         msg = f"{path} has tables whose path goes outside the output folder: {', '.join(unsafe)}."
         raise ValueError(msg)
@@ -458,9 +483,20 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     except BaseException:
         shutil.rmtree(tempfolder, ignore_errors=True)
         raise
+
+    # the earlier folder stays as a backup until the new folder has its place
+    backupfolder = outputfolder.with_name(f"{outputfolder.name}.old")
+    shutil.rmtree(backupfolder, ignore_errors=True)
     if outputfolder.exists():
-        shutil.rmtree(outputfolder)
-    tempfolder.rename(outputfolder)
+        outputfolder.rename(backupfolder)
+    try:
+        tempfolder.rename(outputfolder)
+    except BaseException:
+        if backupfolder.exists():
+            backupfolder.rename(outputfolder)
+        shutil.rmtree(tempfolder, ignore_errors=True)
+        raise
+    shutil.rmtree(backupfolder, ignore_errors=True)
 
 
 def convert_file(path: Path) -> list[Path]:

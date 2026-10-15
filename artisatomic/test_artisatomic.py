@@ -1407,6 +1407,12 @@ def test_hdf5_to_parquet_unpickles_only_numpy_arrays():
     with pytest.raises(pickle.UnpicklingError, match=r"pathlib\.\S*Path"):
         hdf5_to_parquet.unpickle(pickle.dumps(Path("a")))
 
+    # numpy scalar() unpickles the data of a type with Python objects without ArrayUnpickler
+    floats = np.array([np.float64(1.5), "n"], dtype=object)
+    assert hdf5_to_parquet.unpickle(pickle.dumps(floats)).tolist() == floats.tolist()
+    with pytest.raises(pickle.UnpicklingError, match="scalar of Python objects"):
+        hdf5_to_parquet.unpickle(pickle.dumps(np.zeros(1, dtype=[("a", object)])[0]))
+
 
 def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
     """The script refuses an output path that it cannot write without the loss of a table."""
@@ -1414,8 +1420,10 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
         hdf5_to_parquet.output_folder_of(tmp_path / "data")
     with pytest.raises(ValueError, match="differ only in case"):
         hdf5_to_parquet.check_output_paths(tmp_path, ["Lines.parquet", "lines.parquet"])
-    with pytest.raises(ValueError, match="outside the output folder"):
-        hdf5_to_parquet.check_output_paths(tmp_path, ["../lines.parquet"])
+    # Windows reads a backslash as a separator and C: as a drive
+    for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
+        with pytest.raises(ValueError, match="outside the output folder"):
+            hdf5_to_parquet.check_output_paths(tmp_path, [unsafepath])
 
 
 def write_pandas_hdfstore(path, columns, indexlevels):
@@ -1574,7 +1582,7 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
     assert pl.read_parquet_metadata(tmp_path / "aoife" / "levels_data.parquet")["/md5"] == metadata["/md5"]
 
 
-def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion(tmp_path):
+def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion(tmp_path, monkeypatch):
     """A conversion that fails keeps the earlier tables. A good conversion removes each table that went away."""
     h5py = pytest.importorskip("h5py")
 
@@ -1597,6 +1605,21 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
         h5file.create_dataset("a", data=np.array([3.0]))
     hdf5_to_parquet.convert_file(path)
     assert sorted(child.name for child in outputfolder.iterdir()) == ["a.parquet"]
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [3.0]
+
+    # a failure of the last rename puts the earlier folder back
+    def failing_rename(self, target):
+        if self.name == "data.partial":
+            msg = "the file system refuses the rename"
+            raise OSError(msg)
+        return original_rename(self, target)
+
+    original_rename = Path.rename
+    monkeypatch.setattr(Path, "rename", failing_rename)
+    with pytest.raises(OSError, match="refuses the rename"):
+        hdf5_to_parquet.convert_file(path)
+    monkeypatch.undo()
+    assert sorted(child.name for child in tmp_path.iterdir()) == ["data", "data.h5"]
     assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [3.0]
 
     # the script deletes the output folder as a whole, so it refuses a folder with a file of the user
