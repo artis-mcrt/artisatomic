@@ -38,6 +38,9 @@ dependencies = [
 # only makeartisrecombratefile imports ChiantiPy, and only for an ion with no Nahar file.
 # chiantipy declares no dependencies but imports matplotlib and scipy at module level.
 chianti = ["chiantipy>=0.15.1", "matplotlib>=3.11.1", "scipy>=1.15.3"]
+# only artisatomic/hdf5_to_parquet.py and its tests import h5py. h5py 3.16 has no wheel for Python
+# 3.15, so the extra installs nothing there. Use it with Python 3.14 or earlier
+hdf5 = ["h5py>=3.10.0; python_full_version < '3.15'"]
 
 [dependency-groups]
 # its own group so the workflow's combine job can install the coverage the lockfile pinned without
@@ -45,8 +48,6 @@ chianti = ["chiantipy>=0.15.1", "matplotlib>=3.11.1", "scipy>=1.15.3"]
 coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
-    # only the tests of artisatomic/hdf5_to_parquet.py import h5py. h5py 3.16 has no wheel for Python 3.15
-    "h5py>=3.10.0; python_full_version < '3.15'",
     "prek>=0.4.14",
     "pyrefly>=1.2.0",
     "pytest>=9.1.0",

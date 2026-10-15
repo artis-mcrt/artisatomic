@@ -65,13 +65,16 @@ class NoTableError(ValueError):
 def import_h5py() -> ModuleType:
     """Import h5py, which the dependencies of the artisatomic package do not include.
 
-    An import statement would make the type checkers report a missing module. The project
-    environment of Python 3.15 has no h5py.
+    An import statement would make the type checkers report a missing module. h5py is in the
+    optional extra hdf5, which the type checkers do not install.
     """
     try:
         return importlib.import_module("h5py")
     except ModuleNotFoundError as exc:
-        msg = "hdf5_to_parquet.py needs h5py. Run it as artisatomic/hdf5_to_parquet.py, and uv installs h5py."
+        msg = (
+            "hdf5_to_parquet.py needs h5py. Run it as artisatomic/hdf5_to_parquet.py, and uv installs h5py."
+            " Or install the extra hdf5 with Python 3.14: uv sync --python 3.14 --extra hdf5."
+        )
         raise ModuleNotFoundError(msg) from exc
 
 

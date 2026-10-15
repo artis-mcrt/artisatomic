@@ -102,11 +102,13 @@ jobs:
             - name: Test with pytest
               run: uv run coverage run -p -m pytest
 
-            # h5py has no wheel for Python 3.15, so the step above skips the tests that need h5py.
-            # This step runs them with Python 3.14. The import stops the step if h5py is missing,
-            # because pytest would only skip the tests.
+            # h5py is in the optional extra hdf5, and it has no wheel for Python 3.15. So the step
+            # above skips the tests that need h5py, and this step runs them with Python 3.14. The
+            # import stops the step if h5py is missing, because pytest would only skip the tests.
             - name: Test hdf5_to_parquet.py with Python 3.14
-              run: uv run --isolated --python 3.14 sh -c 'python -c "import h5py" && coverage run -p -m pytest artisatomic/test_artisatomic.py -k hdf5_to_parquet'
+              run: |
+                  uv run --isolated --python 3.14 --extra hdf5 python -c "import h5py"
+                  uv run --isolated --python 3.14 --extra hdf5 coverage run -p -m pytest artisatomic/test_artisatomic.py -k hdf5_to_parquet
 
             - name: Upload coverage data
               uses: actions/upload-artifact@v7
