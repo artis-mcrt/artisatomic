@@ -1612,6 +1612,14 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
     with pytest.raises(ValueError, match="more than one metadata item with the key hdf5_file"):
         hdf5_to_parquet.convert_file(path)
 
+    # the root attribute group/x and the attribute x of /group both become /group/x
+    with h5py.File(path, "a") as h5file:
+        del h5file["levels_data"].attrs["hdf5_file"]
+        h5file.attrs["group/x"] = "of the root"
+        h5file["group"].attrs["x"] = "of the group"
+    with pytest.raises(ValueError, match="more than one metadata item with the key /group/x"):
+        hdf5_to_parquet.convert_file(path)
+
 
 def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion(tmp_path, monkeypatch):
     """A conversion that fails keeps the earlier tables. A good conversion removes each table that went away."""

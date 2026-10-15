@@ -391,12 +391,19 @@ def group_metadata(h5file, objectpath: str) -> dict[str, str]:
     """Give the attributes of each group above an object, with the path of the group before the name.
 
     For example, the attributes md5 and uuid1 of the root group of aoife.hdf5 become /md5 and /uuid1.
+    An attribute name can hold a slash, so the root attribute a/x and the attribute x of /a both
+    become /a/x. merge_metadata() stops the run for such a clash.
     """
-    return {
-        f"{grouppath.as_posix().rstrip('/')}/{key}": value
-        for grouppath in PurePosixPath(objectpath).parents
-        for key, value in metadata_of(h5file[grouppath.as_posix()]).items()
-    }
+    return merge_metadata(
+        objectpath,
+        *(
+            {
+                f"{grouppath.as_posix().rstrip('/')}/{key}": value
+                for key, value in metadata_of(h5file[grouppath.as_posix()]).items()
+            }
+            for grouppath in PurePosixPath(objectpath).parents
+        ),
+    )
 
 
 def tables_of(h5file) -> list[tuple[str, pl.DataFrame, dict[str, str]]]:
