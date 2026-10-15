@@ -4,18 +4,24 @@ The data set belongs to the helium work of Boyle, A., Sim, S. A., Hachinger, S.,
 (2017), A&A, 599, A46, doi:10.1051/0004-6361/201629712.
 """
 
-import typing as t
 from functools import cache
 
 import polars as pl
 
+from artisatomic.base import check_integer_columns
+from artisatomic.base import converted_parquet_path
+from artisatomic.base import EnergyLevel
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
+from artisatomic.base import resolve_transition_levelid_columns
 
+boylefolder = PYDIR / ".." / "atomic-data-helium-boyle"
+hdf5path = boylefolder / "aoife.hdf5"
 # artisatomic/hdf5_to_parquet.py writes one Parquet file into this folder for each table of aoife.hdf5
-datafolder = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife"
+datafolder = hdf5path.with_suffix("")
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -26,41 +32,12 @@ description = (
 
 @cache
 def read_aoife_table(tablename: str) -> pl.DataFrame:
-    """Read one table of the AOIFE data set, once, on first use."""
-    path = datafolder / f"{tablename}.parquet"
-    # not an assert: the user must convert aoife.hdf5 once, and the message says how
-    if not path.exists():
-        msg = f"{path} does not exist. Make it with artisatomic/hdf5_to_parquet.py from aoife.hdf5."
-        raise FileNotFoundError(msg)
-    return pl.read_parquet(path)
+    """Read the helium rows of one table of the AOIFE data set, once, on first use.
 
-
-class EnergyLevelRow(t.NamedTuple):
-    """One level of the AOIFE levels_data table, with the derived fields appended.
-
-    The table's energy column is the energy above the ground state in eV. The reader converts it
-    to cm^-1 once, in energyabovegsinpercm.
+    The data set holds many elements, but the boyle handler reads only helium.
     """
-
-    atomic_number: float
-    ion_number: float
-    level_number: float
-    g: float
-    metastable: float
-    energyabovegsinpercm: float
-    parity: int | None  # None where the data set gives no parity
-    levelname: str
-
-
-class TransitionTuple(t.NamedTuple):
-    """One bound-bound transition of the AOIFE lines_data table."""
-
-    atomic_number: float
-    ion_stage: float
-    lowerlevel: int
-    upperlevel: int
-    A: float
-    lambdaangstrom: float
+    path = converted_parquet_path(datafolder / f"{tablename}.parquet", hdf5path)
+    return pl.scan_parquet(path).filter(pl.col("atomic_number") == 2).collect()
 
 
 def read_ionization_data(atomic_number, ion_stage):
@@ -85,85 +62,76 @@ def read_levels_data(atomic_number, ion_stage):
     """Read one ion's energy levels from the AOIFE levels_data table.
 
     The table numbers ion stages from zero, so the reader matches ion_stage against ion_number + 1.
-    Levels have no spectroscopic names, so the name of each level holds its zero-based level number.
+    Levels have no spectroscopic names, so the name of each level holds its file index. The
+    function also gives the map from the file index of each level to its level id.
     """
+    sourcename = "the AOIFE levels_data table"
     dflevels = read_aoife_table("levels_data").filter(
         (pl.col("atomic_number") == atomic_number) & (pl.col("ion_number") == ion_stage - 1)
     )
+    check_integer_columns(dflevels, ["level_number"], sourcename)
 
     energy_levels = [
-        # named fields, not *row plus three positional extras: a bare 0 in the extras would become
-        # the parity of every level
-        EnergyLevelRow(
-            atomic_number=row["atomic_number"],
-            ion_number=row["ion_number"],
-            level_number=row["level_number"],
-            g=row["g"],
-            metastable=row["metastable"],
-            # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196)
-            energyabovegsinpercm=row["energy"] / hc_in_ev_cm,
+        EnergyLevel(
+            levelname=f"level{level_number:05d}",
+            # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196). A division in Python and not
+            # in polars: polars multiplies by the reciprocal, which changes the last bit of some energies
+            energyabovegsinpercm=energy / hc_in_ev_cm,
+            g=g,
             # No parity: this data set supplies none. add_level_ids_forbidden() marks a transition
             # forbidden when its two levels share one parity, and helium has many permitted ones. A
             # null parity never matches another, here as in the other readers whose data set has
             # no parities.
             parity=None,
-            # int() as read_lines_data() does, so the two agree on the name whatever type the
-            # table stores the level number in
-            levelname=f"level{int(row['level_number']):05d}",
         )
-        for row in dflevels.iter_rows(named=True)
+        for level_number, energy, g in dflevels.select("level_number", "energy", "g").iter_rows()
     ]
 
-    # not an assert: read_lines_data() takes the table's level numbers as the zero-based level ids
-    # that leveltuples_to_pldataframe() assigns by row. The two numberings must agree
-    level_numbers = [int(level.level_number) for level in energy_levels]
-    if level_numbers != list(range(len(energy_levels))):
-        msg = (
-            f"the AOIFE levels of Z={atomic_number} ion_stage {ion_stage} are not numbered 0 to"
-            f" {len(energy_levels) - 1} in table order"
-        )
-        raise ValueError(msg)
-
-    return energy_levels
+    return energy_levels, levelid_of_fileindex_map(dflevels["level_number"], sourcename)
 
 
-def read_lines_data(atomic_number, ion_stage):
-    """Read one ion's bound-bound transitions from the AOIFE lines_data table.
+def read_lines_data(atomic_number, ion_stage, levelid_of_fileindex):
+    """Read one ion's bound-bound transitions from the AOIFE lines_data table, with zero-based level ids.
 
-    The table's level numbers are already zero-based, the same as the level ids in memory. The
-    table gives no collision strengths.
+    The table gives the file indices of the levels as floats. The table gives no collision
+    strengths.
     """
+    sourcename = "the AOIFE lines_data table"
+    levelcolumns = ["level_number_lower", "level_number_upper"]
     dflines = read_aoife_table("lines_data").filter(
         (pl.col("atomic_number") == atomic_number) & (pl.col("ion_number") == ion_stage - 1)
     )
 
-    transitions = []
-    for row in dflines.iter_rows(named=True):
-        # transitiondata.txt has the lower id first, so this code swaps a pair that the table
-        # lists in the reverse order. The table stores the level numbers as floats
-        levelid_lower = min(int(row["level_number_lower"]), int(row["level_number_upper"]))
-        levelid_upper = max(int(row["level_number_lower"]), int(row["level_number_upper"]))
-        transitions.append(
-            TransitionTuple(
-                row["atomic_number"], row["ion_number"], levelid_lower, levelid_upper, row["A_ul"], row["wavelength"]
-            )
-        )
+    for column in levelcolumns:
+        values = dflines[column]
+        # not an assert: a cast to an integer would cut a file index such as 3.5 to 3 without a message
+        if values.dtype.is_float() and not (values.is_finite() & (values == values.floor())).all():
+            msg = f"{sourcename} gives a file index in the column {column} that is not a whole number"
+            raise ValueError(msg)
 
-    return transitions
+    dflevelids = resolve_transition_levelid_columns(
+        dflines.with_columns(pl.col(levelcolumns).cast(pl.Int64)),
+        "level_number_lower",
+        "level_number_upper",
+        levelid_of_fileindex,
+        sourcename,
+    )
+    return dflevelids.with_columns(A=dflines["A_ul"])
 
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
+    # the HDF5 file and not the Parquet files: a user of the output files can get only the HDF5 file
     log_comment(
         flog,
         ("adata", "transitiondata"),
-        f"The levels and the transitions come from the tables in {path_for_log(datafolder)}.",
+        f"The levels and the transitions come from {path_in_data_folder(hdf5path, boylefolder)}.",
     )
-    transitions = read_lines_data(atomic_number, ion_stage)
+    energy_levels, levelid_of_fileindex = read_levels_data(atomic_number, ion_stage)
+
+    transitions = read_lines_data(atomic_number, ion_stage, levelid_of_fileindex)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
-
-    energy_levels = read_levels_data(atomic_number, ion_stage)
 
     return ionization_energy_in_ev, energy_levels, transitions

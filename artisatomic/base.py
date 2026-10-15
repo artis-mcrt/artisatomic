@@ -848,6 +848,28 @@ def find_file_check_extension_or_raise(filename: str | Path) -> Path:
     return filepath
 
 
+def converted_parquet_path(parquetpath: Path, hdf5path: Path) -> Path:
+    """Give the path of a Parquet file that artisatomic/hdf5_to_parquet.py made from an HDF5 file.
+
+    The function stops the run if the Parquet file does not exist. The script records the size of
+    the HDF5 file in the metadata of each Parquet file. If the HDF5 file is present and has a
+    different size, the user replaced it and did not convert it again. The function then stops the
+    run, because the Parquet file holds the old data.
+    """
+    if not parquetpath.exists():
+        msg = f"{parquetpath} does not exist. Make it from {hdf5path} with artisatomic/hdf5_to_parquet.py."
+        raise FileNotFoundError(msg)
+    if hdf5path.exists():
+        recordedsize = pl.read_parquet_metadata(parquetpath).get("hdf5_file_size")
+        if recordedsize != str(hdf5path.stat().st_size):
+            msg = (
+                f"{parquetpath} does not come from the current {hdf5path}."
+                f" Convert {hdf5path.name} again with artisatomic/hdf5_to_parquet.py."
+            )
+            raise ValueError(msg)
+    return parquetpath
+
+
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     """Open a data file, or a compressed variant of the name if the plain file does not exist.
 

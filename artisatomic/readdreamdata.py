@@ -4,44 +4,42 @@ DREAM is the Database on Rare Earths At Mons university: Quinet, P., Palmeri, P.
 18, doi:10.3390/atoms8020018.
 """
 
+from functools import cache
+
 import numpy as np
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import converted_parquet_path
 from artisatomic.base import EnergyLevel
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import nist_ionization_energy_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import Transition
 
-# artisatomic/hdf5_to_parquet.py writes this file from the h5 file of Andreas Floers's DREAM parser
-dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325" / "atomic_data.parquet"
+dreamfolder = PYDIR / ".." / "atomic-data-dream"
+# the HDF5 file of the DREAM parser of Andreas Floers
+dreamhdf5path = dreamfolder / "DREAM_atomic_data_20241106-1325.h5"
+# artisatomic/hdf5_to_parquet.py writes this file from the HDF5 file
+dreamdatapath = dreamhdf5path.with_suffix("") / "atomic_data.parquet"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
     "the DREAM database (Database on Rare Earths At Mons university) of Z >= 57. Quinet, P., Palmeri, P. (2020),"
     " Atoms, 8, 18, doi:10.3390/atoms8020018"
 )
-dreamdata: pl.DataFrame | None = None
 
 
-def init_dreamdata():
-    """Load the DREAM line list into the module-level cache, once per process."""
-    global dreamdata
-    if dreamdata is not None:
-        return
-    # not an assert: the user must convert the h5 file once, and the message says how
-    if not dreamdatapath.exists():
-        msg = f"{dreamdatapath} does not exist. Make it with artisatomic/hdf5_to_parquet.py from the DREAM h5 file."
-        raise FileNotFoundError(msg)
-    # drop CF: no reader uses it
-    dreamdata = (
-        pl.read_parquet(dreamdatapath)
-        .drop("CF", strict=False)
-        .with_columns(Lower_g=2 * pl.col("Lower_J") + 1, Upper_g=2 * pl.col("Upper_J") + 1)
+@cache
+def read_dreamdata() -> pl.DataFrame:
+    """Read the DREAM line list, once, on first use."""
+    # only the columns that the reader uses, so a file that lacks one stops the run here
+    columns = ["Z", "C", "Lower_Level", "Lower_Type", "Lower_J", "Upper_Level", "Upper_Type", "Upper_J", "gA"]
+    return pl.read_parquet(converted_parquet_path(dreamdatapath, dreamhdf5path), columns=columns).with_columns(
+        Lower_g=2 * pl.col("Lower_J") + 1, Upper_g=2 * pl.col("Upper_J") + 1
     )
 
 
@@ -53,11 +51,9 @@ def extend_ion_list(
     maxatomicnumber: int | None = None,
 ):
     """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
-    init_dreamdata()
-    assert dreamdata is not None
     dreamions = [
         (atomic_number, charge + 1)
-        for atomic_number, charge in dreamdata.select("Z", "C").unique(maintain_order=True).iter_rows()
+        for atomic_number, charge in read_dreamdata().select("Z", "C").unique(maintain_order=True).iter_rows()
     ]
 
     return add_handlers_if_not_set(
@@ -137,17 +133,18 @@ def read_lines_data(dfiondata):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion from the DREAM database of Z >= 57."""
-    init_dreamdata()
-    assert dreamdata is not None
     charge = ion_stage - 1
-    dfiondata = dreamdata.filter((pl.col("Z") == atomic_number) & (pl.col("C") == charge))
+    dfiondata = read_dreamdata().filter((pl.col("Z") == atomic_number) & (pl.col("C") == charge))
     # not an assert: an ion that the database does not hold would give an empty level list and an
     # ion with no lines in the output
     if dfiondata.is_empty():
         msg = f"The DREAM database has no lines for Z={atomic_number} ion_stage {ion_stage}"
         raise ValueError(msg)
+    # the HDF5 file and not the Parquet file: a user of the output files can get only the HDF5 file
     log_comment(
-        flog, ("adata", "transitiondata"), f"The levels and the transitions come from {path_for_log(dreamdatapath)}."
+        flog,
+        ("adata", "transitiondata"),
+        f"The levels and the transitions come from {path_in_data_folder(dreamhdf5path, dreamfolder)}.",
     )
 
     energy_levels = read_levels_data(dfiondata)

@@ -18,6 +18,7 @@ import polars as pl
 import pytest
 from xopen import xopen
 
+from artisatomic import hdf5_to_parquet
 from artisatomic import readadasdata
 from artisatomic import readfacdata
 from artisatomic import readfloers25data
@@ -27,6 +28,7 @@ from artisatomic import readkuruczdata
 from artisatomic import readmonsdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import converted_parquet_path
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension_or_raise
@@ -1217,87 +1219,203 @@ def test_readhillierdata_hydrogen_lyman_alpha_is_permitted():
     assert not lymanalpha["forbidden"].item()
 
 
-def test_readboyledata_levels_have_no_parity(monkeypatch):
-    """The AOIFE data set supplies no parities, so no transition may come out forbidden.
+@pytest.fixture
+def aoife_folder(tmp_path, monkeypatch):
+    """Point the boyle reader to an empty folder for the AOIFE tables, with no HDF5 file.
 
-    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity. The
-    same parity on every level therefore made every transition of the ion forbidden, and helium
-    has many permitted ones. A null parity cannot match another, which is how readlisbondata and
-    readkuruczdata say the same thing.
-
-    The repository does not hold the AOIFE tables. The .gitignore of atomic-data-helium-boyle
-    excludes them, and its README.txt gives the download link. This test therefore builds the
-    two tables that the readers below want in memory.
+    The fixture empties the cache of the reader before and after the test, so no table of another
+    test stays in it.
     """
     from artisatomic import readboyledata
 
-    # He I: three levels, and two lines between them. The integer columns must stay integers, or
-    # the level names format differently in the two readers below
-    tables = {
+    datafolder = tmp_path / "aoife"
+    datafolder.mkdir()
+    monkeypatch.setattr(readboyledata, "boylefolder", tmp_path)
+    monkeypatch.setattr(readboyledata, "hdf5path", tmp_path / "aoife.hdf5")
+    monkeypatch.setattr(readboyledata, "datafolder", datafolder)
+    readboyledata.read_aoife_table.cache_clear()
+    yield datafolder
+    readboyledata.read_aoife_table.cache_clear()
+
+
+def aoife_tables(level_number_lower=(0.0, 1.0)):
+    """Give the three AOIFE tables that the boyle reader reads, with three levels of He I.
+
+    The levels_data table also has a level of He II and a level of hydrogen, which the reader must
+    not read. The lines_data table gives the file indices of the levels as floats, as the AOIFE
+    data set does.
+    """
+    return {
         "levels_data": pl.DataFrame(
             {
-                "atomic_number": [2, 2, 2, 2],
-                "ion_number": [0, 0, 0, 1],  # the last row is He II, which the reader must filter out
-                "level_number": [0, 1, 2, 0],
-                "energy": [0.0, 159856.0, 166278.0, 0.0],
-                "g": [1, 3, 1, 2],
-                "metastable": [False, True, False, False],
+                "atomic_number": [2, 2, 2, 2, 1],
+                "ion_number": [0, 0, 0, 1, 0],
+                "level_number": [0, 1, 2, 0, 0],
+                "energy": [0.0, 19.8196, 20.6158, 0.0, 0.0],
+                "g": [1, 3, 1, 2, 2],
+                "metastable": [False, True, False, False, False],
             }
         ),
-        # the AOIFE lines_data table stores the level numbers as floats
         "lines_data": pl.DataFrame(
             {
                 "line_id": [0, 1],
                 "wavelength": [584.0, 10830.0],
                 "atomic_number": [2, 2],
                 "ion_number": [0, 0],
-                "level_number_lower": [0.0, 1.0],
+                "level_number_lower": list(level_number_lower),
                 "level_number_upper": [2.0, 2.0],
                 "A_ul": [1.8e9, 1.0e7],
             }
         ),
+        # the ion_number of this table is the charge after the ionisation
+        "ionization_data": pl.DataFrame(
+            {"atomic_number": [2, 2, 1], "ion_number": [1, 2, 1], "ionization_energy": [24.587, 54.418, 13.598]}
+        ),
     }
-    monkeypatch.setattr(readboyledata, "read_aoife_table", tables.__getitem__)
-
-    energy_levels = readboyledata.read_levels_data(2, 1)
-    transitions = readboyledata.read_lines_data(2, 1)
-
-    # the reader filters out the other ion's level
-    assert len(energy_levels) == 3
-
-    # no level has a parity, so no pair of them can compare equal
-    assert all(level.parity is None for level in energy_levels)
-
-    dflevels = leveltuples_to_pldataframe(
-        pl.DataFrame(
-            {
-                "levelname": [level.levelname for level in energy_levels],
-                "energyabovegsinpercm": [level.energyabovegsinpercm for level in energy_levels],
-                "g": [level.g for level in energy_levels],
-                "parity": [level.parity for level in energy_levels],
-            }
-        )
-    )
-    dftransitions = pl.DataFrame(
-        {
-            "lowerlevel": [t.lowerlevel for t in transitions],
-            "upperlevel": [t.upperlevel for t in transitions],
-            "A": [t.A for t in transitions],
-        }
-    )
-    assert not any(add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list())
-
-    # the file's level numbers are the level ids, so the writer's count lands on the right level
-    assert transition_count_of_level(dftransitions, len(energy_levels))[2] == 2
 
 
-def import_hdf5_to_parquet():
-    """Import artisatomic.hdf5_to_parquet, or skip the test if h5py is not installed.
+def test_readboyledata_reads_the_parquet_tables(aoife_folder):
+    """The boyle reader reads the helium rows of the Parquet tables, and its levels have no parity.
 
-    h5py has no wheel for Python 3.15, so the dev group installs it only for an earlier Python.
+    add_level_ids_forbidden() marks a transition forbidden when its two levels share a parity. The
+    AOIFE data set supplies no parities. A null parity matches no other parity, so no transition
+    comes out forbidden.
     """
-    pytest.importorskip("h5py")
-    return importlib.import_module("artisatomic.hdf5_to_parquet")
+    from artisatomic import readboyledata
+
+    for name, table in aoife_tables().items():
+        table.write_parquet(aoife_folder / f"{name}.parquet")
+
+    ionization_energy_in_ev, energy_levels, transitions = readboyledata.read_levels_and_transitions(2, 1, io.StringIO())
+
+    assert ionization_energy_in_ev == 24.587
+    # the reader reads only the levels of He I
+    assert [level.levelname for level in energy_levels] == ["level00000", "level00001", "level00002"]
+    assert energy_levels[1].energyabovegsinpercm == 19.8196 / hc_in_ev_cm
+    assert all(level.parity is None for level in energy_levels)
+    assert transitions.select("lowerlevel", "upperlevel", "A").rows() == [(0, 2, 1.8e9), (1, 2, 1.0e7)]
+
+    dflevels = leveltuples_to_pldataframe(pl.DataFrame(energy_levels))
+    assert not any(add_level_ids_forbidden(dflevels, transitions)["forbidden"].to_list())
+    assert transition_count_of_level(transitions, len(energy_levels))[2] == 2
+
+    # He III is a bare nucleus, so the table has no row for it
+    assert readboyledata.read_ionization_data(2, 3) == 999999.0
+
+
+def test_readboyledata_rejects_a_fractional_file_index(aoife_folder):
+    """A file index such as 1.5 stops the run. A cast to an integer would make it 1 without a message."""
+    from artisatomic import readboyledata
+
+    for name, table in aoife_tables(level_number_lower=(0.0, 1.5)).items():
+        table.write_parquet(aoife_folder / f"{name}.parquet")
+
+    with pytest.raises(ValueError, match="not a whole number"):
+        readboyledata.read_levels_and_transitions(2, 1, io.StringIO())
+
+
+def test_readdreamdata_reads_the_parquet_file(tmp_path, monkeypatch):
+    """The DREAM reader gets the levels from the lines, and A from gA and the g of the upper level."""
+    from artisatomic import readdreamdata
+
+    datapath = tmp_path / "DREAM" / "atomic_data.parquet"
+    datapath.parent.mkdir()
+    pl.DataFrame(
+        {
+            "Z": [58, 58, 59],
+            "C": [1, 1, 1],
+            "Wavelength": [5000.0, 5263.0, 4000.0],
+            "Lower_Level": [0.0, 1000.0, 0.0],
+            "Lower_Type": ["(e)", "(e)", "(o)"],
+            "Lower_J": [4.0, 3.0, 4.5],
+            "Upper_Level": [20000.0, 20000.0, 25000.0],
+            "Upper_Type": ["(o)", "(o)", "(e)"],
+            "Upper_J": [5.0, 5.0, 5.5],
+            "gA": [1.1e9, 2.2e9, 1.2e9],
+            "CF": ["0.5", "n", None],
+        }
+    ).write_parquet(datapath)
+    monkeypatch.setattr(readdreamdata, "dreamfolder", tmp_path)
+    monkeypatch.setattr(readdreamdata, "dreamhdf5path", tmp_path / "DREAM.h5")
+    monkeypatch.setattr(readdreamdata, "dreamdatapath", datapath)
+    readdreamdata.read_dreamdata.cache_clear()
+    try:
+        assert readdreamdata.extend_ion_list([]) == [(58, [(2, "dream")]), (59, [(2, "dream")])]
+        _, energy_levels, transitions = readdreamdata.read_levels_and_transitions(58, 2, io.StringIO())
+    finally:
+        readdreamdata.read_dreamdata.cache_clear()
+
+    assert [(level.energyabovegsinpercm, level.g, level.parity) for level in energy_levels] == [
+        (0.0, 9.0, 0),
+        (1000.0, 7.0, 0),
+        (20000.0, 11.0, 1),
+    ]
+    assert [(t.lowerlevel, t.upperlevel) for t in transitions] == [(0, 2), (1, 2)]
+    assert [t.A for t in transitions] == pytest.approx([1.0e8, 2.0e8])
+
+
+def test_converted_parquet_path_checks_the_size_of_the_hdf5_file(tmp_path):
+    """A missing Parquet file or a changed HDF5 file stops the run with the command that repairs it."""
+    hdf5path = tmp_path / "data.h5"
+    parquetpath = tmp_path / "data" / "table.parquet"
+    with pytest.raises(FileNotFoundError, match=r"hdf5_to_parquet\.py"):
+        converted_parquet_path(parquetpath, hdf5path)
+
+    parquetpath.parent.mkdir()
+    pl.DataFrame({"value": [1]}).write_parquet(parquetpath, metadata={"hdf5_file_size": "3"})
+    # with no HDF5 file, as on a machine that has only the Parquet files, the function cannot check
+    assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
+    hdf5path.write_bytes(b"abc")
+    assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
+    hdf5path.write_bytes(b"abcd")
+    with pytest.raises(ValueError, match=r"Convert data\.h5 again"):
+        converted_parquet_path(parquetpath, hdf5path)
+
+
+def test_hdf5_to_parquet_series_from_array():
+    """The script gives each column a type that Parquet can hold, or it rejects the column."""
+    series_from_array = hdf5_to_parquet.series_from_array
+
+    assert series_from_array("a", np.array([b"ab", b"c"])).to_list() == ["ab", "c"]
+    # bytes that are not UTF-8 stay bytes
+    assert series_from_array("a", np.array([b"\xff"])).dtype == pl.Binary
+
+    def objects(*values: object) -> np.ndarray:
+        return np.array(values, dtype=object)
+
+    # polars takes the type from the first value, and the script must not depend on the order
+    assert series_from_array("a", objects(1, 2.5)).to_list() == [1.0, 2.5]
+    # pandas writes NaN for a missing value of an object column
+    assert series_from_array("a", objects(0.5, float("nan"), "n")).to_list() == ["0.5", None, "n"]
+    assert series_from_array("a", objects(b"x", float("nan"))).to_list() == ["x", None]
+    assert series_from_array("a", objects(True, False)).dtype == pl.Boolean
+
+    with pytest.raises(hdf5_to_parquet.NoTableError):
+        series_from_array("a", np.array([1 + 2j]))
+    with pytest.raises(hdf5_to_parquet.NoTableError):
+        hdf5_to_parquet.table_from_array(np.zeros((2, 2, 2)))
+
+
+def test_hdf5_to_parquet_unpickles_only_numpy_arrays():
+    """The script unpickles a numpy array of objects, and refuses a pickle that names another function.
+
+    An unpickle calls each function that the pickle names, so a pickle in a downloaded file can run
+    any code.
+    """
+    array = np.array([[1, "n"]], dtype=object)
+    assert hdf5_to_parquet.unpickle(pickle.dumps(array)).tolist() == array.tolist()
+    with pytest.raises(pickle.UnpicklingError, match=r"pathlib\.\S*Path"):
+        hdf5_to_parquet.unpickle(pickle.dumps(Path("a")))
+
+
+def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
+    """The script refuses an output path that it cannot write without the loss of a table."""
+    with pytest.raises(ValueError, match="no extension"):
+        hdf5_to_parquet.output_folder_of(tmp_path / "data")
+    with pytest.raises(ValueError, match="differ only in case"):
+        hdf5_to_parquet.check_output_paths(tmp_path, ["Lines.parquet", "lines.parquet"])
+    with pytest.raises(ValueError, match="outside the output folder"):
+        hdf5_to_parquet.check_output_paths(tmp_path, ["../lines.parquet"])
 
 
 def write_pandas_hdfstore(path, columns, indexlevels):
@@ -1305,7 +1423,7 @@ def write_pandas_hdfstore(path, columns, indexlevels):
 
     The test writes the file itself, because the DREAM line list is not part of this repository
     and pandas is not a dependency. columns maps each column name to its values, and indexlevels
-    maps each index level name to its values.
+    maps each index level name to its values. A name of None gives a level with no name.
     """
     h5py = pytest.importorskip("h5py")
 
@@ -1321,15 +1439,17 @@ def write_pandas_hdfstore(path, columns, indexlevels):
             dataset[0] = np.frombuffer(pickle.dumps(obj), dtype=np.uint8)
             return dataset
 
-        for level, (name, values) in enumerate(indexlevels.items()):
+        for level, (name, values) in enumerate(indexlevels):
             uniquevalues = list(dict.fromkeys(values))
             dataset = write_pickle(f"axis1_level{level}", np.array(uniquevalues, dtype=object))
-            dataset.attrs["name"] = name.encode()
+            # pytables stores the pickle of None as the name of a level with no name
+            dataset.attrs["name"] = b"N." if name is None else name.encode()
             group.create_dataset(
                 f"axis1_label{level}", data=np.array([uniquevalues.index(v) for v in values], dtype=np.int8)
             )
 
-        # block 0 holds the float columns, block 1 the columns of Python objects
+        # block 0 holds the float columns, block 1 the columns of Python objects. pandas stores
+        # the transpose of each block, with the rows first, and sets the attribute transposed
         names = list(columns)
         nrows = len(next(iter(columns.values())))
         floatnames = [name for name in names if all(isinstance(v, float) for v in columns[name])]
@@ -1337,12 +1457,12 @@ def write_pandas_hdfstore(path, columns, indexlevels):
         group.create_dataset("block0_items", data=np.array([n.encode() for n in floatnames]))
         group.create_dataset(
             "block0_values", data=np.array([[columns[n][row] for n in floatnames] for row in range(nrows)])
-        )
+        ).attrs["transposed"] = 1
         group.create_dataset("block1_items", data=np.array([n.encode() for n in objectnames]))
         write_pickle(
             "block1_values",
             np.array([[columns[n][row] for n in objectnames] for row in range(nrows)], dtype=object),
-        )
+        ).attrs["transposed"] = 1
         group.create_dataset("axis0", data=np.array([n.encode() for n in names]))
 
 
@@ -1350,9 +1470,9 @@ def test_hdf5_to_parquet_rebuilds_a_pandas_frame(tmp_path):
     """The script rebuilds a pandas HDFStore with h5py, and needs no pandas to do it.
 
     The index levels come first, then the columns in the order of the frame. The script matches
-    the values to the columns by name, so the two blocks may hold them in any order.
+    the values to the columns by name, so the two blocks can hold them in any order.
     """
-    hdf5_to_parquet = import_hdf5_to_parquet()
+    pytest.importorskip("h5py")
 
     path = tmp_path / "store.h5"
     write_pandas_hdfstore(
@@ -1365,12 +1485,13 @@ def test_hdf5_to_parquet_rebuilds_a_pandas_frame(tmp_path):
             # one column of two types becomes a String column, as CF does in the DREAM line list
             "CF": [0.047, "n"],
         },
-        indexlevels={"Z": [57, 57], "C": [0, 1]},
+        indexlevels=[("Z", [57, 57]), (None, [0, 1])],
     )
 
     assert hdf5_to_parquet.convert_file(path) == [tmp_path / "store" / "atomic_data.parquet"]
     df = pl.read_parquet(tmp_path / "store" / "atomic_data.parquet")
-    assert df.columns == ["Z", "C", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J", "CF"]
+    # pandas calls a level with no name level_1 when it makes the level a column
+    assert df.columns == ["Z", "level_1", "Wavelength", "Lower_Level", "Lower_Type", "Lower_J", "CF"]
     # a column of Python integers becomes Int64, so the polars expressions can read it
     assert df.schema["Z"] == pl.Int64
     assert df.schema["Lower_Level"] == pl.Int64
@@ -1379,13 +1500,25 @@ def test_hdf5_to_parquet_rebuilds_a_pandas_frame(tmp_path):
         (57, 0, 3175.982, 0, "(e)", 1.5, "0.047"),
         (57, 1, 3215.81, 1053, "(o)", 2.5, "n"),
     ]
+    metadata = pl.read_parquet_metadata(tmp_path / "store" / "atomic_data.parquet")
     # the HDF5 attributes of the group go into the metadata of the Parquet file
-    assert pl.read_parquet_metadata(tmp_path / "store" / "atomic_data.parquet")["pandas_type"] == "frame"
+    assert metadata["pandas_type"] == "frame"
+    assert metadata["hdf5_file"] == "store.h5"
+    assert metadata["hdf5_file_size"] == str(path.stat().st_size)
+
+
+def test_hdf5_to_parquet_rejects_two_columns_of_one_name(tmp_path):
+    """An index level and a column of one name stop the run, because Parquet holds each name one time."""
+    pytest.importorskip("h5py")
+
+    path = tmp_path / "store.h5"
+    write_pandas_hdfstore(path, columns={"Z": [1.0], "gA": [2.0]}, indexlevels=[("Z", [57])])
+    with pytest.raises(ValueError, match="with the name Z"):
+        hdf5_to_parquet.convert_file(path)
 
 
 def test_hdf5_to_parquet_rejects_another_pandas_format(tmp_path):
     """A pandas group that is not a frame of the "fixed" format names the format that the script needs."""
-    hdf5_to_parquet = import_hdf5_to_parquet()
     h5py = pytest.importorskip("h5py")
 
     path = tmp_path / "table.h5"
@@ -1398,9 +1531,9 @@ def test_hdf5_to_parquet_rejects_another_pandas_format(tmp_path):
 def test_hdf5_to_parquet_writes_each_table(tmp_path):
     """The script writes a compound data set and a plain array as tables, and skips a scalar.
 
-    The AOIFE file holds its tables as compound data sets in the root group.
+    The AOIFE file holds its tables as compound data sets in the root group. The attributes of the
+    root group go into the metadata of each table, with a slash before the name.
     """
-    hdf5_to_parquet = import_hdf5_to_parquet()
     h5py = pytest.importorskip("h5py")
 
     path = tmp_path / "aoife.hdf5"
@@ -1409,9 +1542,11 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
         dtype=[("atomic_number", "i8"), ("ion_number", "i8"), ("energy", "f8"), ("symbol", "S3"), ("metastable", "?")],
     )
     with h5py.File(path, "w") as h5file:
+        h5file.attrs["md5"] = b"6df1b7429ac8df8be7a3e41a877e6338"
         h5file.create_dataset("levels_data", data=levels)
         h5file.create_dataset("group/zeta_data", data=np.array([[1.0, 2.0], [3.0, 4.0]]))
         h5file["group/zeta_data"].attrs["source"] = "a test"
+        h5file["group/zeta_data"].attrs["t_rad"] = np.array([2000, 4000])
         h5file.create_dataset("scalar", data=1.0)
 
     assert sorted(hdf5_to_parquet.convert_file(path)) == [
@@ -1432,7 +1567,65 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
     dfzeta = pl.read_parquet(tmp_path / "aoife" / "group" / "zeta_data.parquet")
     assert dfzeta.rows() == [(1.0, 2.0), (3.0, 4.0)]
     assert dfzeta.columns == ["column_0", "column_1"]
-    assert pl.read_parquet_metadata(tmp_path / "aoife" / "group" / "zeta_data.parquet")["source"] == "a test"
+    metadata = pl.read_parquet_metadata(tmp_path / "aoife" / "group" / "zeta_data.parquet")
+    assert metadata["source"] == "a test"
+    assert metadata["t_rad"] == "[2000, 4000]"
+    assert metadata["/md5"] == "6df1b7429ac8df8be7a3e41a877e6338"
+    assert pl.read_parquet_metadata(tmp_path / "aoife" / "levels_data.parquet")["/md5"] == metadata["/md5"]
+
+
+def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion(tmp_path):
+    """A conversion that fails keeps the earlier tables. A good conversion removes each table that went away."""
+    h5py = pytest.importorskip("h5py")
+
+    path = tmp_path / "data.h5"
+    outputfolder = tmp_path / "data"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("a", data=np.array([1.0]))
+        h5file.create_dataset("b", data=np.array([2.0]))
+    hdf5_to_parquet.convert_file(path)
+
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("a", data=np.array([3.0]))
+        h5file.create_group("frame").attrs["pandas_type"] = b"frame_table"
+    with pytest.raises(ValueError, match="format='fixed'"):
+        hdf5_to_parquet.convert_file(path)
+    assert sorted(child.name for child in outputfolder.iterdir()) == ["a.parquet", "b.parquet"]
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [1.0]
+
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("a", data=np.array([3.0]))
+    hdf5_to_parquet.convert_file(path)
+    assert sorted(child.name for child in outputfolder.iterdir()) == ["a.parquet"]
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [3.0]
+
+    # the script deletes the output folder as a whole, so it refuses a folder with a file of the user
+    (outputfolder / "notes.txt").write_text("notes")
+    with pytest.raises(FileExistsError, match=r"notes\.txt"):
+        hdf5_to_parquet.convert_file(path)
+
+
+def test_hdf5_to_parquet_output_goes_to_the_boyle_reader(aoife_folder):
+    """The boyle reader reads the tables that the script writes, and it stops after a change to the HDF5 file."""
+    h5py = pytest.importorskip("h5py")
+    from artisatomic import readboyledata
+
+    hdf5path = aoife_folder.parent / "aoife.hdf5"
+    with h5py.File(hdf5path, "w") as h5file:
+        for name, table in aoife_tables().items():
+            h5file.create_dataset(name, data=table.to_numpy(structured=True))
+    hdf5_to_parquet.convert_file(hdf5path)
+
+    ionization_energy_in_ev, energy_levels, transitions = readboyledata.read_levels_and_transitions(2, 1, io.StringIO())
+    assert ionization_energy_in_ev == 24.587
+    assert len(energy_levels) == 3
+    assert transitions.height == 2
+
+    readboyledata.read_aoife_table.cache_clear()
+    with hdf5path.open("ab") as h5file:
+        h5file.write(b"\0")
+    with pytest.raises(ValueError, match=r"Convert aoife\.hdf5 again"):
+        readboyledata.read_levels_and_transitions(2, 1, io.StringIO())
 
 
 def test_readlisbondata_reads_the_levels_and_lines_csv(tmp_path):
