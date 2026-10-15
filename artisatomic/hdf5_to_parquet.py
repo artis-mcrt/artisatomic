@@ -1,6 +1,6 @@
 #!/usr/bin/env -S uv run --script
 # /// script
-# requires-python = ">=3.13,<3.15"
+# requires-python = ">=3.13"
 # dependencies = ["h5py>=3.10.0", "numpy>=2.2.6", "polars>=2.0.0"]
 # ///
 """Convert each table of an HDF5 file to a Parquet file.
@@ -10,8 +10,9 @@ Run this script once for each HDF5 file, and again after a change to the HDF5 fi
 
     artisatomic/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5
 
-uv installs the dependencies in the header above. h5py 3.16 has no wheel for Python 3.15, so the
-header makes uv use an earlier Python. The script writes the tables into a folder that has the
+uv installs the dependencies in the header above. h5py 3.16 has no wheel for Python 3.15, so uv
+builds h5py from source there, which needs an HDF5 library. Without one, run the script with
+uv run --python 3.14. The script writes the tables into a folder that has the
 name of the HDF5 file without its extension. It replaces the earlier content of that folder. The
 path of a table in the folder is the path of its object in the HDF5 file. The script does not
 change or delete the HDF5 file.
