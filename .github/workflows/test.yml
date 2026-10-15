@@ -177,7 +177,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons, adas]
+                testname: [adas, cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
@@ -212,6 +212,11 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            - name: Extract Floers25 atomic data
+              if: matrix.testname == 'floers25'
+              working-directory: atomic-data-floers25/
+              run: tar -xJvf testdata.tar.xz
+
             # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
             # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
             - name: Cache JPLT atomic data
@@ -225,11 +230,6 @@ jobs:
               if: matrix.testname == 'jplt'
               working-directory: atomic-data-tanaka-jplt/
               run: source ./setup_jplt_data.sh
-
-            - name: Extract Floers25 atomic data
-              if: matrix.testname == 'floers25'
-              working-directory: atomic-data-floers25/
-              run: tar -xJvf testdata.tar.xz
 
             - name: Generate artis atomic data files
               run: |
