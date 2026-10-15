@@ -445,7 +445,9 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
 
     def filekey(relativepath: str) -> str:
         normalised = unicodedata.normalize("NFC", relativepath.replace("\\", "/"))
-        return unicodedata.normalize("NFC", normalised.casefold())
+        # Windows removes the periods and the spaces at the end of each part of a path
+        parts = [part.rstrip(". ") for part in normalised.split("/")]
+        return unicodedata.normalize("NFC", "/".join(parts).casefold())
 
     counts = Counter(map(filekey, relativepaths))
     clashes = sorted(relativepath for relativepath in relativepaths if counts[filekey(relativepath)] > 1)
@@ -487,6 +489,8 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     # earlier output folder stays in it as a backup until the new tables have their place
     workfolder = Path(tempfile.mkdtemp(prefix=f"{outputfolder.name}.partial-", dir=outputfolder.parent))
     newfolder = workfolder / "new"
+    # an HDF5 file with no table gives an empty output folder
+    newfolder.mkdir()
     backupfolder = workfolder / "old"
     keepworkfolder = False
     try:
@@ -538,7 +542,13 @@ def main() -> None:
     """Convert each HDF5 file that the command line names."""
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
     parser.add_argument("paths", nargs="+", type=Path, help="the HDF5 files to convert")
-    for path in parser.parse_args().paths:
+    paths = parser.parse_args().paths
+    # two input files with one output folder: the second conversion would delete the tables of the first
+    outputfolders = Counter(str(output_folder_of(path).resolve()).casefold() for path in paths)
+    clashes = [str(path) for path in paths if outputfolders[str(output_folder_of(path).resolve()).casefold()] > 1]
+    if clashes:
+        parser.error(f"these files have one output folder: {', '.join(clashes)}")
+    for path in paths:
         convert_file(path)
 
 

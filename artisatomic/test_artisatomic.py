@@ -1425,12 +1425,15 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
     """The script refuses an output path that it cannot write without the loss of a table."""
     with pytest.raises(ValueError, match="no extension"):
         hdf5_to_parquet.output_folder_of(tmp_path / "data")
-    # macOS gives one file to two names that differ only in case, in the separator or in the
-    # Unicode form, here a composed and a decomposed e with an acute accent
+    # macOS or Windows gives one file to two names that differ only in case, in the separator, in
+    # the Unicode form (a composed and a decomposed e with an acute accent), or in a period or a
+    # space at the end of a part
     for clash in [
         ["Lines.parquet", "lines.parquet"],
         ["a/b.parquet", "a\\b.parquet"],
         ["\u00e9.parquet", "e\u0301.parquet"],
+        ["a/b.parquet", "a./b.parquet"],
+        ["a/b.parquet", "a /b.parquet"],
     ]:
         with pytest.raises(ValueError, match="one output file"):
             hdf5_to_parquet.check_output_paths(tmp_path, clash)
@@ -1666,6 +1669,27 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
     assert backupfolder.parent.name.startswith("data.partial-")
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
+
+
+def test_hdf5_to_parquet_refuses_two_files_with_one_output_folder(tmp_path, monkeypatch):
+    """The second conversion would delete the tables of the first, so the script converts neither file."""
+    monkeypatch.setattr("sys.argv", ["hdf5_to_parquet.py", str(tmp_path / "data.h5"), str(tmp_path / "data.hdf5")])
+    with pytest.raises(SystemExit):
+        hdf5_to_parquet.main()
+
+
+def test_hdf5_to_parquet_writes_an_empty_folder_for_a_file_with_no_table(tmp_path):
+    """A table that went away from the HDF5 file also goes away from the output folder."""
+    h5py = pytest.importorskip("h5py")
+
+    path = tmp_path / "data.h5"
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("a", data=np.array([1.0]))
+    hdf5_to_parquet.convert_file(path)
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("scalar", data=1.0)
+    assert hdf5_to_parquet.convert_file(path) == []
+    assert list((tmp_path / "data").iterdir()) == []
 
 
 def test_hdf5_to_parquet_output_goes_to_the_boyle_reader(aoife_folder):
