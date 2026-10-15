@@ -43,6 +43,7 @@ import numbers
 # unpickle it. ArrayUnpickler permits only the names of numpy arrays
 import pickle  # ruff: ignore[suspicious-pickle-import]
 import shutil
+import string
 import tempfile
 import unicodedata
 from collections import Counter
@@ -437,25 +438,54 @@ def output_folder_of(path: Path) -> Path:
     return path.with_suffix("")
 
 
+# the names of devices on Windows. A file of such a name, with any extension, is the device
+WINDOWS_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"}
+    | {f"{device}{digit}" for device in ("COM", "LPT") for digit in [*string.digits, "\u00b9", "\u00b2", "\u00b3"]}
+)
+
+
+def filekey(path: str) -> str:
+    """Give a key that is the same for two paths that macOS or Windows reads as one file.
+
+    HDF5 names are case-sensitive, but the default file systems of macOS and Windows are not.
+    Windows reads a backslash as a separator, and it removes the periods and the spaces at the end
+    of each part. macOS gives one file to two Unicode forms of one name, for example a composed and
+    a decomposed letter.
+    """
+    normalised = unicodedata.normalize("NFC", path.replace("\\", "/"))
+    parts = [part.rstrip(". ") for part in normalised.split("/")]
+    return unicodedata.normalize("NFC", "/".join(parts).casefold())
+
+
 def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     """Stop the run if two tables get one output file, or if a table goes outside the output folder.
 
-    HDF5 names are case-sensitive, but the default file systems of macOS and Windows are not.
-    Windows also reads a backslash as a separator. macOS gives one file to two Unicode forms of one
-    name, for example a composed and a decomposed letter. Such names would give one file, and one
-    table would be lost.
+    Two paths with one filekey() would give one file, and one table would be lost. A table path
+    that is also the folder of a different table, for example /a.parquet/b for /a, stops the run
+    too. The function also refuses the names of Windows devices.
     """
-
-    def filekey(relativepath: str) -> str:
-        normalised = unicodedata.normalize("NFC", relativepath.replace("\\", "/"))
-        # Windows removes the periods and the spaces at the end of each part of a path
-        parts = [part.rstrip(". ") for part in normalised.split("/")]
-        return unicodedata.normalize("NFC", "/".join(parts).casefold())
-
-    counts = Counter(map(filekey, relativepaths))
-    clashes = sorted(relativepath for relativepath in relativepaths if counts[filekey(relativepath)] > 1)
+    keys = [filekey(relativepath) for relativepath in relativepaths]
+    counts = Counter(keys)
+    folderkeys = {str(parent) for key in keys for parent in PurePosixPath(key).parents}
+    clashes = sorted(
+        relativepath
+        for relativepath, key in zip(relativepaths, keys, strict=True)
+        if counts[key] > 1 or key in folderkeys
+    )
     if clashes:
-        msg = f"{path} has tables that would get one output file: {', '.join(clashes)}."
+        msg = f"{path} has tables that would get one output file or folder: {', '.join(clashes)}."
+        raise ValueError(msg)
+    devices = [
+        relativepath
+        for relativepath in relativepaths
+        if any(
+            part.split(".")[0].rstrip(" ").upper() in WINDOWS_DEVICE_NAMES
+            for part in relativepath.replace("\\", "/").split("/")
+        )
+    ]
+    if devices:
+        msg = f"{path} has tables whose path has the name of a Windows device: {', '.join(devices)}."
         raise ValueError(msg)
     # the two path types: Windows also reads a backslash as a separator, and C: as a drive
     unsafe = [
@@ -486,7 +516,9 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
         otherfiles = [
             filepath
             for filepath in outputfolder.rglob("*")
-            if not filepath.is_dir() and filepath.suffix != ".parquet" and filepath.name != ".DS_Store"
+            # a symbolic link is not a file that the script wrote, also with the extension .parquet
+            if filepath.is_symlink()
+            or (not filepath.is_dir() and filepath.suffix != ".parquet" and filepath.name != ".DS_Store")
         ]
         if otherfiles:
             msg = f"{outputfolder} holds files that the script did not write, for example {otherfiles[0]}."
@@ -551,8 +583,9 @@ def main() -> None:
     parser.add_argument("paths", nargs="+", type=Path, help="the HDF5 files to convert")
     paths = parser.parse_args().paths
     # two input files with one output folder: the second conversion would delete the tables of the first
-    outputfolders = Counter(str(output_folder_of(path).resolve()).casefold() for path in paths)
-    clashes = [str(path) for path in paths if outputfolders[str(output_folder_of(path).resolve()).casefold()] > 1]
+    keys = [filekey(str(output_folder_of(path).resolve())) for path in paths]
+    counts = Counter(keys)
+    clashes = [str(path) for path, key in zip(paths, keys, strict=True) if counts[key] > 1]
     if clashes:
         parser.error(f"these files have one output folder: {', '.join(clashes)}")
     for path in paths:

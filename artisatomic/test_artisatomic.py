@@ -1431,9 +1431,16 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
         ["\u00e9.parquet", "e\u0301.parquet"],
         ["a/b.parquet", "a./b.parquet"],
         ["a/b.parquet", "a /b.parquet"],
+        # the output file of /a is also the folder of /a.parquet/b
+        ["a.parquet", "a.parquet/b.parquet"],
     ]:
-        with pytest.raises(ValueError, match="one output file"):
+        with pytest.raises(ValueError, match="one output file or folder"):
             hdf5_to_parquet.check_output_paths(tmp_path, clash)
+    # Windows writes a file with the name of a device to the device
+    for devicepath in ["NUL.parquet", "group/com1.parquet", "con.x/b.parquet"]:
+        with pytest.raises(ValueError, match="Windows device"):
+            hdf5_to_parquet.check_output_paths(tmp_path, [devicepath])
+    hdf5_to_parquet.check_output_paths(tmp_path, ["a/b.parquet", "a/c.parquet", "console.parquet"])
     # Windows reads a backslash as a separator and C: as a drive
     for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
         with pytest.raises(ValueError, match="outside the output folder"):
@@ -1677,12 +1684,22 @@ def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     assert outputfolder.read_text() == "a table of the user"
     assert [child.name for child in tmp_path.iterdir()] == ["data.parquet"]
 
+    # a symbolic link in the output folder, also with the extension .parquet, is not a file of the script
+    outputfolder = tmp_path / "data"
+    outputfolder.mkdir()
+    (outputfolder / "table.parquet").symlink_to(tmp_path / "data.parquet")
+    with pytest.raises(FileExistsError, match=r"table\.parquet"):
+        hdf5_to_parquet.write_tables(outputfolder, [])
+    assert (outputfolder / "table.parquet").is_symlink()
+
 
 def test_hdf5_to_parquet_refuses_two_files_with_one_output_folder(tmp_path, monkeypatch):
     """The second conversion would delete the tables of the first, so the script converts neither file."""
-    monkeypatch.setattr("sys.argv", ["hdf5_to_parquet.py", str(tmp_path / "data.h5"), str(tmp_path / "data.hdf5")])
-    with pytest.raises(SystemExit):
-        hdf5_to_parquet.main()
+    # macOS gives one folder to a composed and a decomposed e with an acute accent
+    for names in [("data.h5", "data.hdf5"), ("\u00e9.h5", "e\u0301.hdf5")]:
+        monkeypatch.setattr("sys.argv", ["hdf5_to_parquet.py", *(str(tmp_path / name) for name in names)])
+        with pytest.raises(SystemExit):
+            hdf5_to_parquet.main()
 
 
 def test_hdf5_to_parquet_writes_an_empty_folder_for_a_file_with_no_table(tmp_path):
