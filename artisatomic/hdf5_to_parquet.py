@@ -42,6 +42,7 @@ import numbers
 # unpickle it. ArrayUnpickler permits only the names of numpy arrays
 import pickle  # ruff: ignore[suspicious-pickle-import]
 import shutil
+import tempfile
 from collections import Counter
 from itertools import starmap
 from pathlib import Path
@@ -434,13 +435,18 @@ def output_folder_of(path: Path) -> Path:
 def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     """Stop the run if two tables get one output file, or if a table goes outside the output folder.
 
-    HDF5 names are case-sensitive, but the default file system of macOS is not. Two names that
-    differ only in case would give one file, and one table would be lost.
+    HDF5 names are case-sensitive, but the default file systems of macOS and Windows are not.
+    Windows also reads a backslash as a separator. Two names that differ only in case or in the
+    separator would give one file, and one table would be lost.
     """
-    counts = Counter(relativepath.casefold() for relativepath in relativepaths)
-    clashes = sorted(relativepath for relativepath in relativepaths if counts[relativepath.casefold()] > 1)
+
+    def filekey(relativepath: str) -> str:
+        return relativepath.replace("\\", "/").casefold()
+
+    counts = Counter(map(filekey, relativepaths))
+    clashes = sorted(relativepath for relativepath in relativepaths if counts[filekey(relativepath)] > 1)
     if clashes:
-        msg = f"{path} has tables whose names differ only in case: {', '.join(clashes)}."
+        msg = f"{path} has tables whose names differ only in case or in the separator: {', '.join(clashes)}."
         raise ValueError(msg)
     # the two path types: Windows also reads a backslash as a separator, and C: as a drive
     unsafe = [
@@ -473,30 +479,26 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             msg = f"{outputfolder} holds files that the script did not write, for example {otherfiles[0]}."
             raise FileExistsError(msg)
 
-    tempfolder = outputfolder.with_name(f"{outputfolder.name}.partial")
-    shutil.rmtree(tempfolder, ignore_errors=True)
+    # a new folder with a unique name, so the function deletes no folder that it did not make. The
+    # earlier output folder stays in it as a backup until the new tables have their place
+    workfolder = Path(tempfile.mkdtemp(prefix=f"{outputfolder.name}.partial-", dir=outputfolder.parent))
+    newfolder = workfolder / "new"
+    backupfolder = workfolder / "old"
     try:
         for relativepath, table, metadata in tables:
-            outputpath = tempfolder / relativepath
+            outputpath = newfolder / relativepath
             outputpath.parent.mkdir(parents=True, exist_ok=True)
             table.write_parquet(outputpath, metadata=metadata)
-    except BaseException:
-        shutil.rmtree(tempfolder, ignore_errors=True)
-        raise
-
-    # the earlier folder stays as a backup until the new folder has its place
-    backupfolder = outputfolder.with_name(f"{outputfolder.name}.old")
-    shutil.rmtree(backupfolder, ignore_errors=True)
-    if outputfolder.exists():
-        outputfolder.rename(backupfolder)
-    try:
-        tempfolder.rename(outputfolder)
-    except BaseException:
-        if backupfolder.exists():
-            backupfolder.rename(outputfolder)
-        shutil.rmtree(tempfolder, ignore_errors=True)
-        raise
-    shutil.rmtree(backupfolder, ignore_errors=True)
+        if outputfolder.exists():
+            outputfolder.rename(backupfolder)
+        try:
+            newfolder.rename(outputfolder)
+        except BaseException:
+            if backupfolder.exists():
+                backupfolder.rename(outputfolder)
+            raise
+    finally:
+        shutil.rmtree(workfolder, ignore_errors=True)
 
 
 def convert_file(path: Path) -> list[Path]:

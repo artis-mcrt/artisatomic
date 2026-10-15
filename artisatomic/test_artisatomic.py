@@ -1420,6 +1420,8 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
         hdf5_to_parquet.output_folder_of(tmp_path / "data")
     with pytest.raises(ValueError, match="differ only in case"):
         hdf5_to_parquet.check_output_paths(tmp_path, ["Lines.parquet", "lines.parquet"])
+    with pytest.raises(ValueError, match="in the separator"):
+        hdf5_to_parquet.check_output_paths(tmp_path, ["a/b.parquet", "a\\b.parquet"])
     # Windows reads a backslash as a separator and C: as a drive
     for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
         with pytest.raises(ValueError, match="outside the output folder"):
@@ -1609,7 +1611,7 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
 
     # a failure of the last rename puts the earlier folder back
     def failing_rename(self, target):
-        if self.name == "data.partial":
+        if self.name == "new":
             msg = "the file system refuses the rename"
             raise OSError(msg)
         return original_rename(self, target)
@@ -1621,6 +1623,12 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     monkeypatch.undo()
     assert sorted(child.name for child in tmp_path.iterdir()) == ["data", "data.h5"]
     assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [3.0]
+
+    # the script deletes only the folders that it made, and not a folder of the user beside them
+    (tmp_path / "data.old").mkdir()
+    (tmp_path / "data.partial").mkdir()
+    hdf5_to_parquet.convert_file(path)
+    assert sorted(child.name for child in tmp_path.iterdir()) == ["data", "data.h5", "data.old", "data.partial"]
 
     # the script deletes the output folder as a whole, so it refuses a folder with a file of the user
     (outputfolder / "notes.txt").write_text("notes")
