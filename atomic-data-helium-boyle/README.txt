@@ -1,5 +1,10 @@
-Save the helium data set of Aoife Boyle as aoife.hdf5 in this directory. The boyle handler
-reads He I and He II from it. He III is a bare nucleus, so the file has no entry for it. No
+Save the helium data set of Aoife Boyle as aoife.hdf5 in this directory. Then convert it to Parquet
+once, from the root of the repository:
+
+    scripts/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5
+
+The script writes one Parquet file for each table into the folder aoife. The boyle handler reads
+He I and He II from those files. He III is a bare nucleus, so the data set has no entry for it. No
 built-in ion selection uses the handler. Name it in artisatomicionhandlers.json to use it.
 
 The data set belongs to the helium work of Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W.

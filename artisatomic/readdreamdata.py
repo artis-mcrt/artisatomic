@@ -4,12 +4,6 @@ DREAM is the Database on Rare Earths At Mons university: Quinet, P., Palmeri, P.
 18, doi:10.3390/atoms8020018.
 """
 
-# the pandas HDFStore format holds a block of Python objects as a pickle, so this module must
-# unpickle it. The file comes from the DREAM parser that the user runs, so it is a trusted input
-import pickle  # ruff: ignore[suspicious-pickle-import]
-from pathlib import Path
-
-import h5py
 import numpy as np
 import polars as pl
 
@@ -23,8 +17,8 @@ from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import Transition
 
-# the h5 file comes from Andreas Floers's DREAM parser
-dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325.h5"
+# scripts/hdf5_to_parquet.py writes this file from the h5 file of Andreas Floers's DREAM parser
+dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325" / "atomic_data.parquet"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -34,110 +28,18 @@ description = (
 dreamdata: pl.DataFrame | None = None
 
 
-def read_pandas_hdfstore(path: Path) -> pl.DataFrame:
-    """Read one frame from a pandas HDFStore of the "fixed" format.
-
-    The DREAM parser writes its line list with the to_hdf() method of pandas. That format holds
-    the frame as blocks. Each block has a data set of the values and a data set of the column
-    names. This function reads them with h5py, which keeps pandas out of the dependencies.
-
-    The function matches the values to the columns by name, so the order of the blocks does not
-    matter. pandas pickles a block of Python objects and the levels of the index, so this
-    function unpickles those. A file of any other format raises a ValueError, because the block
-    layout is the only layout that this function reads.
-    """
-
-    def unpickle(dataset) -> np.ndarray:
-        # pandas stores a column of Python objects as one pickle, in a pytables VLArray
-        return pickle.loads(dataset[0].tobytes())  # ruff: ignore[suspicious-pickle-usage]
-
-    def as_text(value) -> str:
-        # h5py gives a byte string for a written attribute and a str for one it decoded itself
-        return value.decode("utf-8") if isinstance(value, bytes | np.bytes_) else str(value)
-
-    def names_of(dataset) -> list[str]:
-        return [as_text(name) for name in dataset[:]]
-
-    with h5py.File(path, "r") as h5file:
-        groupnames = list(h5file.keys())
-        # not an assert: a file that holds no frame, or more than one, must fail with its name
-        if len(groupnames) != 1:
-            msg = f"{path} holds {len(groupnames)} groups. The DREAM reader expects exactly one frame."
-            raise ValueError(msg)
-        group = h5file[groupnames[0]]
-
-        pandas_type = as_text(group.attrs.get("pandas_type", b""))
-        if pandas_type != "frame":
-            msg = (
-                f"{path} has pandas_type {pandas_type!r}, not 'frame'."
-                " Write it with DataFrame.to_hdf(..., format='fixed')."
-            )
-            raise ValueError(msg)
-
-        columns: dict[str, np.ndarray] = {}
-
-        # the levels of the index come first, so the frame starts with Z and the ion charge
-        for level in range(int(group.attrs["axis1_nlevels"])):
-            leveldata = group[f"axis1_level{level}"]
-            # pandas pickles a level of Python objects only. It writes a level of numbers plain,
-            # as it does a block of numbers
-            levelvalues = unpickle(leveldata) if leveldata.dtype == object else leveldata[:]
-            codes = group[f"axis1_label{level}"][:]
-            # not an assert: pandas writes -1 for a row that the level does not hold, and numpy
-            # reads -1 as the last value. Such a row would join the wrong ion without a message
-            if codes.min() < 0:
-                msg = f"{path} index level {level} has a row with no value. pandas writes -1 for such a row."
-                raise ValueError(msg)
-            columns[as_text(leveldata.attrs["name"])] = levelvalues[codes]
-
-        blockvalues: dict[str, np.ndarray] = {}
-        for block in range(int(group.attrs["nblocks"])):
-            values = group[f"block{block}_values"]
-            names = names_of(group[f"block{block}_items"])
-            array = unpickle(values) if values.dtype == object else values[:]
-            # each block holds one column for each of its names, so a mismatch means that the
-            # file does not have the layout that this function reads
-            if array.shape[1] != len(names):
-                msg = f"{path} block {block} has {array.shape[1]} columns for {len(names)} names"
-                raise ValueError(msg)
-            for index, name in enumerate(names):
-                blockvalues[name] = array[:, index]
-
-        # axis0 holds the columns in the order of the frame, which the blocks do not keep
-        columns |= {name: blockvalues[name] for name in names_of(group["axis0"])}
-
-    return pl.DataFrame({name: series_from_array(values) for name, values in columns.items()})
-
-
-def series_from_array(values: np.ndarray) -> pl.Series:
-    """Make a polars series from one column of a pandas HDFStore.
-
-    pandas gives a column of Python objects as an array of dtype object. polars reads such an
-    array as the Object type, which its expressions cannot filter or group. A list of the same
-    values lets polars find the type, which gives Int64 for the ion charge and the level indices.
-
-    A column whose rows hold more than one type keeps the Object type. The DREAM line list has
-    one such column, CF, which holds a float in most rows and a string in the others.
-    """
-    if values.dtype != object:
-        return pl.Series(values)
-    try:
-        return pl.Series(values.tolist())
-    except (TypeError, pl.exceptions.PolarsError):
-        # polars raises TypeError for a mixed column today. The except covers its own error class
-        # too, so a later polars that raises SchemaError still reaches the Object fallback
-        return pl.Series(values, dtype=pl.Object)
-
-
 def init_dreamdata():
     """Load the DREAM line list into the module-level cache, once per process."""
     global dreamdata
     if dreamdata is not None:
         return
-    # drop CF: no reader uses it, and its rows hold a float or a string, so it stays an Object
-    # column that no polars expression can read
+    # not an assert: the user must convert the h5 file once, and the message says how
+    if not dreamdatapath.exists():
+        msg = f"{dreamdatapath} does not exist. Make it with scripts/hdf5_to_parquet.py from the DREAM h5 file."
+        raise FileNotFoundError(msg)
+    # drop CF: no reader uses it
     dreamdata = (
-        read_pandas_hdfstore(dreamdatapath)
+        pl.read_parquet(dreamdatapath)
         .drop("CF", strict=False)
         .with_columns(Lower_g=2 * pl.col("Lower_J") + 1, Upper_g=2 * pl.col("Upper_J") + 1)
     )

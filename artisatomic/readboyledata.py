@@ -7,12 +7,15 @@ The data set belongs to the helium work of Boyle, A., Sim, S. A., Hachinger, S.,
 import typing as t
 from functools import cache
 
+import polars as pl
+
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 
-datafilepath = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife.hdf5"
+# scripts/hdf5_to_parquet.py writes one Parquet file into this folder for each table of aoife.hdf5
+datafolder = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
@@ -22,20 +25,14 @@ description = (
 
 
 @cache
-def get_aoife_dataset():
-    """Open the AOIFE HDF5 file, once, on first use.
-
-    The open happens here and not at import. iondata.py imports this module for the handler
-    registry. So an open at import would hold a file handle for the whole of every run, whichever
-    handlers the user selected. Returns None when the file (or h5py) is absent. The readers below
-    use that to report that this data set is unavailable.
-    """
-    try:
-        import h5py
-    except ModuleNotFoundError:
-        return None
-
-    return h5py.File(datafilepath, "r") if datafilepath.exists() else None
+def read_aoife_table(tablename: str) -> pl.DataFrame:
+    """Read one table of the AOIFE data set, once, on first use."""
+    path = datafolder / f"{tablename}.parquet"
+    # not an assert: the user must convert aoife.hdf5 once, and the message says how
+    if not path.exists():
+        msg = f"{path} does not exist. Make it with scripts/hdf5_to_parquet.py from aoife.hdf5."
+        raise FileNotFoundError(msg)
+    return pl.read_parquet(path)
 
 
 class EnergyLevelRow(t.NamedTuple):
@@ -67,73 +64,63 @@ class TransitionTuple(t.NamedTuple):
 
 
 def read_ionization_data(atomic_number, ion_stage):
-    """Ionisation energy in eV of one ion, from the AOIFE HDF5 file.
+    """Ionisation energy in eV of one ion, from the AOIFE ionization_data table.
 
-    He III is a bare nucleus, so the file has no entry for it. The function uses a sentinel instead.
+    The ion_number of the table is the charge after the ionisation, so it is equal to ion_stage.
+    He III is a bare nucleus, so the table has no row for it. The function uses a sentinel instead.
     """
-    aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
-    ionization_data = aoife_dataset["/ionization_data"]
+    if (atomic_number, ion_stage) == (2, 3):
+        return 999999.0
 
-    ionization_dict = {}
-    for atomic_num, ion_number, ionization_energy in ionization_data:
-        ion_dict = {ion_number: ionization_energy}
-        if atomic_num in ionization_dict:
-            ionization_dict[atomic_num].update(ion_dict)
-        else:
-            ionization_dict[atomic_num] = ion_dict
-    ionization_dict[2][3] = 999999.0  # He III
-
-    return ionization_dict[atomic_number][ion_stage]
+    # item() stops the run if the table has no row or more than one row for the ion
+    return (
+        read_aoife_table("ionization_data")
+        .filter((pl.col("atomic_number") == atomic_number) & (pl.col("ion_number") == ion_stage))
+        .get_column("ionization_energy")
+        .item()
+    )
 
 
 def read_levels_data(atomic_number, ion_stage):
-    """Read one ion's energy levels from the AOIFE HDF5 file.
+    """Read one ion's energy levels from the AOIFE levels_data table.
 
-    The file numbers ion stages from zero, so the reader matches ion_stage against ion_number + 1.
+    The table numbers ion stages from zero, so the reader matches ion_stage against ion_number + 1.
     Levels have no spectroscopic names, so the name of each level holds its zero-based level number.
     """
-    aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
-    levels_data = aoife_dataset["/levels_data"]
+    dflevels = read_aoife_table("levels_data").filter(
+        (pl.col("atomic_number") == atomic_number) & (pl.col("ion_number") == ion_stage - 1)
+    )
 
-    energy_levels: list[EnergyLevelRow] = []
-
-    for rowtuple in levels_data:
-        atomic_num, ion_number, level_number, energy_ev, g, metastable = rowtuple
-
-        if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
-            continue
-
-        # named fields, not *rowtuple plus three positional extras: a bare 0 in the extras would
-        # become the parity of every level
-        energy_levels.append(
-            EnergyLevelRow(
-                atomic_number=atomic_num,
-                ion_number=ion_number,
-                level_number=level_number,
-                g=g,
-                metastable=metastable,
-                # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196)
-                energyabovegsinpercm=energy_ev / hc_in_ev_cm,
-                # No parity: this data set supplies none. add_level_ids_forbidden() marks a
-                # transition forbidden when its two levels share one parity, and helium has many
-                # permitted ones. A null parity never matches another, here as in the other readers
-                # whose data set has no parities.
-                parity=None,
-                # int() as read_lines_data() does, so the two agree on the name whatever dtype the
-                # file stores the level number in
-                levelname=f"level{int(level_number):05d}",
-            )
+    energy_levels = [
+        # named fields, not *row plus three positional extras: a bare 0 in the extras would become
+        # the parity of every level
+        EnergyLevelRow(
+            atomic_number=row["atomic_number"],
+            ion_number=row["ion_number"],
+            level_number=row["level_number"],
+            g=row["g"],
+            metastable=row["metastable"],
+            # the AOIFE energy column is in eV (He I 1s2s 3S is 19.8196)
+            energyabovegsinpercm=row["energy"] / hc_in_ev_cm,
+            # No parity: this data set supplies none. add_level_ids_forbidden() marks a transition
+            # forbidden when its two levels share one parity, and helium has many permitted ones. A
+            # null parity never matches another, here as in the other readers whose data set has
+            # no parities.
+            parity=None,
+            # int() as read_lines_data() does, so the two agree on the name whatever type the
+            # table stores the level number in
+            levelname=f"level{int(row['level_number']):05d}",
         )
+        for row in dflevels.iter_rows(named=True)
+    ]
 
-    # not an assert: read_lines_data() takes the file's level numbers as the zero-based level ids
+    # not an assert: read_lines_data() takes the table's level numbers as the zero-based level ids
     # that leveltuples_to_pldataframe() assigns by row. The two numberings must agree
     level_numbers = [int(level.level_number) for level in energy_levels]
     if level_numbers != list(range(len(energy_levels))):
         msg = (
             f"the AOIFE levels of Z={atomic_number} ion_stage {ion_stage} are not numbered 0 to"
-            f" {len(energy_levels) - 1} in file order"
+            f" {len(energy_levels) - 1} in table order"
         )
         raise ValueError(msg)
 
@@ -141,40 +128,26 @@ def read_levels_data(atomic_number, ion_stage):
 
 
 def read_lines_data(atomic_number, ion_stage):
-    """Read one ion's bound-bound transitions from the AOIFE HDF5 file.
+    """Read one ion's bound-bound transitions from the AOIFE lines_data table.
 
-    The file's level numbers are already zero-based, the same as the level ids in memory. The
-    file gives no collision strengths.
+    The table's level numbers are already zero-based, the same as the level ids in memory. The
+    table gives no collision strengths.
     """
-    aoife_dataset = get_aoife_dataset()
-    assert aoife_dataset is not None, "the boyle handler needs the AOIFE HDF5 file"
-    lines_data = aoife_dataset["/lines_data"]
+    dflines = read_aoife_table("lines_data").filter(
+        (pl.col("atomic_number") == atomic_number) & (pl.col("ion_number") == ion_stage - 1)
+    )
 
     transitions = []
-
-    for rowtuple in lines_data:
-        (
-            _line_id,
-            wavelength,
-            atomic_num,
-            ion_number,
-            _f_ul,
-            _f_lu,
-            level_number_lower,
-            level_number_upper,
-            _nu,
-            _B_lu,
-            _B_ul,
-            A_ul,
-        ) = rowtuple
-
-        if int(atomic_num) != atomic_number or int(ion_number) != ion_stage - 1:
-            continue
-        # transitiondata.txt has the lower id first, so this code swaps a pair that the file lists
-        # in the reverse order.
-        levelid_lower = min(int(level_number_lower), int(level_number_upper))
-        levelid_upper = max(int(level_number_lower), int(level_number_upper))
-        transitions.append(TransitionTuple(atomic_num, ion_number, levelid_lower, levelid_upper, A_ul, wavelength))
+    for row in dflines.iter_rows(named=True):
+        # transitiondata.txt has the lower id first, so this code swaps a pair that the table
+        # lists in the reverse order. The table stores the level numbers as floats
+        levelid_lower = min(int(row["level_number_lower"]), int(row["level_number_upper"]))
+        levelid_upper = max(int(row["level_number_lower"]), int(row["level_number_upper"]))
+        transitions.append(
+            TransitionTuple(
+                row["atomic_number"], row["ion_number"], levelid_lower, levelid_upper, row["A_ul"], row["wavelength"]
+            )
+        )
 
     return transitions
 
@@ -183,7 +156,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion for the "boyle" handler, which covers helium only."""
     assert atomic_number == 2
     log_comment(
-        flog, ("adata", "transitiondata"), f"The levels and the transitions come from {path_for_log(datafilepath)}."
+        flog,
+        ("adata", "transitiondata"),
+        f"The levels and the transitions come from the tables in {path_for_log(datafolder)}.",
     )
     transitions = read_lines_data(atomic_number, ion_stage)
 
