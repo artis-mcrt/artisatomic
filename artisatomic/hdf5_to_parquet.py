@@ -424,7 +424,9 @@ def tables_of(h5file) -> list[tuple[str, pl.DataFrame, dict[str, str]]]:
             except NoTableError as exc:
                 print(f"{h5object.file.filename}:{h5object.name} {exc}. The script skips it.")
             else:
-                tables.append((h5object.name, table, metadata_of(h5object) | enummetadata))
+                tables.append(
+                    (h5object.name, table, merge_metadata(h5object.name, metadata_of(h5object), enummetadata))
+                )
 
     h5file.visititems(visit)
     return tables
@@ -499,6 +501,16 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     if unsafe:
         msg = f"{path} has tables whose path goes outside the output folder: {', '.join(unsafe)}."
         raise ValueError(msg)
+    # Windows refuses these characters in a file name. NTFS reads a colon in a part as the name of an
+    # alternate data stream, and writes a file with the part before the colon as its name
+    badnames = [
+        relativepath
+        for relativepath in relativepaths
+        if any(character in '<>:"|?*' or ord(character) < 32 for character in relativepath)
+    ]
+    if badnames:
+        msg = f"{path} has tables whose path has a character that Windows refuses: {', '.join(badnames)}."
+        raise ValueError(msg)
 
 
 def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[str, str]]]) -> None:
@@ -557,6 +569,21 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             shutil.rmtree(workfolder, ignore_errors=True)
 
 
+def merge_metadata(name: str, *parts: dict[str, str]) -> dict[str, str]:
+    """Merge the metadata items of one table. Stop the run if two items have one key.
+
+    A key of the script, for example hdf5_file, can also be the name of an HDF5 attribute. A merge
+    would keep only one of the two values, so the function stops the run.
+    """
+    merged: dict[str, str] = {}
+    for part in parts:
+        if duplicates := sorted(merged.keys() & part.keys()):
+            msg = f"{name} has more than one metadata item with the key {', '.join(duplicates)}."
+            raise ValueError(msg)
+        merged |= part
+    return merged
+
+
 def convert_file(path: Path) -> list[Path]:
     """Write each table of one HDF5 file as a Parquet file, and give the paths of those files.
 
@@ -568,7 +595,11 @@ def convert_file(path: Path) -> list[Path]:
         filemetadata = {"hdf5_file": path.name, "hdf5_file_sha256": hashlib.file_digest(hdf5file, "sha256").hexdigest()}
     with h5py.File(path, "r") as h5file:
         tables = [
-            (f"{name.lstrip('/')}.parquet", table, group_metadata(h5file, name) | metadata | filemetadata)
+            (
+                f"{name.lstrip('/')}.parquet",
+                table,
+                merge_metadata(name, group_metadata(h5file, name), metadata, filemetadata),
+            )
             for name, table, metadata in tables_of(h5file)
         ]
     check_output_paths(path, [relativepath for relativepath, _, _ in tables])

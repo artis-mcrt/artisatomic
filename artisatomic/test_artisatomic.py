@@ -1445,6 +1445,10 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
     for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
         with pytest.raises(ValueError, match="outside the output folder"):
             hdf5_to_parquet.check_output_paths(tmp_path, [unsafepath])
+    # NTFS reads table:stream as an alternate data stream of a file with the name table
+    for badpath in ["table:stream.parquet", "a/b?.parquet", "a\tb.parquet"]:
+        with pytest.raises(ValueError, match="a character that Windows refuses"):
+            hdf5_to_parquet.check_output_paths(tmp_path, [badpath])
 
 
 def write_pandas_hdfstore(path, columns, indexlevels):
@@ -1601,6 +1605,12 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
     assert metadata["t_rad"] == "[2000, 4000]"
     assert metadata["/md5"] == "6df1b7429ac8df8be7a3e41a877e6338"
     assert pl.read_parquet_metadata(tmp_path / "aoife" / "levels_data.parquet")["/md5"] == metadata["/md5"]
+
+    # an attribute with the name of a key of the script stops the run, because one value would be lost
+    with h5py.File(path, "a") as h5file:
+        h5file["levels_data"].attrs["hdf5_file"] = "another file"
+    with pytest.raises(ValueError, match="more than one metadata item with the key hdf5_file"):
+        hdf5_to_parquet.convert_file(path)
 
 
 def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion(tmp_path, monkeypatch):
