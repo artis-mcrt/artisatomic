@@ -5,7 +5,6 @@ import argparse
 import contextlib
 import functools
 import importlib
-import importlib.util
 import io
 import json
 import operator
@@ -1293,18 +1292,12 @@ def test_readboyledata_levels_have_no_parity(monkeypatch):
 
 
 def import_hdf5_to_parquet():
-    """Import scripts/hdf5_to_parquet.py, or skip the test if h5py is not installed.
+    """Import artisatomic.hdf5_to_parquet, or skip the test if h5py is not installed.
 
     h5py has no wheel for Python 3.15, so the dev group installs it only for an earlier Python.
     """
     pytest.importorskip("h5py")
-    path = Path(__file__).parent.parent / "scripts" / "hdf5_to_parquet.py"
-    spec = importlib.util.spec_from_file_location("hdf5_to_parquet", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return importlib.import_module("artisatomic.hdf5_to_parquet")
 
 
 def write_pandas_hdfstore(path, columns, indexlevels):

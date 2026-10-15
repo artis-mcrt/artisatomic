@@ -17,7 +17,7 @@ from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import Transition
 
-# scripts/hdf5_to_parquet.py writes this file from the h5 file of Andreas Floers's DREAM parser
+# artisatomic/hdf5_to_parquet.py writes this file from the h5 file of Andreas Floers's DREAM parser
 dreamdatapath = PYDIR / ".." / "atomic-data-dream" / "DREAM_atomic_data_20241106-1325" / "atomic_data.parquet"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
@@ -35,7 +35,7 @@ def init_dreamdata():
         return
     # not an assert: the user must convert the h5 file once, and the message says how
     if not dreamdatapath.exists():
-        msg = f"{dreamdatapath} does not exist. Make it with scripts/hdf5_to_parquet.py from the DREAM h5 file."
+        msg = f"{dreamdatapath} does not exist. Make it with artisatomic/hdf5_to_parquet.py from the DREAM h5 file."
         raise FileNotFoundError(msg)
     # drop CF: no reader uses it
     dreamdata = (

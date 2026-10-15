@@ -14,7 +14,7 @@ from artisatomic.base import log_comment
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 
-# scripts/hdf5_to_parquet.py writes one Parquet file into this folder for each table of aoife.hdf5
+# artisatomic/hdf5_to_parquet.py writes one Parquet file into this folder for each table of aoife.hdf5
 datafolder = PYDIR / ".." / "atomic-data-helium-boyle" / "aoife"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
@@ -30,7 +30,7 @@ def read_aoife_table(tablename: str) -> pl.DataFrame:
     path = datafolder / f"{tablename}.parquet"
     # not an assert: the user must convert aoife.hdf5 once, and the message says how
     if not path.exists():
-        msg = f"{path} does not exist. Make it with scripts/hdf5_to_parquet.py from aoife.hdf5."
+        msg = f"{path} does not exist. Make it with artisatomic/hdf5_to_parquet.py from aoife.hdf5."
         raise FileNotFoundError(msg)
     return pl.read_parquet(path)
 

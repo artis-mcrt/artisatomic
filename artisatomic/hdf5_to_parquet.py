@@ -8,7 +8,7 @@
 The readers of artisatomic read Parquet files with polars, so artisatomic needs no HDF5 library.
 Run this script once for each HDF5 file of a data set:
 
-    scripts/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5
+    artisatomic/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5
 
 The script writes the tables into a folder that has the name of the HDF5 file without its
 extension. The path of a table in that folder is the path of its object in the HDF5 file. The

@@ -5,7 +5,7 @@ Generate the h5 file with <https://github.com/afloers/DREAM_atomic_data>. Save i
 `DREAM_atomic_data_20241106-1325.h5` in this directory. Then convert it to Parquet once:
 
 ```sh
-scripts/hdf5_to_parquet.py atomic-data-dream/DREAM_atomic_data_20241106-1325.h5
+artisatomic/hdf5_to_parquet.py atomic-data-dream/DREAM_atomic_data_20241106-1325.h5
 ```
 
 The script writes `DREAM_atomic_data_20241106-1325/atomic_data.parquet`. `readdreamdata.py` reads
