@@ -4,6 +4,7 @@
 import argparse
 import contextlib
 import functools
+import hashlib
 import importlib
 import io
 import json
@@ -31,6 +32,7 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import converted_parquet_path
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import empty_transitions_schema
+from artisatomic.base import file_sha256
 from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
@@ -1354,7 +1356,7 @@ def test_readdreamdata_reads_the_parquet_file(tmp_path, monkeypatch):
     assert [t.A for t in transitions] == pytest.approx([1.0e8, 2.0e8])
 
 
-def test_converted_parquet_path_checks_the_size_of_the_hdf5_file(tmp_path):
+def test_converted_parquet_path_checks_the_hash_of_the_hdf5_file(tmp_path):
     """A missing Parquet file or a changed HDF5 file stops the run with the command that repairs it."""
     hdf5path = tmp_path / "data.h5"
     parquetpath = tmp_path / "data" / "table.parquet"
@@ -1362,12 +1364,17 @@ def test_converted_parquet_path_checks_the_size_of_the_hdf5_file(tmp_path):
         converted_parquet_path(parquetpath, hdf5path)
 
     parquetpath.parent.mkdir()
-    pl.DataFrame({"value": [1]}).write_parquet(parquetpath, metadata={"hdf5_file_size": "3"})
+    pl.DataFrame({"value": [1]}).write_parquet(
+        parquetpath, metadata={"hdf5_file_sha256": hashlib.sha256(b"abc").hexdigest()}
+    )
     # with no HDF5 file, as on a machine that has only the Parquet files, the function cannot check
     assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
     hdf5path.write_bytes(b"abc")
     assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
-    hdf5path.write_bytes(b"abcd")
+    # a change that keeps the size. The time of the change can stay the same on a coarse clock, so
+    # the test empties the cache of the hash
+    hdf5path.write_bytes(b"abd")
+    file_sha256.cache_clear()
     with pytest.raises(ValueError, match=r"Convert data\.h5 again"):
         converted_parquet_path(parquetpath, hdf5path)
 
@@ -1418,10 +1425,15 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
     """The script refuses an output path that it cannot write without the loss of a table."""
     with pytest.raises(ValueError, match="no extension"):
         hdf5_to_parquet.output_folder_of(tmp_path / "data")
-    with pytest.raises(ValueError, match="differ only in case"):
-        hdf5_to_parquet.check_output_paths(tmp_path, ["Lines.parquet", "lines.parquet"])
-    with pytest.raises(ValueError, match="in the separator"):
-        hdf5_to_parquet.check_output_paths(tmp_path, ["a/b.parquet", "a\\b.parquet"])
+    # macOS gives one file to two names that differ only in case, in the separator or in the
+    # Unicode form, here a composed and a decomposed e with an acute accent
+    for clash in [
+        ["Lines.parquet", "lines.parquet"],
+        ["a/b.parquet", "a\\b.parquet"],
+        ["\u00e9.parquet", "e\u0301.parquet"],
+    ]:
+        with pytest.raises(ValueError, match="one output file"):
+            hdf5_to_parquet.check_output_paths(tmp_path, clash)
     # Windows reads a backslash as a separator and C: as a drive
     for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
         with pytest.raises(ValueError, match="outside the output folder"):
@@ -1514,7 +1526,7 @@ def test_hdf5_to_parquet_rebuilds_a_pandas_frame(tmp_path):
     # the HDF5 attributes of the group go into the metadata of the Parquet file
     assert metadata["pandas_type"] == "frame"
     assert metadata["hdf5_file"] == "store.h5"
-    assert metadata["hdf5_file_size"] == str(path.stat().st_size)
+    assert metadata["hdf5_file_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def test_hdf5_to_parquet_rejects_two_columns_of_one_name(tmp_path):
@@ -1630,10 +1642,30 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     hdf5_to_parquet.convert_file(path)
     assert sorted(child.name for child in tmp_path.iterdir()) == ["data", "data.h5", "data.old", "data.partial"]
 
-    # the script deletes the output folder as a whole, so it refuses a folder with a file of the user
-    (outputfolder / "notes.txt").write_text("notes")
-    with pytest.raises(FileExistsError, match=r"notes\.txt"):
+    # the script deletes the output folder as a whole, so it refuses a folder with a file of the
+    # user, also a hidden file. It permits only the .DS_Store of the Finder of macOS
+    (outputfolder / ".DS_Store").write_text("")
+    hdf5_to_parquet.convert_file(path)
+    for filename in ["notes.txt", ".notes"]:
+        (outputfolder / filename).write_text("notes")
+        with pytest.raises(FileExistsError, match=re.escape(filename)):
+            hdf5_to_parquet.convert_file(path)
+        (outputfolder / filename).unlink()
+
+    # if the earlier folder cannot go back, the script keeps it and names its path
+    def failing_renames(self, target):
+        if self.name in {"new", "old"}:
+            msg = "the file system refuses the rename"
+            raise OSError(msg)
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", failing_renames)
+    with pytest.raises(RuntimeError, match="could not put back") as excinfo:
         hdf5_to_parquet.convert_file(path)
+    monkeypatch.undo()
+    backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
+    assert backupfolder.parent.name.startswith("data.partial-")
+    assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
 
 
 def test_hdf5_to_parquet_output_goes_to_the_boyle_reader(aoife_folder):

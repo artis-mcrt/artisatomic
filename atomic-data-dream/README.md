@@ -10,5 +10,6 @@ artisatomic/hdf5_to_parquet.py atomic-data-dream/DREAM_atomic_data_20241106-1325
 ```
 
 The script writes `DREAM_atomic_data_20241106-1325/atomic_data.parquet`, and `readdreamdata.py` reads
-that file. Run the script again after you replace the HDF5 file. The reader compares the size of the
-HDF5 file with the size that the Parquet file records. It stops if the two sizes are different.
+that file. Run the script again after you replace the HDF5 file. The reader compares the SHA-256
+hash of the HDF5 file with the hash that the Parquet file records. It stops if the two hashes are
+different.

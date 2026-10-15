@@ -2,6 +2,7 @@
 
 import atexit
 import datetime as dt
+import hashlib
 import io
 import itertools
 import math
@@ -848,20 +849,32 @@ def find_file_check_extension_or_raise(filename: str | Path) -> Path:
     return filepath
 
 
+@lru_cache
+def file_sha256(path: Path, size: int, mtime_ns: int) -> str:  # ruff: ignore[unused-function-argument]
+    """Give the SHA-256 hash of the content of a file.
+
+    A reader checks several Parquet files of one HDF5 file. The size and the time of the last change
+    are in the cache key, so the function reads the file again only after a change.
+    """
+    with path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+
 def converted_parquet_path(parquetpath: Path, hdf5path: Path) -> Path:
     """Give the path of a Parquet file that artisatomic/hdf5_to_parquet.py made from an HDF5 file.
 
-    The function stops the run if the Parquet file does not exist. The script records the size of
-    the HDF5 file in the metadata of each Parquet file. If the HDF5 file is present and has a
-    different size, the user replaced it and did not convert it again. The function then stops the
+    The function stops the run if the Parquet file does not exist. The script records the SHA-256
+    hash of the HDF5 file in the metadata of each Parquet file. If the HDF5 file is present and has a
+    different hash, the user changed it and did not convert it again. The function then stops the
     run, because the Parquet file holds the old data.
     """
     if not parquetpath.exists():
         msg = f"{parquetpath} does not exist. Make it from {hdf5path} with artisatomic/hdf5_to_parquet.py."
         raise FileNotFoundError(msg)
     if hdf5path.exists():
-        recordedsize = pl.read_parquet_metadata(parquetpath).get("hdf5_file_size")
-        if recordedsize != str(hdf5path.stat().st_size):
+        recordedhash = pl.read_parquet_metadata(parquetpath).get("hdf5_file_sha256")
+        stat = hdf5path.stat()
+        if recordedhash != file_sha256(hdf5path, stat.st_size, stat.st_mtime_ns):
             msg = (
                 f"{parquetpath} does not come from the current {hdf5path}."
                 f" Convert {hdf5path.name} again with artisatomic/hdf5_to_parquet.py."

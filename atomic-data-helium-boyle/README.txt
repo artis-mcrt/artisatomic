@@ -4,8 +4,8 @@ from the root of the repository:
     artisatomic/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5
 
 The script writes one Parquet file for each table into the folder aoife. Run the script again after
-you replace aoife.hdf5. The boyle handler compares the size of aoife.hdf5 with the size that each
-Parquet file records. It stops if the two sizes are different.
+you replace aoife.hdf5. The boyle handler compares the SHA-256 hash of aoife.hdf5 with the hash
+that each Parquet file records. It stops if the two hashes are different.
 
 The boyle handler reads He I, He II and He III from the Parquet files. He III is a bare nucleus. The
 levels_data table has one level for it, and the ionization_data table has no row for it. No built-in

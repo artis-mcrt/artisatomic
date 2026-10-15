@@ -26,12 +26,13 @@ The key-value metadata of each Parquet file holds these items:
 
 - the HDF5 attributes of the object, with their names;
 - the attributes of each group above the object, with the path of the group before the name;
-- the name of the HDF5 file (hdf5_file) and its size in bytes (hdf5_file_size).
+- the name of the HDF5 file (hdf5_file) and the SHA-256 hash of its content (hdf5_file_sha256).
 
-The readers compare hdf5_file_size with the HDF5 file, and they stop if the HDF5 file changed.
+The readers compare hdf5_file_sha256 with the HDF5 file, and they stop if the HDF5 file changed.
 """
 
 import argparse
+import hashlib
 import importlib
 import io
 import json
@@ -43,6 +44,7 @@ import numbers
 import pickle  # ruff: ignore[suspicious-pickle-import]
 import shutil
 import tempfile
+import unicodedata
 from collections import Counter
 from itertools import starmap
 from pathlib import Path
@@ -436,17 +438,19 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     """Stop the run if two tables get one output file, or if a table goes outside the output folder.
 
     HDF5 names are case-sensitive, but the default file systems of macOS and Windows are not.
-    Windows also reads a backslash as a separator. Two names that differ only in case or in the
-    separator would give one file, and one table would be lost.
+    Windows also reads a backslash as a separator. macOS gives one file to two Unicode forms of one
+    name, for example a composed and a decomposed letter. Such names would give one file, and one
+    table would be lost.
     """
 
     def filekey(relativepath: str) -> str:
-        return relativepath.replace("\\", "/").casefold()
+        normalised = unicodedata.normalize("NFC", relativepath.replace("\\", "/"))
+        return unicodedata.normalize("NFC", normalised.casefold())
 
     counts = Counter(map(filekey, relativepaths))
     clashes = sorted(relativepath for relativepath in relativepaths if counts[filekey(relativepath)] > 1)
     if clashes:
-        msg = f"{path} has tables whose names differ only in case or in the separator: {', '.join(clashes)}."
+        msg = f"{path} has tables that would get one output file: {', '.join(clashes)}."
         raise ValueError(msg)
     # the two path types: Windows also reads a backslash as a separator, and C: as a drive
     unsafe = [
@@ -467,13 +471,13 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     An error leaves the earlier output folder as it was. The script makes the output folder, so it
     replaces the folder as a whole. A table that the HDF5 file no longer holds goes away too. The
     function stops if the earlier folder holds a file that is not a Parquet file. The script did
-    not write such a file.
+    not write such a file. The function permits only .DS_Store, which the Finder of macOS writes.
     """
     if outputfolder.exists():
         otherfiles = [
             filepath
             for filepath in (outputfolder.rglob("*") if outputfolder.is_dir() else [outputfolder])
-            if filepath.is_file() and filepath.suffix != ".parquet" and not filepath.name.startswith(".")
+            if not filepath.is_dir() and filepath.suffix != ".parquet" and filepath.name != ".DS_Store"
         ]
         if otherfiles:
             msg = f"{outputfolder} holds files that the script did not write, for example {otherfiles[0]}."
@@ -484,6 +488,7 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     workfolder = Path(tempfile.mkdtemp(prefix=f"{outputfolder.name}.partial-", dir=outputfolder.parent))
     newfolder = workfolder / "new"
     backupfolder = workfolder / "old"
+    keepworkfolder = False
     try:
         for relativepath, table, metadata in tables:
             outputpath = newfolder / relativepath
@@ -493,12 +498,19 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             outputfolder.rename(backupfolder)
         try:
             newfolder.rename(outputfolder)
-        except BaseException:
+        except BaseException as exc:
             if backupfolder.exists():
-                backupfolder.rename(outputfolder)
-            raise
+                try:
+                    backupfolder.rename(outputfolder)
+                except OSError as restoreexc:
+                    # the backup holds the only copy of the earlier tables, so the function keeps it
+                    keepworkfolder = True
+                    msg = f"The script could not put back the earlier tables. They are in {backupfolder}."
+                    raise RuntimeError(msg) from restoreexc
+            raise exc from None
     finally:
-        shutil.rmtree(workfolder, ignore_errors=True)
+        if not keepworkfolder:
+            shutil.rmtree(workfolder, ignore_errors=True)
 
 
 def convert_file(path: Path) -> list[Path]:
@@ -508,7 +520,8 @@ def convert_file(path: Path) -> list[Path]:
     """
     h5py = import_h5py()
     outputfolder = output_folder_of(path)
-    filemetadata = {"hdf5_file": path.name, "hdf5_file_size": str(path.stat().st_size)}
+    with path.open("rb") as hdf5file:
+        filemetadata = {"hdf5_file": path.name, "hdf5_file_sha256": hashlib.file_digest(hdf5file, "sha256").hexdigest()}
     with h5py.File(path, "r") as h5file:
         tables = [
             (f"{name.lstrip('/')}.parquet", table, group_metadata(h5file, name) | metadata | filemetadata)
