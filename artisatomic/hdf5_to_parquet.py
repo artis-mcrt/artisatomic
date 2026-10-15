@@ -508,6 +508,16 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
     if unsafe:
         msg = f"{path} has tables whose path goes outside the output folder: {', '.join(unsafe)}."
         raise ValueError(msg)
+    # Windows removes the periods and the spaces at the end of a part. A part of only those
+    # characters becomes empty, so /a/ /b and /a/b would both give a/b.parquet
+    emptyparts = [
+        relativepath
+        for relativepath in relativepaths
+        if any(not part.rstrip(". ") for part in relativepath.replace("\\", "/").split("/"))
+    ]
+    if emptyparts:
+        msg = f"{path} has tables whose path has a part of only periods or spaces: {', '.join(emptyparts)}."
+        raise ValueError(msg)
     # Windows refuses these characters in a file name. NTFS reads a colon in a part as the name of an
     # alternate data stream, and writes a file with the part before the colon as its name
     badnames = [
@@ -627,6 +637,15 @@ def main() -> None:
     clashes = [str(path) for path, key in zip(paths, keys, strict=True) if counts[key] > 1]
     if clashes:
         parser.error(f"these files have one output folder: {', '.join(clashes)}")
+    # an input file in the output folder of another input file: that conversion would delete it
+    inputkeys = [filekey(str(path.resolve())) for path in paths]
+    inside = [
+        str(path)
+        for path, inputkey in zip(paths, inputkeys, strict=True)
+        if any(inputkey.startswith(f"{key}/") for key in keys)
+    ]
+    if inside:
+        parser.error(f"these files are in the output folder of another file: {', '.join(inside)}")
     for path in paths:
         convert_file(path)
 

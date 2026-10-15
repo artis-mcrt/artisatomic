@@ -1445,6 +1445,10 @@ def test_hdf5_to_parquet_checks_the_output_paths(tmp_path):
     for unsafepath in ["../lines.parquet", "..\\lines.parquet", "a\\..\\..\\lines.parquet", "C:lines.parquet"]:
         with pytest.raises(ValueError, match="outside the output folder"):
             hdf5_to_parquet.check_output_paths(tmp_path, [unsafepath])
+    # Windows removes the periods and the spaces at the end of a part, so these parts become empty
+    for emptypath in ["a/ /b.parquet", "a/.../b.parquet", "a//b.parquet"]:
+        with pytest.raises(ValueError, match="only periods or spaces"):
+            hdf5_to_parquet.check_output_paths(tmp_path, [emptypath])
     # NTFS reads table:stream as an alternate data stream of a file with the name table
     for badpath in ["table:stream.parquet", "a/b?.parquet", "a\tb.parquet"]:
         with pytest.raises(ValueError, match="a character that Windows refuses"):
@@ -1714,7 +1718,8 @@ def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
 def test_hdf5_to_parquet_refuses_two_files_with_one_output_folder(tmp_path, monkeypatch):
     """The second conversion would delete the tables of the first, so the script converts neither file."""
     # macOS gives one folder to a composed and a decomposed e with an acute accent
-    for names in [("data.h5", "data.hdf5"), ("\u00e9.h5", "e\u0301.hdf5")]:
+    # a file in the output folder of another file: the first conversion would delete it
+    for names in [("data.h5", "data.hdf5"), ("\u00e9.h5", "e\u0301.hdf5"), ("data.h5", "data/source.parquet")]:
         monkeypatch.setattr("sys.argv", ["hdf5_to_parquet.py", *(str(tmp_path / name) for name in names)])
         with pytest.raises(SystemExit):
             hdf5_to_parquet.main()
