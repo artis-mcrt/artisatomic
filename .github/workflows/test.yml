@@ -102,6 +102,14 @@ jobs:
             - name: Test with pytest
               run: uv run coverage run -p -m pytest
 
+            # h5py is in the optional extra hdf5, and it has no wheel for Python 3.15. So the step
+            # above skips the tests that need h5py, and this step runs them with Python 3.14. The
+            # import stops the step if h5py is missing, because pytest would only skip the tests.
+            - name: Test hdf5_to_parquet.py with Python 3.14
+              run: |
+                  uv run --isolated --python 3.14 --extra hdf5 python -c "import h5py"
+                  uv run --isolated --python 3.14 --extra hdf5 coverage run -p -m pytest artisatomic/test_artisatomic.py -k hdf5_to_parquet
+
             - name: Upload coverage data
               uses: actions/upload-artifact@v7
               with:
@@ -169,7 +177,7 @@ jobs:
     tests:
         strategy:
             matrix:
-                testname: [cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons, adas]
+                testname: [adas, cmfgen, cmfgen_lowz, floers25, jplt, kurucz, mons]
             fail-fast: false
         runs-on: ubuntu-26.04-arm
         timeout-minutes: 45
@@ -204,6 +212,11 @@ jobs:
               working-directory: atomic-data-hillier/
               run: source ./setup_cmfgen_data.sh
 
+            - name: Extract Floers25 atomic data
+              if: matrix.testname == 'floers25'
+              working-directory: atomic-data-floers25/
+              run: tar -xJvf testdata.tar.xz
+
             # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
             # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
             - name: Cache JPLT atomic data
@@ -217,11 +230,6 @@ jobs:
               if: matrix.testname == 'jplt'
               working-directory: atomic-data-tanaka-jplt/
               run: source ./setup_jplt_data.sh
-
-            - name: Extract Floers25 atomic data
-              if: matrix.testname == 'floers25'
-              working-directory: atomic-data-floers25/
-              run: tar -xJvf testdata.tar.xz
 
             - name: Generate artis atomic data files
               run: |

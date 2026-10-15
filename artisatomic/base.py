@@ -1,7 +1,8 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
-import datetime
+import datetime as dt
+import hashlib
 import io
 import itertools
 import math
@@ -351,12 +352,12 @@ def creation_time_utc() -> str:
     """
     epoch = "0" if TESTMODE else os.environ.get("SOURCE_DATE_EPOCH")
     if epoch is None:
-        creationtime = datetime.datetime.now(datetime.UTC)
+        creationtime = dt.datetime.now(dt.UTC)
     else:
         try:
             if int(epoch) < 0:
                 raise ValueError(epoch)  # ruff: ignore[raise-within-try]
-            creationtime = datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
+            creationtime = dt.datetime.fromtimestamp(int(epoch), dt.UTC)
         except (ValueError, OverflowError, OSError) as exc:
             msg = f"SOURCE_DATE_EPOCH must be a count of seconds since 1970 as a whole number, not {epoch!r}"
             raise ValueError(msg) from exc
@@ -846,6 +847,38 @@ def find_file_check_extension_or_raise(filename: str | Path) -> Path:
         raise FileNotFoundError(msg)
 
     return filepath
+
+
+def file_sha256(path: Path) -> str:
+    """Give the SHA-256 hash of the content of a file.
+
+    The function has no cache. A change to the content can keep the size and the time of the last
+    change, so a cache with those keys could give an old hash.
+    """
+    with path.open("rb") as file:
+        return hashlib.file_digest(file, "sha256").hexdigest()
+
+
+def converted_parquet_path(parquetpath: Path, hdf5path: Path) -> Path:
+    """Give the path of a Parquet file that artisatomic/hdf5_to_parquet.py made from an HDF5 file.
+
+    The function stops the run if the Parquet file does not exist. The script records the SHA-256
+    hash of the HDF5 file in the metadata of each Parquet file. If the HDF5 file is present and has a
+    different hash, the user changed it and did not convert it again. The function then stops the
+    run, because the Parquet file holds the old data.
+    """
+    if not parquetpath.exists():
+        msg = f"{parquetpath} does not exist. Make it from {hdf5path} with artisatomic/hdf5_to_parquet.py."
+        raise FileNotFoundError(msg)
+    if hdf5path.exists():
+        recordedhash = pl.read_parquet_metadata(parquetpath).get("hdf5_file_sha256")
+        if recordedhash != file_sha256(hdf5path):
+            msg = (
+                f"{parquetpath} does not come from the current {hdf5path}."
+                f" Convert {hdf5path.name} again with artisatomic/hdf5_to_parquet.py."
+            )
+            raise ValueError(msg)
+    return parquetpath
 
 
 def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:

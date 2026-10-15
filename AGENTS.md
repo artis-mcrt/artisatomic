@@ -37,7 +37,10 @@ uv sync --frozen
 
 This installs the package in editable mode with the `dev` dependency group. It installs no optional
 extra. The command `uv sync --frozen --extra chianti` adds ChiantiPy, matplotlib and scipy, which
-`makeartisrecombratefile` needs for an ion with no Nahar file. The type checkers pass without the
+`makeartisrecombratefile` needs for an ion with no Nahar file. The extra `hdf5` adds h5py, which only
+`artisatomic/hdf5_to_parquet.py` and its tests need. h5py has no wheel for Python 3.15, so on
+Python 3.15 uv builds h5py from source, which needs an HDF5 library. With Python 3.14, uv installs
+a wheel: `uv sync --frozen --python 3.14 --extra hdf5`. The type checkers pass without the
 extra, because `makerecombratefile.py` imports ChiantiPy through `importlib.import_module()`.
 
 Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, ADAS, MONS and Floers+25 tests read committed samples. The full test suite therefore needs the CMFGEN download and the extracted Floers+25 sample (`tar -xJf testdata.tar.xz` in `atomic-data-floers25`). The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.
@@ -68,6 +71,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/__init__.py` re-exports nothing. The package has no public API. Import each name from the submodule that defines it, in the source and in the tests. Python binds a submodule to its package when something imports it, so `from artisatomic import readadasdata` needs no line in `__init__.py`.
 - `artisatomic/base.py` holds shared helpers and constants. It imports nothing from the package, which prevents circular imports. Submodules import from `artisatomic.base`, not from `artisatomic`.
 - `artisatomic/read*.py` modules each read one atomic data source. `artisatomic/ionhandlers.py` selects a handler for each ion.
+- `artisatomic/hdf5_to_parquet.py` converts an HDF5 file to Parquet files. The DREAM and AOIFE readers read those Parquet files, so the package needs no HDF5 library. The script declares its own dependencies, and `uv run` installs h5py for it. The extra `hdf5` gives h5py to the project environment also. h5py 3.16 has no wheel for Python 3.15. Until a release has one, run the script with `uv run --python 3.14` on a computer with no HDF5 library. The script records the SHA-256 hash of the HDF5 file in each Parquet file. The readers stop if the HDF5 file has a different hash. The tests that need h5py have "hdf5_to_parquet" in their names. CI runs them with Python 3.14.
 - `artisatomic/output.py` writes the ARTIS output files. `artisatomic/phixs.py` processes photoionisation cross sections.
 - `clear_files()` in `output.py` writes the file comment at the top of adata.txt, transitiondata.txt and phixsdata_v2.txt. The file comment must explain each field of the file to a reader who has only that file. It also says where each number starts (level numbers and ion stages start at 1). Update it when a writer changes a field. A value that is the same for all ions belongs there, and not in the comment block of each ion.
 - The file comment gives the creation time in UTC. `creation_time_utc()` in `base.py` gives a time of zero in the test mode, so the checksums stay the same. Without the test mode it obeys `SOURCE_DATE_EPOCH`. Do not put a version into the file comment, because the checksums would change with each commit.
