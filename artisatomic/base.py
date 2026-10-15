@@ -1,7 +1,7 @@
 """Element data, physical constants, and small utilities shared by the data-source readers."""
 
 import atexit
-import datetime
+import datetime as dt
 import io
 import itertools
 import math
@@ -351,12 +351,12 @@ def creation_time_utc() -> str:
     """
     epoch = "0" if TESTMODE else os.environ.get("SOURCE_DATE_EPOCH")
     if epoch is None:
-        creationtime = datetime.datetime.now(datetime.UTC)
+        creationtime = dt.datetime.now(dt.UTC)
     else:
         try:
             if int(epoch) < 0:
                 raise ValueError(epoch)  # ruff: ignore[raise-within-try]
-            creationtime = datetime.datetime.fromtimestamp(int(epoch), datetime.UTC)
+            creationtime = dt.datetime.fromtimestamp(int(epoch), dt.UTC)
         except (ValueError, OverflowError, OSError) as exc:
             msg = f"SOURCE_DATE_EPOCH must be a count of seconds since 1970 as a whole number, not {epoch!r}"
             raise ValueError(msg) from exc
