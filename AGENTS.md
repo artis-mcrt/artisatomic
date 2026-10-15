@@ -38,8 +38,9 @@ uv sync --frozen
 This installs the package in editable mode with the `dev` dependency group. It installs no optional
 extra. The command `uv sync --frozen --extra chianti` adds ChiantiPy, matplotlib and scipy, which
 `makeartisrecombratefile` needs for an ion with no Nahar file. The extra `hdf5` adds h5py, which only
-`artisatomic/hdf5_to_parquet.py` and its tests need. h5py has no wheel for Python 3.15, so the extra
-installs nothing there. Use it with Python 3.14: `uv sync --frozen --python 3.14 --extra hdf5`. The type checkers pass without the
+`artisatomic/hdf5_to_parquet.py` and its tests need. h5py has no wheel for Python 3.15, so on
+Python 3.15 uv builds h5py from source, which needs an HDF5 library. With Python 3.14, uv installs
+a wheel: `uv sync --frozen --python 3.14 --extra hdf5`. The type checkers pass without the
 extra, because `makerecombratefile.py` imports ChiantiPy through `importlib.import_module()`.
 
 Some readers require large external data sets. The `atomic-data-*` directories contain download scripts (for example `atomic-data-hillier/setup_cmfgen_data.sh`) but not the data itself. Run the applicable script before you run tests that read that data. The Kurucz, ADAS, MONS and Floers+25 tests read committed samples. The full test suite therefore needs the CMFGEN download and the extracted Floers+25 sample (`tar -xJf testdata.tar.xz` in `atomic-data-floers25`). The charge transfer source files in `atomic-data-chargetransfer` are small and tracked.

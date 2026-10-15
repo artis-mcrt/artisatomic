@@ -31,7 +31,7 @@ chianti = [
     { name = "scipy" },
 ]
 hdf5 = [
-    { name = "h5py", marker = "python_full_version < '3.15'" },
+    { name = "h5py" },
 ]
 
 [package.dev-dependencies]
@@ -53,7 +53,7 @@ requires-dist = [
     { name = "argcomplete", specifier = ">=3.5.1" },
     { name = "artistools", specifier = ">=2026.10.8" },
     { name = "chiantipy", marker = "extra == 'chianti'", specifier = ">=0.15.1" },
-    { name = "h5py", marker = "python_full_version < '3.15' and extra == 'hdf5'", specifier = ">=3.10.0" },
+    { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.10.0" },
     { name = "matplotlib", marker = "extra == 'chianti'", specifier = ">=3.11.1" },
     { name = "numpy", specifier = ">=2.2.6" },
     { name = "polars", specifier = ">=2.0.0" },
