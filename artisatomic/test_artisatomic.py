@@ -32,7 +32,6 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import converted_parquet_path
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import empty_transitions_schema
-from artisatomic.base import file_sha256
 from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
@@ -1371,10 +1370,8 @@ def test_converted_parquet_path_checks_the_hash_of_the_hdf5_file(tmp_path):
     assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
     hdf5path.write_bytes(b"abc")
     assert converted_parquet_path(parquetpath, hdf5path) == parquetpath
-    # a change that keeps the size. The time of the change can stay the same on a coarse clock, so
-    # the test empties the cache of the hash
+    # a change that keeps the size
     hdf5path.write_bytes(b"abd")
-    file_sha256.cache_clear()
     with pytest.raises(ValueError, match=r"Convert data\.h5 again"):
         converted_parquet_path(parquetpath, hdf5path)
 
@@ -1669,6 +1666,16 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
     assert backupfolder.parent.name.startswith("data.partial-")
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
+
+
+def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
+    """The output folder of data.parquet.h5 is data.parquet. The script keeps a file of that name."""
+    outputfolder = tmp_path / "data.parquet"
+    outputfolder.write_text("a table of the user")
+    with pytest.raises(FileExistsError, match="not a folder"):
+        hdf5_to_parquet.write_tables(outputfolder, [])
+    assert outputfolder.read_text() == "a table of the user"
+    assert [child.name for child in tmp_path.iterdir()] == ["data.parquet"]
 
 
 def test_hdf5_to_parquet_refuses_two_files_with_one_output_folder(tmp_path, monkeypatch):

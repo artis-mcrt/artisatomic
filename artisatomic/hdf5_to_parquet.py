@@ -475,10 +475,14 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     function stops if the earlier folder holds a file that is not a Parquet file. The script did
     not write such a file. The function permits only .DS_Store, which the Finder of macOS writes.
     """
+    # the script makes only a folder at this path, also for an input such as data.parquet.h5
+    if outputfolder.is_symlink() or (outputfolder.exists() and not outputfolder.is_dir()):
+        msg = f"{outputfolder} is not a folder that the script made."
+        raise FileExistsError(msg)
     if outputfolder.exists():
         otherfiles = [
             filepath
-            for filepath in (outputfolder.rglob("*") if outputfolder.is_dir() else [outputfolder])
+            for filepath in outputfolder.rglob("*")
             if not filepath.is_dir() and filepath.suffix != ".parquet" and filepath.name != ".DS_Store"
         ]
         if otherfiles:

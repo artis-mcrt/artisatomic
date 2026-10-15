@@ -849,12 +849,11 @@ def find_file_check_extension_or_raise(filename: str | Path) -> Path:
     return filepath
 
 
-@lru_cache
-def file_sha256(path: Path, size: int, mtime_ns: int) -> str:  # ruff: ignore[unused-function-argument]
+def file_sha256(path: Path) -> str:
     """Give the SHA-256 hash of the content of a file.
 
-    A reader checks several Parquet files of one HDF5 file. The size and the time of the last change
-    are in the cache key, so the function reads the file again only after a change.
+    The function has no cache. A change to the content can keep the size and the time of the last
+    change, so a cache with those keys could give an old hash.
     """
     with path.open("rb") as file:
         return hashlib.file_digest(file, "sha256").hexdigest()
@@ -873,8 +872,7 @@ def converted_parquet_path(parquetpath: Path, hdf5path: Path) -> Path:
         raise FileNotFoundError(msg)
     if hdf5path.exists():
         recordedhash = pl.read_parquet_metadata(parquetpath).get("hdf5_file_sha256")
-        stat = hdf5path.stat()
-        if recordedhash != file_sha256(hdf5path, stat.st_size, stat.st_mtime_ns):
+        if recordedhash != file_sha256(hdf5path):
             msg = (
                 f"{parquetpath} does not come from the current {hdf5path}."
                 f" Convert {hdf5path.name} again with artisatomic/hdf5_to_parquet.py."
