@@ -124,7 +124,7 @@ jobs:
         # implicit success() over all of needs.
         needs: [pytest, tests, chargetransfer]
         if: ${{ !cancelled() && needs.pytest.result == 'success' }}
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-26.04-arm
         permissions:
             contents: read
             code-quality: write
