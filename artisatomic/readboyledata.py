@@ -121,7 +121,12 @@ def read_lines_data(atomic_number, ion_stage, levelid_of_fileindex):
 
 def read_levels_and_transitions(atomic_number, ion_stage, flog):
     """Read one ion for the "boyle" handler, which covers helium only."""
-    assert atomic_number == 2
+    # not an assert: a handlers file can name this handler for any element, and the check must
+    # survive python -O. Without it, the read gives no levels and fails later in a polars call
+    # that names neither the handler nor the element.
+    if atomic_number != 2:
+        msg = f"The boyle handler reads helium (Z=2) only, not Z={atomic_number}"
+        raise ValueError(msg)
     # the HDF5 file and not the Parquet files: a user of the output files can get only the HDF5 file
     log_comment(
         flog,

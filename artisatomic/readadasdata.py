@@ -1061,19 +1061,20 @@ def _fill_co3_phixs(
         0.007210703,
     ]
 
-    if abs(args.nphixspoints - 100) < 0.5 and abs(args.phixsnuincrement - 0.1) < 0.001:
-        phixsvalues = np.array(phixsvalues_const)
-    else:
-        # the stop of 10.95 makes arange produce all 100 grid points from 1.0 to 10.9. A stop
-        # of 10.9 produced 99 points, and the strict flag then dropped the table's last point.
-        dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
-        phixsvalues = reduce_phixs_tables(
-            dict_phixstable,
-            args.optimaltemperature,
-            args.nphixspoints,
-            args.phixsnuincrement,
-            label=f"{ion_label(atomic_number, ion_stage)} QUB constant table",
-        )["gs"]
+    # The table has 100 points from 1.0 to 10.9 times the threshold. The stop of 10.95 makes
+    # arange produce all 100 grid points. A stop of 10.9 produced 99 points, and the strict flag
+    # then dropped the table's last point.
+    # The downsample runs also for the grid of the table itself. Every table of the output file is
+    # the average over the frequency bin of each point, as the file comment says. The point values
+    # of the table are not those averages.
+    dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
+    phixsvalues = reduce_phixs_tables(
+        dict_phixstable,
+        args.optimaltemperature,
+        args.nphixspoints,
+        args.phixsnuincrement,
+        label=f"{ion_label(atomic_number, ion_stage)} QUB constant table",
+    )["gs"]
 
     log_comment(
         flog,

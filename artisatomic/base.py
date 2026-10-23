@@ -573,17 +573,18 @@ def open_for_atomic_write(path: Path) -> Generator[t.TextIO]:
     """Open a new temporary file beside path. At the end of the block, replace path with it.
 
     A failure in the block, for example of a reader or of a full disk, keeps the earlier file and
-    removes the temporary file. The replace of a file in the same folder is atomic. Each call has
-    its own temporary file, so two runs into one folder do not write into the same file.
+    removes the temporary file. A failure of the replace, for example when path is a folder,
+    removes it also. The replace of a file in the same folder is atomic. Each call has its own
+    temporary file, so two runs into one folder do not write into the same file.
     """
     temppath = path.with_name(f"{path.name}.{secrets.token_hex(8)}.tmp")
     try:
         with temppath.open(mode="x", encoding="utf-8") as fout:
             yield fout
+        temppath.replace(path)
     except BaseException:
         temppath.unlink(missing_ok=True)
         raise
-    temppath.replace(path)
 
 
 def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:

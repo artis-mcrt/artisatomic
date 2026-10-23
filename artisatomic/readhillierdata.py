@@ -343,8 +343,6 @@ def get_term_as_tuple(config: str) -> tuple[int, int, int]:
     config = config.split("[", maxsplit=1)[0]
 
     if "{" in config and "}" in config:  # JJ coupling, no L and S
-        if parity < 0:
-            print(f"WARNING: could not read the parity from the JJ coupling state '{config}'")
         return (-1, -1, parity)
 
     lposition = -1
@@ -379,7 +377,7 @@ def fortran_float_expr(text: pl.Expr) -> pl.Expr:
     return text.str.replace_all("D", "E", literal=True).cast(pl.Float64, strict=False)
 
 
-def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFrame:
+def parse_transition_lines(dflines: pl.LazyFrame, filename: Path, flog) -> pl.DataFrame:
     """Read the oscillator strengths table of a CMFGEN file into a transition frame.
 
     A transition line names its two levels, and a level name can hold a dash. The parser
@@ -390,6 +388,8 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
     The file marks no end of the table. A line that is not a transition, e.g. a title, gives
     parts that fit neither layout below, and the filter drops it. The parser stops at a second
     'Oscillator strengths' title, because a file can hold two tables.
+
+    flog gets the warning about transition ids that differ from their entry numbers.
     """
     # the parser reads only the first table, so a spelling mistake in a title must not hide the second one
     from_second_title = pl.col("line").str.contains(r"^\s*Osci(l|ll)ator strengths").fill_null(False).cum_max()
@@ -454,9 +454,11 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path) -> pl.DataFram
     )
     if not mismatched.is_empty():
         first_entry, first_id = mismatched.row(0)  # with_row_index() puts its column first
-        print(
-            f"{filename} WARNING: {mismatched.height:d} transition ids differ from their entry numbers."
-            f" The first is id {first_id:d} at entry {first_entry:d}."
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {mismatched.height:d} transition ids of {filename.name} differ from their entry numbers."
+            f" The first is id {first_id:d} at entry {first_entry:d}.",
         )
 
     return dftransitions.cast(hillier_transition_schema)
@@ -656,6 +658,15 @@ def read_levels_and_transitions_from_file(
                     # cannot match it against another level's absent parity.
                     parity = None
                     levels_without_parity.append(levelname)
+                    if isjjcoupled:
+                        # a JJ coupling state names its parity with its last letter, so one with
+                        # no parity is a name that the reader could not read
+                        log_detail(
+                            flog,
+                            ("adata",),
+                            "JJ coupling state with no parity",
+                            f"WARNING: could not read the parity from the JJ coupling state '{levelname}'.",
+                        )
 
                 levelrows.append(
                     HillierEnergyLevel(
@@ -711,7 +722,7 @@ def read_levels_and_transitions_from_file(
 
     # the rest of the file holds the transitions. polars reads them, not Python: one ion carries
     # half a million of them
-    dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename)
+    dftransitions = parse_transition_lines(scan_file_lines(filename, skip_lines=linesread), filename, flog)
 
     log_and_print(flog, f"The reader got {dftransitions.height:d} transitions.")
     if dftransitions.height != expected_transitions:
@@ -939,6 +950,8 @@ class PhotFileReader:
         # counters below hold the rows of the current file that repeat an energy. read_file()
         # logs one line for each of the two.
         self.levels_without_edge: dict[str, None] = {}
+        # the level names of the current file that the oscillator file does not have, in file order
+        self.levels_not_in_oscillator: dict[str, None] = {}
         self.duplicate_energy_rows = 0
         self.duplicate_energy_first: tuple[str, float] | None = None
         # the count of lines before the header of the current file that name no target
@@ -1013,7 +1026,12 @@ class PhotFileReader:
         edge is zero or below, and records the level. CMFGEN divides the frequency by the edge
         (sub_phot_gen.f line 228), which gives no useful cross section for such a level. The
         caller then stores no table, and read_file() logs one summary line for each file.
+
+        Returns None also for a level name that the oscillator file does not have. Such a level
+        has no edge to read, and nothing could use its table (see take_event_line()).
         """
+        if self.lowerlevelindex < 0:
+            return None
         excitation_energy_ev = self.resolve_excitation_energy()
         lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex]
         edge_ev = 0.0 if lambda_angstrom == 0.0 else hc_in_ev_angstrom / lambda_angstrom + excitation_energy_ev
@@ -1071,6 +1089,15 @@ class PhotFileReader:
                 ("phixsdata",),
                 f"WARNING: {self.lines_without_target} lines before the header of {photfilename} name no"
                 " photoionisation target, so the reader skipped them.",
+            )
+        # the log file only: the phot files can cover levels that the oscillator file does not,
+        # and the output files hold no table for such a level
+        if self.levels_not_in_oscillator:
+            log_and_print(
+                self.flog,
+                f"{len(self.levels_not_in_oscillator)} level names of {photfilename} are not levels of the"
+                f" oscillator file, so the reader skipped their tables. The first is"
+                f" {next(iter(self.levels_not_in_oscillator))}.",
             )
         if self.duplicate_energy_first is not None:
             duplicate_levelname, duplicate_energy = self.duplicate_energy_first
@@ -1156,15 +1183,16 @@ class PhotFileReader:
             self.fitcoefficients = []
             self.numpointsexpected = 0
             # take the first level that matches (without J splitting, several can differ by
-            # J). A name with no level that matches falls back to index 0, so the fit uses
-            # the ground state's threshold wavelength. Nothing uses that table: the
-            # levelindices_of_matchname mapping in read_phixs_tables() has the same key,
-            # finds no level for the name, and drops the table. The phot files can cover
-            # levels that the oscillator file does not. This fallback is therefore silent and
-            # not an error.
+            # J). A name with no level that matches gets the index -1, and edge_lambda_angstrom()
+            # then gives no edge, so the reader builds no table for it. The phot files can cover
+            # levels that the oscillator file does not, and the levelindices_of_matchname mapping
+            # in read_phixs_tables() would find no level for such a table. This is therefore not
+            # an error, and read_file() logs one line for each file.
             self.lowerlevelindex = (
                 self.firstlevelindex_of_levelname if self.j_splitting_on else self.firstlevelindex_of_levelnamenoJ
-            ).get(self.lowerlevelname, 0)
+            ).get(self.lowerlevelname, -1)
+            if self.lowerlevelindex < 0:
+                self.levels_not_in_oscillator[self.lowerlevelname] = None
             if not self.targetlevelname:
                 msg = f"{self.photfilename} names a level before its '!Final state in ion' line"
                 raise ValueError(msg)
@@ -1289,9 +1317,13 @@ class PhotFileReader:
             self.thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
             # for these types the x value is a multiple of the threshold, not an energy
             if abs(x[0] - 1.0) > 0.5:
-                print(
-                    f"{self.lowerlevelname} cross section type {self.crosssectiontype}: the first value {x[0]:.3f}"
-                    f" is not near one, so it can be an energy. E_threshold = {self.thresholdenergyryd:.3f} Ry"
+                log_detail(
+                    self.flog,
+                    ("phixsdata",),
+                    "first table value not near one",
+                    f"WARNING: {self.lowerlevelname} cross section type {self.crosssectiontype}: the first value"
+                    f" {x[0]:.3f} is not near one, so it can be an energy. E_threshold = {self.thresholdenergyryd:.3f}"
+                    " Ry.",
                 )
         energyryd = x * self.thresholdenergyryd
         # the order test includes the last point of the block read so far

@@ -41,27 +41,29 @@ def get_ion_handlers(
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
 
+    # Include every ion that has data and that the limits keep.
+    # The first call that adds an ion sets its handler, so the order of these calls matters.
+    # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
+    # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
+    # whose files start above the default -maxionstage needs a higher value.
+    #
+    # The ADAS ions come before the Kurucz ions. The ADAS Sr I file gives collision strengths,
+    # and the Kurucz line list of Sr I gives none.
+    ion_handlers = readadasdata.extend_ion_list(
+        [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
     kuruczions = [
         (atomic_number, ion_stage)
         for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3)))
         for ion_stage in ion_stages
     ]
     ion_handlers = add_handlers_if_not_set(
-        [],
+        ion_handlers,
         kuruczions,
         "kurucz",
         minionstage=minionstage,
         maxionstage=maxionstage,
         maxatomicnumber=maxatomicnumber,
-    )
-
-    # Include every ion that has data and that the limits keep.
-    # The first call that adds an ion sets its handler, so the order of these calls matters.
-    # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
-    # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
-    # whose files start above the default -maxionstage needs a higher value.
-    ion_handlers = readadasdata.extend_ion_list(
-        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
     )
     ion_handlers = readhillierdata.extend_ion_list(
         ion_handlers,
