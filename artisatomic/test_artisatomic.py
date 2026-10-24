@@ -6942,8 +6942,9 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
     )
     dflevels = readdreamdata.level_frame(dflines)
 
-    # the two levels at 0 cm^-1 in the order of the lines, then the shared level at 500 cm^-1
-    # before the one that the first line names, because the first line's upper level is first
+    # The two levels at 0 cm^-1 come in the order of the lines. The lower levels of every line
+    # come before the upper levels. So the shared level at 500 cm^-1, which is the lower level
+    # of the third line, comes before the upper level of the first line.
     assert dflevels.rows() == [
         (0, "(e)", 0, 9.0),
         (1, "(e)", 0, 7.0),

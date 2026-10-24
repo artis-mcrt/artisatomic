@@ -327,8 +327,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
-    # GetLevels() and GetLines() open the plain file or a compressed form of it, and they stop
-    # the run with the names of the forms when none exists
+    # GetLevels() and GetLines() open the plain file or a compressed form of it. When no form
+    # exists, they stop the run with the names of the forms.
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them, the
     # filter below knows whether a transition names a dropped level or an unknown level
