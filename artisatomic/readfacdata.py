@@ -33,6 +33,7 @@ from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import split_levels_above_ionization
+from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
 from artisatomic.readfloers25data import reference as floers25_reference
 
@@ -152,9 +153,11 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
 
     The caller drops the levels above the ionisation energy and keeps their Ilev values. The
     values show whether a transition names a dropped level or an unknown level.
+
+    The table scan reads a compressed form of the file also, so the header read does the same.
     """
     headerlines: list[str] = []
-    with Path(filename).open(encoding="utf-8") as f:
+    with xopen_check_extension(filename, mode="rt", encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
 
     # headerlines[7] holds the ground state and headerlines[5] the ion charge. This function needs
@@ -204,7 +207,7 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
     The first line of the file names the code, which selects the column layout.
     """
     headerlines: list[str] = []
-    with Path(filename).open(encoding="utf-8") as f:
+    with xopen_check_extension(filename, mode="rt", encoding="utf-8") as f:
         headerlines.extend(f.readline() for _ in range(11))
     # headerlines[8], [10] and [5] hold the ground state, multipole and ion charge. This function
     # needs none. headerlines[9] holds the NTRANS line, which check_row_count() reads.
@@ -324,9 +327,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
-    if not levels_file.is_file():
-        msg = f"FAC levels file {levels_file} not found"
-        raise FileNotFoundError(msg)
+    # GetLevels() and GetLines() open the plain file or a compressed form of it, and they stop
+    # the run with the names of the forms when none exists
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them, the
     # filter below knows whether a transition names a dropped level or an unknown level
@@ -338,9 +340,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
-    if not lines_file.is_file():
-        msg = f"FAC transitions file {lines_file} not found"
-        raise FileNotFoundError(msg)
     dfalllines = GetLines(filename=lines_file)
 
     # a line that names a dropped level goes with it, because that level has no level id

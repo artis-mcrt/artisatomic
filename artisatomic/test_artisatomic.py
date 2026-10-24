@@ -3669,7 +3669,9 @@ def test_parse_transition_lines_reads_both_layouts():
     """parse_transition_lines() reads a CMFGEN oscillator table with or without the last two columns."""
     withbars = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090D-03   2.599E+05     1-   2   |    |    |"
     withid = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090E-03   2.599E+05     1-   2       7"
-    dftransitions = rhd.parse_transition_lines(pl.LazyFrame({"line": [withbars, withid]}), Path("test_osc"))
+    dftransitions = rhd.parse_transition_lines(
+        pl.LazyFrame({"line": [withbars, withid]}), Path("test_osc"), io.StringIO()
+    )
 
     assert dftransitions.height == 2
     assert dftransitions["namefrom"].to_list() == ["3d6_a6De[9/2]"] * 2
@@ -3688,10 +3690,10 @@ def test_parse_transition_lines_stops_at_a_second_table():
     transition = "a-b   1.0E-01   2.0E-01   3.0E+03     1-   2       1"
     lines = [transition, "   Oscillator strengths for Fe2", transition]
 
-    assert rhd.parse_transition_lines(pl.LazyFrame({"line": lines}), Path("test_osc")).height == 1
+    assert rhd.parse_transition_lines(pl.LazyFrame({"line": lines}), Path("test_osc"), io.StringIO()).height == 1
     # a file that ends at the table title leaves no line to read
     emptyframe = pl.LazyFrame({"line": []}, schema={"line": pl.String})
-    assert rhd.parse_transition_lines(emptyframe, Path("test_osc")).height == 0
+    assert rhd.parse_transition_lines(emptyframe, Path("test_osc"), io.StringIO()).height == 0
 
 
 def test_parse_gfall_collapses_label_whitespace(monkeypatch):
@@ -5393,6 +5395,13 @@ def test_get_ion_handlers_builds_the_built_in_selection(tmp_path, monkeypatch):
     ions_unlimited = {(atomic_number, ion) for atomic_number, listions in unlimited for ion in listions}
     assert ions <= ions_unlimited
 
+    # the ADAS Sr I file gives collision strengths, so the ADAS reader comes before the Kurucz ions
+    handler_of_ion = {
+        (atomic_number, ion_stage): handler for atomic_number, listions in unlimited for ion_stage, handler in listions
+    }
+    assert handler_of_ion[38, 1] == "adas"
+    assert handler_of_ion[38, 2] == "kurucz"
+
 
 def test_log_comment_records_for_an_ionlog_only():
     """A plain stream gets the log line and records nothing, so the older callers stay valid."""
@@ -6787,3 +6796,163 @@ def test_read_ion_data_takes_the_value_of_read_coldata_for_a_pair_of_both_source
     monkeypatch.setitem(iondata.handlers, "stub", handler)
     result = iondata.read_ion_data(1, (1, "stub"), True, phixs_args(output_folder=str(tmp_path), nophixs=True))
     assert upsilon_dict(result.dfupsilon) == {(0, 1): 5.0, (0, 2): 0.4, (1, 2): 6.0}
+
+
+def test_write_adata_rejects_a_first_level_above_the_lowest_level():
+    """ARTIS takes the first level as the ground level, so a lower level at a later id stops the run.
+
+    Two levels of one energy are not an error. The stable sorts of the readers keep such levels
+    in the order of the file. The check runs before the writer writes any line of the ion.
+    """
+
+    def levels(energies: list[float]) -> pl.DataFrame:
+        return leveltuples_to_pldataframe(
+            pl.DataFrame({"levelname": ["a", "b"], "energyabovegsinpercm": energies, "g": [1.0, 3.0]})
+        )
+
+    buf = io.StringIO()
+    with pytest.raises(
+        ValueError, match=r"level id 0 has the energy 100.0 cm\^-1, but level id 1 has the lower energy 0.0"
+    ):
+        write_adata(buf, 26, 2, levels([100.0, 0.0]), 10.0, [0, 0], io.StringIO())
+    assert not buf.getvalue()
+
+    buf = io.StringIO()
+    write_adata(buf, 26, 2, levels([0.0, 0.0]), 10.0, [0, 0], io.StringIO())
+    assert buf.getvalue().splitlines()[0].split()[2] == "2"
+
+
+def test_open_for_atomic_write_removes_the_temporary_file_when_the_replace_fails(tmp_path):
+    """A replace that fails, here because the path is a folder, leaves no temporary file behind."""
+    from artisatomic.base import open_for_atomic_write
+
+    target = tmp_path / "recombrates.txt"
+    target.mkdir()
+    with pytest.raises(OSError, match=r"recombrates\.txt"), open_for_atomic_write(target) as fout:
+        fout.write("1\n")
+    assert [path.name for path in tmp_path.iterdir()] == ["recombrates.txt"]
+
+
+def test_readboyledata_rejects_an_element_other_than_helium():
+    """The check names the handler and the element, and it runs before the reader opens a table."""
+    from artisatomic import readboyledata
+
+    with pytest.raises(ValueError, match=r"helium \(Z=2\) only, not Z=26"):
+        readboyledata.read_levels_and_transitions(26, 1, io.StringIO())
+
+
+def test_parse_transition_lines_records_the_id_mismatch_for_the_comment_block():
+    """A file that numbers its transitions from 0 gets one warning line in the transitiondata block."""
+    from artisatomic.base import IonLog
+
+    transition = "a-b   1.0E-01   2.0E-01   3.0E+03     1-   2       {}"
+    lines = [transition.format(0), transition.format(1)]
+    flog = IonLog(io.StringIO())
+
+    assert rhd.parse_transition_lines(pl.LazyFrame({"line": lines}), Path("osc_data"), flog).height == 2
+    assert flog.comments["transitiondata"] == [
+        "WARNING: 2 transition ids of osc_data differ from their entry numbers. The first is id 0 at entry 1."
+    ]
+    assert flog.comments["adata"] == []
+
+
+def test_photfilereader_skips_a_level_name_that_the_oscillator_file_lacks(tmp_path):
+    """A phot file can cover a level that the oscillator file does not. Such a level gets no table.
+
+    The reader builds no table for the name, so it does not count the name with the levels that
+    have no edge. The log file gets one line for each file with such names.
+    """
+    from artisatomic.readhillierdata import PhotFileReader
+
+    header = (
+        "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+        "1                                       !Number of energy levels\n"
+        "2.0D0                                   !Screened nuclear charge\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "0.0                                     !Excitation energy of final state\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+    )
+
+    def block(levelname: str) -> str:
+        return (
+            f"{levelname:<40}!Configuration name\n"
+            "20                                      !Type of cross-section\n"
+            "2                                       !Number of cross-section points\n"
+            "1.0 4.0\n2.0 1.0\n\n"
+        )
+
+    photfile = tmp_path / "phot_test"
+    photfile.write_text(header + block("A") + block("B"))
+    flog = io.StringIO()
+    reader = PhotFileReader(56, 2, 1, [911.0], {"A": 0}, {"A": 0}, flog)
+    reader.read_file(0, photfile, photfile.name)
+
+    assert list(reader.phixstables[0]) == ["A"]
+    assert not reader.levels_without_edge
+    assert list(reader.levels_not_in_oscillator) == ["B"]
+    assert "1 level names of phot_test are not levels of the oscillator file" in flog.getvalue()
+    assert "The first is B." in flog.getvalue()
+    assert "threshold energy of zero or below" not in flog.getvalue()
+
+
+def test_read_photoionizations_downsamples_the_co3_table_on_its_own_grid():
+    """The grid of the Co III table itself gets the bin averages too, as every other table does."""
+    args = phixs_args(nphixspoints=100, phixsnuincrement=0.1)
+    phixs = readadasdata.read_photoionizations(27, 3, pl.DataFrame({"levelid": range(5)}), args, io.StringIO())
+
+    # the table falls from 9.338 Mb at the threshold to 7.016 Mb one step above it, so the
+    # average over the first bin is below the value at the threshold
+    assert 8.0 < phixs.crosssections[0][0] < 9.338
+    assert phixs.crosssections[4].tolist() == [0.0] * 100
+    assert phixs.targetfractions == [[(0, 1.0)]] * 5
+
+
+def test_readfacdata_reads_a_compressed_file(tmp_path):
+    """The header read accepts the compressed forms of a file, as the table scan does."""
+    import gzip
+
+    write_fac_fixture(tmp_path)
+    plain = readfacdata.GetLevels(tmp_path / "fac.lev.asc")
+    data = (tmp_path / "fac.lev.asc").read_bytes()
+    (tmp_path / "fac.lev.asc").unlink()
+    with gzip.open(tmp_path / "fac.lev.asc.gz", "wb") as fgzip:
+        fgzip.write(data)
+
+    assert readfacdata.GetLevels(tmp_path / "fac.lev.asc").equals(plain)
+
+
+def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_energy():
+    """Two levels of one energy get their ids in the order of their first mention in the line list.
+
+    The lower levels of every line come before the upper levels, and a level that two lines share
+    gets one id. The frame keeps the values of the line list as the keys of the join.
+    """
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [0, 0, 500],
+            "Lower_Type": ["(e)", "(e)", "(o)"],
+            "Lower_g": [9.0, 7.0, 3.0],
+            "Upper_Level": [500, 500, 20000],
+            "Upper_Type": ["(e)", "(o)", "(e)"],
+            "Upper_g": [5.0, 3.0, 1.0],
+        }
+    )
+    dflevels = readdreamdata.level_frame(dflines)
+
+    # the two levels at 0 cm^-1 in the order of the lines, then the shared level at 500 cm^-1
+    # before the one that the first line names, because the first line's upper level is first
+    assert dflevels.rows() == [
+        (0, "(e)", 0, 9.0),
+        (1, "(e)", 0, 7.0),
+        (2, "(o)", 500, 3.0),
+        (3, "(e)", 500, 5.0),
+        (4, "(e)", 20000, 1.0),
+    ]
+    assert dflevels["levelid"].dtype == pl.Int64
+    assert [level.levelname for level in readdreamdata.read_levels_data(dflevels)][:2] == [
+        "enpercm=0,even,g=9.0",
+        "enpercm=0,even,g=7.0",
+    ]

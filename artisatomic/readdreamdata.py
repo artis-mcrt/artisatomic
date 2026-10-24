@@ -66,15 +66,13 @@ def extend_ion_list(
     )
 
 
-def energytuplefromrow(row, prefix):
-    """Build the lower or upper level of one DREAM line, selected by prefix ("Lower"/"Upper").
+def energytuple(energy, leveltype, g) -> EnergyLevel:
+    """Build one DREAM level from its energy, its type "(o)" or "(e)", and its statistical weight.
 
     DREAM levels have no spectroscopic names, so the name of each level holds the energy, parity
-    and statistical weight that identify it. read_levels_data() deduplicates on the same three
+    and statistical weight that identify it. level_frame() keys the levels on the same three
     values.
     """
-    energy, leveltype, g = row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"]
-
     # not a default of 0 for any other text: the Laporte rule would get a parity the file did
     # not state
     if leveltype not in {"(o)", "(e)"}:
@@ -88,29 +86,47 @@ def energytuplefromrow(row, prefix):
     return EnergyLevel(levelname=levelname, parity=parity, g=g, energyabovegsinpercm=energyabovegsinpercm)
 
 
-def read_levels_data(dflines):
+def energytuplefromrow(row, prefix):
+    """Build the lower or upper level of one DREAM line, selected by prefix ("Lower"/"Upper")."""
+    return energytuple(row[prefix + "_Level"], row[prefix + "_Type"], row[prefix + "_g"])
+
+
+# the columns of a line that identify one of its levels, without the "Lower_" or "Upper_" prefix
+level_key_columns = ("Type", "Level", "g")
+
+
+def level_frame(dflines: pl.DataFrame) -> pl.DataFrame:
     """Recover the level list from a DREAM line list, which has no separate level table.
 
     Each line carries both of its levels inline, so the levels are the distinct lower and upper
-    levels over all lines, sorted by energy.
+    levels over all lines, sorted by energy. The frame holds the key columns of each level, with
+    the values of the line list, and its zero-based level id. read_levels_and_transitions() joins
+    the lines to the frame on the key columns, so the join needs no Python loop over the lines.
     """
-    # a set for the membership test, not `not in energy_levels`: a list scan for each candidate
-    # costs O(levels^2) for the build of the level list
-    seen: set[EnergyLevel] = set()
-    energy_levels = []
+    keys = pl.concat(
+        [
+            dflines.select(pl.col(f"{prefix}_{column}").alias(column) for column in level_key_columns)
+            for prefix in ("Lower", "Upper")
+        ]
+    )
+    # keep="first" pins the order that decides the ids of two levels of one energy. The sort is
+    # stable, so levels of one energy keep that order
+    return (
+        keys.unique(keep="first", maintain_order=True)
+        .sort(pl.col("Level").cast(pl.Float64), maintain_order=True)
+        .with_row_index("levelid")
+        .with_columns(pl.col("levelid").cast(pl.Int64))
+    )
 
-    for prefix in ["Lower", "Upper"]:
-        subset = [prefix + "_Type", prefix + "_Level", prefix + "_g"]
-        # keep="first" pins the order that decides the ids of two levels of one energy
-        for row in dflines.unique(subset=subset, keep="first", maintain_order=True).iter_rows(named=True):
-            leveltuple = energytuplefromrow(row, prefix)
-            if leveltuple not in seen:
-                seen.add(leveltuple)
-                energy_levels.append(leveltuple)
 
-    energy_levels.sort(key=lambda x: x.energyabovegsinpercm)
+def read_levels_data(dflevels: pl.DataFrame) -> list[EnergyLevel]:
+    """Give the levels of a frame of level_frame() as tuples, in the order of the frame.
 
-    return energy_levels
+    The tuples validate the level type of every level, so a line with a different type stops the
+    run here.
+    """
+    # with_row_index() puts the level id first
+    return [energytuple(energy, leveltype, g) for _levelid, leveltype, energy, g in dflevels.iter_rows()]
 
 
 def read_lines_data(dfiondata):
@@ -147,29 +163,25 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         f"The levels and the transitions come from {path_in_data_folder(dreamhdf5path, dreamfolder)}.",
     )
 
-    energy_levels = read_levels_data(dfiondata)
+    dflevels = level_frame(dfiondata)
+    energy_levels = read_levels_data(dflevels)
 
-    # a dict, not energy_levels.index(): a list scan for each level of every line costs
-    # O(lines x levels)
-    levelid_of_leveltuple = {leveltuple: levelid for levelid, leveltuple in enumerate(energy_levels)}
-
-    def get_level_index(row, prefix):
-        """Return the zero-based level id of the row's level."""
-        leveltuple = energytuplefromrow(row, prefix)
-        levelid = levelid_of_leveltuple.get(leveltuple)
-        if levelid is None:
-            # not an assert: read_levels_data() built the level list from the same frame as the
-            # lines. A miss means they disagree, so the code must not map it silently
-            msg = f"DREAM line names a {prefix} level that is not in the level list: {leveltuple}"
+    # a join on the key columns, not a Python loop over the lines: an ion has 10^5 lines
+    for prefix in ("Lower", "Upper"):
+        dfiondata = dfiondata.join(
+            dflevels.select(
+                *(pl.col(column).alias(f"{prefix}_{column}") for column in level_key_columns),
+                pl.col("levelid").alias(f"{prefix}_index"),
+            ),
+            on=[f"{prefix}_{column}" for column in level_key_columns],
+            how="left",
+            maintain_order="left",
+        )
+        # not an assert: level_frame() built the level list from the same frame as the lines. A
+        # miss means they disagree, so the code must not map it silently
+        if dfiondata[f"{prefix}_index"].null_count() > 0:
+            msg = f"A DREAM line names a {prefix} level that is not in the level list"
             raise ValueError(msg)
-        return levelid
-
-    # a list over the rows, not a call for each column: the level id needs the whole row
-    rows = list(dfiondata.iter_rows(named=True))
-    dfiondata = dfiondata.with_columns(
-        Lower_index=pl.Series([get_level_index(row, prefix="Lower") for row in rows], dtype=pl.Int64),
-        Upper_index=pl.Series([get_level_index(row, prefix="Upper") for row in rows], dtype=pl.Int64),
-    )
 
     transitions = read_lines_data(dfiondata)
 
