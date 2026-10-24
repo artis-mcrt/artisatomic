@@ -1090,8 +1090,8 @@ class PhotFileReader:
                 f"WARNING: {self.lines_without_target} lines before the header of {photfilename} name no"
                 " photoionisation target, so the reader skipped them.",
             )
-        # the log file only: the phot files can cover levels that the oscillator file does not,
-        # and the output files hold no table for such a level
+        # The log file only. The phot files can cover levels that the oscillator file does not,
+        # and the output files hold no table for such a level.
         if self.levels_not_in_oscillator:
             log_and_print(
                 self.flog,

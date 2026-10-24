@@ -1065,8 +1065,8 @@ def _fill_co3_phixs(
     # The table has 100 points from 1.0 to 10.9 times the threshold. The stop of 10.95 makes
     # arange produce all 100 grid points. A stop of 10.9 produced 99 points, and the strict flag
     # then dropped the table's last point.
-    # The downsample takes the first column in Rydberg, because the weight of a bin depends on
-    # the energy of the photon and not on its ratio to the threshold. The threshold of the ground
+    # The downsample takes the first column in Rydberg. The weight of a bin depends on the
+    # energy of the photon, and not on its ratio to the threshold. The threshold of the ground
     # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
     # quartet lie within 0.12 eV of each other, so the one table covers each of them.
     # The downsample runs also for the grid of the table itself. Every table of the output file is
