@@ -657,18 +657,19 @@ def write_adata(
 
     ARTIS takes the first level of an ion as its ground level (input.cc). The photoionisation
     targets of the ion below also name level id 0 as the ground state (see match_hydrogenic_phixs()
-    in phixs.py). A reader that keeps the order of its file can give a different level first, so
-    the function stops the run when level id 0 is not a level of the lowest energy.
+    in phixs.py). A reader that keeps the order of its file can give a different level first. The
+    function therefore stops the run when level id 0 is not a level of the lowest energy.
     """
     log_and_print(flog, f"artisatomic writes {dfenergylevels.height} levels to adata.txt.")
     # not an assert: this guards written output and must survive python -O
     if dfenergylevels.height > 0:
         energies = dfenergylevels["energyabovegsinpercm"]
-        if energies[0] > energies.min():
+        lowestlevelid = energies.arg_min()
+        if lowestlevelid is not None and energies[0] > energies[lowestlevelid]:
             msg = (
                 f"Z={atomic_number} ion_stage={ion_stage}: level id 0 has the energy {energies[0]} cm^-1, but level"
-                f" id {energies.arg_min()} has the lower energy {energies.min()} cm^-1. ARTIS takes the first level"
-                " as the ground level, so the reader must give the lowest level first."
+                f" id {lowestlevelid} has the lower energy {energies[lowestlevelid]} cm^-1. ARTIS takes the first"
+                " level as the ground level, so the reader must give the lowest level first."
             )
             raise ValueError(msg)
     write_comment_block(fatommodels, "adata", titlelines, flog)

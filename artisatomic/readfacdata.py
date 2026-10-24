@@ -19,7 +19,6 @@ from artisatomic.base import check_row_count
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
 from artisatomic.base import EnergyLevel
-from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
 from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
@@ -328,10 +327,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
     log_comment(flog, ("adata",), nist_ionization_energy_comment)
 
-    # the reader accepts a compressed form of each file, so the test looks for every form
-    if find_file_check_extension(levels_file) is None:
-        msg = f"FAC levels file {levels_file} not found"
-        raise FileNotFoundError(msg)
+    # GetLevels() and GetLines() open the plain file or a compressed form of it, and they stop
+    # the run with the names of the forms when none exists
     dfalllevels = GetLevels(filename=levels_file)
     # drop the levels above the ionisation energy, but keep their Ilev values. With them, the
     # filter below knows whether a transition names a dropped level or an unknown level
@@ -343,9 +340,6 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 
-    if find_file_check_extension(lines_file) is None:
-        msg = f"FAC transitions file {lines_file} not found"
-        raise FileNotFoundError(msg)
     dfalllines = GetLines(filename=lines_file)
 
     # a line that names a dropped level goes with it, because that level has no level id

@@ -1185,9 +1185,9 @@ class PhotFileReader:
             # take the first level that matches (without J splitting, several can differ by
             # J). A name with no level that matches gets the index -1, and edge_lambda_angstrom()
             # then gives no edge, so the reader builds no table for it. The phot files can cover
-            # levels that the oscillator file does not, and the levelindices_of_matchname mapping
-            # in read_phixs_tables() would find no level for such a table. This is therefore not
-            # an error, and read_file() logs one line for each file.
+            # levels that the oscillator file does not. The levelindices_of_matchname mapping in
+            # read_phixs_tables() would find no level for such a table. This is therefore not an
+            # error, and read_file() logs one line for each file.
             self.lowerlevelindex = (
                 self.firstlevelindex_of_levelname if self.j_splitting_on else self.firstlevelindex_of_levelnamenoJ
             ).get(self.lowerlevelname, -1)

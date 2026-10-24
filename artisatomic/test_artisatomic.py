@@ -6920,3 +6920,39 @@ def test_readfacdata_reads_a_compressed_file(tmp_path):
         fgzip.write(data)
 
     assert readfacdata.GetLevels(tmp_path / "fac.lev.asc").equals(plain)
+
+
+def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_energy():
+    """Two levels of one energy get their ids in the order of their first mention in the line list.
+
+    The lower levels of every line come before the upper levels, and a level that two lines share
+    gets one id. The frame keeps the values of the line list as the keys of the join.
+    """
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [0, 0, 500],
+            "Lower_Type": ["(e)", "(e)", "(o)"],
+            "Lower_g": [9.0, 7.0, 3.0],
+            "Upper_Level": [500, 500, 20000],
+            "Upper_Type": ["(e)", "(o)", "(e)"],
+            "Upper_g": [5.0, 3.0, 1.0],
+        }
+    )
+    dflevels = readdreamdata.level_frame(dflines)
+
+    # the two levels at 0 cm^-1 in the order of the lines, then the shared level at 500 cm^-1
+    # before the one that the first line names, because the first line's upper level is first
+    assert dflevels.rows() == [
+        (0, "(e)", 0, 9.0),
+        (1, "(e)", 0, 7.0),
+        (2, "(o)", 500, 3.0),
+        (3, "(e)", 500, 5.0),
+        (4, "(e)", 20000, 1.0),
+    ]
+    assert dflevels["levelid"].dtype == pl.Int64
+    assert [level.levelname for level in readdreamdata.read_levels_data(dflevels)][:2] == [
+        "enpercm=0,even,g=9.0",
+        "enpercm=0,even,g=7.0",
+    ]
