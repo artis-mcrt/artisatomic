@@ -41,6 +41,7 @@ from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
+from artisatomic.base import ryd_to_ev
 from artisatomic.base import TESTMODE
 from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
@@ -1064,10 +1065,17 @@ def _fill_co3_phixs(
     # The table has 100 points from 1.0 to 10.9 times the threshold. The stop of 10.95 makes
     # arange produce all 100 grid points. A stop of 10.9 produced 99 points, and the strict flag
     # then dropped the table's last point.
+    # The downsample takes the first column in Rydberg, because the weight of a bin depends on
+    # the energy of the photon and not on its ratio to the threshold. The threshold of the ground
+    # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
+    # quartet lie within 0.12 eV of each other, so the one table covers each of them.
     # The downsample runs also for the grid of the table itself. Every table of the output file is
     # the average over the frequency bin of each point, as the file comment says. The point values
     # of the table are not those averages.
-    dict_phixstable = {"gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1), phixsvalues_const, strict=True)))}
+    threshold_ryd = get_nist_ionization_energies_ev()[atomic_number, ion_stage] / ryd_to_ev
+    dict_phixstable = {
+        "gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1) * threshold_ryd, phixsvalues_const, strict=True)))
+    }
     phixsvalues = reduce_phixs_tables(
         dict_phixstable,
         args.optimaltemperature,
