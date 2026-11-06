@@ -46,8 +46,12 @@ def _read_atomic_properties() -> tuple[list[str], list[float]]:
     columns = rows[0]
     symbolcolumn, numbercolumn, masscolumn = columns.index("symbol"), columns.index("number"), columns.index("mass")
     symbols = [row[symbolcolumn] for row in rows[1:]]
-    # estimate an unknown atomic mass ("NA" in the file) as Z / 0.45
-    masses = [float(row[masscolumn]) if row[masscolumn] != "NA" else int(row[numbercolumn]) / 0.45 for row in rows[1:]]
+    # every element has a mass: an element with no stable isotope has the mass number of its
+    # longest-lived isotope. compositiondata.txt gives the mass, and ARTIS divides by it.
+    masses = [float(row[masscolumn]) for row in rows[1:]]
+    if [int(row[numbercolumn]) for row in rows[1:]] != list(range(1, len(rows))):
+        msg = "atomic_properties.txt must list the elements in the order of the atomic number, from Z = 1"
+        raise ValueError(msg)
     return symbols, masses
 
 
@@ -228,7 +232,9 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     if isinstance(energy_levels, pl.DataFrame):
         dflevels = energy_levels
     elif energy_levels:
-        dflevels = pl.DataFrame(energy_levels)
+        # all rows, and not the first 100: a column that starts with 100 integers would become an
+        # integer column and cut a later float, and a column that starts with 100 nulls would raise
+        dflevels = pl.DataFrame(energy_levels, infer_schema_length=None)
     else:
         # An empty list carries no column names, and write_adata() selects the level columns
         # by name. An ion with no levels therefore gets the columns that every reader supplies.
@@ -894,9 +900,14 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     The data sets ship some files compressed and some not, and the set of compressed files varies
     between downloads. Callers name the plain file, and this function finds the form that is
     present.
+
+    The default threads=0 decompresses in this process. With threads above 0, xopen starts a process
+    that writes into a pipe. A reader that closes the file before its end, for example after the
+    header lines, then makes that thread of xopen print a BrokenPipeError.
     """
     from xopen import xopen
 
+    kwargs.setdefault("threads", 0)
     return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
@@ -923,16 +934,26 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     print(f"{filepath} is not utf-8. artisatomic rewrites the file as utf-8 from iso-8859-1.")
     # every byte is a character in iso-8859-1, so this decode cannot fail
     text = filebytes.decode("iso-8859-1")
+    # A temporary file beside the data file, and then a replace, so that an interrupt cannot leave a
+    # part of the data file. The temporary name keeps the compression extension, because xopen
+    # selects the compression from it.
+    extension = next((ext for ext in compression_extensions if ext and filepath.name.endswith(ext)), "")
+    temppath = filepath.with_name(f"{filepath.name.removesuffix(extension)}.{secrets.token_hex(8)}.tmp{extension}")
     try:
-        with xopen(filepath, "wt", encoding="utf-8") as fout:
+        with xopen(temppath, "wt", encoding="utf-8") as fout:
             fout.write(text)
+        temppath.replace(filepath)
     except OSError as exc:
+        temppath.unlink(missing_ok=True)
         msg = (
             f"Could not rewrite {filepath} as utf-8: {exc}\n"
             f"Convert the file by hand. Then run this again:\n"
             f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
         )
         raise RuntimeError(msg) from exc
+    except BaseException:
+        temppath.unlink(missing_ok=True)
+        raise
 
     return True
 

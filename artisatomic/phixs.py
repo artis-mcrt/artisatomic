@@ -124,6 +124,17 @@ def match_hydrogenic_phixs(
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
         photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
+    # ARTIS stops for an ion with a table for an excited level and none for the ground level
+    # (input.cc). The ground level is the first of the levels in energy order.
+    if phixstables and lowest_levels["levelid"][0] not in phixstables:
+        log_comment(
+            flog,
+            ("adata",),
+            "WARNING: the ground level gets no hydrogenic photoionisation table, so artisatomic gives no table to any"
+            " level of this ion. ARTIS needs a table for the ground level if an excited level has one.",
+        )
+        return np.empty((0, args.nphixspoints)), [], np.empty(0)
+
     reduced_phixs_dict = reduce_phixs_tables(
         phixstables,
         args.optimaltemperature,
