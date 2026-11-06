@@ -6957,3 +6957,11 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_fix_coldata_level_name_keeps_the_j_part() -> None:
+    """Replace only the term of a known typo, and keep the [J] part."""
+    nametypos = rhd.coldata_level_name_typos[9, 3]
+    assert rhd.fix_coldata_level_name("2s2_2p3_4Do[5/2]", nametypos) == "2s2_2p3_2Do[5/2]"
+    assert rhd.fix_coldata_level_name("2s2_2p3_4Do", nametypos) == "2s2_2p3_2Do"
+    assert rhd.fix_coldata_level_name("2s2_2p3_4So", nametypos) == "2s2_2p3_4So"

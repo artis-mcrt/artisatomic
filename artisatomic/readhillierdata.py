@@ -162,8 +162,9 @@ ions_data |= {
     (8, 1): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     (8, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # F
-    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), ""),
-    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
+    # the collision data files of F II and F III give the values of the isoelectronic Ne III and Ne IV
+    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), "col_data.dat"),
+    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), "col_data.dat"),
     # Si
     (14, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # P
@@ -1923,6 +1924,23 @@ def get_level_valence_n(levelname: str) -> int | None:
     return parse_orbital_n(orbitals[-1]) if orbitals else None
 
 
+# Level names of a collision data file that are typos for a level of the oscillator file. The
+# configuration 2s2_2p3 has the terms 4S, 2D and 2P only, and the F III lines name J = 5/2 and 3/2.
+coldata_level_name_typos = {(9, 3): {"2s2_2p3_4Do": "2s2_2p3_2Do"}}
+
+# the collision data files that give the values of another ion, as their headers say
+coldata_of_another_ion = {
+    (9, 2): "The collision data file gives the values of Ne III, the ion with the same electrons, as its header says.",
+    (9, 3): "The collision data file gives the values of Ne IV, the ion with the same electrons, as its header says.",
+}
+
+
+def fix_coldata_level_name(name: str, nametypos: dict[str, str]) -> str:
+    """Replace the part before the [J] of a collision data level name if it is a known typo."""
+    term, bracket, rest = name.partition("[")
+    return nametypos.get(term, term) + bracket + rest
+
+
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
@@ -1967,6 +1985,16 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     log_comment(
         flog, ("transitiondata",), f"The collision strengths come from {path_in_data_folder(filename, hillier_folder)}."
     )
+    if (atomic_number, ion_stage) in coldata_of_another_ion:
+        log_comment(flog, ("transitiondata",), coldata_of_another_ion[atomic_number, ion_stage])
+    nametypos = coldata_level_name_typos.get((atomic_number, ion_stage), {})
+    for typo, levelname in nametypos.items():
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The collision data file writes {typo} for the level {levelname} of the oscillator file. The reader reads"
+            " it as that level.",
+        )
     coll_lines_in = 0
     # the lines that name a term with more than one J level, so that their value applies to each level of the term
     termnamed_lines = 0
@@ -2076,6 +2104,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 else:
                     # Assume there is just a space between them (as is the case in Ni XIV)
                     namefrom, nameto = row[:2]
+                namefrom, nameto = (fix_coldata_level_name(name, nametypos) for name in (namefrom, nameto))
                 upsilon = fortran_float(upsilonvalues[temperature_index])
                 coll_lines_in += 1
 
