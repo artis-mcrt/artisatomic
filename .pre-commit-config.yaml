@@ -1,6 +1,4 @@
 ---
-# prek install installs these hook types. The uv-sync hook runs after a checkout, a merge and a rewrite.
-default_install_hook_types: [pre-commit, post-checkout, post-merge, post-rewrite]
 repos:
     - repo: https://github.com/pre-commit/pre-commit-hooks
       rev: v6.0.0

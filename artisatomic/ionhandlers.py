@@ -60,19 +60,6 @@ def get_ion_handlers(
         for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3)))
         for ion_stage in ion_stages
     ]
-    # The read of the lighter elements can take an hour, so a missing file stops the run here. The
-    # test mode reads the Kurucz sample, which holds the files of Sr I-II and Y I-II only.
-    if not TESTMODE:
-        for atomic_number, ion_stage in kuruczions:
-            try:
-                readkuruczdata.find_gfall(atomic_number, ion_stage - 1)
-            except FileNotFoundError as exc:
-                msg = (
-                    f"The built-in selection takes Z={atomic_number} ion_stage={ion_stage} from the Kurucz line lists,"
-                    f" but the file is missing. Download the Kurucz files (atomic-data-kurucz/url.txt), or give an"
-                    f" ion handlers file.\n{exc}"
-                )
-                raise FileNotFoundError(msg) from exc
     ion_handlers = add_handlers_if_not_set(
         ion_handlers,
         kuruczions,
@@ -81,6 +68,23 @@ def get_ion_handlers(
         maxionstage=maxionstage,
         maxatomicnumber=maxatomicnumber,
     )
+    # The read of the lighter elements can take an hour, so a missing file stops the run here. Only the
+    # ions that the Kurucz handler keeps count: ADAS can take Sr I, and the limits can exclude an ion.
+    # The test mode reads the Kurucz sample, which holds the files of Sr I-II and Y I-II only.
+    if not TESTMODE:
+        for atomic_number, listions in ion_handlers:
+            for ion_stage, handler in listions:
+                if handler != "kurucz":
+                    continue
+                try:
+                    readkuruczdata.find_gfall(atomic_number, ion_stage - 1)
+                except FileNotFoundError as exc:
+                    msg = (
+                        f"The built-in selection takes Z={atomic_number} ion_stage={ion_stage} from the Kurucz line"
+                        " lists, but the file is missing. Download the Kurucz files (atomic-data-kurucz/url.txt), or"
+                        f" give an ion handlers file.\n{exc}"
+                    )
+                    raise FileNotFoundError(msg) from exc
     ion_handlers = readhillierdata.extend_ion_list(
         ion_handlers,
         minionstage=minionstage,
