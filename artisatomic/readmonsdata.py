@@ -70,6 +70,10 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
             schema_overrides=dict.fromkeys(columnnames, pl.String),
         ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
 
+    # polars casts the text "NaN" or "inf" to a float with no error, and a NaN energy passes the tolerance test
+    if dfcolumns.select(pl.all().is_finite().all()).row(0) != (True,) * columncount:
+        msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
+        raise ValueError(msg)
     return [dfcolumns[name].to_numpy() for name in columnnames]
 
 

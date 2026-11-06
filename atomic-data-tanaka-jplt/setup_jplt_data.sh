@@ -15,7 +15,9 @@ if [ ! -f data_v2.1/33_2.txt.zst ]; then
   # v2.1 holds only some ions, so the script extracts it over the v2.0 files
   tar -xvf data_v2.0.tar.gz -C data_v2.1 --strip-components=1
 
-  tar -xvf grasp_v2.1.tar.gz -C data_v2.1 --strip-components=1
+  # The transition list of grasp_v2.1/33_2.txt (As II) does not use the level numbers of its level
+  # list, so the v2.0 file of As II stays. readtanakajpltdata.py stops on the v2.1 file.
+  tar -xvf grasp_v2.1.tar.gz -C data_v2.1 --strip-components=1 --exclude='*/33_2.txt'
 
 fi
 zstd --rm -f -T0 -v -5 data_v2.1/*.txt || true

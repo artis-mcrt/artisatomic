@@ -95,6 +95,21 @@ def energytuplefromrow(row, prefix):
 level_key_columns = ("Type", "Level", "g")
 
 
+def check_level_keys(dflines: pl.DataFrame) -> None:
+    """Stop the run for a level key that is NaN or null.
+
+    polars takes NaN as equal to NaN in unique() and in a join, so a line with a NaN g would give a
+    level with g = NaN and no error.
+    """
+    for prefix in ("Lower", "Upper"):
+        for column in level_key_columns:
+            values = dflines[f"{prefix}_{column}"]
+            bad = values.is_null() | (values.is_nan() if values.dtype.is_float() else False)
+            if bad.any():
+                msg = f"The DREAM table gives a {prefix} level with no value of {column} on {int(bad.sum())} lines"
+                raise ValueError(msg)
+
+
 def level_frame(dflines: pl.DataFrame) -> pl.DataFrame:
     """Recover the level list from a DREAM line list, which has no separate level table.
 
@@ -103,6 +118,7 @@ def level_frame(dflines: pl.DataFrame) -> pl.DataFrame:
     the values of the line list, and its zero-based level id. read_levels_and_transitions() joins
     the lines to the frame on the key columns, so the join needs no Python loop over the lines.
     """
+    check_level_keys(dflines)
     keys = pl.concat(
         [
             dflines.select(pl.col(f"{prefix}_{column}").alias(column) for column in level_key_columns)
