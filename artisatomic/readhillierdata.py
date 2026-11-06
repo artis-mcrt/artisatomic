@@ -1636,19 +1636,10 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             photoionization_targetconfig_fractions[levelindex] = phixs_targetconfigfractions_of_levelname.get(
                 lowerlevelname_a
             )
-            # The ground-state edge of the level, and not the edge of the route that gave the
-            # kept table. The writer gives every target of a level this one value, so a
-            # per-target value has no column to go in. ARTIS ignores the column: it computes
-            # the threshold of each route itself as the ionisation energy plus E(target) minus
-            # E(level). That is the edge of edge_lambda_angstrom(). See write_phixs_data() in
-            # output.py.
-            #
-            # abs(): CMFGEN writes a negative Lam(A) for some levels, and threshold_is_known() in
-            # output.py treats a value at or below zero as a missing threshold. A zero Lam(A) gives
-            # no threshold at all, which avoids a division by zero. The level keeps its NaN, and
-            # write_phixs_data() skips it.
-            if lambdaangstroms[levelindex] != 0.0:
-                photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
+            # The threshold stays NaN. fill_missing_phixs_thresholds() in output.py gives the edge to
+            # the first target from the ionisation energy and the level energies, as the file comment
+            # says. Lam(A) gave the edge to the ground level of the upper ion, and for a level above
+            # the limit its distance above the limit.
 
     return PhixsData(
         photoionization_crosssections,
