@@ -909,11 +909,14 @@ class PhotFileReader:
 
         self.phixstables: list[dict[str, np.ndarray]] = [{} for _ in range(photfilecount)]
         # Without J splitting, a fit of an edge-dependent type gets one table for each level of its
-        # name, with the edge of that level (see store_fit()). The key is the name and the level id.
+        # name. Each table has the edge of its level (see store_fit()). The key is the name and the level id.
         self.leveltables: list[dict[tuple[str, int], np.ndarray]] = [{} for _ in range(photfilecount)]
         # every level id of each name without its [J], for store_fit()
         self.levelindices_of_levelnamenoJ: dict[str, list[int]] = {}
-        for levelindex, levelname in enumerate(levelnames or []):
+        self.levelnames = levelnames or []
+        # the edge [Ry] of each table in phixstables, for shared_table_at_level_edge()
+        self.shared_edge_ryd: list[dict[str, float]] = [{} for _ in range(photfilecount)]
+        for levelindex, levelname in enumerate(self.levelnames):
             self.levelindices_of_levelnamenoJ.setdefault(levelname.split("[")[0], []).append(levelindex)
         self.phixstargets: list[str] = ["" for _ in range(photfilecount)]
         self.j_splitting_on = False
@@ -1049,7 +1052,10 @@ class PhotFileReader:
         lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex if levelindex is None else levelindex]
         edge_ev = 0.0 if lambda_angstrom == 0.0 else hc_in_ev_angstrom / lambda_angstrom + excitation_energy_ev
         if edge_ev <= 0.0:
-            self.levels_without_edge[self.lowerlevelname] = None
+            if levelindex is None or levelindex >= len(self.levelnames):
+                self.levels_without_edge[self.lowerlevelname] = None
+            else:
+                self.levels_without_edge[self.levelnames[levelindex]] = None
             return None
         return hc_in_ev_angstrom / edge_ev
 
@@ -1291,6 +1297,7 @@ class PhotFileReader:
         # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
+        self.shared_edge_ryd[self.filenum][self.pending_levelname] = self.thresholdenergyryd
 
     def take_data_rows(self, start: int, end: int) -> None:
         """Read the data rows start to end - 1 into the current block."""
@@ -1378,7 +1385,7 @@ class PhotFileReader:
             lambda_angstrom = self.edge_lambda_angstrom()
             if lambda_angstrom is None:
                 return
-            self.store_table(make_table(lambda_angstrom))
+            self.store_table(make_table(lambda_angstrom), lambda_angstrom)
             return
         for levelindex in self.levelindices_of_levelnamenoJ.get(self.lowerlevelname, [self.lowerlevelindex]):
             lambda_angstrom = self.edge_lambda_angstrom(levelindex)
@@ -1388,10 +1395,38 @@ class PhotFileReader:
             self.leveltables[self.filenum][self.lowerlevelname, levelindex] = table
             self.numpointsexpected = len(table)
 
-    def store_table(self, table: np.ndarray) -> None:
-        """Keep the evaluated table of the current level, and record its point count."""
+    def store_table(self, table: np.ndarray, lambda_angstrom: float) -> None:
+        """Keep the evaluated table of the current level, and record its point count and its edge."""
         self.phixstables[self.filenum][self.lowerlevelname] = table
+        self.shared_edge_ryd[self.filenum][self.lowerlevelname] = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
         self.numpointsexpected = len(table)
+
+    def shared_table_at_level_edge(self, filenum: int, levelname: str, levelindex: int) -> np.ndarray | None:
+        """Give the table of a name in one file, moved to the edge of one level of that name.
+
+        The reader evaluates a table of a type outside edge_dependent_fit_types at the edge of the
+        first level of the name. Such a table depends only on the ratio to the edge. The function
+        therefore multiplies the energies by the ratio of the two edges. It gives None for a level
+        with no edge.
+        """
+        table = self.phixstables[filenum][levelname]
+        firstlevelindex = self.firstlevelindex_of_levelnamenoJ[levelname]
+        edge_ryd = self.shared_edge_ryd[filenum].get(levelname)
+        if levelindex == firstlevelindex or edge_ryd is None:
+            return table
+        lambda_level = self.lambdaangstroms[levelindex]
+        if lambda_level == 0.0:
+            return None
+        # the excitation energy of the target is the same for each level of the name
+        level_edge_ryd = (
+            edge_ryd
+            + (hc_in_ev_angstrom / lambda_level - hc_in_ev_angstrom / self.lambdaangstroms[firstlevelindex]) / ryd_to_ev
+        )
+        if level_edge_ryd <= 0.0:
+            return None
+        moved = table.copy()
+        moved[:, 0] *= level_edge_ryd / edge_ryd
+        return moved
 
     def take_fit_coefficient(self, value: float) -> None:
         """Add one coefficient of a fit type, and evaluate the fit when the count of the type is complete."""
@@ -1603,11 +1638,31 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             names_with_leveltables.add(lowerlevelname)
 
     # A name with a table for each of its levels gives each level its own routes: the routes of the
-    # level, and the routes of the name in the other files.
+    # level, and the routes of the name in the other files. The downsample weights each bin with the
+    # absolute frequency. The table of the name therefore moves to the edge of each level before the downsample.
+    for filenum, photfilename in enumerate(photfilenames):
+        movedtables: dict[tuple[str, int], np.ndarray] = {}
+        for lowerlevelname in sorted(names_with_leveltables):
+            tablein = reader.phixstables[filenum].get(lowerlevelname)
+            if tablein is None or len(tablein) == 0 or tablein[0][0] == 0.0:
+                continue
+            for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
+                moved = reader.shared_table_at_level_edge(filenum, lowerlevelname, levelindex)
+                if moved is not None:
+                    movedtables[lowerlevelname, levelindex] = moved
+        reduced_movedtables = reduce_phixs_tables(
+            movedtables,
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
+        )
+        for (_, levelindex), reduced_phixstable in reduced_movedtables.items():
+            routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
     for lowerlevelname in sorted(names_with_leveltables):
-        nameroutes = routes_of_levelname.pop(lowerlevelname, [])
+        routes_of_levelname.pop(lowerlevelname, None)
         for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
-            routes = sorted([*routes_of_levelid.get(levelindex, []), *nameroutes], key=operator.itemgetter(0))
+            routes = sorted(routes_of_levelid.get(levelindex, []), key=operator.itemgetter(0))
             if routes:
                 routes_of_levelkey[levelindex] = routes
 
