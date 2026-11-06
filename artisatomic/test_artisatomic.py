@@ -38,6 +38,7 @@ from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import output_xgrid
 from artisatomic.base import PhixsData
@@ -6957,3 +6958,193 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_write_adata_rejects_an_ion_that_artis_cannot_read():
+    """An ion with no levels, a level energy that is not finite, or a bad g stops the run before any output."""
+
+    def levels(energies: list[float], gvalues: list[float]) -> pl.DataFrame:
+        return leveltuples_to_pldataframe(
+            pl.DataFrame({"levelname": ["a"] * len(energies), "energyabovegsinpercm": energies, "g": gvalues})
+        )
+
+    cases = [
+        (levels([], []), 10.0, "has no levels"),
+        (levels([0.0, float("nan")], [1.0, 3.0]), 10.0, "not a\n? ?finite number"),
+        (levels([0.0, 10.0], [1.0, 0.0]), 10.0, "finite positive number"),
+        (levels([0.0, 10.0], [1.0, float("inf")]), 10.0, "finite positive number"),
+        (levels([0.0], [1.0]), float("nan"), "ionisation energy nan"),
+    ]
+    for dflevels, ionization_energy, message in cases:
+        buf = io.StringIO()
+        with pytest.raises(ValueError, match=message):
+            write_adata(buf, 26, 2, dflevels, ionization_energy, [0] * dflevels.height, io.StringIO())
+        assert not buf.getvalue()
+
+
+def test_write_transition_data_rejects_values_that_artis_cannot_read():
+    """A NaN or negative A, or a collision strength that is not finite, stops the run before the header line."""
+    for avalue, collstr in ((float("nan"), -1.0), (-1.0, -1.0), (1.0, float("nan")), (float("inf"), 0.5)):
+        dftransitions = pl.DataFrame(
+            {"lowerlevel": [0], "upperlevel": [1], "A": [avalue], "coll_str": [collstr], "forbidden": [False]}
+        )
+        out = io.StringIO()
+        with pytest.raises(ValueError, match="not a finite number"):
+            write_transition_data(out, 26, 2, dftransitions, io.StringIO())
+        assert not out.getvalue()
+
+
+def test_resolve_coll_str_keeps_a_nan_upsilon_for_the_writer_check():
+    """Polars orders NaN above every number, so a NaN upsilon reaches coll_str, and the writer stops on it."""
+    from artisatomic.output import resolve_coll_str
+
+    dftransitions = pl.DataFrame(
+        {"lowerlevel": [0], "upperlevel": [1], "A": [1.0], "forbidden": [False], "upsilon": [float("nan")]}
+    ).pipe(resolve_coll_str)
+    with pytest.raises(ValueError, match="collision strength that is not a finite number"):
+        write_transition_data(io.StringIO(), 26, 2, dftransitions, io.StringIO())
+
+
+def test_log_repeated_level_pairs():
+    """Two transitions of one level pair get one counted warning, because ARTIS adds their A values."""
+    from artisatomic.output import log_repeated_level_pairs
+
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0, 0, 1], "upperlevel": [1, 1, 2, 2], "A": [1.0, 2.0, 3.0, 4.0]})
+    flog = IonLog(io.StringIO(), {"transitiondata": []})
+    log_repeated_level_pairs(flog, dftransitions)
+    assert flog.comments["transitiondata"] == [
+        (
+            "WARNING: the count of transitions that name the same pair of levels as the transition before them is"
+            " 1. ARTIS adds the A values of such transitions into one transition."
+        )
+    ]
+
+    flog = IonLog(io.StringIO(), {"transitiondata": []})
+    log_repeated_level_pairs(flog, dftransitions.unique(["lowerlevel", "upperlevel"], maintain_order=True))
+    assert flog.comments["transitiondata"] == []
+
+
+def test_write_phixs_data_rejects_tables_with_no_table_for_the_ground_level():
+    """ARTIS stops for an ion with a table for an excited level and none for the ground level."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[0.0, 0.0], [1.0, 0.5]])
+    targetfractions = [[], [(0, 1.0)]]
+    thresholds = np.array([np.nan, 13.6])
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="none for the ground level"):
+        write_phixs_data(out, 27, 3, crosssections, targetfractions, thresholds, args, io.StringIO())
+    assert not out.getvalue()
+
+
+def test_write_phixs_data_rejects_a_target_fraction_that_prints_as_zero():
+    """ARTIS stops for a target fraction that is not above zero, and it reads the printed value."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5]])
+    targetfractions = [[(0, 1.0 - 1e-7), (1, 1e-7)]]
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="prints as zero"):
+        write_phixs_data(out, 8, 1, crosssections, targetfractions, np.array([13.6]), args, io.StringIO())
+    assert not out.getvalue()
+
+
+def test_match_hydrogenic_phixs_gives_no_table_when_the_ground_level_has_none():
+    """A ground level name with no principal quantum number gives the whole ion no table.
+
+    ARTIS stops for an ion with a table for an excited level and none for the ground level. The
+    Kurucz Co III ground level 'd7 a4F' is such a case.
+    """
+    rhd.read_hyd_phixsdata()
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [0.0, 1000.0],
+            "g": [10.0, 2.0],
+            "levelname": ["N(1S)2H 1,enpercm=0.0,j=4.5", "s1s  1S,enpercm=1000.0,j=0.5"],
+        }
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "phixsdata": []})
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=27,
+        energy_levels=dflevels,
+        ionization_energy_ev=4 * rhd.ryd_to_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=phixs_args(),
+        flog=flog,
+    )
+    assert crosssections.size == 0
+    assert targetfractions == []
+    assert thresholds.size == 0
+    assert flog.comments["adata"][0].startswith("WARNING: the ground level gets no hydrogenic photoionisation table")
+    assert flog.comments["phixsdata"] == []
+
+
+def test_xopen_check_extension_closes_a_compressed_file_early_with_no_thread_error(tmp_path, monkeypatch):
+    """A reader that reads only the header of a .zst file must not make a thread of xopen raise.
+
+    The zstd program makes the file, as the setup scripts do. With threads above 0, xopen read such
+    a file through a pipe, and an early close gave a BrokenPipeError in most reads.
+    """
+    import shutil
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]  # the test runs the zstd program
+    import threading
+
+    zstdpath = shutil.which("zstd")
+    if zstdpath is None:
+        pytest.skip("the zstd program is not installed")
+    values = np.random.default_rng(1).random((100_000, 2))
+    filepath = tmp_path / "table.txt"
+    filepath.write_text(
+        "".join(f"{index:d} {first:.12e} {second:.12e}\n" for index, (first, second) in enumerate(values.tolist())),
+        encoding="utf-8",
+    )
+    subprocess.run([zstdpath, "-q", "-15", "--rm", str(filepath)], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+
+    errors: list[BaseException | None] = []
+    monkeypatch.setattr(threading, "excepthook", lambda hookargs: errors.append(hookargs.exc_value))
+    for _ in range(20):
+        with xopen_check_extension(filepath, mode="rt", encoding="utf-8") as fin:
+            assert fin.readline().startswith("0 ")
+    assert errors == []
+
+
+def test_rewrite_file_as_utf8_keeps_the_compression_and_leaves_no_temporary_file(tmp_path):
+    """The rewrite of a compressed file gives the same compression, and no temporary file stays in the folder."""
+    text = "Reference: Galavís M.E. 1998\n"
+    filepath = tmp_path / "osc_data.gz"
+    with xopen(filepath, "wb") as fout:
+        fout.write(text.encode("iso-8859-1"))
+
+    assert rewrite_file_as_utf8(tmp_path / "osc_data")
+    with xopen(filepath, "rb") as fin:
+        assert fin.read() == text.encode("utf-8")
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["osc_data.gz"]
+
+
+def test_atomic_weights_give_each_element_a_mass():
+    """Each element has a mass. An element with no stable isotope has the mass number of its longest-lived isotope."""
+    from artisatomic.base import atomic_weights
+    from artisatomic.base import elsymbols
+
+    assert len(atomic_weights) == len(elsymbols) == 119
+    assert all(isinstance(mass, float) and mass > 0.0 for mass in atomic_weights[1:])
+    assert (elsymbols[43], atomic_weights[43]) == ("Tc", 98.0)
+    assert (elsymbols[61], atomic_weights[61]) == ("Pm", 145.0)
+    assert (elsymbols[84], atomic_weights[84]) == ("Po", 209.0)
+    assert (elsymbols[88], atomic_weights[88]) == ("Ra", 226.0)
+    assert atomic_weights[26] == 55.845
+
+
+def test_leveltuples_to_pldataframe_infers_the_types_from_all_rows():
+    """A column that starts with 100 integers keeps a later float, and one that starts with 100 nulls keeps a later value."""
+    from artisatomic.base import EnergyLevel
+
+    levels = [
+        EnergyLevel(f"level{index}", 0 if index < 120 else 1234.5, 2, None if index < 120 else 1)
+        for index in range(200)
+    ]
+    dflevels = leveltuples_to_pldataframe(levels)
+    assert dflevels["energyabovegsinpercm"][150] == 1234.5
+    assert dflevels["parity"][150] == 1

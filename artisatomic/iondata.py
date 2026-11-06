@@ -262,7 +262,10 @@ def read_ion_data(
                 atomic_number, dfenergylevels, ionization_energy_ev, handler, get_level_valence_n, args, flog
             )
 
-    dftransitions = transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions)
+    # all rows, and not the first 100 (see leveltuples_to_pldataframe())
+    dftransitions = (
+        transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions, infer_schema_length=None)
+    )
 
     return IonData(
         ion_stage=ion_stage,
