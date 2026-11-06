@@ -2643,7 +2643,7 @@ def test_is_adf04_terminator():
 
 
 def read_adf04_sample_lines() -> list[str]:
-    """Return the lines of the committed adf04 sample, which stops inside the collision block."""
+    """Return the lines of the committed adf04 sample. It holds a part of the collision rows, and the two -1 rows."""
     with xopen_check_extension(adf04_sample_path()) as fsample:
         return fsample.readlines()
 
@@ -2654,8 +2654,9 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     # an ADAS process-code row sits inside the collision block; the trailer follows the terminator
     processrow = "R  1  +1" + " 3.24-13" * 22 + "\n"
     trailer = ["  -1\n", "  -1  -1\n", "C-----\n", "C PRODUCER: test\n", "   1   2 9.99+99\n"]
+    assert lines[-2:] == ["  -1\n", "  -1  -1\n"]
     filepath = tmp_path / "27_3.adf04"
-    filepath.write_text("".join([*lines, processrow, *trailer]))
+    filepath.write_text("".join([*lines[:-2], processrow, *trailer]))
 
     flog = io.StringIO()
     _, energylevels, dfupsilon, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
@@ -2744,9 +2745,14 @@ def test_rename_old_data_directory_does_not_move_the_data_of_a_symbolic_link(tmp
 
 
 def test_extend_ion_list_finds_a_compressed_adf04():
-    """Ion discovery must find an adf04 file that is compressed."""
-    assert (38, [(1, "adas")]) in readadasdata.extend_ion_list({})
-    assert (20, [(3, "adas")]) in readadasdata.extend_ion_list({})
+    """Ion discovery must find an adf04 file that is compressed.
+
+    The OPEN-ADAS Ca III file is the test file of the Eissner notation. The built-in selection does
+    not take it, so a default run takes CMFGEN Ca III.
+    """
+    ions = readadasdata.extend_ion_list({})
+    assert (38, [(1, "adas")]) in ions
+    assert all(atomic_number != 20 for atomic_number, _ in ions)
 
 
 def test_convert_eissner_to_standard():
@@ -2943,12 +2949,11 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
         "   2   1 6.27+08 4.29-01 5.29-01",
         " P  2   1 1.00-10 1.00-10 1.00-10",
         "R  1  +1         3.24-13 3.24-13",
-        "C a comment",
     ]
     flog = io.StringIO()
     upsilons = upsilon_dict(readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2])
     assert upsilons == {(0, 1): pytest.approx(0.429)}
-    assert "The reader skipped 3 collision rows that are not an electron impact excitation." in flog.getvalue()
+    assert "The reader skipped 2 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
 
@@ -7241,3 +7246,138 @@ def test_read_levels_and_transitions_names_an_ion_that_cmfgen_lacks():
         readhillierdata.read_levels_and_transitions_from_file(23, 1, io.StringIO())
     with pytest.raises(ValueError, match=r"Z=29 ion_stage=2"):
         readhillierdata.read_levels_and_transitions_from_file(29, 2, io.StringIO())
+
+
+def test_kurucz_get_level_valence_n_with_the_electron_count():
+    """With the electron count of the ion, a label that gives only counts gets the lowest n outside the core."""
+    valence_n = readkuruczdata.get_level_valence_n
+    # Co I 3d7 4s2 and Co III 3d7: the counts sum to the electrons outside the argon core
+    assert valence_n("d7s2 a4F,enpercm=0.0,j=4.5", nelectrons=27) == 4
+    assert valence_n("d7 a4F,enpercm=0.0,j=4.5", nelectrons=25) == 3
+    # Ca V 3s2 3p4: the parser read the count 2 as n
+    assert valence_n("s2p4 3P,enpercm=0.0,j=2.0", nelectrons=16) == 3
+    # C I 2p 3s: the counts also sum to 4, but 2p then 2s is not in the order of a label
+    assert valence_n("p3s 3P,enpercm=60000.0,j=1.0", nelectrons=6) == 3
+    # Y I 4d 5s2 gives its n, and the counts 5 + 2 do not sum to 3
+    assert valence_n("d5s2 a2D,enpercm=0.0,j=1.5", nelectrons=39) == 5
+    # Ce I 4f 5d2 6s
+    assert valence_n("fd2s 1G,enpercm=0.0,j=4.0", nelectrons=58) == 6
+    # an n below the lowest n of the orbital outside the core is a count read as n
+    assert valence_n("2p 2P,enpercm=1000.0,j=0.5", nelectrons=13) is None
+    # without the electron count, the parser reads the label alone
+    assert valence_n("d7s2 a4F,enpercm=0.0,j=4.5") == 7
+
+
+def test_kurucz_label_parity_reads_each_configuration_word():
+    """Y I "5s2 5p z2P" is odd: the parity comes from all the words before the term."""
+    assert readkuruczdata.kurucz_label_parity("5s2 5p z2P") == 1
+    assert readkuruczdata.kurucz_label_parity("sp6 10p 1P") == 1
+    assert readkuruczdata.kurucz_label_parity("5s2 a1S") == 0
+    assert readkuruczdata.kurucz_label_parity("3s *5S") == 1
+
+
+def kurucz_rows(**columns: list[float]) -> pl.DataFrame:
+    """Build gfall rows with the columns that the J functions read."""
+    base = {
+        "label_lower": ["a"] * len(columns["j_lower"]),
+        "label_upper": ["b"] * len(columns["j_lower"]),
+        "loggf": [0.0] * len(columns["j_lower"]),
+    }
+    return pl.DataFrame({**base, **columns})
+
+
+def test_kurucz_round_j_to_half_integers():
+    """A J that is not a multiple of 1/2 gets the nearest J with the 2J parity of the ion (Eu I J = 6.6)."""
+    dfgfall = kurucz_rows(
+        energyabovegsinpercm_lower=[0.0, 0.0],
+        j_lower=[3.5, 3.5],
+        energyabovegsinpercm_upper=[13778.68, 20000.0],
+        j_upper=[6.6, 4.5],
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    # Eu I has 63 electrons, so 2J is odd: 6.6 becomes 6.5
+    result = readkuruczdata.round_j_to_half_integers(dfgfall, 63, flog)
+    assert result["j_upper"].to_list() == [6.5, 4.5]
+    assert flog.comments["adata"][0].startswith("WARNING: On 1 line, the file gives a J that is not a multiple of 1/2")
+    # an even count of electrons gives an even 2J: 6.6 becomes 7.0
+    assert readkuruczdata.round_j_to_half_integers(dfgfall, 62, io.StringIO())["j_upper"][0] == 7.0
+
+
+def test_kurucz_drop_lines_of_a_second_ground_j():
+    """One row that gives the ground level another J (S I 3p4 3P J = 0 at 0 cm^-1) loses its line."""
+    dfgfall = kurucz_rows(
+        energyabovegsinpercm_lower=[0.0, 0.0, 0.0, 396.055],
+        j_lower=[2.0, 2.0, 0.0, 1.0],
+        energyabovegsinpercm_upper=[50000.0, 51000.0, 74976.14, 50000.0],
+        j_upper=[1.0, 2.0, 1.0, 1.0],
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    result = readkuruczdata.drop_lines_of_a_second_ground_j(dfgfall, flog)
+    assert result["j_lower"].to_list() == [2.0, 2.0, 1.0]
+    assert "keeps J = 2.0" in flog.comments["adata"][0]
+    # one J at 0 cm^-1 changes nothing
+    assert readkuruczdata.drop_lines_of_a_second_ground_j(result, io.StringIO()).equals(result)
+
+
+def test_kurucz_reader_rejects_a_file_of_another_ion(monkeypatch):
+    """A gfall file of another ion stops the read, and does not give its levels to the requested ion."""
+    srii = readkuruczdata.find_gfall(38, 1)
+    monkeypatch.setattr(readkuruczdata, "find_gfall", lambda *_: srii)
+    with pytest.raises(ValueError, match=r"holds the lines of Z=38 ion_stage=2, and not of Z=38 ion_stage=1"):
+        readkuruczdata.read_levels_and_transitions(38, 1, io.StringIO())
+
+
+def test_read_adf04_ends_the_collision_block_at_a_comment_line(tmp_path):
+    """A comment line ends the collision block, as in the Co III file of Tyndall, which has no -1 row."""
+    filepath = tmp_path / "1_1.adf04"
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01"]
+    filepath.write_text(
+        "\n".join([hydrogen_header, *hydrogen_levels, "   -1", two_temperatures, *rows, "C---", "C DATE:", ""]),
+        encoding="utf-8",
+    )
+    flog = io.StringIO()
+    upsilons = upsilon_dict(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2])
+    assert upsilons == {(0, 1): pytest.approx(0.429)}
+    assert "skipped" not in flog.getvalue()
+
+
+def test_read_adf04_rejects_a_file_that_ends_inside_the_collision_block(tmp_path):
+    """A file with no -1 row and no comment line after its collision rows is incomplete."""
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join(read_adf04_sample_lines()[:-2]))
+    with pytest.raises(ValueError, match="ends with no -1 row and no comment line"):
+        readadasdata.read_adf04(filepath, io.StringIO(), 5010.0, 27, 3)
+
+
+def test_read_adf04_rejects_a_negative_collision_strength(tmp_path):
+    """A negative upsilon is the mark of the writer for a forbidden pair with no value, so a file must not give one."""
+    with pytest.raises(ValueError, match="negative effective collision strengths"):
+        read_hydrogen_adf04(tmp_path, ["   2   1 6.27+08-4.29-01 5.29-01"])
+
+
+def test_adas_reader_keeps_one_a_value_for_a_repeated_pair(tmp_path, monkeypatch):
+    """ARTIS adds the A values of two rows of one pair, so the reader keeps the first row, as for the upsilons."""
+    write_hydrogen_adf04(tmp_path, ["   2   1 6.27+08 4.29-01 5.29-01", "   2   1 6.27+08 4.29-01 5.29-01"])
+    monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    result = readadasdata.read_adas_levels_and_transitions(1, 1, flog, phixs_args(electrontemperature=5000.0))
+    dftransitions = result[2]
+    assert dftransitions.height == 1
+    assert any("on more than one row for 1 rows" in line for line in flog.comments["transitiondata"])
+
+
+def test_adas_parity_and_valence_n_ignore_an_unclosed_parent_term():
+    """The 18 characters of the configuration column can end inside a parent term: '3s23p63d5(4P)4s(3P'."""
+    config = "3s23p63d5(4P)4s(3P"
+    assert readadasdata.without_unclosed_parent_term(config) == "3s23p63d5(4P)4s"
+    assert get_config_parity(readadasdata.without_unclosed_parent_term(config), hasterm=False) == 0
+    assert readadasdata.get_level_valence_n(f"{config}_4Pe[3/2]_id=7") == 4
+
+
+def test_split_orbitals_reads_a_two_digit_n_after_an_occupation():
+    """'5s110p1' is 5s1 10p1. The reading 5s11 0p1 gives n = 0, which is not possible."""
+    assert get_config_parity("4p65s110p1", hasterm=False) == 1
+    assert get_config_parity("4p610s1", hasterm=False) == 0
+    assert get_config_parity("4p6 5s1 10p1", hasterm=False) == 1
+    # the occupation-1 reading still wins where both readings are possible: 3d1 4s2
+    assert get_config_parity("3d14s2", hasterm=False) == 0

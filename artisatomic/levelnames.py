@@ -82,10 +82,14 @@ def _split_orbitals(instr: str) -> list[str]:
                 # Single-digit occupation. A two-digit n survives ('10d1') only where the
                 # digits cannot belong to a preceding orbital. '3d14s2' is ambiguous
                 # (3d1 4s2 or 3d 14s2), and there the occupation-1 reading wins.
+                # A one-digit reading that gives n = 0 is not possible, so there the two-digit n
+                # wins: '5s110p1' is 5s1 10p1, and not 5s11 0p1.
                 two_digit_n = (
                     len(instr) >= 4
                     and is_two_digit_n(instr[-4:-2])
-                    and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
+                    and (
+                        len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars) or instr[-3] == "0"
+                    )
                 )
                 startpos = -4 if two_digit_n else -3
                 electron_config.insert(0, instr[startpos:])
