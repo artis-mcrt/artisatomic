@@ -844,7 +844,14 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         firstindex_of_name.setdefault(levelname, levelindex)
         firstindex_of_namenoj.setdefault(levelname.split("[")[0], levelindex)
     reader = rhd.PhotFileReader(
-        8, 1, 2, dflevels["lambdaangstrom"].to_list(), firstindex_of_name, firstindex_of_namenoj, io.StringIO()
+        8,
+        1,
+        2,
+        dflevels["lambdaangstrom"].to_list(),
+        firstindex_of_name,
+        firstindex_of_namenoj,
+        io.StringIO(),
+        levelnames=levelnames,
     )
     reduced_of_filenum = []
     for filenum, photfilename in enumerate(ionfiles.photfilenames):
@@ -6957,3 +6964,21 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
+    """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
+
+    CMFGEN evaluates the fit with the edge of each level. The reader gave each level the table of
+    the first level of the name, so the levels [4] and [5] got 4.269 Mb at the threshold in place of 4.877 Mb.
+    """
+    if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = readhillierdata.read_levels_and_transitions(19, 2, flog)
+        phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, phixs_args(), flog)
+    names = dflevels["levelname"].to_list()
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2692, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8767, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8767, rel=1e-3)

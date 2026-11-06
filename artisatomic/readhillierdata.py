@@ -2,10 +2,12 @@
 
 import contextlib
 import io
+import operator
 import os
 import re
 import typing as t
 from collections import defaultdict
+from collections.abc import Callable
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
@@ -738,6 +740,9 @@ def read_levels_and_transitions_from_file(
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
 
 
+# the fit types that depend on the edge itself, and not only on the ratio of the frequency to the edge
+edge_dependent_fit_types = frozenset({2, 3, 7, 8, 9})
+
 # the energy grid of the fit types 1, 4, 5, 6, 7 and 9, as a multiple of the threshold energy. The
 # grid has 1000 points from the threshold to 20.96 times the threshold, denser near the threshold.
 fit_energy_div_threshold = 1 + 20 * (np.arange(0, 1.0, 0.001) ** 2)
@@ -889,6 +894,7 @@ class PhotFileReader:
         firstlevelindex_of_levelname: dict[str, int],
         firstlevelindex_of_levelnamenoJ: dict[str, int],
         flog,
+        levelnames: list[str] | None = None,
     ) -> None:
         """Set up the reader for one ion. The level lookups come from read_phixs_tables()."""
         self.atomic_number = atomic_number
@@ -902,6 +908,13 @@ class PhotFileReader:
         self.flog = flog
 
         self.phixstables: list[dict[str, np.ndarray]] = [{} for _ in range(photfilecount)]
+        # Without J splitting, a fit of an edge-dependent type gets one table for each level of its
+        # name, with the edge of that level (see store_fit()). The key is the name and the level id.
+        self.leveltables: list[dict[tuple[str, int], np.ndarray]] = [{} for _ in range(photfilecount)]
+        # every level id of each name without its [J], for store_fit()
+        self.levelindices_of_levelnamenoJ: dict[str, list[int]] = {}
+        for levelindex, levelname in enumerate(levelnames or []):
+            self.levelindices_of_levelnamenoJ.setdefault(levelname.split("[")[0], []).append(levelindex)
         self.phixstargets: list[str] = ["" for _ in range(photfilecount)]
         self.j_splitting_on = False
         # the level matching after the files uses one mode for the whole ion. Every phot file of
@@ -1013,7 +1026,7 @@ class PhotFileReader:
         )
         return self.excitation_energy_ev
 
-    def edge_lambda_angstrom(self) -> float | None:
+    def edge_lambda_angstrom(self, levelindex: int | None = None) -> float | None:
         """Threshold wavelength of the current level for the route of the current file.
 
         CMFGEN evaluates every fit at EDGE = GS_EDGE + EXC_FREQ (sub_phot_gen.f lines 182 and
@@ -1033,7 +1046,7 @@ class PhotFileReader:
         if self.lowerlevelindex < 0:
             return None
         excitation_energy_ev = self.resolve_excitation_energy()
-        lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex]
+        lambda_angstrom = self.lambdaangstroms[self.lowerlevelindex if levelindex is None else levelindex]
         edge_ev = 0.0 if lambda_angstrom == 0.0 else hc_in_ev_angstrom / lambda_angstrom + excitation_energy_ev
         if edge_ev <= 0.0:
             self.levels_without_edge[self.lowerlevelname] = None
@@ -1350,10 +1363,30 @@ class PhotFileReader:
         """Add one eight-column row of a type 9 (Verner & Yakovlev 1995) block."""
         self.fitcoefficients.append(VY95PhixsFitRow(int(row[0]), int(row[1]), *[fortran_float(x) for x in row[2:]]))
         if len(self.fitcoefficients) * 8 == self.numpointsexpected:
+            fitrows = list(self.fitcoefficients)
+            self.store_fit(lambda lambda_angstrom: get_vy95_phixstable(lambda_angstrom, fitrows))
+
+    def store_fit(self, make_table: Callable[[float], np.ndarray]) -> None:
+        """Evaluate the fit of the current block at the edge of its level, and store the table.
+
+        The fit types 2, 3, 7, 8 and 9 depend on the edge itself, and not only on the ratio to it.
+        CMFGEN evaluates them with the edge of each level (rdphot_gen_v2.f, lines 739-741;
+        sub_phot_gen.f). Without J splitting, one name covers the J levels of a term, and their
+        edges differ. The function then evaluates such a fit for each level of the name.
+        """
+        if self.j_splitting_on or self.crosssectiontype not in edge_dependent_fit_types or self.lowerlevelindex < 0:
             lambda_angstrom = self.edge_lambda_angstrom()
             if lambda_angstrom is None:
                 return
-            self.store_table(get_vy95_phixstable(lambda_angstrom, self.fitcoefficients))
+            self.store_table(make_table(lambda_angstrom))
+            return
+        for levelindex in self.levelindices_of_levelnamenoJ.get(self.lowerlevelname, [self.lowerlevelindex]):
+            lambda_angstrom = self.edge_lambda_angstrom(levelindex)
+            if lambda_angstrom is None:
+                continue
+            table = make_table(lambda_angstrom)
+            self.leveltables[self.filenum][self.lowerlevelname, levelindex] = table
+            self.numpointsexpected = len(table)
 
     def store_table(self, table: np.ndarray) -> None:
         """Keep the evaluated table of the current level, and record its point count."""
@@ -1379,10 +1412,8 @@ class PhotFileReader:
             fitcoefficients.append(value)
             ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
             if len(fitcoefficients) == ncoefficients:
-                lambda_angstrom = self.edge_lambda_angstrom()
-                if lambda_angstrom is None:
-                    return
-                self.store_table(fitfunc(lambda_angstrom, *fitcoefficients))
+                coefficients = list(fitcoefficients)
+                self.store_fit(lambda lambda_angstrom: fitfunc(lambda_angstrom, *coefficients))
             return
 
         if crosssectiontype == 2:
@@ -1404,10 +1435,9 @@ class PhotFileReader:
                         f"WARNING: l_end = {l_end} is greater than n - 1 = {n - 1}, so the reader skips the table.",
                     )
                 else:
-                    lambda_angstrom = self.edge_lambda_angstrom()
-                    if lambda_angstrom is None:
-                        return
-                    self.store_table(get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end))
+                    self.store_fit(
+                        lambda lambda_angstrom: get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end)
+                    )
             return
 
         if crosssectiontype == 3:
@@ -1422,13 +1452,14 @@ class PhotFileReader:
                         f"WARNING: n = {n} is above the largest n of the hydrogenic Gaunt tables ({max_hyd_gaunt_n}), so the reader skips the table.",
                     )
                     return
-                lambda_angstrom = self.edge_lambda_angstrom()
-                if lambda_angstrom is None:
-                    return
-                # scale the cross sections but not the energy grid
-                phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
-                phixstable[:, 1] *= scale
-                self.store_table(phixstable)
+
+                def scaled_table(lambda_angstrom: float) -> np.ndarray:
+                    # scale the cross sections but not the energy grid
+                    phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
+                    phixstable[:, 1] *= scale
+                    return phixstable
+
+                self.store_fit(scaled_table)
             return
 
         if crosssectiontype == 8:
@@ -1451,11 +1482,11 @@ class PhotFileReader:
                         f"WARNING: l_end = {l_end} is greater than n - 1 = {n - 1}, so the reader skips the table.",
                     )
                 else:
-                    lambda_angstrom = self.edge_lambda_angstrom()
-                    if lambda_angstrom is None:
-                        return
-                    self.store_table(
-                        get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=self.zion)
+                    zion = self.zion
+                    self.store_fit(
+                        lambda lambda_angstrom: get_hydrogenic_nl_phixstable(
+                            lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion
+                        )
                     )
 
 
@@ -1522,6 +1553,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         firstlevelindex_of_levelname,
         firstlevelindex_of_levelnamenoJ,
         flog,
+        levelnames=levelnames,
     )
     # the sum of the reduced tables of the routes of each level, and the fraction of each target
     reduced_phixs_dict: dict[str, np.ndarray] = {}
@@ -1529,6 +1561,10 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     num_levelnames_with_zero_crosssection = 0
     # every route of each level: (file number, reduced table)
     routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray]]] = defaultdict(list)
+    # the routes of the tables of one level (see PhotFileReader.store_fit()), and the names that have such tables
+    routes_of_levelid: defaultdict[int, list[tuple[int, np.ndarray]]] = defaultdict(list)
+    names_with_leveltables: set[str] = set()
+    routes_of_levelkey: dict[int, list[tuple[int, np.ndarray]]] = {}
 
     for filenum, photfilename in enumerate(photfilenames):
         filename = Path(
@@ -1555,27 +1591,34 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 continue
             routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable))
 
-    for lowerlevelname, routes in routes_of_levelname.items():
-        # Every ion with more than one photoionisation file has one file per final state of
-        # the upper ion. A level is usually present in all of them, so a second table for a
-        # level is the normal multi-target case and not an error.
-        #
-        # The ratio grid of a route starts at the first energy of its raw table. For a
-        # tabulated type that is the first row of the file, which can lie below the threshold.
+        reduced_leveltables = reduce_phixs_tables(
+            reader.leveltables[filenum],
+            args.optimaltemperature,
+            args.nphixspoints,
+            args.phixsnuincrement,
+            label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
+        )
+        for (lowerlevelname, levelindex), reduced_phixstable in reduced_leveltables.items():
+            routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
+            names_with_leveltables.add(lowerlevelname)
+
+    # A name with a table for each of its levels gives each level its own routes: the routes of the
+    # level, and the routes of the name in the other files.
+    for lowerlevelname in sorted(names_with_leveltables):
+        nameroutes = routes_of_levelname.pop(lowerlevelname, [])
+        for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
+            routes = sorted([*routes_of_levelid.get(levelindex, []), *nameroutes], key=operator.itemgetter(0))
+            if routes:
+                routes_of_levelkey[levelindex] = routes
+
+    def combine_routes(
+        label: str, routes: list[tuple[int, np.ndarray]]
+    ) -> tuple[np.ndarray, list[tuple[str, float]]] | None:
+        """Combine the routes of one level or one name, and log them. Give None for a table that is zero everywhere."""
         combined = combine_phixs_routes([(reader.phixstargets[filenum], reduced) for filenum, reduced in routes])
-
-        # A route whose reduced table is zero on every output point gives no output table,
-        # whatever its raw table holds. A type 8 fit does that when its offset edge nu_edge +
-        # nu_o lies above the grid that reduce_phixs_tables() samples.
         if not combined.fractions:
-            num_levelnames_with_zero_crosssection += 1
-            log_and_print(
-                flog, f"WARNING: every cross section point of {lowerlevelname} is zero, so its levels get no table."
-            )
-            continue
-
-        reduced_phixs_dict[lowerlevelname] = combined.table
-        phixs_targetconfigfractions_of_levelname[lowerlevelname] = combined.fractions
+            log_and_print(flog, f"WARNING: every cross section point of {label} is zero, so its levels get no table.")
+            return None
         if len(combined.factors) > 1:
             factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in combined.factors)
             droppedtext = "".join(
@@ -1586,9 +1629,30 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 flog,
                 ("phixsdata",),
                 "level with more than one route",
-                f"{lowerlevelname} has a cross section table in {len(combined.factors)} photoionisation files."
+                f"{label} has a cross section table in {len(combined.factors)} photoionisation files."
                 f" The sums of the reduced tables are {factortext}.{droppedtext}",
             )
+        return combined.table, combined.fractions
+
+    # Every ion with more than one photoionisation file has one file per final state of the upper
+    # ion. A level is usually present in all of them, so a second table for a level is the normal
+    # multi-target case and not an error. A route whose reduced table is zero on every output point
+    # gives no output table, whatever its raw table holds. A type 8 fit does that when its offset
+    # edge nu_edge + nu_o lies above the grid that reduce_phixs_tables() samples.
+    for lowerlevelname, routes in routes_of_levelname.items():
+        result = combine_routes(lowerlevelname, routes)
+        if result is None:
+            num_levelnames_with_zero_crosssection += 1
+            continue
+        reduced_phixs_dict[lowerlevelname], phixs_targetconfigfractions_of_levelname[lowerlevelname] = result
+
+    reduced_phixs_of_levelid: dict[int, tuple[np.ndarray, list[tuple[str, float]]]] = {}
+    for levelindex, routes in routes_of_levelkey.items():
+        result = combine_routes(levelnames[levelindex], routes)
+        if result is None:
+            num_levelnames_with_zero_crosssection += 1
+        else:
+            reduced_phixs_of_levelid[levelindex] = result
 
     # one summary for the ion, not one per photoionisation file. The counts below accumulate
     # over every file, so a log inside that loop repeated them with partial totals.
@@ -1649,6 +1713,13 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             # write_phixs_data() skips it.
             if lambdaangstroms[levelindex] != 0.0:
                 photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
+
+    for levelindex, (phixstable, fractions) in reduced_phixs_of_levelid.items():
+        photoionization_crosssections[levelindex] = phixstable
+        photoionization_targetconfig_fractions[levelindex] = fractions
+        # the ground-state edge of the level, as in the loop above
+        if lambdaangstroms[levelindex] != 0.0:
+            photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
     return PhixsData(
         photoionization_crosssections,
