@@ -373,6 +373,13 @@ def attribute_text(value, h5file) -> str:
         if value.dtype.kind == "S":
             value = np.strings.decode(value, "utf-8", "backslashreplace")
         return json.dumps(value.tolist(), default=str)
+    if isinstance(value, str):
+        # h5py gives a byte of a variable-length string that is not UTF-8 as a lone surrogate
+        # ("\udcff"), which write_parquet() cannot take
+        try:
+            return value.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="backslashreplace")
+        except UnicodeEncodeError:
+            return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
     return str(value)
 
 
@@ -567,12 +574,13 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             outputpath = newfolder / relativepath
             outputpath.parent.mkdir(parents=True, exist_ok=True)
             table.write_parquet(outputpath, metadata=metadata)
-        if outputfolder.exists():
-            outputfolder.rename(backupfolder)
+        # both renames are inside the try: an interrupt after the first one must put the earlier tables back
         try:
+            if outputfolder.exists():
+                outputfolder.rename(backupfolder)
             newfolder.rename(outputfolder)
         except BaseException as exc:
-            if backupfolder.exists():
+            if backupfolder.exists() and not outputfolder.exists():
                 try:
                     backupfolder.rename(outputfolder)
                 except OSError as restoreexc:
@@ -582,6 +590,10 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
                     raise RuntimeError(msg) from restoreexc
             raise exc from None
     finally:
+        # the state of the disk, and not only the flag: the backup can be the only copy of the
+        # earlier tables also after an interrupt in the handler above
+        if backupfolder.exists() and not outputfolder.exists():
+            keepworkfolder = True
         if not keepworkfolder:
             shutil.rmtree(workfolder, ignore_errors=True)
 

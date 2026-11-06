@@ -12,9 +12,12 @@ from pathlib import Path
 from artisatomic import readadasdata
 from artisatomic import readfloers25data
 from artisatomic import readhillierdata
+from artisatomic import readkuruczdata
 from artisatomic import readtanakajpltdata
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import elsymbols
 from artisatomic.base import sort_ion_handlers
+from artisatomic.base import TESTMODE
 from artisatomic.iondata import known_handlers
 
 # The file that holds a full ion selection, in the working directory. main() rejects an ion limit
@@ -57,6 +60,19 @@ def get_ion_handlers(
         for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3)))
         for ion_stage in ion_stages
     ]
+    # The read of the lighter elements can take an hour, so a missing file stops the run here. The
+    # test mode reads the Kurucz sample, which holds the files of Sr I-II and Y I-II only.
+    if not TESTMODE:
+        for atomic_number, ion_stage in kuruczions:
+            try:
+                readkuruczdata.find_gfall(atomic_number, ion_stage - 1)
+            except FileNotFoundError as exc:
+                msg = (
+                    f"The built-in selection takes Z={atomic_number} ion_stage={ion_stage} from the Kurucz line lists,"
+                    f" but the file is missing. Download the Kurucz files (atomic-data-kurucz/url.txt), or give an"
+                    f" ion handlers file.\n{exc}"
+                )
+                raise FileNotFoundError(msg) from exc
     ion_handlers = add_handlers_if_not_set(
         ion_handlers,
         kuruczions,
@@ -109,7 +125,20 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
     the file.
     """
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
-    for atomic_number, listions in loaded:
+    for element in loaded:
+        try:
+            atomic_number, listions = element
+        except (TypeError, ValueError):
+            msg = f"The entry {element!r} in artisatomicionhandlers.json is not an [atomic_number, [ions]] pair."
+            raise TypeError(msg) from None
+        # a JSON true is a Python bool, which is an int, and int() cuts 26.9 to 26
+        if (
+            not isinstance(atomic_number, int)
+            or isinstance(atomic_number, bool)
+            or not 1 <= atomic_number < len(elsymbols)
+        ):
+            msg = f"The atomic number {atomic_number!r} in artisatomicionhandlers.json is not a whole number from 1 to {len(elsymbols) - 1}."
+            raise ValueError(msg)
         ions: list[tuple[int, str]] = []
         for entry in listions:
             if isinstance(entry, int):
@@ -126,15 +155,21 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
                     " [ion_stage, handler] pair."
                 )
                 raise TypeError(msg) from None
+            if not isinstance(ion_stage, int) or isinstance(ion_stage, bool) or not 1 <= ion_stage <= atomic_number + 1:
+                msg = (
+                    f"Z={atomic_number} ion stage {ion_stage!r} in artisatomicionhandlers.json is not a whole number"
+                    f" from 1 to {atomic_number + 1}."
+                )
+                raise ValueError(msg)
             newnames = renamed_handlers.get(str(handler), {None: str(handler)})
-            handlername = newnames.get(int(ion_stage), newnames[None])
+            handlername = newnames.get(ion_stage, newnames[None])
             if handlername not in known_handlers:
                 msg = (
                     f"Z={atomic_number} ion stage {ion_stage} in artisatomicionhandlers.json names the unknown"
                     f" handler {handlername!r}. The handlers are: {', '.join(sorted(known_handlers))}."
                 )
                 raise ValueError(msg)
-            ions.append((int(ion_stage), handlername))
-        ion_handlers.append((int(atomic_number), ions))
+            ions.append((ion_stage, handlername))
+        ion_handlers.append((atomic_number, ions))
 
     return ion_handlers
