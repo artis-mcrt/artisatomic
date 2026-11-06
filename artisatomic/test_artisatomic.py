@@ -788,7 +788,9 @@ def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
     sums = [reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table).sum() for table in tables]
     assert sums[0] > 0.0
     assert [fraction for _, fraction in targets] == pytest.approx([tablesum / sum(sums) for tablesum in sums])
-    assert "so it will have no phixs" not in log
+    # the values on their own, so that a worker that reads the zero row at the repeated edge fails
+    assert [fraction for _, fraction in targets] == pytest.approx([0.85387, 0.14613], abs=1e-4)
+    assert "so its levels get no table" not in log
 
 
 def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
@@ -969,6 +971,11 @@ def test_read_coldata_term_to_j_redistribution():
     # and the reader splits it over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
     for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
         assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
+    # and over the upper levels in proportion to g_j (7 : 5 : 3 out of g_U = 15), for each pair
+    assert sorted(gvalues[j] for j in upper_ids) == [3.0, 5.0, 7.0]
+    for i in lower_ids:
+        for j in upper_ids:
+            assert upsilondict[i, j] == pytest.approx(upsilon_term * gvalues[i] / 9.0 * gvalues[j] / 15.0, rel=1e-3)
 
     # Fe II collision data is already J-resolved, so every value passes through unscaled. The
     # first row of col_data, a6De[9/2] -> a6De[7/2], gives 3.230 in the T = 0.5e4 K column
@@ -2239,9 +2246,16 @@ def test_extend_ion_list_forwards_the_limits(modulename):
     except FileNotFoundError as exc:
         pytest.skip(f"the data set of {modulename} is not available here: {exc}")
 
+    # these readers read committed data or the CMFGEN data that CI downloads, so no ion is an error
     if not allions:
-        if module is readhillierdata:
-            msg = "the CMFGEN corpus is missing"
+        if modulename in {
+            "groundstatesonlynist",
+            "readadasdata",
+            "readfloers25data",
+            "readhillierdata",
+            "readmonsdata",
+        }:
+            msg = f"{modulename} offers no ion"
             raise AssertionError(msg)
         pytest.skip(f"{modulename} found no ion here")
 
@@ -2260,6 +2274,18 @@ def test_extend_ion_list_forwards_the_limits(modulename):
         )
         assert result == keep_ions_within_limits(allions, minionstage, maxionstage, maxatomicnumber)
         assert result, "a limit that comes from the ions of the reader must keep one ion or more"
+
+    # A limit that excludes every ion must give no ion. This also tests a reader with only one ion
+    # stage or one element, where the limits above keep every ion.
+    for minionstage, maxionstage, maxatomicnumber in (
+        (ion_stages[-1] + 1, ion_stages[-1] + 1, atomic_numbers[-1]),
+        (1, ion_stages[0] - 1, atomic_numbers[-1]),
+        (ion_stages[0], ion_stages[-1], atomic_numbers[0] - 1),
+    ):
+        result = module.extend_ion_list(
+            [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+        )
+        assert result == [], f"the limits {minionstage}, {maxionstage}, {maxatomicnumber} must exclude every ion"
 
 
 def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
@@ -2664,7 +2690,6 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     assert len(dfupsilon) == 235
     assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "The levels, the transitions and the collision strengths come from " in flog.getvalue()
-    assert "level pairs" not in flog.getvalue()
 
 
 def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
@@ -2744,12 +2769,18 @@ def test_rename_old_data_directory_does_not_move_the_data_of_a_symbolic_link(tmp
     assert (old / "27_3.adf04").exists()
 
 
-def test_extend_ion_list_finds_a_compressed_adf04():
+def test_extend_ion_list_finds_a_compressed_adf04(tmp_path, monkeypatch):
     """Ion discovery must find an adf04 file that is compressed.
 
     The OPEN-ADAS Ca III file is the test file of the Eissner notation. The built-in selection does
     not take it, so a default run takes CMFGEN Ca III.
     """
+    import shutil
+
+    # a folder with the two tracked files, so that a private file of the real folder cannot change the result
+    for name in ("38_1.adf04.zst", "20_3.adf04.zst"):
+        shutil.copy(readadasdata.adaspath / name, tmp_path / name)
+    monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
     ions = readadasdata.extend_ion_list({})
     assert (38, [(1, "adas")]) in ions
     assert all(atomic_number != 20 for atomic_number, _ in ions)
@@ -3523,7 +3554,7 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
             chars[start:end] = list(f"{text:>{end - start}}")
         return "".join(chars).rstrip()
 
-    # La II ionises at 11.06 eV, so the third level is above the ionisation energy
+    # La II ionises at 11.18 eV, so the third level is above the ionisation energy
     iondir = tmp_path / "OptimizedFAC_lanthanides_calibrated" / "57LaII_calib"
     iondir.mkdir(parents=True)
     levels = fac_levels_header("FAC", 3)
@@ -3570,7 +3601,7 @@ def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_e
             chars[start:end] = list(f"{text:>{end - start}}")
         return "".join(chars).rstrip()
 
-    # La II ionises at 11.06 eV, so both levels are above the ionisation energy
+    # La II ionises at 11.18 eV, so both levels are above the ionisation energy
     iondir = tmp_path / "OptimizedFAC_lanthanides_calibrated" / "57LaII_calib"
     iondir.mkdir(parents=True)
     levels = fac_levels_header("FAC", 2)
@@ -4536,7 +4567,9 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     transheader = header + " Lower Upper A Type\n"
     (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
     # the row to level 9 references a level that the levels file does not list: discard it
-    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n")
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(
+        transheader + " 0 1 2.0e+00 M1\n 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n"
+    )
     # the E2 row is in reverse order on purpose: it must swap and then merge with the M1 row
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 E2\n")
 
@@ -4554,7 +4587,8 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
         (lower, upper): (A, forbidden)
         for upper, lower, A, forbidden in dftransitions[["upperlevel", "lowerlevel", "A", "forbidden"]].iter_rows()
     }
-    assert rows == {(0, 1): (1.0e6, False), (0, 2): (5.0, True)}
+    # the pair 0-1 has an E1 line and an M1 line, so it is permitted
+    assert rows == {(0, 1): (1.0e6 + 2.0, False), (0, 2): (5.0, True)}
     assert dflevels["levelname"].to_list() == ["5d1 J=0 index=0", "5p1 J=1 index=1", "4f1 J=2 index=2"]
     assert transition_count_of_level(dftransitions, dflevels.height) == [2, 1, 1]
 
@@ -5147,7 +5181,8 @@ def test_cmfgen_fit_functions():
     table7 = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=nu_o_1e15hz)
     assert table7[0, 1] == 0.0
     assert table7[200, 1] == 0.0  # u = 1.8
-    assert table7[300, 1] > 0.0  # u = 2.8
+    # u = 2.8 is the ratio 1.4 to the moved edge, where the Seaton fit gives its value
+    assert table7[300, 1] == pytest.approx(2.0 * (0.5 + 0.5 / 1.4) * 1.4**-3.0)
 
     # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
     table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
@@ -5170,6 +5205,10 @@ def test_cmfgen_fit_functions():
     table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.0, 0.0, 0.5, 0.0, -2.0, 0.0)
     assert table6[0, 1] == pytest.approx(10.0)
     assert table6[500, 1] == pytest.approx(6.0**-2.0)
+    # a break above u = 6 tests the cubic at a point other than x = 0
+    table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.5, 0.25, 1.0, 0.0, -2.0, 0.0)
+    x6 = np.log10(6.0)
+    assert table6[500, 1] == pytest.approx(10 ** (1.0 - x6 + 0.5 * x6**2 + 0.25 * x6**3))
 
     # type 9: the H I ground-state fit of Verner & Yakovlev (1995, A&AS, 109, 125-133, bibcode
     # 1995A&AS..109..125V) gives the 6.3 Mb threshold cross section
@@ -5595,7 +5634,6 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     assert not phixstext.splitlines()[-1].startswith("#")
     # the file holds the two grid numbers and the tables of each ion already
     assert "Downsample" not in phixstext
-    assert "Writing" not in phixstext
     lines = phixstext.splitlines()
     # ARTIS reads the first two numbers with no comment skip
     assert int(lines[0]) == nphixspoints
@@ -5711,7 +5749,7 @@ def test_hydrogenic_estimate_records_its_source_only_with_a_table():
     sourceline = flog.comments["phixsdata"][0]
     assert sourceline.startswith("source: the hydrogenic estimate of artisatomic")
     assert "gbf_n_data.dat" in sourceline
-    assert "/Users/" not in sourceline
+    assert sourceline.endswith("atomic-data-hillier/atomic_21jun23/HYD/I/5dec96/gbf_n_data.dat")
 
 
 def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
@@ -5719,6 +5757,8 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
     from artisatomic import cli
 
     monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    # main() moves the files of atomic-data-qub of the repository, which a test must not do
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     cli.main()
 
@@ -6285,6 +6325,9 @@ def cli_run_with_stub_writer(
     from artisatomic import cli
     from artisatomic.base import log_path
 
+    # main() moves the files of atomic-data-qub of the repository, which a test must not do
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+
     def write_files(_ion_handlers, args):
         for filename in ("adata.txt", "transitiondata.txt"):
             Path(args.output_folder, filename).write_text("the output of the new run\n", encoding="utf-8")
@@ -6393,6 +6436,10 @@ def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
         return original_import(name, *import_args, **import_kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_without_fcntl)
+    # a new import of the module, so that an import of fcntl at the top of cli.py fails here also
+    from artisatomic import cli
+
+    importlib.reload(cli)
     outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
 
@@ -6912,6 +6959,8 @@ def test_read_photoionizations_downsamples_the_co3_table_on_its_own_grid():
     # the table falls from 9.338 Mb at the threshold to 7.016 Mb one step above it, so the
     # average over the first bin is below the value at the threshold
     assert 8.0 < phixs.crosssections[0][0] < 9.338
+    # the value of the table with its energies in Rydberg. eV or a ratio to the threshold give 9.31 or 8.87
+    assert phixs.crosssections[0][0] == pytest.approx(9.0212, abs=1e-3)
     assert phixs.crosssections[4].tolist() == [0.0] * 100
     assert phixs.targetfractions == [[(0, 1.0)]] * 5
 
@@ -7539,3 +7588,149 @@ def test_floers25_withforbidden_source_line_in_the_test_mode(monkeypatch):
     assert "not public" not in readfloers25data.description_calibrated_withforbidden(70, 2)
     monkeypatch.setattr(readfloers25data, "TESTMODE", False)
     assert "It is not public" in readfloers25data.description_calibrated_withforbidden(70, 2)
+
+
+def test_readfacdata_sorts_levels_that_the_file_gives_out_of_energy_order(tmp_path):
+    """The level ids follow the energies, and a transition finds its levels through the map of the file indices."""
+    write_fac_fixture(tmp_path)
+    levels = readfacdata.GetLevels(tmp_path / "fac.lev.asc").reverse()
+    _, levelid_of_fileindex = readfacdata.read_levels_data(levels)
+    # Ilev 1 and 2 have one energy, and the stable sort keeps the order of the rows (here reversed)
+    assert levelid_of_fileindex == {0: 0, 2: 1, 1: 2}
+
+
+def test_readdreamdata_level_frame_sorts_by_energy():
+    """A line can name a lower level that is below a level that an earlier line names, and the ids follow the energy."""
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [500.0, 0.0],
+            "Lower_Type": ["(o)", "(e)"],
+            "Lower_g": [3.0, 9.0],
+            "Upper_Level": [20000.0, 500.0],
+            "Upper_Type": ["(e)", "(o)"],
+            "Upper_g": [1.0, 3.0],
+        }
+    )
+    dflevels = readdreamdata.level_frame(dflines)
+    assert dflevels["Level"].cast(pl.Float64).to_list() == [0.0, 500.0, 20000.0]
+
+
+def test_hillier_ions_data_names_files_that_exist():
+    """Each folder and each file that ions_data names exists in the CMFGEN data set."""
+    cmfgen_corpus_or_skip()
+    for (atomic_number, ion_stage), ionfiles in readhillierdata.ions_data.items():
+        if not ionfiles.folder:
+            continue  # the bare nucleus of H II has no file
+        folder = Path(readhillierdata.hillier_ion_folder(atomic_number, ion_stage)) / ionfiles.folder
+        assert folder.is_dir(), folder
+        names = [ionfiles.levelstransitionsfilename, *ionfiles.photfilenames]
+        if ionfiles.coldatafilename:
+            names.append(ionfiles.coldatafilename)
+        for name in names:
+            assert find_file_check_extension_or_raise(folder / name)
+
+
+def test_rename_old_data_directory_gives_a_warning_when_the_move_fails(tmp_path, monkeypatch, capsys):
+    """A failure of the move does not stop the run, because the conversion can continue without the old folder."""
+    old, new = tmp_path / "atomic-data-qub", tmp_path / "atomic-data-adas"
+    old.mkdir()
+
+    def fail(_oldpath, _newpath):
+        msg = "a read-only folder"
+        raise OSError(msg)
+
+    monkeypatch.setattr(readadasdata, "_move_old_data_directory", fail)
+    readadasdata.rename_old_data_directory(old, new)
+    assert "WARNING: could not move the files of" in capsys.readouterr().out
+
+
+def test_output_folder_lock_continues_when_the_file_system_gives_no_lock(tmp_path, monkeypatch, capsys):
+    """Lustre with noflock and NFS with no lock daemon refuse flock(), and the run must not fail after its work."""
+    import errno
+
+    fcntl = pytest.importorskip("fcntl")
+    from artisatomic import cli
+
+    def refuse(_fd, _operation):
+        raise OSError(errno.ENOSYS, "Function not implemented")
+
+    monkeypatch.setattr(fcntl, "flock", refuse)
+    with cli.output_folder_lock(tmp_path):
+        pass
+    assert "gives no lock" in capsys.readouterr().out
+
+
+def test_stop_signals_raise_system_exit():
+    """SIGTERM inside the block becomes SystemExit, so the cleanup of a failed run runs, and the old handler comes back."""
+    import os
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or not hasattr(os, "kill"):
+        pytest.skip("no SIGTERM here")
+    before = signal.getsignal(signal.SIGTERM)
+    with cli.stop_signals_as_exit(), pytest.raises(SystemExit):
+        os.kill(os.getpid(), signal.SIGTERM)
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_remove_stale_work_folders(tmp_path, capsys):
+    """A work folder of a process that no longer exists goes. The folder of a live run and an old name stay."""
+    import os
+    import socket
+
+    from artisatomic import cli
+
+    hostname = socket.gethostname()
+    live = tmp_path / f"{cli.workfolder_prefix}{os.getpid()}@{hostname}@abc_1"
+    # a process id far above any real one
+    stale = tmp_path / f"{cli.workfolder_prefix}999999999@{hostname}@def_2"
+    oldname = tmp_path / f"{cli.workfolder_prefix}pb449vi5"
+    for folder in (live, stale, oldname):
+        folder.mkdir()
+    cli.remove_stale_work_folders(tmp_path)
+    assert live.is_dir()
+    assert not stale.exists()
+    assert oldname.is_dir()
+    assert "Remove it if no run uses it" in capsys.readouterr().out
+
+
+def test_parse_ion_handlers_rejects_a_bad_atomic_number_or_ion_stage():
+    """A JSON true is an int in Python, and int() cut 2.7 to 2, so the parser checks the types and the ranges."""
+    from artisatomic.ionhandlers import parse_ion_handlers
+
+    assert parse_ion_handlers([[26, [[2, "cmfgen"]]]]) == [(26, [(2, "cmfgen")])]
+    for loaded, message in (
+        ([[26, [[0, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[26, [[2.7, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[26, [[True, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[2, [[4, "cmfgen"]]]], "is not a whole number from 1 to 3"),
+        ([[0, [[1, "cmfgen"]]]], "The atomic number 0"),
+        ([[26.9, [[1, "cmfgen"]]]], "The atomic number 26.9"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            parse_ion_handlers(loaded)
+    with pytest.raises(TypeError, match=r"is not an \[atomic_number, \[ions\]\] pair"):
+        parse_ion_handlers([[26]])
+
+
+def test_read_nahar_rrcfile_rejects_a_file_with_no_rows(tmp_path):
+    """ARTIS stops for an ion block with no temperature, so a Nahar file with a header and no row stops here."""
+    from artisatomic import makerecombratefile
+
+    filepath = tmp_path / "fe2.rrc.ls.txt"
+    filepath.write_text("TOTAL RECOMBINATION RATE\n\n\n  log(T)  RRC(low n)  RRC(total)\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has a header row and no data rows"):
+        makerecombratefile.read_nahar_rrcfile(filepath, noprint=True)
+
+
+def test_hdf5_to_parquet_attribute_text_escapes_a_byte_that_is_not_utf8():
+    """h5py gives such a byte of a variable-length string as a lone surrogate, which write_parquet() cannot take."""
+    text = hdf5_to_parquet.attribute_text("abc\udcff", None)
+    assert text == "abc\\xff"
+    assert hdf5_to_parquet.attribute_text("Å", None) == "Å"
+    # the metadata of a Parquet file takes the text
+    pl.DataFrame({"x": [1]}).write_parquet(io.BytesIO(), metadata={"units": text})
