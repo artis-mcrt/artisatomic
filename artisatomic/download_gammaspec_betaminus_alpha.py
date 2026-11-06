@@ -238,6 +238,10 @@ def main():
                             for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
                                 fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
                         print(f"Saved {nucoutfilepath.name}")
+                    # a file of an earlier run would still give the lines that this run leaves out
+                    elif nucoutfilepath.exists():
+                        nucoutfilepath.unlink()
+                        print(f"empty DataFrame, so the run removed the old {nucoutfilepath.name}")
                     else:
                         print("empty DataFrame")
                 if not found_groundlevel:

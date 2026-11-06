@@ -225,8 +225,7 @@ jobs:
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
 
-            # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
-            # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
+            # no cache-hit guard on the download below: setup_jplt_data.sh does nothing when the data is there
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
               uses: actions/cache@v6

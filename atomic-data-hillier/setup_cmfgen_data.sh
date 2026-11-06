@@ -19,12 +19,16 @@ fi
 md5sum -c "$archive.md5" \
   || { echo "ERROR: $archive has a wrong MD5 sum. Delete it and run this script again." >&2; return 1 2>/dev/null || exit 1; }
 
-if [ -d "atomic_$version" ]; then
-  # a second mv would move the new tree into the old folder
-  echo "atomic_$version exists, so the script does not extract $archive again. Delete the folder to extract it again."
+# The mark is the last step. A script that stops before it does the remaining steps at the next
+# run. Each step after the extraction skips the files that it already changed.
+marker="atomic_$version/setup_complete.txt"
+if [ -f "$marker" ]; then
+  echo "$marker exists, so the script does not extract $archive again. Delete the folder to extract it again."
 else
-  tar -xJf "$archive" || { echo "ERROR: the extraction of $archive failed" >&2; return 1 2>/dev/null || exit 1; }
-  mv atomic/ "atomic_$version/"
+  if [ ! -d "atomic_$version" ]; then
+    tar -xJf "$archive" || { echo "ERROR: the extraction of $archive failed" >&2; return 1 2>/dev/null || exit 1; }
+    mv atomic/ "atomic_$version/"
+  fi
 
   # CMFGEN writes an author's name with an accent, which leaves a few files in iso-8859-1.
   # The readers expect utf-8, so convert those files once, here.
@@ -37,6 +41,8 @@ else
   done
 
   find "atomic_$version" ! -name "*.zst" -size +10M -exec zstd -12 -v -T0 --rm {} \; || true
+
+  echo "The setup of atomic_$version is complete." > "$marker"
 fi
 
 set +x

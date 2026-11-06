@@ -173,32 +173,34 @@ def main() -> None:
     workfolder = Path(
         tempfile.mkdtemp(prefix=f"{workfolder_prefix}{os.getpid()}@{socket.gethostname()}@", dir=outputfolder)
     )
-    try:
-        with stop_signals_as_exit():
-            write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
-    except BaseException:
-        with output_folder_lock(outputfolder):
-            discard_run(workfolder, outputfolder)
-        raise
-
-    # Two runs into one output folder can end at the same time. The lock lets only one run change
-    # the files in the output folder, so the folder holds the files of one run.
-    with output_folder_lock(outputfolder):
+    # The signal handler stays active until the end of the install, so a SIGTERM during the moves
+    # also restores the files of the earlier run.
+    with stop_signals_as_exit():
         try:
-            earlierfolder = install_files(workfolder, outputfolder)
+            write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
         except BaseException:
-            discard_run(workfolder, outputfolder)
+            with output_folder_lock(outputfolder):
+                discard_run(workfolder, outputfolder)
             raise
 
-        # The output folder holds the full new output now. A failure of the cleanup must not make
-        # the run fail, because the files of the earlier run are gone from the output folder.
-        try:
-            shutil.rmtree(earlierfolder)
-            workfolder.rmdir()
-            (outputfolder / failedlogname).unlink(missing_ok=True)
-            remove_old_log_folder(outputfolder)
-        except OSError as error:
-            print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+        # Two runs into one output folder can end at the same time. The lock lets only one run change
+        # the files in the output folder, so the folder holds the files of one run.
+        with output_folder_lock(outputfolder):
+            try:
+                earlierfolder = install_files(workfolder, outputfolder)
+            except BaseException:
+                discard_run(workfolder, outputfolder)
+                raise
+
+            # The output folder holds the full new output now. A failure of the cleanup must not make
+            # the run fail, because the files of the earlier run are gone from the output folder.
+            try:
+                shutil.rmtree(earlierfolder)
+                workfolder.rmdir()
+                (outputfolder / failedlogname).unlink(missing_ok=True)
+                remove_old_log_folder(outputfolder)
+            except OSError as error:
+                print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
 
 
 workfolder_prefix = ".artisatomic_run_"

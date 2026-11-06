@@ -6390,6 +6390,30 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
 
 
+def test_cli_restores_the_earlier_output_at_a_sigterm_during_the_moves(tmp_path, monkeypatch):
+    """A SIGTERM during install_files() must give SystemExit, so that the files of the earlier run come back."""
+    import os
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or os.name != "posix":
+        pytest.skip("the test sends SIGTERM to its own process")
+    original_install_files = cli.install_files
+
+    def install_files(workfolder: Path, outputfolder: Path) -> Path:
+        os.kill(os.getpid(), signal.SIGTERM)
+        return original_install_files(workfolder, outputfolder)
+
+    monkeypatch.setattr(cli, "install_files", install_files)
+    with pytest.raises(SystemExit):
+        cli_run_with_stub_writer(tmp_path, monkeypatch)
+    outputfolder = tmp_path / "artis_files"
+    for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
+    assert not list(outputfolder.glob(".artisatomic_run_*"))
+
+
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
     """A second run must not change the files of the output folder while the first run moves its files."""
     import fcntl
