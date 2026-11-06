@@ -7721,6 +7721,7 @@ def test_read_nahar_rrcfile_rejects_a_file_with_no_rows(tmp_path):
 
 def test_hdf5_to_parquet_attribute_text_escapes_a_byte_that_is_not_utf8():
     """h5py gives such a byte of a variable-length string as a lone surrogate, which write_parquet() cannot take."""
+    pytest.importorskip("h5py")
     text = hdf5_to_parquet.attribute_text("abc\udcff", None)
     assert text == "abc\\xff"
     assert hdf5_to_parquet.attribute_text("Å", None) == "Å"
