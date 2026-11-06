@@ -6965,10 +6965,10 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     The downsample takes the first energy of a table as its threshold, so a row below the edge
     moved each output value to a lower energy (N VII 5g_2Ge starts at x = 0.75).
     """
-    import types
-
-    reader = types.SimpleNamespace(thresholdenergyryd=2.0, flog=io.StringIO(), pending_levelname="5g_2Ge")
-    cut = functools.partial(readhillierdata.PhotFileReader.cut_below_threshold, reader)
+    reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, io.StringIO())
+    reader.thresholdenergyryd = 2.0
+    reader.pending_levelname = "5g_2Ge"
+    cut = reader.cut_below_threshold
 
     x = np.array([0.75, 0.9, 1.1, 2.0])
     energyryd, sigma = cut(x * 2.0, np.array([1.0, 0.5, 0.3, 0.1]))
