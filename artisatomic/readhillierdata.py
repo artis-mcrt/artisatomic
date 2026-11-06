@@ -1637,9 +1637,10 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
             names_with_leveltables.add(lowerlevelname)
 
-    # A name with a table for each of its levels gives each level its own routes: the routes of the
-    # level, and the routes of the name in the other files. The downsample weights each bin with the
-    # absolute frequency. The table of the name therefore moves to the edge of each level before the downsample.
+    # A name with a table for each of its levels gives each level its own routes. These are the
+    # routes of the level, and the routes of the name in the other files. The downsample weights
+    # each bin with the absolute frequency. The table of the name therefore moves to the edge of
+    # each level before the downsample.
     for filenum, photfilename in enumerate(photfilenames):
         movedtables: dict[tuple[str, int], np.ndarray] = {}
         for lowerlevelname in sorted(names_with_leveltables):
