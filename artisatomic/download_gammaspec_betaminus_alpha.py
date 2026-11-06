@@ -14,6 +14,10 @@ from artisatomic.base import elsymbols
 from artisatomic.base import open_for_atomic_write
 from artisatomic.base import PYDIR
 
+# ARTIS gives these nuclides hard-coded decay data in decay.cc, so they are in neither decay file.
+# Their gamma energy comes only from the gamma spectrum.
+nuclides_with_artis_hardcoded_decay_data = ((21, 44),)
+
 colreplacements = {
     "Rad Int.": "intensity",
     "Rad Ene.": "radiationenergy_kev",
@@ -42,6 +46,7 @@ def normalise_parent_elevel() -> pl.Expr:
 def main():
     """Fetch a NuDat3 decay table for each nuclide in betaminusdecays.txt and alphadecays.txt.
 
+    It also fetches the table of each nuclide in nuclides_with_artis_hardcoded_decay_data.
     The script reads the two files from the artistools data directory. It skips a beta-minus row
     with Q <= 0 or with no positive lifetime, and an alpha row with no positive half-life. It
     writes the gamma lines of the ground-level decay of each nuclide to
@@ -90,7 +95,11 @@ def main():
     assert dfalpha.height == dfalpha.unique(("Z", "A")).height
 
     # a set: the script downloads a nuclide in both lists once
-    nuclist = sorted(set(dfbetaminus.select(["Z", "A"]).iter_rows()) | set(dfalpha.select(["Z", "A"]).iter_rows()))
+    nuclist = sorted(
+        set(dfbetaminus.select(["Z", "A"]).iter_rows())
+        | set(dfalpha.select(["Z", "A"]).iter_rows())
+        | set(nuclides_with_artis_hardcoded_decay_data)
+    )
     # one session for the whole run, and a retry on a transient failure. Then one 5xx or a
     # dropped connection does not end the run after N nuclides.
     nuclides_without_table: list[str] = []
