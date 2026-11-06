@@ -1763,6 +1763,16 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     phixstable[:, 0] = u_grid * thresholdenergyryd
     phixstable[:, 1] = arr_sigma
 
+    if nu_o is not None:
+        # The offset edge falls between two points of the U grid, which are 10% apart. Two rows at the
+        # edge give the step of CMFGEN (zero below, the value at U = 1 above). Without them the
+        # downsample joined the zero point and the full point with a ramp over one step.
+        firstopen = int(np.searchsorted(u_offset, 1.0, side="left"))
+        if 0 < firstopen < len(u_offset):
+            edge_ryd = (e_o_ev + thresholdenergyev) / ryd_to_ev
+            sigma_at_edge = 10 ** log_sigma[0] * scale_factor
+            phixstable = np.insert(phixstable, firstopen, [[edge_ryd, 0.0], [edge_ryd, sigma_at_edge]], axis=0)
+
     return phixstable
 
 
