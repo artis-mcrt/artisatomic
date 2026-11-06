@@ -12,6 +12,7 @@ from pathlib import Path
 from string import ascii_uppercase
 
 import numpy as np
+import numpy.typing as npt
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
@@ -28,6 +29,7 @@ from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
 from artisatomic.base import path_in_data_folder
+from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import rewrite_file_as_utf8
@@ -1275,9 +1277,46 @@ class PhotFileReader:
                 f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
+        energyryd, sigma = self.cut_below_threshold(energyryd, sigma)
         # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
+
+    def cut_below_threshold(
+        self, energyryd: npt.NDArray[np.float64], sigma: npt.NDArray[np.float64]
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+        """Remove the rows of a tabulated table below the threshold, and start the table at the threshold.
+
+        CMFGEN uses a table only at frequencies at or above the edge (sub_phot_gen.f), and reads the
+        value at the edge by linear interpolation between the rows. reduce_phixs_tables_worker()
+        takes the first energy of a table as its threshold, so a row below the edge moved each output
+        value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data start below
+        x = 1. A table that ends below the threshold continues as nu^-3 from its last row, as in CMFGEN.
+        """
+        x = energyryd / self.thresholdenergyryd
+        # a tolerance, because x = 1 of the file comes back from a product and a division
+        if x[0] >= 1.0 - 1e-12:
+            return energyryd, sigma
+        above = np.flatnonzero(x >= 1.0 - 1e-12)
+        log_detail(
+            self.flog,
+            ("phixsdata",),
+            "table that starts below the threshold",
+            f"The table of {self.pending_levelname} starts at {x[0]:.4g} times the threshold. The reader drops the"
+            " rows below the threshold and adds a row at the threshold by linear interpolation, as CMFGEN does.",
+        )
+        if above.size == 0:
+            sigma_at_edge = phixs_nu_cubed_tail(float(sigma[-1]), float(x[-1]), 1.0)
+            return np.array([self.thresholdenergyryd]), np.array([sigma_at_edge])
+        first = int(above[0])
+        if abs(x[first] - 1.0) <= 1e-12:
+            return energyryd[first:], sigma[first:]
+        fraction = (1.0 - x[first - 1]) / (x[first] - x[first - 1])
+        sigma_at_edge = sigma[first - 1] + fraction * (sigma[first] - sigma[first - 1])
+        return (
+            np.concatenate(([self.thresholdenergyryd], energyryd[first:])),
+            np.concatenate(([sigma_at_edge], sigma[first:])),
+        )
 
     def take_data_rows(self, start: int, end: int) -> None:
         """Read the data rows start to end - 1 into the current block."""
