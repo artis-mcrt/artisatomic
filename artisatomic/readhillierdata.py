@@ -2087,8 +2087,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 # the collision file can name a level that the oscillator file does not have.
                 # A membership test, not a try/except KeyError around the whole block: that
                 # would report every KeyError below as an unlisted level.
-                # CMFGEN takes a line that names a J of a level that the oscillator file gives with no
-                # J ('5s_2Se[1/2]' for '5s_2Se') as a line of that level, and adds the lines of one pair
+                # A line can name a J of a level that the oscillator file gives with no J: '5s_2Se[1/2]'
+                # for '5s_2Se'. CMFGEN takes it as a line of that level, and adds the lines of one pair
                 # (gen_omega_rd_v2.f). C IV gives such lines for each level from n = 5.
                 to_unsplit_level = False
                 if namefrom not in level_ids_of_level_name and namefrom.split("[")[0] in unsplit_level_names:
@@ -2152,8 +2152,10 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                         # levels of the two terms can interleave, so order the key and do not
                         # drop the pairs that come out reversed.
                         key = (min(id_lower, id_upper), max(id_lower, id_upper))
-                        if to_unsplit_level and key in summed_pairs:
+                        # the sum applies if this line or an earlier line of the pair names a J of an unsplit level
+                        if key in upsilondict and upsilondict[key] >= 0.0 and (to_unsplit_level or key in summed_pairs):
                             upsilondict[key] += upsilonscaled
+                            summed_pairs.add(key)
                         elif key in upsilondict and upsilondict[key] >= 0.0:
                             log_detail(
                                 flog,
