@@ -4514,6 +4514,29 @@ def test_get_nearest_level_indices():
     assert onelevel_second.tolist() == [0, 0]
 
 
+def test_mons_tagged_energy_names_the_level():
+    """The tag of the transition file picks the level where the closest energy picks its neighbour.
+
+    The levels 1 and 2 are 2e-6 apart (1000 cm^-1). Level 1 has J = 6, so its tag of 6.01e-6 puts its
+    transition energy nearer to level 2 than to level 1.
+    """
+    energies = np.array([0.0, 100.0, 100.000002])
+    j_arr = np.array([0.0, 6.0, 1.0])
+    tagged = readmonsdata.tagged_level_energies(energies, j_arr)
+    assert tagged.tolist() == pytest.approx([1e-8, 100.0 + 6e-6 + 1e-8, 100.000002 + 1e-6 + 1e-8], abs=1e-12)
+    # two levels of one J: the second has n = 2
+    assert readmonsdata.tagged_level_energies(np.array([5.0, 6.0]), np.array([2.0, 2.0])).tolist() == pytest.approx(
+        [5.0 + 2e-6 + 1e-8, 6.0 + 2e-6 + 2e-8], abs=1e-12
+    )
+
+    transitionenergies = np.array([tagged[1], tagged[2], 50.0])
+    levels, _, untagged = readmonsdata.match_tagged_levels(tagged, energies * 1000, transitionenergies)
+    assert levels.tolist() == [1, 2, 0]
+    assert untagged.tolist() == [False, False, True]
+    closest, _ = readmonsdata.get_nearest_level_indices(energies * 1000, transitionenergies[:1] * 1000)
+    assert closest.tolist() == [2]
+
+
 def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path):
     """The per-type Floers+25 files merge duplicate level pairs and set the forbidden flag.
 
