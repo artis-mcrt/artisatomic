@@ -803,7 +803,7 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "The target target1 has less than 2% of the total, so the output drops it." in log
+    assert "The target target1 of ground has less than 2% of the total, so the output drops it." in log
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -7148,3 +7148,96 @@ def test_leveltuples_to_pldataframe_infers_the_types_from_all_rows():
     dflevels = leveltuples_to_pldataframe(levels)
     assert dflevels["energyabovegsinpercm"][150] == 1234.5
     assert dflevels["parity"][150] == 1
+
+
+def test_get_level_parity_keeps_the_stated_parity_of_a_name_with_l_not_below_n():
+    """Only a w or z merge marker overrides the parity letter at the end of a CMFGEN level name.
+
+    Co I names two levels by their energy, and P VI has 5i and 6i levels. The test l >= n read such
+    names as merged levels and removed their parity.
+    """
+    assert readhillierdata.get_level_parity("59947oo[11/2]") == 1
+    assert readhillierdata.get_level_parity("54989ee[9/2]") == 0
+    assert readhillierdata.get_level_parity("2s_2p3(3Do)3f_4De") == 0
+    assert readhillierdata.get_level_parity("2s2_2p5_5i_3Ho[4]") == 1
+    assert readhillierdata.get_level_parity("2s2_13w_2W") == -1
+    assert readhillierdata.get_level_parity("3s2_18w_2W") == -1
+    assert readhillierdata.get_level_parity("2s2_2p3(4So)5z_5Z") == -1
+
+
+def test_split_coldata_row_takes_the_names_first_and_then_the_values():
+    """A row with more values than the header declares keeps its level names (P II col_data, line 61)."""
+    row = ["3s2_3p2_3Pe[0]-3s_3p3_3So[1]", "0.624", "0.626", "0.627", "7.355", "1", "1.539"]
+    namefrom, nameto, values = readhillierdata.split_coldata_row(row)
+    assert (namefrom, nameto) == ("3s2_3p2_3Pe[0]", "3s_3p3_3So[1]")
+    assert values == ["0.624", "0.626", "0.627", "7.355", "1", "1.539"]
+
+    # Ni XIV puts only a space between the two names
+    assert readhillierdata.split_coldata_row(["2s2_2p3_4So", "2s2_2p3_2Do", "0.5", "0.6"]) == (
+        "2s2_2p3_4So",
+        "2s2_2p3_2Do",
+        ["0.5", "0.6"],
+    )
+
+
+def cmfgen_corpus_or_skip() -> None:
+    """Skip a test that reads the CMFGEN data where the data is not present."""
+    if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+
+
+def test_read_coldata_converts_a_log10_temperature_header():
+    """The Ne V header gives log10(T/K), so the reader takes the column at 10^3.8 K for 6000 K, and not 1000 K."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(10, 5, flog)
+    readhillierdata.read_coldata(10, 5, dflevels, phixs_args(electrontemperature=6000), flog)
+    assert any(
+        line.startswith("The collision strengths are the values at 6309.57 K.")
+        for line in flog.comments["transitiondata"]
+    )
+
+
+def test_read_coldata_takes_no_value_from_a_file_that_declares_no_transitions():
+    """The Co I collision file declares 0 transitions and gives six placeholder lines, which CMFGEN ignores."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(27, 1, flog)
+    dfupsilon = readhillierdata.read_coldata(27, 1, dflevels, phixs_args(), flog)
+    assert dfupsilon.is_empty()
+    assert any("declares 0 transitions but has 6 lines" in line for line in flog.comments["transitiondata"])
+
+
+def test_read_levels_keeps_a_level_that_only_the_collision_file_names():
+    """Ca VIII 3s_3p(3P)3d_4Fo[7/2] has no radiative transition, but its collision data stays."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(20, 8, flog)
+    assert "3s_3p(3P)3d_4Fo[7/2]" in dflevels["levelname"].to_list()
+    readhillierdata.read_coldata(20, 8, dflevels, phixs_args(), flog)
+    assert not any(line.startswith("The reader discarded upsilon") for line in flog.comments["transitiondata"])
+
+
+def test_read_levels_takes_the_nist_ionisation_energy_for_sc_i():
+    """The Sc I header gives 8.0166 eV, the limit to an excited Sc II level. The reader takes NIST and moves Lam(A)."""
+    from artisatomic.base import get_nist_ionization_energies_ev
+
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    ionization_energy_ev, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(21, 1, flog)
+    nist_ev = get_nist_ionization_energies_ev()[21, 1]
+    assert ionization_energy_ev == nist_ev
+    # the ground level threshold is the ionisation energy, to the four figures of Lam(A)
+    assert hc_in_ev_angstrom / dflevels["lambdaangstrom"][0] == pytest.approx(nist_ev, rel=1e-3)
+    # a level above the NIST limit has a negative Lam(A), as CMFGEN writes it
+    above = dflevels.filter(pl.col("energyabovegsinpercm") * hc_in_ev_cm > nist_ev + 0.01)
+    assert not above.is_empty()
+    assert (above["lambdaangstrom"] < 0.0).all()
+
+
+def test_read_levels_and_transitions_names_an_ion_that_cmfgen_lacks():
+    """An ion outside ions_data stops with a message that names the handler and the ion, and not a bare KeyError."""
+    with pytest.raises(ValueError, match=r"cmfgen handler has no data for Z=23 ion_stage=1"):
+        readhillierdata.read_levels_and_transitions_from_file(23, 1, io.StringIO())
+    with pytest.raises(ValueError, match=r"Z=29 ion_stage=2"):
+        readhillierdata.read_levels_and_transitions_from_file(29, 2, io.StringIO())

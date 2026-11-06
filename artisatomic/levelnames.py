@@ -190,7 +190,9 @@ def _last_letter_is_index(instr: str) -> bool:
     return len(instr) < 3 or not str.isdigit(instr[-2]) or instr[-3] in lchars_lower
 
 
-def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator[tuple[int, int, bool]]:
+def _iter_occupied_orbitals(
+    instr, warn: bool, hasterm: bool = True, letters_only: bool = False
+) -> Iterator[tuple[int, int, bool]]:
     """Walk the occupied orbitals of a configuration and yield (l, number of electrons, merged).
 
     Parent terms in parentheses are not occupied orbitals, and the walk skips them. An orbital
@@ -238,7 +240,10 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
             # l >= n identifies a merge marker, but only where the token actually carried an n.
             # Tokens such as the 'sp' of '3d8(2H)sp_2Go' have none, and to call those merged
             # would discard the parity that their name states.
-            merged = orbitalchar in merged_orbital_letters or (nend > 0 and l >= principalquantumnumber)
+            # letters_only: only the w and z markers count, and not l >= n
+            merged = orbitalchar in merged_orbital_letters or (
+                not letters_only and nend > 0 and l >= principalquantumnumber
+            )
             yield l, nelec, merged
 
         if not foundorbital and warn:
@@ -255,6 +260,19 @@ def has_merged_orbital(instr, hasterm: bool = True) -> bool:
     unreadable one, and no suffix on the name can supply it.
     """
     return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False, hasterm=hasterm))
+
+
+def has_merge_marker_letter(instr, hasterm: bool = True) -> bool:
+    """Whether the configuration contains a w or a z orbital, the merge markers of CMFGEN.
+
+    The test l >= n of has_merged_orbital() also finds names that are not merged levels. Co I
+    names two levels by their energy ('59947oo[11/2]'), and P VI has 5i and 6i levels with l >= n
+    by the letters of lchars. Such a name states its parity with its last letter, and only a w or a
+    z overrides that letter.
+    """
+    return any(
+        merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False, hasterm=hasterm, letters_only=True)
+    )
 
 
 def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | None:
