@@ -1142,8 +1142,8 @@ def test_log_deltaj_contradictions_judges_f_and_a_separately():
         }
     )
     log = warnings_for(twokinds)
-    assert "WARNING: 1 transitions of Test II break the delta J rule" in log
-    assert "so these transitions stay permitted" in log
+    assert "WARNING: 1 transition of Test II breaks the delta J rule" in log
+    assert "so each such transition stays permitted" in log
     assert "WARNING: 2 transitions of Test II break the delta J rule but carry A > 100000 (largest 2e+06)" in log
     assert "the same parity, so the output writes it as forbidden" in log
 
@@ -1977,7 +1977,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     ]
     # the four lines are 0-1, 1-2, 2-3 and 3-4. The last two name a dropped level
     assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1), (1, 2)]
-    assert "The reader dropped 2 levels that are above the ionisation energy." in flog.getvalue()
+    assert "The reader dropped 2 levels above the ionisation energy." in flog.getvalue()
     assert "skipped 2 transitions" in flog.getvalue()
 
 
@@ -3542,7 +3542,7 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
     assert len(energy_levels) == 2
     assert transitions.is_empty()
     assert "The reader skipped all 2 transitions" in flog.getvalue()
-    assert "The reader dropped 1 levels that are above the ionisation energy." in flog.getvalue()
+    assert "The reader dropped 1 level above the ionisation energy." in flog.getvalue()
 
 
 def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
@@ -6187,6 +6187,7 @@ def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_p
 
     write_floers25_lanthanum_files(tmp_path, {"E1": "E1", "E1 (1)": "E1"})
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    monkeypatch.setattr(readfloers25data, "floers_data_folder", tmp_path)
     flog = IonLog(io.StringIO())
     _, _, dftransitions = readfloers25data.read_levels_and_transitions(57, 2, flog, calibrated=True, withforbidden=True)
     assert dftransitions["A"].to_list() == [1.0e6]

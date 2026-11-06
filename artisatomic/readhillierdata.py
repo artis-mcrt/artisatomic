@@ -253,6 +253,17 @@ description = (
     " doi:10.1086/305350"
 )
 
+# H II has no oscillator file. read_levels_and_transitions() gives it one level from constants in the code.
+bare_proton_description = (
+    "constants of artisatomic, because no CMFGEN file gives the bare proton. The ion has one level with g = 1"
+    " and no transition."
+)
+
+
+def description_of_ion(atomic_number: int, ion_stage: int) -> str:
+    """Give the "source:" line of the levels and the transitions of one ion."""
+    return bare_proton_description if (atomic_number, ion_stage) == (1, 2) else description
+
 
 def hillier_ion_folder(atomic_number, ion_stage):
     """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
@@ -1601,14 +1612,15 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             log_comment(
                 flog,
                 ("phixsdata",),
-                f"WARNING: {len(reader.phixs_type_levels[crosssectiontype])} tables have the unknown cross section"
+                f"WARNING: {len(reader.phixs_type_levels[crosssectiontype])} level names have tables of the unknown"
+                f" cross section"
                 f" type {crosssectiontype}: {typelabel}.",
             )
         else:
             log_comment(
                 flog,
                 ("phixsdata",),
-                f"{len(reader.phixs_type_levels[crosssectiontype])} tables have the cross section type"
+                f"{len(reader.phixs_type_levels[crosssectiontype])} level names have tables of the cross section type"
                 f" {crosssectiontype}: {typelabel}.",
             )
 
@@ -1933,6 +1945,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     """
     t_scale_factor = 1e4  # Hillier gives the temperatures as T_4
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
+    if (atomic_number, ion_stage) == (1, 2):
+        return pl.DataFrame(schema=upsilon_schema)
     if not coldatafilename:
         log_comment(flog, ("transitiondata",), "CMFGEN has no collision data file for this ion.")
         return pl.DataFrame(schema=upsilon_schema)
