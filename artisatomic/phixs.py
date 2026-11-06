@@ -324,10 +324,12 @@ def reduce_phixs_tables_worker(
     arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
     arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
 
-    # The integrals use the piecewise-linear table exactly: the grid holds each table sample. Each
-    # bin also gets 51 points from one edge to the other, because the weight is not linear. A
-    # resample at the 51 points alone loses a narrow peak between two points, and spreads a peak
-    # at one point over a whole step. The high edge of a bin is the first point of the next bin.
+    # The grid holds each table sample, so no peak of the table falls between two points. Each bin
+    # also gets 51 points from one edge to the other, because the weight is not linear. The
+    # trapezoid rule on the product of the weight and the table is then accurate where a segment is
+    # narrow in kT. A resample at the 51 points alone loses a narrow peak between two points, and
+    # spreads a peak at one point over a whole step. The high edge of a bin is the first point of
+    # the next bin.
     lin_energyryd = np.append(np.linspace(arr_enlow, arr_enhigh, num=50, endpoint=False, axis=-1), arr_enhigh[-1])
     # np.interp holds the last cross section constant past the table's end, so apply the power-law
     # decay there instead

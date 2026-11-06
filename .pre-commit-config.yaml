@@ -1,4 +1,6 @@
 ---
+# prek install installs these hook types. The uv-sync hook runs after a checkout, a merge and a rewrite.
+default_install_hook_types: [pre-commit, post-checkout, post-merge, post-rewrite]
 repos:
     - repo: https://github.com/pre-commit/pre-commit-hooks
       rev: v6.0.0
@@ -37,8 +39,9 @@ repos:
       rev: 0.13.6
       hooks:
           - id: uv-lock
+          # the command of the Setup section of AGENTS.md: the project in editable mode, and no extra
           - id: uv-sync
-            args: [--frozen, --all-extras, --no-install-project]
+            args: [--frozen]
 
 ci:
     autoupdate_schedule: quarterly

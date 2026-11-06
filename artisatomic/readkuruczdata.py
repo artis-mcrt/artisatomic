@@ -166,8 +166,8 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     """Locate one ion's Kurucz line list in the extendedatoms layout or the zztar layout.
 
-    Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
-    has no data for it.
+    Raises FileNotFoundError if the ion has no file. get_ion_handlers() calls it to check the files
+    of the built-in selection before the read starts.
     """
     stems = [
         kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}.lines",

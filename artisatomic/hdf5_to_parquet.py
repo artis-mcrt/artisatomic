@@ -75,7 +75,7 @@ def import_h5py() -> ModuleType:
     except ModuleNotFoundError as exc:
         msg = (
             "hdf5_to_parquet.py needs h5py. Run it as artisatomic/hdf5_to_parquet.py, and uv installs h5py."
-            " Or install the extra hdf5 with Python 3.14: uv sync --python 3.14 --extra hdf5."
+            " Or install the extra hdf5 with Python 3.14: uv sync --frozen --python 3.14 --extra hdf5."
         )
         raise ModuleNotFoundError(msg) from exc
 
