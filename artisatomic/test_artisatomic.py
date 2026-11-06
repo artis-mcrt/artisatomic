@@ -6957,3 +6957,21 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level():
+    """C IV col_data names '5p_2Po[1/2]' and '5p_2Po[3/2]', and osc_data gives '5p_2Po' with no J.
+
+    CMFGEN takes each such line as a line of the unsplit level and adds the lines of one pair
+    (gen_omega_rd_v2.f). The two lines 2s -> 5p give 0.0260 and 0.0519 at 6000 K.
+    """
+    if not Path(readhillierdata.hillier_ion_folder(6, 4)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(6, 4, flog)
+        dfupsilon = readhillierdata.read_coldata(6, 4, dflevels, phixs_args(electrontemperature=6000), flog)
+    names = dflevels["levelname"].to_list()
+    upsilons = upsilon_dict(dfupsilon)
+    assert upsilons[names.index("2s_2Se[1/2]"), names.index("5p_2Po")] == pytest.approx(0.0779)
+    assert "The reader discarded upsilon" not in flog.getvalue()
