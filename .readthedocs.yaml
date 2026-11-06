@@ -10,13 +10,16 @@ build:
         # setuptools_scm gets the version from the git tags, and a shallow clone has none
         post_checkout:
             - git fetch --unshallow || true
-
-python:
-    install:
-        - method: uv
-          command: sync
-          groups:
-              - docs
+        pre_create_environment:
+            - asdf plugin add uv
+            - asdf install uv latest
+            - asdf global uv latest
+        # uv takes Python 3.15 from .python-version, and isal has no Python 3.15 wheel for x86-64.
+        # The method uv of python.install has no Python option, so these jobs give the version.
+        create_environment:
+            - uv venv --python 3.14 "${READTHEDOCS_VIRTUALENV_PATH}"
+        install:
+            - UV_PROJECT_ENVIRONMENT="${READTHEDOCS_VIRTUALENV_PATH}" uv sync --frozen --python 3.14 --no-default-groups --group docs
 
 sphinx:
     configuration: docs/conf.py
