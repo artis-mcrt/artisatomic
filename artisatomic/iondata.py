@@ -168,7 +168,7 @@ handlers: dict[str, Handler] = {
     ),
     # levels, collision strengths and cross sections
     "cmfgen": Handler(
-        readhillierdata.description,
+        readhillierdata.description_of_ion,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
