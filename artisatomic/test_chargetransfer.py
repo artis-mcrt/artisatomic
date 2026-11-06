@@ -198,7 +198,8 @@ def test_committed_source_files_build_the_expected_entries():
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
-    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
+    # four SS11 reactions that need energy have no line (see get_ss11_entries())
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 32)
     entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
 
