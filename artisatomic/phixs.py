@@ -270,13 +270,13 @@ def reduce_phixs_tables_worker(
     """Downsample one cross section table onto the output's nu/nu_edge grid.
 
     Each output point is the average of the input over that point's frequency bin, with the
-    weight nu^2 exp(-h (nu - nu_low) / k T). The weight preserves the recombination rate at
+    weight nu^2 exp(-h (nu - nu_ref) / k T). The weight preserves the recombination rate at
     optimaltemperature, and not the cross section itself.
 
-    nu_low is the lowest frequency of the bin. The constant factor exp(h nu_low / k T) cancels in
-    the ratio of the two integrals, so the subtraction leaves the average unchanged. It also keeps
-    the weight at 1.0 or below. The absolute weight underflows to zero for h nu / k T > 745, which
-    is every bin above about 64 eV at -optimaltemperature 1000.
+    nu_ref is the lowest sample frequency of the bin. The constant factor exp(h nu_ref / k T)
+    cancels in the ratio of the two integrals, so the subtraction leaves the average unchanged. It
+    also keeps the largest exponential of each bin at 1.0. The absolute weight underflows to zero
+    for h nu / k T > 745, which is every bin above about 64 eV at -optimaltemperature 1000.
 
     xgrid is the nu/nu_edge grid of the output, which reduce_phixs_tables() builds once for the
     whole batch. It holds one point more than the output, to close the last bin.
@@ -339,16 +339,25 @@ def reduce_phixs_tables_worker(
     grid_energyryd = grid_energyryd[order]
     grid_sigma = grid_sigma[order]
 
-    # Each segment between two neighbouring grid points belongs to the bin of its low end. The
-    # weight of a segment is relative to nu_low of its bin, so each point of the segment uses that bin's nu_low.
+    # Each segment between two neighbouring grid points belongs to the bin of its low end.
     # a step at the last edge gives a segment of zero width that starts there
     arr_bin = np.minimum(np.searchsorted(arr_enhigh, grid_energyryd[:-1], side="right"), nphixspoints - 1)
-    arr_nu_low = arr_enlow[arr_bin] * ryd_to_hz
     # The cross section is linear on a segment, and the weight is not. A Gauss-Legendre rule of three
     # points on each segment integrates both products to 1e-9 or better also where a bin is many kT
     # wide. The trapezoid rule of the two ends gave errors of 4% in a bin at 6000 K and 150 eV.
     half_dx = 0.5 * np.diff(grid_energyryd)
     midpoint = 0.5 * (grid_energyryd[:-1] + grid_energyryd[1:])
+    # The first node of a segment has the lowest frequency of the segment. nu_ref of a bin is the
+    # lowest such node of a segment with a width above zero. The bin edge is not a node, and with a
+    # narrow weight each node can be more than 745 kT above the edge.
+    arr_nu_ref = np.full(nphixspoints, np.inf)
+    np.minimum.at(
+        arr_nu_ref,
+        arr_bin,
+        np.where(half_dx > 0.0, (midpoint + gauss_legendre_3[0][0] * half_dx) * ryd_to_hz, np.inf),
+    )
+    arr_nu_ref[np.isinf(arr_nu_ref)] = 0.0
+    arr_nu_ref = arr_nu_ref[arr_bin]
     integralnosigma = np.zeros(nphixspoints)
     integralwithsigma = np.zeros(nphixspoints)
     # The weight is positive, so a negative average comes only from a negative cross section, and the
@@ -358,7 +367,7 @@ def reduce_phixs_tables_worker(
     with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
         for node, nodeweight in gauss_legendre_3:
             nodenu = (midpoint + node * half_dx) * ryd_to_hz
-            weight = nodeweight * half_dx * nodenu**2 * np.exp(minus_h_over_kb_t * (nodenu - arr_nu_low))
+            weight = nodeweight * half_dx * nodenu**2 * np.exp(minus_h_over_kb_t * (nodenu - arr_nu_ref))
             sigma = grid_sigma[:-1] + 0.5 * (node + 1.0) * (grid_sigma[1:] - grid_sigma[:-1])
             integralnosigma += np.bincount(arr_bin, weights=weight, minlength=nphixspoints)
             integralwithsigma += np.bincount(arr_bin, weights=weight * sigma, minlength=nphixspoints)

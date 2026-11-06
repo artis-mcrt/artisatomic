@@ -6983,3 +6983,18 @@ def test_reduce_phixs_tables_worker_is_accurate_where_a_bin_is_many_kt_wide():
         sigma = np.interp(energy, table[:, 0], table[:, 1])
         expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
         assert averages[index] == pytest.approx(expected, rel=1e-5)
+
+
+def test_reduce_phixs_tables_worker_with_a_narrow_thermal_weight():
+    """At 1 K and a bin width of the threshold, each Gauss node lies more than 745 kT above the bin edge.
+
+    The weight of each bin is relative to its lowest node. A weight relative to the bin edge
+    underflowed to zero at each node, and the function stopped the run.
+    """
+    threshold_ryd = 100.0 / ryd_to_ev
+    xgrid = 1.0 + np.arange(6, dtype=float)
+    table = np.array([[threshold_ryd, 1.0], [10.0 * threshold_ryd, 0.001]])
+    averages = reduce_phixs_tables_worker(1.0, xgrid, table)
+    assert np.all(np.isfinite(averages))
+    assert np.all(averages > 0.0)
+    assert averages[0] == pytest.approx(1.0, rel=1e-3)
