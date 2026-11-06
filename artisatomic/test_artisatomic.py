@@ -6957,3 +6957,35 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_tabulated_cross_section_starts_at_the_threshold():
+    """A tabulated table (types 20 to 22) loses its rows below x = 1 and gets a row at x = 1 by interpolation.
+
+    The downsample takes the first energy of a table as its threshold, so a row below the edge
+    moved each output value to a lower energy (N VII 5g_2Ge starts at x = 0.75).
+    """
+    import types
+
+    reader = types.SimpleNamespace(thresholdenergyryd=2.0, flog=io.StringIO(), pending_levelname="5g_2Ge")
+    cut = functools.partial(readhillierdata.PhotFileReader.cut_below_threshold, reader)
+
+    x = np.array([0.75, 0.9, 1.1, 2.0])
+    energyryd, sigma = cut(x * 2.0, np.array([1.0, 0.5, 0.3, 0.1]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.2, 4.0])
+    # linear between x = 0.9 (0.5) and x = 1.1 (0.3)
+    assert sigma.tolist() == pytest.approx([0.4, 0.3, 0.1])
+
+    # a step at x = 1 keeps both of its rows
+    energyryd, sigma = cut(np.array([0.5, 1.0, 1.0, 1.5]) * 2.0, np.array([0.0, 0.0, 1.372, 0.5]))
+    assert sigma.tolist() == [0.0, 1.372, 0.5]
+
+    # a table that ends below the threshold continues as nu^-3 from its last row
+    energyryd, sigma = cut(np.array([0.5, 0.8]) * 2.0, np.array([1.0, 0.512]))
+    assert energyryd.tolist() == [2.0]
+    assert sigma.tolist() == pytest.approx([0.512 * 0.8**3])
+
+    # a table that starts at the threshold stays as it is
+    table = (np.array([2.0, 3.0]), np.array([1.0, 0.5]))
+    assert cut(*table) is not None
+    assert cut(*table)[0] is table[0]
