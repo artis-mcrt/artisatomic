@@ -90,13 +90,14 @@ coll_str      effective collision strength (upsilon) at the temperature closest 
               -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod, T. S.
                   (1980), PhD thesis, University of California, Santa Cruz.
 forbidden     1 for a forbidden transition, 0 for a permitted (electric dipole) transition.
-              A transition is forbidden if its two levels have the same parity, or if it breaks the delta J
-              rule (|delta J| > 1, or J = 0 to J = 0). Between two LS terms, the rules of LS coupling apply in
-              place of the delta J rule (|delta L| > 1, L = 0 to L = 0, or a different 2S+1). The delta J
-              rule and the LS rules do not apply where the data set gives f > {minf:g} (the cmfgen handlers)
-              or A > {mina:g} s^-1 (the other handlers). A rule applies only where the data set gives the
-              values that it needs. The floers25 handlers take the flag from the type of each line of the
-              data set. The flag is also 1 for each transition with coll_str -2.
+              A transition is forbidden if its two levels have the same parity. It is also forbidden if it
+              breaks the delta J rule: |delta J| > 1, or J = 0 to J = 0. Between two LS terms, the rules of
+              LS coupling apply in place of the delta J rule: |delta L| > 1, L = 0 to L = 0, or a different
+              2S+1.
+              The cmfgen handlers apply the delta J rule and the LS rules only where f <= {minf:g}.
+              The other handlers apply them only where A <= {mina:g} s^-1. A rule applies only where the
+              data set gives the values that it needs. The floers25 handlers take the flag from the type
+              of each line of the data set. The flag is also 1 for each transition with coll_str -2.
 
 NUMBERS START AT 1
 ion_stage, lower and upper start at 1, and not at 0. The numbers -1 and -2 in coll_str are not level numbers.
