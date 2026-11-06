@@ -51,8 +51,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
     assert totals["Ge", 1] == pytest.approx(powerlaw, rel=0.01)
     # every channel on the floor gives the floor itself, not zero
     assert totals["Ge", 2] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
-    # the paper floors the total, so a sum below the floor also becomes the floor
-    assert totals["Ge", 3] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
+    # a reaction that needs energy has no channel on the floor, so its total stays below the floor
+    assert totals["Ge", 3] == pytest.approx([5.00e-21] * len(makechargetransferfile.SS11_TGRID))
 
     fit = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
     assert fit.a == pytest.approx(3.0e-10, rel=0.01)
