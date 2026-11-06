@@ -1320,7 +1320,7 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
             self.in_header = True  # All phot_data_* in 19apr23 have this line
             if row[0] != "Megabarns":
-                msg = f"Wrong cross-section unit: {row[0]}"
+                msg = f"Wrong cross section unit: {row[0]}"
                 raise ValueError(msg)
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
@@ -1700,7 +1700,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # .get(): the branch below fires for exactly the types that this parser does not handle.
         # Those are the types least likely to have a label, so an index lookup would fail in the
         # report.
-        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
+        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross section type")
         if crosssectiontype in reader.unknown_phixs_types:
             log_comment(
                 flog,
@@ -2657,8 +2657,8 @@ def extend_ion_list(
 ):
     """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
 
-    include_hydrogen=False leaves out H I. The built-in selection of ionhandlers.py passes True,
-    so that list holds H I.
+    include_hydrogen=False leaves out H I and H II. The built-in selection of ionhandlers.py passes
+    True, so that list holds both.
     """
     cmfgenions = [
         (atomic_number, ion_stage) for atomic_number, ion_stage in ions_data if include_hydrogen or atomic_number != 1

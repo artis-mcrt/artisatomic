@@ -843,7 +843,7 @@ def write_transition_data(
             )
             raise ValueError(msg)
 
-    # sums, and not a filtered copy of the frame for each count: a cmfgen ion has 2.6M rows
+    # sums, and not a filtered copy of the frame for each count: a Floers+25 ion has up to 21M rows
     num_forbidden_transitions, num_collision_strengths_applied = (
         (0, 0)
         if dftransitions_ion.is_empty()

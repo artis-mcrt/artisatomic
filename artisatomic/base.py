@@ -671,9 +671,9 @@ def fortran_float(text: str) -> float:
 def isfloat(value: t.Any) -> bool:
     """Whether a string parses as a float, with Fortran's D exponent (1.5D-3) permitted.
 
-    The CMFGEN oscillator reader calls this once for each field of every line (5.3M times for the
-    cmfgen test set). The function therefore calls replace() only when the field contains a D.
-    This avoids a copy of every field.
+    The CMFGEN oscillator reader calls this once for each field of each level line (about 186000
+    times for the cmfgen test set). The function calls replace() only when the field contains a D,
+    which avoids a copy of every field.
     """
     try:
         float(value.replace("D", "E") if "D" in value else value)
@@ -1163,8 +1163,8 @@ def sort_ion_handlers(
 
     process_files() relies on the ion stages in order from lowest to highest to identify the top
     ion and to find each ion's photoionisation target. This function normalises the order before
-    main() writes the handler list to artisatomicionhandlers.json and passes it to
-    write_compositionfile().
+    write_files() in cli.py writes the handler list to artisatomicionhandlers_used.json and passes it
+    to write_compositionfile().
 
     This function rejects a duplicated element or ion stage, because the code downstream trusts
     the list. The ion count of write_compositionfile() is max - min + 1, so it cannot see a
@@ -1216,7 +1216,7 @@ def add_handlers_if_not_set(
     list_ions_of_element = dict(ion_handlers_out)
 
     for ion in ions:
-        # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+        # Readers derive these from numpy data, and json.dump() in write_files() cannot serialise numpy
         # integers. Normalise them here and not in each caller.
         atomic_number = int(ion[0])
         ion_stage = int(ion[1])

@@ -266,11 +266,9 @@ def test_interpret_configuration():
 
 def test_hydrogenic_phixs():
     """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
-    ryd_to_ev = rhd.ryd_to_ev
-
     rhd.read_hyd_phixsdata()
 
-    oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / ryd_to_ev
+    oneryd_lambda_angstrom = hc_in_ev_angstrom / ryd_to_ev
     expected_n1 = np.array(
         [
             [1.0, 6.30341644],
@@ -292,7 +290,7 @@ def test_hydrogenic_phixs():
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 1)
     assert np.allclose(expected_n1, phixstable_n[:10], rtol=1e-3)
 
-    oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / (5**2 * ryd_to_ev)
+    oneryd_lambda_angstrom = hc_in_ev_angstrom / (5**2 * ryd_to_ev)
     expected_n5 = np.array(
         [
             [2.50000000e01, 5.91880525e-02],
@@ -329,11 +327,9 @@ def test_hydrogenic_nl_phixs_offset_type8():
 
     rhd.read_hyd_phixsdata()
 
-    ryd_to_ev = rhd.ryd_to_ev
-
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
     threshold_ev, n, l_start, l_end, nu_o, zion = 7.90, 4, 1, 1, 0.88936, 2
-    lambda_angstrom = rhd.hc_in_ev_angstrom / threshold_ev
+    lambda_angstrom = hc_in_ev_angstrom / threshold_ev
     e_o_ev = nu_o * 1e15 * h_in_ev_seconds
 
     phixstable = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion)
@@ -377,27 +373,25 @@ def test_hydrogenic_phixs_effective_charge_scaling():
     The H (Z=1) cases in test_hydrogenic_phixs() cannot detect a spurious extra factor of
     Z_eff**2, so check the scaling explicitly for Z > 1.
     """
-    ryd_to_ev = rhd.ryd_to_ev
-
     rhd.read_hyd_phixsdata()
 
-    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
+    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
 
     for atomic_number in (1, 2, 3, 6, 26):
         for n in (1, 2, 5):
             # a hydrogenic level of charge Z and principal quantum number n ionises at Z**2 / n**2 Ryd
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
-            phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
+            phixstable = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / threshold_ev, n)
 
             # Kramers (1923, Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244):
             # sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
             # depends only on n. A comparison at the same n therefore leaves a ratio of exactly n / Z**2
-            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
+            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 
         # the n=1 threshold cross section must fall exactly as 1 / Z**2
         threshold_ev = atomic_number**2 * ryd_to_ev
-        phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, 1)
+        phixstable = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / threshold_ev, 1)
         assert np.isclose(phixstable[0][1], sigma_hydrogen_1s / atomic_number**2, rtol=1e-6)
 
 
@@ -409,8 +403,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     E_th = 11 eV, n = 5 valence level).
     """
     rhd.read_hyd_phixsdata()
-
-    ryd_to_ev = rhd.ryd_to_ev
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
@@ -437,7 +429,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert thresholds[0] == ionization_energy_ev
     assert targetfractions[0] == [(0, 1.0)]  # the upper ion's ground state
 
-    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
+    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
     assert abs(expected_threshold_mb - 6.3067 / 4) < 1e-3  # exact hydrogenic value for He II 1s
     # the downsampled first point is a bin average, so allow a few percent
     assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
@@ -470,7 +462,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
     rhd.read_hyd_phixsdata()
 
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     nlevels = 5
     dflevels = pl.DataFrame(
         {
@@ -533,7 +525,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
 def test_match_hydrogenic_phixs_takes_the_lowest_levels_by_energy():
     """A reader that keeps its file's order still gets the estimate for its lowest levels by energy."""
     rhd.read_hyd_phixsdata()
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     # row 0 is the highest level and row 1 the ground state
     dflevels = pl.DataFrame(
         {
@@ -3865,7 +3857,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     rhd.read_hyd_phixsdata()
     assert rhd.max_hyd_gaunt_n == 30
 
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     dflevels = pl.DataFrame(
         {
             "levelid": [0, 1, 2],
@@ -7124,7 +7116,7 @@ def test_match_hydrogenic_phixs_gives_no_table_when_the_ground_level_has_none():
     crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
         atomic_number=27,
         energy_levels=dflevels,
-        ionization_energy_ev=4 * rhd.ryd_to_ev,
+        ionization_energy_ev=4 * ryd_to_ev,
         ion_handler="kurucz",
         get_level_valence_n=readkuruczdata.get_level_valence_n,
         args=phixs_args(),

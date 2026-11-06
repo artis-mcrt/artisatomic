@@ -1121,7 +1121,7 @@ def _fill_co3_phixs(
     # The downsample takes the first column in Rydberg. The weight of a bin depends on the
     # energy of the photon, and not on its ratio to the threshold. The threshold of the ground
     # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
-    # quartet lie within 0.12 eV of each other, so the one table covers each of them.
+    # quartet lie within 0.23 eV of each other (1866.8 cm^-1), so the one table covers each of them.
     # The downsample runs also for the grid of the table itself. Every table of the output file is
     # the average over the frequency bin of each point, as the file comment says. The point values
     # of the table are not those averages.
