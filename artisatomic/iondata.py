@@ -128,7 +128,7 @@ handlers: dict[str, Handler] = {
     ),
     "lisbon": Handler(readlisbondata.description, readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
-        readfloers25data.description_withforbidden,
+        readfloers25data.description_calibrated_withforbidden,
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),

@@ -3978,11 +3978,11 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
         "# Energy levels ",
         "# num  weight parity      E(eV)      configuration ",
         "      1   5.0  even  0.0000000e+00 {  4s+ 2  4p- 2  4p+ 2 } ",
-        "      2   3.0  even  2.3450344e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
-        "      3   1.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
+        "      2   3.0  even  3.1167385e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
+        "      3   3.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
         "# Transitions ",
         "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
-        "      3       1       330.290     5.619e+05        -3.037 ",
+        "      3       1      3977.982     5.619e+05        -3.037 ",
         "      3       2 1290010779.045     2.386e-13        -8.225 ",
     ]
     (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -3993,7 +3993,8 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
     )
 
     assert dflevels.height == 3
-    assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5, 2.386e-13], rel=1e-12)
+    # the file gives g_u * A, and the upper level has g = 3
+    assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5 / 3, 2.386e-13 / 3], rel=1e-12)
 
 
 def test_readtanakajpltdata_records_the_header_with_a_joined_paper_line(tmp_path, monkeypatch):
@@ -7382,3 +7383,159 @@ def test_split_orbitals_reads_a_two_digit_n_after_an_occupation():
     assert get_config_parity("4p6 5s1 10p1", hasterm=False) == 1
     # the occupation-1 reading still wins where both readings are possible: 3d1 4s2
     assert get_config_parity("3d14s2", hasterm=False) == 0
+
+
+def jplt_lines(
+    transitions: list[str],
+    *,
+    header: tuple[str, ...] = ("# Japan-Lithuania Opacity Database for Kilonova (version 2.1)", "# Se I "),
+) -> list[str]:
+    """Give the lines of a small JPLT file of Se I, with three levels and the transition rows given."""
+    return [
+        *header,
+        "# 34 1 ",
+        f"# 3 {len(transitions)} ",
+        "# CLOSED=  1s+  2s+ ",
+        "# IP = 9.752 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)      configuration ",
+        "      1   5.0  even  0.0000000e+00 {  4s+ 2  4p- 2  4p+ 2 } ",
+        "      2   3.0  even  2.3450344e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
+        "      3   3.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+        *transitions,
+    ]
+
+
+def test_readtanakajpltdata_stops_for_wavelengths_that_do_not_fit_the_levels(tmp_path, monkeypatch):
+    """A transition list that does not use the level numbers of the level list stops the read (As II of grasp_v2.1)."""
+    # the right wavelengths are 3977.98 nm (3 -> 1) and 16066.1 nm (3 -> 2)
+    rows = [
+        "      3       1      5287.000     5.619e+05        -3.037 ",
+        "      3       2      2000.000     1.0e+05     -3.0 ",
+    ]
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines(rows)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    with pytest.raises(ValueError, match="2 of 2 transitions have a wavelength that does not fit"):
+        readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+
+
+def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
+    """A row that repeats the levels, the wavelength and g_u*A is one line two times, which ARTIS would add."""
+    row = "      3       1      3977.982     5.619e+05        -3.037 "
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines([row, row])) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    _, _, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
+    assert dftransitions.height == 1
+    assert any("gives 1 transition rows two times" in line for line in flog.comments["transitiondata"])
+
+
+def test_readtanakajpltdata_keeps_a_paper_line_that_ends_with_the_ion_name(tmp_path, monkeypatch):
+    """63_2.txt and 66_2.txt write the paper and the ion name on one line, and the paper must stay in the comment."""
+    header = (
+        "# Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        "# L. Radziute et al., ApJS 248 (2020) 17.# Se I",
+    )
+    row = "      3       1      3977.982     5.619e+05        -3.037 "
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines([row], header=header)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
+    assert "L. Radziute et al., ApJS 248 (2020) 17." in flog.comments["adata"]
+
+
+def test_readboyledata_drops_a_line_that_the_table_gives_two_times(monkeypatch):
+    """The AOIFE table gives two He I lines two times. ARTIS adds the A values of two rows, so one row must go."""
+    from artisatomic import readboyledata
+
+    table = pl.DataFrame(
+        {
+            "line_id": [566306, 566307, 566308, 566309],
+            "wavelength": [8866.82, 20586.9, 8866.82, 20586.9],
+            "atomic_number": [2] * 4,
+            "ion_number": [0] * 4,
+            "level_number_lower": [1.0, 2.0, 1.0, 2.0],
+            "level_number_upper": [4.0, 4.0, 4.0, 4.0],
+            "A_ul": [1.55, 1.9746e6, 1.55, 1.9746e6],
+        }
+    )
+    monkeypatch.setattr(readboyledata, "read_aoife_table", lambda _name: table)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    dftransitions = readboyledata.read_lines_data(2, 1, {1: 1, 2: 2, 4: 4}, flog)
+    assert dftransitions["A"].to_list() == [1.55, 1.9746e6]
+    assert "gives 2 lines two times" in flog.comments["transitiondata"][0]
+
+
+def test_readdreamdata_rejects_a_level_key_that_is_nan():
+    """Polars takes NaN as equal to NaN in unique() and joins, so a NaN g would give a level with g = NaN."""
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [0.0],
+            "Lower_Type": ["(e)"],
+            "Lower_g": [9.0],
+            "Upper_Level": [20000.0],
+            "Upper_Type": ["(o)"],
+            "Upper_g": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError, match="Upper level with no value of g"):
+        readdreamdata.level_frame(dflines)
+
+
+def test_readmonsdata_rejects_a_value_that_is_not_finite(tmp_path, monkeypatch):
+    """Polars casts the text NaN to a float with no error, and a NaN energy passed the match tolerance."""
+    import zipfile
+
+    with zipfile.ZipFile(tmp_path / "levels.zip", "w") as archive:
+        archive.writestr("member.txt", " 0.000, 1.5\n NaN, 2.5\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    with pytest.raises(ValueError, match="not a finite number"):
+        readmonsdata.read_csv_columns("levels.zip", "member.txt", 2)
+
+
+def test_readfacdata_puts_the_e0_level_first_among_the_lowest_levels(tmp_path):
+    """Dy III gives Ilev 0 and Ilev 62 at 0.0. The header line E0 names the ground level, and it becomes level id 0."""
+
+    def levelrow(ilev: str, energy: str, parity: str, twoj: str, config: str) -> str:
+        chars = [" "] * 125
+        for text, start, end in ((ilev, 0, 7), (energy, 14, 30), (parity, 30, 31), (twoj, 38, 43), (config, 76, 125)):
+            chars[start:end] = list(f"{text:>{end - start}}")
+        return "".join(chars).rstrip()
+
+    header = fac_levels_header("FAC", 3)
+    header[7] = "E0\t= 1, -3.30187428E+05"
+    lines = [
+        *header,
+        levelrow("0", "0.0000000000E+00", "0", "12", "4f8"),
+        levelrow("1", "0.0000000000E+00", "0", "16", "4f8.6p2"),
+        levelrow("2", "5.0000000000E+00", "1", "4", "4f7.5d1"),
+        "",
+    ]
+    (tmp_path / "dy.lev.asc").write_text("\n".join(lines) + "\n")
+    energy_levels, levelid_of_fileindex = readfacdata.read_levels_data(readfacdata.GetLevels(tmp_path / "dy.lev.asc"))
+    assert levelid_of_fileindex == {1: 0, 0: 1, 2: 2}
+    assert energy_levels[0].g == 17
+
+
+def test_readfloers25data_stops_for_a_table_with_fewer_rows_than_its_header_declares(tmp_path):
+    """A file that a download or a copy cut between two rows stops the read."""
+    from artisatomic import readfloers25data
+
+    filepath = tmp_path / "57LaII_levels_calib.txt"
+    filepath.write_text("Energy levels of La II\nNumber of levels: 3\n--\n--\n--\n Index Energy\n 0 0.0\n 1 100.0\n")
+    with pytest.raises(ValueError, match="declares Number of levels = 3 but holds 2 rows"):
+        readfloers25data.read_dashed_table(filepath, usecols=["Index", "Energy"])
+
+
+def test_floers25_withforbidden_source_line_in_the_test_mode(monkeypatch):
+    """In the test mode the withforbidden handler reads the public test sample, so its source line must not say private."""
+    from artisatomic import readfloers25data
+
+    monkeypatch.setattr(readfloers25data, "TESTMODE", True)
+    assert "not public" not in readfloers25data.description_calibrated_withforbidden(70, 2)
+    monkeypatch.setattr(readfloers25data, "TESTMODE", False)
+    assert "It is not public" in readfloers25data.description_calibrated_withforbidden(70, 2)
