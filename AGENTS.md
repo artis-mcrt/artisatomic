@@ -54,8 +54,9 @@ Run all commands through uv so they use the locked environment:
 - Format: `uv run ruff format .`
 - Type checks: `uv run pyrefly check`, `uv run ty check`
 - Pre-commit hooks: `prek install` once, then hooks run on each commit
+- Documentation: `uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html`
 
-CI (`.github/workflows/test.yml`) runs the lint check, the format check, both type checks, the prek hooks, the tests, and the output checksums. Run them locally before you push.
+CI (`.github/workflows/test.yml`) runs the lint check, the format check, both type checks, the prek hooks, the tests, the output checksums, and the documentation build. Run them locally before you push.
 
 ## Output checksums
 
@@ -87,6 +88,8 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
 - `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
+- `docs/` holds the Sphinx documentation, which readthedocs.org builds from `.readthedocs.yaml`. The pages use MyST Markdown. `docs/index.md` includes README.md, and `docs/tests.md` includes tests/README.md. `docs/modules.md` lists the modules for autodoc. Add a new module to that list.
+- Sphinx reads the docstrings as reStructuredText, and the build stops on a warning. Put text such as `|delta J|` in backticks, because reStructuredText reads `|...|` as a substitution. Put a blank line before a list.
 - `tests/` contains test configurations and reference checksums for the data sources that CI covers. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
 - The pytest settings in `pyproject.toml` fail the run if a test gives a warning (`max_warnings = "0"`). Do not use `filterwarnings = ["error"]` for this. polars gives some deprecations from its Rust core, and that filter hides them.
 

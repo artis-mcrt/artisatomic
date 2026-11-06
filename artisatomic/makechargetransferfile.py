@@ -18,7 +18,9 @@ setup_chargetransfer_data.sh in that folder downloads the tables. The sources ar
   tabulated k(T) values and no fit coefficients, so the script fits their tables over 1e3 to 4e4 K.
 
 Every entry uses the KF96 fit form (their equation 7, from AR85):
+
   k = a * 1e-9 * t4^b * (1 + c * exp(d * t4)) * exp(-eexp/T)  [cm3/s],  t4 = T / 1e4 K.
+
 See the header of the output file for the column definitions. The chargetransfer.cc module of ARTIS
 reads the file and makes its own estimates for the reactions that the file does not cover.
 """

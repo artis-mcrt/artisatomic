@@ -55,6 +55,12 @@ dev = [
     "ty>=0.0.74",
     "types-requests>=2.32.0.20241016",
 ]
+docs = [
+    "furo>=2025.12.19",
+    "myst-parser>=5.1.0",
+    "sphinx>=9.2.0",
+    "sphinxcontrib-programoutput>=0.20",
+]
 
 [project.urls]
 Repository = "https://www.github.com/artis-mcrt/artisatomic"
@@ -157,6 +163,10 @@ unfixable = [
     "empty-type-checking-block",
     "unused-import",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Sphinx runs docs/conf.py as a script, so the folder is not a package
+"docs/conf.py" = ["implicit-namespace-package"]
 
 [tool.ruff.lint.pydocstyle]
 # Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and

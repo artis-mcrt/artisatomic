@@ -3,6 +3,8 @@
 
 >The Python package converts atomic data from several sources (for example CMFGEN, Kurucz, JPLT, ADAS) into the ARTIS format.
 
+The documentation is at <https://artisatomic.readthedocs.io>.
+
 ## Installation and Development
 First clone the repository, for example:
 ```sh
