@@ -1737,6 +1737,8 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
     l_degeneracy = (l_end - l_start + 1) * (l_end + l_start + 1)  # == sum of (2l + 1) from l_start to l_end
 
+    # the position and the two rows of the step at the offset edge of type 8
+    steprows: tuple[int, list[list[float]]] | None = None
     if nu_o is None:
         # type 2: the output energies coincide with the tabulated U values, so no interpolation
         # 1 / thresholdenergyryd / n**2 is CMFGEN's (NEF / (n * ZION))**2
@@ -1760,20 +1762,18 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # the cross section is zero below the offset edge
         arr_sigma[u_offset < 1.0] = 0.0
 
-    phixstable[:, 0] = u_grid * thresholdenergyryd
-    phixstable[:, 1] = arr_sigma
-
-    if nu_o is not None:
         # The offset edge falls between two points of the U grid, which are 10% apart. Two rows at the
         # edge give the step of CMFGEN (zero below, the value at U = 1 above). Without them the
         # downsample joined the zero point and the full point with a ramp over one step.
         firstopen = int(np.searchsorted(u_offset, 1.0, side="left"))
         if 0 < firstopen < len(u_offset):
             edge_ryd = (e_o_ev + thresholdenergyev) / ryd_to_ev
-            sigma_at_edge = 10 ** log_sigma[0] * scale_factor
-            phixstable = np.insert(phixstable, firstopen, [[edge_ryd, 0.0], [edge_ryd, sigma_at_edge]], axis=0)
+            steprows = (firstopen, [[edge_ryd, 0.0], [edge_ryd, 10 ** log_sigma[0] * scale_factor]])
 
-    return phixstable
+    phixstable[:, 0] = u_grid * thresholdenergyryd
+    phixstable[:, 1] = arr_sigma
+
+    return phixstable if steprows is None else np.insert(phixstable, steprows[0], steprows[1], axis=0)
 
 
 def hyd_gaunt_filename() -> str:
