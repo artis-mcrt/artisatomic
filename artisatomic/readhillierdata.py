@@ -162,8 +162,9 @@ ions_data |= {
     (8, 1): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     (8, 4): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # F
-    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), ""),
-    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), ""),
+    # the collision data files of F II and F III give the values of the isoelectronic Ne III and Ne IV
+    (9, 2): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c"), "col_data.dat"),
+    (9, 3): IonFiles("tst", "fin_osc", ("phot_data_a", "phot_data_b", "phot_data_c", "phot_data_d"), "col_data.dat"),
     # Si
     (14, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     # P
@@ -1923,6 +1924,13 @@ def get_level_valence_n(levelname: str) -> int | None:
     return parse_orbital_n(orbitals[-1]) if orbitals else None
 
 
+# the collision data files that give the values of another ion, as their headers say
+coldata_of_another_ion = {
+    (9, 2): "The collision data file gives the values of Ne III, the ion with the same electrons, as its header says.",
+    (9, 3): "The collision data file gives the values of Ne IV, the ion with the same electrons, as its header says.",
+}
+
+
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
@@ -1967,6 +1975,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     log_comment(
         flog, ("transitiondata",), f"The collision strengths come from {path_in_data_folder(filename, hillier_folder)}."
     )
+    if (atomic_number, ion_stage) in coldata_of_another_ion:
+        log_comment(flog, ("transitiondata",), coldata_of_another_ion[atomic_number, ion_stage])
     coll_lines_in = 0
     # the lines that name a term with more than one J level, so that their value applies to each level of the term
     termnamed_lines = 0
