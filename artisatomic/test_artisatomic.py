@@ -2026,7 +2026,7 @@ def test_readlisbondata_stops_on_a_level_with_no_energy(tmp_path, monkeypatch):
     write_lisbon_fixture(tmp_path, [0.0, "", 2000.0])
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
-    with pytest.raises(ValueError, match="level with no energy"):
+    with pytest.raises(ValueError, match="The Lisbon levels file has rows with no value"):
         readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
 
@@ -7751,3 +7751,30 @@ def test_hdf5_to_parquet_attribute_text_escapes_a_byte_that_is_not_utf8():
     assert hdf5_to_parquet.attribute_text("Å", None) == "Å"
     # the metadata of a Parquet file takes the text
     pl.DataFrame({"x": [1]}).write_parquet(io.BytesIO(), metadata={"units": text})
+
+
+def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
+    """The chunks of the process pool must give the same lines as one format in this process."""
+    from artisatomic import output
+
+    rng = np.random.default_rng(7)
+    nrows = 1000
+    lower = rng.integers(0, 50, nrows)
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": lower,
+            "upperlevel": lower + rng.integers(1, 50, nrows),
+            "A": 10.0 ** rng.uniform(-3, 9, nrows),
+            "coll_str": np.where(rng.random(nrows) < 0.5, -1.0, rng.uniform(0.0, 5.0, nrows)),
+            "forbidden": rng.integers(0, 2, nrows).astype(bool),
+        }
+    )
+    texts = []
+    for rowsforpool in (10**9, 1):
+        monkeypatch.setattr(output, "transition_rows_for_the_pool", rowsforpool)
+        ftransitiondata = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            output.write_transition_data(ftransitiondata, 26, 2, dftransitions, io.StringIO())
+        texts.append(ftransitiondata.getvalue())
+    assert texts[0] == texts[1]
+    assert texts[0].count("\n") > nrows

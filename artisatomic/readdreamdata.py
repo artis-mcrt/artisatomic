@@ -12,10 +12,9 @@ import polars as pl
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import converted_parquet_path
 from artisatomic.base import EnergyLevel
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import Transition
@@ -202,9 +201,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     transitions = read_lines_data(dfiondata)
 
     # DREAM has no ionisation energies, so take them from NIST as the other handlers do
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     log_and_print(flog, f"The reader got {len(energy_levels):d} levels.")
 

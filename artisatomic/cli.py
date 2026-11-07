@@ -16,16 +16,8 @@ from pathlib import Path
 
 import argcomplete
 
-from artisatomic import readadasdata
-from artisatomic.base import check_ion_stages_contiguous
-from artisatomic.base import log_path
-from artisatomic.iondata import read_ion_data
-from artisatomic.iondata import resolve_photoion_targetfractions
-from artisatomic.ionhandlers import get_ion_handlers
-from artisatomic.ionhandlers import inputhandlersfile
-from artisatomic.output import clear_files
-from artisatomic.output import write_compositionfile
-from artisatomic.output import write_output_files
+# The functions import the modules of the package only when they need them. The package imports
+# polars and numpy, which took 0.3 s, so "--help" and the tab completion waited for them.
 
 # the record of the ions and the handlers of a run, in the output folder
 handlersrecordname = "artisatomicionhandlers_used.json"
@@ -91,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def get_ion_handlers(
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Give the ion selection of ionhandlers.get_ion_handlers(), with the import only at the call."""
+    from artisatomic import ionhandlers
+
+    return ionhandlers.get_ion_handlers(
+        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
+
+
 def main() -> None:
     """Write an ARTIS atomic database from the configured ions and handlers."""
     parser = build_parser()
@@ -105,6 +108,10 @@ def main() -> None:
     for name in ionlimits:
         if getattr(args, name) is None:
             setattr(args, name, parser.get_default(name))
+
+    from artisatomic import readadasdata
+    from artisatomic.base import check_ion_stages_contiguous
+    from artisatomic.ionhandlers import inputhandlersfile
 
     # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so that
     # file selects the ions itself. Not an assert: this validates the command line and must
@@ -295,6 +302,8 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
 
 def discard_run(workfolder: Path, outputfolder: Path) -> None:
     """Remove the work folder of a run that failed. Keep its log as failedlogname in the output folder."""
+    from artisatomic.base import log_path
+
     if log_path(workfolder).is_file():
         log_path(workfolder).replace(outputfolder / failedlogname)
     shutil.rmtree(workfolder)
@@ -331,6 +340,10 @@ def install_files(workfolder: Path, outputfolder: Path) -> Path:
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Write all output files of the run, the log file, and the record of the ion handlers to args.output_folder."""
+    from artisatomic.base import log_path
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_compositionfile
+
     # this makes the log file. The passes of each ion append to the file.
     log_path(args.output_folder).write_text("", encoding="utf-8")
 
@@ -374,6 +387,11 @@ def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: a
     targets are levels of the next ion up, so the loop knows them already. The order also
     identifies the top ion, which gets no cross sections.
     """
+    from artisatomic.base import log_path
+    from artisatomic.iondata import read_ion_data
+    from artisatomic.iondata import resolve_photoion_targetfractions
+    from artisatomic.output import write_output_files
+
     for atomic_number, listions in ion_handlers:
         if not listions:
             continue
