@@ -14,13 +14,12 @@ import polars as pl
 from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
@@ -871,9 +870,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
 
     log_and_print(flog, f"The reader got {len(transitions):d} transitions.")
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     return ionization_energy_in_ev, dflevels, transitions
 

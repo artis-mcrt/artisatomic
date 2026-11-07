@@ -24,6 +24,7 @@ import polars as pl
 # readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import check_no_nulls
 from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
@@ -37,7 +38,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -812,9 +813,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         # The header of adf04_v1 gives 330397 cm^-1 (40.96 eV). NIST and the CMFGEN data of Co III
         # give 33.50 eV, so the header value is wrong.
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
         transitionfile = tyndall_co3_path / "adf04rad_v1"
         log_comment(
@@ -850,9 +849,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
         dfupsilon = pl.DataFrame(schema=upsilon_schema)
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
@@ -937,9 +934,8 @@ def _fill_co2_phixs(
             f"The cross sections of level {lowerlevelid + 1} come from {path_in_data_folder(filename, adasfolder)}.",
         )
         photdata = tableread.result()
-        if photdata.null_count().sum_horizontal().item() > 0:
-            msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
-            raise ValueError(msg)
+        # a missing value means that the columns are not in their expected positions
+        check_no_nulls(photdata, str(filename))
         # a cross section is never negative, so a negative value is an error in the file
         nnegative = photdata.select(pl.sum_horizontal((pl.col(name) < 0.0).sum() for name in columnnames[1:])).item()
         if nnegative > 0:

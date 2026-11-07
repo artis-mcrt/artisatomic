@@ -628,6 +628,14 @@ nist_ionization_energy_comment = (
 )
 
 
+def nist_ionization_energy_ev(atomic_number: int, ion_stage: int, flog) -> float:
+    """Give the NIST ionisation energy of an ion in eV, and record in adata.txt that it comes from NIST."""
+    ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+    return ionization_energy_ev
+
+
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
     """Render an input data path for a log file, relative to a directory.
 
@@ -1129,6 +1137,18 @@ def parallel_map[ResultType](
     # ThreadPoolExecutor.map() ignores a chunk size
     with ThreadPoolExecutor() as executor:
         return list(executor.map(fn, *lists))
+
+
+def map_chunks[ItemType, ResultType](fn: Callable[[ItemType], ResultType], chunks: list[ItemType]) -> list[ResultType]:
+    """Map fn over a few large chunks of work in the run-wide pool, and keep their order.
+
+    parallel_map() does a list of 32 items or fewer in this process, because a small item costs
+    more in IPC than in work. A chunk here is large, so each chunk goes to the pool.
+    """
+    if not sys._is_gil_enabled():  # ruff: ignore[private-member-access]
+        with ThreadPoolExecutor() as executor:
+            return list(executor.map(fn, chunks))
+    return list(get_process_pool().map(fn, chunks))
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:

@@ -11,14 +11,14 @@ from pathlib import Path
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import check_no_nulls
 from artisatomic.base import check_row_count
 from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
@@ -237,10 +237,7 @@ def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
 
     # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
     # Not an assert: input validation must survive python -O.
-    for colname in ("Lower", "Upper", "A", "Type"):
-        if dffile[colname].null_count() > 0:
-            msg = f"Unreadable {colname} values in {filepath}"
-            raise ValueError(msg)
+    check_no_nulls(dffile.select("Lower", "Upper", "A", "Type"), str(filepath))
 
     # the forbidden flag below trusts the Type column, so an unknown type must stop the run
     # rather than count as forbidden. A file has few distinct types, so test those and not each row.
@@ -371,8 +368,7 @@ def read_levels_and_transitions(
             f"The transitions come from {basepath.name}/{without_compression_extension(transition_file.name)}.",
         )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # the levels files of the data sets do not all carry the same columns, so name the ones used.
     # J keeps its "5/2" form as a string, which the g column below reads.
@@ -380,10 +376,7 @@ def read_levels_and_transitions(
 
     # a null means an empty cell, and a level needs each of these values
     # not an assert: input validation must survive python -O
-    for colname in dflevels.columns:
-        if dflevels[colname].null_count() > 0:
-            msg = f"Unreadable {colname} values in {levels_file}"
-            raise ValueError(msg)
+    check_no_nulls(dflevels, str(levels_file))
 
     # every expression here reads the input frame, so g reads the file's own J string. J is "5/2"
     # for a half-integer value and "2" for an integer value.

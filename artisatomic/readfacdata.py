@@ -21,12 +21,11 @@ from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
 from artisatomic.base import EnergyLevel
 from artisatomic.base import fixed_width_column
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import null_if_blank
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelid_columns
@@ -343,8 +342,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         flog, ("transitiondata",), f"The transitions come from {path_for_log(lines_file, relative_to=logged_root)}."
     )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # GetLevels() and GetLines() open the plain file or a compressed form of it. When no form
     # exists, they stop the run with the names of the forms.
