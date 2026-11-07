@@ -6998,3 +6998,16 @@ def test_reduce_phixs_tables_worker_with_a_narrow_thermal_weight():
     assert np.all(np.isfinite(averages))
     assert np.all(averages > 0.0)
     assert averages[0] == pytest.approx(1.0, rel=1e-3)
+
+
+def test_reduce_phixs_tables_worker_with_an_edge_narrower_than_a_segment():
+    """At 1 K, the weight of a bin is in the first 1e-4 eV above its low edge.
+
+    The cross section falls from 1 at 100 eV to 0 at 101 eV, so the average of the first bin is
+    0.999914. Three Gauss nodes per segment gave 0.887, because each node lies far above the edge.
+    """
+    threshold_ryd = 100.0 / ryd_to_ev
+    xgrid = 1.0 + np.arange(6, dtype=float)
+    table = np.array([[threshold_ryd, 1.0], [1.01 * threshold_ryd, 0.0], [10.0 * threshold_ryd, 0.0]])
+    averages = reduce_phixs_tables_worker(1.0, xgrid, table)
+    assert averages[0] == pytest.approx(0.999914, rel=1e-5)

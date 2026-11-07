@@ -1,5 +1,6 @@
 """Downsample photoionisation cross section tables and estimate hydrogenic ones where none exist."""
 
+import math
 import typing as t
 from collections.abc import Callable
 from functools import partial
@@ -342,35 +343,66 @@ def reduce_phixs_tables_worker(
     # Each segment between two neighbouring grid points belongs to the bin of its low end.
     # a step at the last edge gives a segment of zero width that starts there
     arr_bin = np.minimum(np.searchsorted(arr_enhigh, grid_energyryd[:-1], side="right"), nphixspoints - 1)
-    # The cross section is linear on a segment, and the weight is not. A Gauss-Legendre rule of three
-    # points on each segment integrates both products to 1e-9 or better also where a bin is many kT
-    # wide. The trapezoid rule of the two ends gave errors of 4% in a bin at 6000 K and 150 eV.
-    half_dx = 0.5 * np.diff(grid_energyryd)
-    midpoint = 0.5 * (grid_energyryd[:-1] + grid_energyryd[1:])
-    # The first node of a segment has the lowest frequency of the segment. nu_ref of a bin is the
-    # lowest such node of a segment with a width above zero. The bin edge is not a node, and with a
-    # narrow weight each node can be more than 745 kT above the edge.
+    # The cross section is linear on a segment, and the weight is not. The trapezoid rule of the two
+    # ends gave errors of 4% in a bin at 6000 K and 150 eV. The integrals below use two rules:
+    # - a segment narrower than 0.25 kT takes a Gauss-Legendre rule of three points, with an error
+    #   below 2e-10;
+    # - a wider segment takes the exact integral of a polynomial times exp(-a s).
+    # Each rule fails where the other works. The exact form loses digits in a narrow segment, and three
+    # points miss the weight at the low end of a segment that is many kT wide.
+    a_hz = -minus_h_over_kb_t
+    nu_start = grid_energyryd[:-1] * ryd_to_hz
+    width_hz = np.diff(grid_energyryd) * ryd_to_hz
+    sigma_start = grid_sigma[:-1]
+    sigma_slope = np.divide(grid_sigma[1:] - sigma_start, width_hz, out=np.zeros_like(width_hz), where=width_hz > 0.0)
+    # nu_ref of a bin is the start of its first segment with a width above zero. Each exponent of the bin
+    # is then 0 or less.
     arr_nu_ref = np.full(nphixspoints, np.inf)
-    np.minimum.at(
-        arr_nu_ref,
-        arr_bin,
-        np.where(half_dx > 0.0, (midpoint + gauss_legendre_3[0][0] * half_dx) * ryd_to_hz, np.inf),
-    )
+    np.minimum.at(arr_nu_ref, arr_bin, np.where(width_hz > 0.0, nu_start, np.inf))
     arr_nu_ref[np.isinf(arr_nu_ref)] = 0.0
     arr_nu_ref = arr_nu_ref[arr_bin]
-    integralnosigma = np.zeros(nphixspoints)
-    integralwithsigma = np.zeros(nphixspoints)
     # The weight is positive, so a negative average comes only from a negative cross section, and the
     # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
     # average is then NaN or infinite, and ARTIS would fail only when it reads the table. The check
     # below stops the run for these cases, so numpy gives no warning about them.
-    with np.errstate(over="ignore", divide="ignore", invalid="ignore"):
+    with np.errstate(over="ignore", divide="ignore", invalid="ignore", under="ignore"):
+        segment_nosigma = np.zeros(len(width_hz))
+        segment_withsigma = np.zeros(len(width_hz))
         for node, nodeweight in gauss_legendre_3:
-            nodenu = (midpoint + node * half_dx) * ryd_to_hz
-            weight = nodeweight * half_dx * nodenu**2 * np.exp(minus_h_over_kb_t * (nodenu - arr_nu_ref))
-            sigma = grid_sigma[:-1] + 0.5 * (node + 1.0) * (grid_sigma[1:] - grid_sigma[:-1])
-            integralnosigma += np.bincount(arr_bin, weights=weight, minlength=nphixspoints)
-            integralwithsigma += np.bincount(arr_bin, weights=weight * sigma, minlength=nphixspoints)
+            offset = 0.5 * (node + 1.0) * width_hz
+            weight = (
+                0.5
+                * nodeweight
+                * width_hz
+                * (nu_start + offset) ** 2
+                * np.exp(-a_hz * (nu_start + offset - arr_nu_ref))
+            )
+            segment_nosigma += weight
+            segment_withsigma += weight * (sigma_start + sigma_slope * offset)
+
+        # s is the distance from the start of the segment. moments[k] is the integral of s^k exp(-a s)
+        # from 0 to the width: k! / a^(k+1) (1 - exp(-t) (1 + t + ... + t^k / k!)), with t = a * width.
+        wide = a_hz * width_hz > 0.25
+        twidth = a_hz * width_hz[wide]
+        exp_minus_t = np.exp(-twidth)
+        moments = []
+        partialsum = np.zeros_like(twidth)
+        term = np.ones_like(twidth)
+        for k in range(4):
+            if k > 0:
+                term = term * twidth / k
+            partialsum += term
+            moments.append(math.factorial(k) / a_hz ** (k + 1) * (1.0 - exp_minus_t * partialsum))
+        scale = np.exp(-a_hz * (nu_start[wide] - arr_nu_ref[wide]))
+        nu0 = nu_start[wide]
+        # nu^2 = nu0^2 + 2 nu0 s + s^2, and sigma = sigma_start + sigma_slope s
+        nu2_moment0 = nu0**2 * moments[0] + 2.0 * nu0 * moments[1] + moments[2]
+        nu2_moment1 = nu0**2 * moments[1] + 2.0 * nu0 * moments[2] + moments[3]
+        segment_nosigma[wide] = scale * nu2_moment0
+        segment_withsigma[wide] = scale * (sigma_start[wide] * nu2_moment0 + sigma_slope[wide] * nu2_moment1)
+
+        integralnosigma = np.bincount(arr_bin, weights=segment_nosigma, minlength=nphixspoints)
+        integralwithsigma = np.bincount(arr_bin, weights=segment_withsigma, minlength=nphixspoints)
         averages = integralwithsigma / integralnosigma
     if not (np.all(integralnosigma > 0.0) and np.all(np.isfinite(averages)) and np.all(averages >= 0.0)):
         msg = (
