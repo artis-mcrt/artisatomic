@@ -6957,3 +6957,57 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_reduce_phixs_tables_worker_is_accurate_where_a_bin_is_many_kt_wide():
+    """A bin of 52 kT (150 eV threshold, -optimaltemperature 1000) with sharp windows gives the bin average to 1e-5.
+
+    The trapezoid rule on the 51 points of a bin gave errors of 19% in such a bin. A dense
+    trapezoid rule on each bin is the reference.
+    """
+    xgrid = output_xgrid(100, 0.03)
+    temperature = 1000.0
+    threshold_ryd = 150.0 / ryd_to_ev
+    x = np.linspace(1.0, 4.2, 801)
+    table = np.column_stack((x * threshold_ryd, x**-3 * (1 + 5 * (np.sin(37 * x) > 0.95))))
+    averages = reduce_phixs_tables_worker(temperature, xgrid, table)
+
+    nbins = len(xgrid) - 1
+    lowedges = 0.5 * (xgrid[np.maximum(np.arange(nbins) - 1, 0)] + xgrid[:-1]) * threshold_ryd
+    highedges = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_ryd
+    for index in (0, 10, 50, 99):
+        energy = np.linspace(lowedges[index], highedges[index], 40001)
+        weight = (energy * ryd_to_hz) ** 2 * np.exp(
+            -h_over_kb_in_K_sec / temperature * (energy - lowedges[index]) * ryd_to_hz
+        )
+        sigma = np.interp(energy, table[:, 0], table[:, 1])
+        expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
+        assert averages[index] == pytest.approx(expected, rel=1e-5)
+
+
+def test_reduce_phixs_tables_worker_with_a_narrow_thermal_weight():
+    """At 1 K and a bin width of the threshold, each Gauss node lies more than 745 kT above the bin edge.
+
+    The weight of each bin is relative to its lowest node. A weight relative to the bin edge
+    underflowed to zero at each node, and the function stopped the run.
+    """
+    threshold_ryd = 100.0 / ryd_to_ev
+    xgrid = 1.0 + np.arange(6, dtype=float)
+    table = np.array([[threshold_ryd, 1.0], [10.0 * threshold_ryd, 0.001]])
+    averages = reduce_phixs_tables_worker(1.0, xgrid, table)
+    assert np.all(np.isfinite(averages))
+    assert np.all(averages > 0.0)
+    assert averages[0] == pytest.approx(1.0, rel=1e-3)
+
+
+def test_reduce_phixs_tables_worker_with_an_edge_narrower_than_a_segment():
+    """At 1 K, the weight of a bin is in the first 1e-4 eV above its low edge.
+
+    The cross section falls from 1 at 100 eV to 0 at 101 eV, so the average of the first bin is
+    0.999914. Three Gauss nodes per segment gave 0.887, because each node lies far above the edge.
+    """
+    threshold_ryd = 100.0 / ryd_to_ev
+    xgrid = 1.0 + np.arange(6, dtype=float)
+    table = np.array([[threshold_ryd, 1.0], [1.01 * threshold_ryd, 0.0], [10.0 * threshold_ryd, 0.0]])
+    averages = reduce_phixs_tables_worker(1.0, xgrid, table)
+    assert averages[0] == pytest.approx(0.999914, rel=1e-5)
