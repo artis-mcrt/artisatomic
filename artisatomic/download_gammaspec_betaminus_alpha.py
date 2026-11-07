@@ -103,6 +103,7 @@ def main():
     # one session for the whole run, and a retry on a transient failure. Then one 5xx or a
     # dropped connection does not end the run after N nuclides.
     nuclides_without_table: list[str] = []
+    nuclides_without_groundlevel: list[str] = []
     with requests.Session() as session:
         session.mount(
             "https://",
@@ -222,6 +223,14 @@ def main():
                             "intensity": dfgammadecays["intensity"] / 100.0,
                         }
                     ).sort("energy_mev")
+                    # the file gives each intensity with 4 decimal places, so a weaker line would print as
+                    # 0.0000 and carry no energy. A nuclide with only such lines then gets no file.
+                    nweak = dfout.filter(pl.col("intensity") < 5e-5).height
+                    if nweak:
+                        print(
+                            f"  {nweak} gamma lines have an intensity below 5e-5 per decay, so the file leaves them out"
+                        )
+                        dfout = dfout.filter(pl.col("intensity") >= 5e-5)
                     if len(dfout) > 0:
                         # a run that stops part way through leaves the previous file complete
                         with open_for_atomic_write(nucoutfilepath) as fout:
@@ -229,15 +238,29 @@ def main():
                             for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
                                 fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
                         print(f"Saved {nucoutfilepath.name}")
+                    # a file of an earlier run would still give the lines that this run leaves out
+                    elif nucoutfilepath.exists():
+                        nucoutfilepath.unlink()
+                        print(f"empty DataFrame, so the run removed the old {nucoutfilepath.name}")
                     else:
                         print("empty DataFrame")
                 if not found_groundlevel:
                     print("  ERROR! the table has no ground level")
+                    nuclides_without_groundlevel.append(strnuclide)
 
     # a run that skipped a nuclide must not end with an exit code of 0 and a missing file
+    problems = []
     if nuclides_without_table:
-        msg = f"NuDat returned no table for {len(nuclides_without_table)} nuclides: {', '.join(nuclides_without_table)}"
-        raise SystemExit(msg)
+        problems.append(
+            f"NuDat returned no table for {len(nuclides_without_table)} nuclides: {', '.join(nuclides_without_table)}"
+        )
+    if nuclides_without_groundlevel:
+        problems.append(
+            f"The NuDat table of {len(nuclides_without_groundlevel)} nuclides has no ground level:"
+            f" {', '.join(nuclides_without_groundlevel)}"
+        )
+    if problems:
+        raise SystemExit("\n".join(problems))
 
 
 if __name__ == "__main__":

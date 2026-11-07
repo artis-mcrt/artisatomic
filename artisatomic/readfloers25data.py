@@ -11,13 +11,14 @@ from pathlib import Path
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import check_no_nulls
+from artisatomic.base import check_row_count
 from artisatomic.base import compression_extensions
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
@@ -121,16 +122,20 @@ def extend_ion_list(
     return ion_handlers
 
 
-def read_table_header(filepath: Path) -> tuple[list[str], int]:
+def read_table_header(filepath: Path) -> tuple[list[str], int, list[str]]:
     """Read the column names of the data table that starts after the third '----' line.
 
-    The second value is the number of lines before the first data row, which the scan skips.
+    The second value is the number of lines before the first data row, which the scan skips. The
+    third value is the lines before the first '----' line, for example "Number of levels: 41".
     """
     linecount = 0
     dashrowcount = 0
+    headerlines: list[str] = []
     with xopen_check_extension(filepath) as f:
         for line in f:
             linecount += 1
+            if dashrowcount == 0 and not line.startswith("--"):
+                headerlines.append(line)
             if line.startswith("--"):
                 dashrowcount += 1
                 if dashrowcount == 3:
@@ -148,7 +153,7 @@ def read_table_header(filepath: Path) -> tuple[list[str], int]:
         msg = f"Did not find the expected data table in {filepath}"
         raise ValueError(msg)
 
-    return columns, linecount
+    return columns, linecount, headerlines
 
 
 def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
@@ -166,7 +171,7 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     list of tokens and never become a column. This keeps the memory low on a wide file. Every
     column of the result holds strings, because the tables mix text and numbers.
     """
-    columns, skip_lines = read_table_header(filepath)
+    columns, skip_lines, headerlines = read_table_header(filepath)
     missing = [name for name in usecols if name not in columns]
     # not an assert: input validation must survive python -O
     if missing:
@@ -210,6 +215,14 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
         msg = f"{nlongrows} rows of the data table in {filepath} have more than {len(columns)} tokens"
         raise ValueError(msg)
 
+    # The header declares the count of rows, so a file that a download or a copy cut between two
+    # rows stops the run. A levels file says "Number of levels: N" and a transitions file says
+    # "Total number of transitions: N". A cut file keeps its header.
+    for key in ("Number of levels", "Total number of transitions"):
+        if any(line.startswith(f"{key}:") for line in headerlines):
+            check_row_count(dftable, headerlines, key, ":", str(filepath))
+            break
+
     return dftable.drop(countcol)
 
 
@@ -224,10 +237,7 @@ def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
 
     # a null means an unreadable cell, and it must not decide a flag or become a zero rate.
     # Not an assert: input validation must survive python -O.
-    for colname in ("Lower", "Upper", "A", "Type"):
-        if dffile[colname].null_count() > 0:
-            msg = f"Unreadable {colname} values in {filepath}"
-            raise ValueError(msg)
+    check_no_nulls(dffile.select("Lower", "Upper", "A", "Type"), str(filepath))
 
     # the forbidden flag below trusts the Type column, so an unknown type must stop the run
     # rather than count as forbidden. A file has few distinct types, so test those and not each row.
@@ -273,6 +283,16 @@ def find_levels_file(atomic_number: int, ion_stage: int, *, calibrated: bool, wi
         msg = f"Found no Floers+25 levels file for {ionstr}. Searched {searched}"
         raise FileNotFoundError(msg)
     return levels_file
+
+
+def description_calibrated_withforbidden(atomic_number: int, ion_stage: int) -> str:  # ruff: ignore[unused-function-argument]
+    """Give the "source:" line of the floers25calibwithforbidden handler.
+
+    In the test mode the handler reads test_sample, which holds only public data.
+    """
+    if TESTMODE:
+        return description.format(variant="calibrated")
+    return description_withforbidden
 
 
 def description_uncalibrated(atomic_number: int, ion_stage: int) -> str:
@@ -348,8 +368,7 @@ def read_levels_and_transitions(
             f"The transitions come from {basepath.name}/{without_compression_extension(transition_file.name)}.",
         )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # the levels files of the data sets do not all carry the same columns, so name the ones used.
     # J keeps its "5/2" form as a string, which the g column below reads.
@@ -357,10 +376,7 @@ def read_levels_and_transitions(
 
     # a null means an empty cell, and a level needs each of these values
     # not an assert: input validation must survive python -O
-    for colname in dflevels.columns:
-        if dflevels[colname].null_count() > 0:
-            msg = f"Unreadable {colname} values in {levels_file}"
-            raise ValueError(msg)
+    check_no_nulls(dflevels, str(levels_file))
 
     # every expression here reads the input frame, so g reads the file's own J string. J is "5/2"
     # for a half-integer value and "2" for an integer value.

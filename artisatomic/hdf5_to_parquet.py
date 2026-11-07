@@ -75,7 +75,7 @@ def import_h5py() -> ModuleType:
     except ModuleNotFoundError as exc:
         msg = (
             "hdf5_to_parquet.py needs h5py. Run it as artisatomic/hdf5_to_parquet.py, and uv installs h5py."
-            " Or install the extra hdf5 with Python 3.14: uv sync --python 3.14 --extra hdf5."
+            " Or install the extra hdf5 with Python 3.14: uv sync --frozen --python 3.14 --extra hdf5."
         )
         raise ModuleNotFoundError(msg) from exc
 
@@ -373,6 +373,13 @@ def attribute_text(value, h5file) -> str:
         if value.dtype.kind == "S":
             value = np.strings.decode(value, "utf-8", "backslashreplace")
         return json.dumps(value.tolist(), default=str)
+    if isinstance(value, str):
+        # h5py gives a byte of a variable-length string that is not UTF-8 as a lone surrogate
+        # ("\udcff"), which write_parquet() cannot take
+        try:
+            return value.encode("utf-8", errors="surrogateescape").decode("utf-8", errors="backslashreplace")
+        except UnicodeEncodeError:
+            return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
     return str(value)
 
 
@@ -562,18 +569,24 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     newfolder.mkdir()
     backupfolder = workfolder / "old"
     keepworkfolder = False
+    installed = False
     try:
         for relativepath, table, metadata in tables:
             outputpath = newfolder / relativepath
             outputpath.parent.mkdir(parents=True, exist_ok=True)
             table.write_parquet(outputpath, metadata=metadata)
-        if outputfolder.exists():
-            outputfolder.rename(backupfolder)
+        # both renames are inside the try: an interrupt after the first one must put the earlier tables back
         try:
+            if outputfolder.exists():
+                outputfolder.rename(backupfolder)
             newfolder.rename(outputfolder)
+            installed = True
         except BaseException as exc:
             if backupfolder.exists():
                 try:
+                    # an outputfolder that exists now is not the new tables: another process made it
+                    if outputfolder.exists():
+                        raise FileExistsError(outputfolder)
                     backupfolder.rename(outputfolder)
                 except OSError as restoreexc:
                     # the backup holds the only copy of the earlier tables, so the function keeps it
@@ -582,6 +595,11 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
                     raise RuntimeError(msg) from restoreexc
             raise exc from None
     finally:
+        # the state of the disk, and not only the flag: the backup can be the only copy of the
+        # earlier tables also after an interrupt in the handler above. A backup is safe to delete
+        # only when the new tables are in their place.
+        if backupfolder.exists() and not installed:
+            keepworkfolder = True
         if not keepworkfolder:
             shutil.rmtree(workfolder, ignore_errors=True)
 

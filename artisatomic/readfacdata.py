@@ -16,16 +16,16 @@ import polars as pl
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import check_no_nulls
 from artisatomic.base import check_row_count
+from artisatomic.base import compression_extensions
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
 from artisatomic.base import EnergyLevel
 from artisatomic.base import fixed_width_column
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import null_if_blank
 from artisatomic.base import path_for_log
 from artisatomic.base import resolve_transition_levelid_columns
@@ -172,7 +172,17 @@ def GetLevels(filename: Path | str) -> pl.DataFrame:
         msg = f"The first line of {filename} names neither FAC nor cFAC"
         raise ValueError(msg)
 
-    return check_row_count(levels, headerlines, "NLEV", "=", "The FAC levels file")
+    levels = check_row_count(levels, headerlines, "NLEV", "=", "The FAC levels file")
+
+    # Two levels can share the lowest energy (Dy III: Ilev 0 and Ilev 62 at 0.0). The header line
+    # "E0 = 62, ..." names the ground level, so that level comes first. The stable sort by energy
+    # in read_levels_data() then makes it level id 0.
+    groundmatch = re.match(r"\s*E0\s*=\s*(\d+)", headerlines[7])
+    if groundmatch is not None:
+        groundilev = int(groundmatch[1])
+        isground = pl.col("Ilev") == groundilev
+        levels = pl.concat([levels.filter(isground), levels.filter(~isground)])
+    return levels
 
 
 def GetLines_FAC(filename: Path | str) -> pl.DataFrame:
@@ -242,15 +252,23 @@ def extend_ion_list(
         )
         raise FileNotFoundError(msg)
 
-    facions = [
-        split_element_ionstage_str(s.parts[-1].lstrip(string.digits).removesuffix(".lev.asc").removesuffix("_calib"))
-        for s in basepath.glob("**/*.lev.asc")
-    ]
+    # GetLevels() opens a compressed form of a file also, so the discovery finds those forms
+    facions = set()
+    for extension in compression_extensions:
+        for path in basepath.glob(f"**/*.lev.asc{extension}"):
+            ionstr = (
+                path.name.removesuffix(extension).removesuffix(".lev.asc").lstrip(string.digits).removesuffix("_calib")
+            )
+            try:
+                facions.add(split_element_ionstage_str(ionstr))
+            except ValueError:
+                # for example a copy of a file that a sync program makes, "58CeIII_calib (1).lev.asc"
+                print(f"WARNING: the FAC discovery skips {path}, because its name gives no ion")
 
     # add_handlers_if_not_set() keeps the list sorted by atomic number, matching the other readers
     return add_handlers_if_not_set(
         ion_handlers,
-        facions,
+        sorted(facions),
         "fac",
         minionstage=minionstage,
         maxionstage=maxionstage,
@@ -324,8 +342,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         flog, ("transitiondata",), f"The transitions come from {path_for_log(lines_file, relative_to=logged_root)}."
     )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # GetLevels() and GetLines() open the plain file or a compressed form of it. When no form
     # exists, they stop the run with the names of the forms.

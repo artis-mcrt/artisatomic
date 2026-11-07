@@ -3,7 +3,9 @@ name: Test
 permissions:
     contents: read
 on:
+    # branches only: a push of a tag ran every job on old code
     push:
+        branches: ['**']
     merge_group:
     schedule:
         - cron: 0 13 * * 1
@@ -40,6 +42,12 @@ jobs:
                   makeartisatomicfiles --help > /dev/null
                   makeartischargetransferfile --help > /dev/null
                   makeartisrecombratefile --help > /dev/null
+
+            # UV_FROZEN makes the uv-lock hook check only that uv.lock exists, so this step checks that it is
+            # up to date. The explicit option wins over UV_FROZEN.
+            - name: Check that uv.lock agrees with pyproject.toml
+              if: always()
+              run: uv lock --check
 
             - name: Run Ruff
               if: always()
@@ -197,9 +205,9 @@ jobs:
             - name: Install artisatomic
               run: uv sync --compile-bytecode
 
-            # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
-            # hydrogenic photoionisation tables from HYD/I on any run without --nophixs, so gating this
-            # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
+            # every matrix entry but mons needs this, not just the cmfgen ones: the hydrogenic estimate of
+            # a handler with a level-name parser reads the tables of HYD/I on any run without --nophixs,
+            # so gating this on the test name breaks those jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
               id: cache-cmfgendata
@@ -217,14 +225,13 @@ jobs:
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
 
-            # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
-            # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
+            # no cache-hit guard on the download below: setup_jplt_data.sh does nothing when the data is there
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
               uses: actions/cache@v6
               with:
                   path: atomic-data-tanaka-jplt/data_v2.1/**
-                  key: atomic-data-tanaka-jplt-files-v2.1
+                  key: atomic-data-tanaka-jplt-files-v2.1-${{ hashFiles('atomic-data-tanaka-jplt/setup_jplt_data.sh') }}
 
             - name: Download/extract JPLT atomic data
               if: matrix.testname == 'jplt'

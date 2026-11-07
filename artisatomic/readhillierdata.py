@@ -16,7 +16,9 @@ import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import elsymbols
+from artisatomic.base import find_file_check_extension
 from artisatomic.base import fortran_float
+from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
@@ -27,6 +29,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
+from artisatomic.base import nist_ionization_energy_comment
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -38,6 +41,7 @@ from artisatomic.base import upsilon_frame
 from artisatomic.base import upsilon_schema
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import get_config_parity
+from artisatomic.levelnames import has_merge_marker_letter
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import parse_orbital_n
@@ -283,14 +287,19 @@ def get_level_parity(config: str) -> int:
     if not config:
         return -1
 
-    # first, because a merged level spans both parities whatever the rest of the name says
-    if has_merged_orbital(config):
+    # A w or z merge marker spans both parities, whatever the suffix says. The test l >= n of
+    # has_merged_orbital() comes after the suffix: it also finds names that state their parity
+    # ('59947oo[11/2]' of Co I, the 5i and 6i levels of P VI).
+    if has_merge_marker_letter(config):
         return -1
 
     if config[-1] == "e":
         return 0
     if config[-1] == "o":
         return 1
+
+    if has_merged_orbital(config):
+        return -1
 
     configparity = get_config_parity(config)
     return -1 if configparity is None else configparity
@@ -534,6 +543,14 @@ def read_levels_and_transitions_from_file(
             pl.DataFrame(schema=hillier_transition_schema),
         )
 
+    if (atomic_number, ion_stage) not in ions_data or atomic_number not in atomic_number_to_hillier_code:
+        msg = (
+            f"The cmfgen handler has no data for Z={atomic_number} ion_stage={ion_stage}"
+            f" ({elsymbols[atomic_number]} {roman_numerals[ion_stage]}). ions_data in readhillierdata.py lists the"
+            " CMFGEN ions."
+        )
+        raise ValueError(msg)
+
     filename = hillier_osc_filename(atomic_number, ion_stage)
 
     log_comment(
@@ -729,13 +746,78 @@ def read_levels_and_transitions_from_file(
         msg = f"{filename} declares {expected_transitions} transitions but has {dftransitions.height}"
         raise ValueError(msg)
 
-    names_with_transitions = pl.concat([dftransitions["namefrom"], dftransitions["nameto"]])
+    hillier_ionization_energy_ev, levelrows = compare_ionization_energy_with_nist(
+        atomic_number, ion_stage, hillier_ionization_energy_ev, levelrows, flog
+    )
+
+    # A level stays if a transition names it or if the collision data file names it. A metastable
+    # level can have collision data and no radiative transition (Ca VIII 3s_3p(3P)3d_4Fo[7/2]).
+    names_to_keep = pl.concat(
+        [
+            dftransitions["namefrom"],
+            dftransitions["nameto"],
+            pl.Series(sorted(collision_file_level_names(atomic_number, ion_stage)), dtype=pl.String),
+        ]
+    )
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
         # implode(): polars deprecates is_in() with a bare Series of the same dtype
-        pl.col("levelname").is_in(names_with_transitions.implode())
+        pl.col("levelname").is_in(names_to_keep.implode())
     )
 
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
+
+
+# The ions whose oscillator file gives a wrong ionisation energy in its header. The reader takes
+# the NIST value for these. The header of Sc I gives 64658 cm^-1 (8.0166 eV), which is 52922 cm^-1
+# plus the Sc II level 3p6_4s2_1Se at 11736.36 cm^-1. NIST gives 6.5615 eV.
+ions_with_nist_ionization_energy = frozenset({(21, 1)})
+
+# A header value that differs from the NIST value by more than this fraction gets a warning
+ionization_energy_warning_fraction = 0.02
+
+
+def compare_ionization_energy_with_nist(
+    atomic_number: int, ion_stage: int, ionization_energy_ev: float, levelrows: list[HillierEnergyLevel], flog
+) -> tuple[float, list[HillierEnergyLevel]]:
+    """Compare the ionisation energy of the file header with the NIST value.
+
+    For an ion in ions_with_nist_ionization_energy, the function returns the NIST value. It also
+    moves the Lam(A) of each level, because Lam(A) is the threshold to the ionisation limit of the
+    header. A level that is then above the limit gets a negative Lam(A), as CMFGEN writes it. For
+    another ion, the function returns the header value and writes a warning when the two values
+    differ by more than ionization_energy_warning_fraction.
+    """
+    nist_ev = get_nist_ionization_energies_ev().get((atomic_number, ion_stage))
+    if nist_ev is None:
+        return ionization_energy_ev, levelrows
+
+    if (atomic_number, ion_stage) in ions_with_nist_ionization_energy:
+        shift_ev = ionization_energy_ev - nist_ev
+
+        def moved_lambda(lambdaangstrom: float) -> float:
+            if lambdaangstrom == 0.0:
+                return 0.0
+            edge_ev = hc_in_ev_angstrom / lambdaangstrom - shift_ev
+            return 0.0 if edge_ev == 0.0 else hc_in_ev_angstrom / edge_ev
+
+        log_comment(
+            flog,
+            ("adata", "phixsdata"),
+            f"WARNING: the oscillator file gives an ionisation energy of {ionization_energy_ev:.4f} eV, but the"
+            f" NIST value is {nist_ev:.4f} eV. The output takes the NIST value, and the threshold of each level"
+            f" moves by {-shift_ev:.4f} eV.",
+        )
+        log_comment(flog, ("adata",), nist_ionization_energy_comment)
+        return nist_ev, [row._replace(lambdaangstrom=moved_lambda(row.lambdaangstrom)) for row in levelrows]
+
+    if abs(ionization_energy_ev / nist_ev - 1.0) > ionization_energy_warning_fraction:
+        log_comment(
+            flog,
+            ("adata",),
+            f"WARNING: the oscillator file gives an ionisation energy of {ionization_energy_ev:.4f} eV, and the"
+            f" NIST value is {nist_ev:.4f} eV. The output keeps the value of the oscillator file.",
+        )
+    return ionization_energy_ev, levelrows
 
 
 # the energy grid of the fit types 1, 4, 5, 6, 7 and 9, as a multiple of the threshold energy. The
@@ -1127,7 +1209,9 @@ class PhotFileReader:
             return
 
         if len(row) >= 2 and " ".join(row[-4:]) == "!Final state in ion":
-            self.targetlevelname = row[0]
+            # CMFGEN removes the blanks of the name (rdphot_gen_v2.f), so '2s2s1Se / 2s2_1Se' gives two
+            # spellings. A bracket alone after the name (Sc III '3p6_1Se            [') is not a part of it.
+            self.targetlevelname = "".join(token for token in row[:-4] if token not in {"[", "]"})
             log_comment(
                 self.flog,
                 ("phixsdata",),
@@ -1225,7 +1309,7 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
             self.in_header = True  # All phot_data_* in 19apr23 have this line
             if row[0] != "Megabarns":
-                msg = f"Wrong cross-section unit: {row[0]}"
+                msg = f"Wrong cross section unit: {row[0]}"
                 raise ValueError(msg)
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
@@ -1414,19 +1498,22 @@ class PhotFileReader:
             fitcoefficients.append(value)
             if len(fitcoefficients) == 2:
                 scale, n = fitcoefficients
+                lambda_angstrom = self.edge_lambda_angstrom()
+                if lambda_angstrom is None:
+                    return
                 if n > max_hyd_gaunt_n:
+                    # CMFGEN uses a Gaunt factor of 1 above n = 30 (sub_phot_gen.f)
                     log_detail(
                         flog,
                         ("phixsdata",),
                         "n above the hydrogenic Gaunt tables",
-                        f"WARNING: n = {n} is above the largest n of the hydrogenic Gaunt tables ({max_hyd_gaunt_n}), so the reader skips the table.",
+                        f"n = {n:g} is above the largest n of the hydrogenic Gaunt tables ({max_hyd_gaunt_n}), so the"
+                        " table has a Gaunt factor of 1, as in CMFGEN.",
                     )
-                    return
-                lambda_angstrom = self.edge_lambda_angstrom()
-                if lambda_angstrom is None:
-                    return
+                    phixstable = get_kramers_phixstable(lambda_angstrom, int(n))
+                else:
+                    phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
                 # scale the cross sections but not the energy grid
-                phixstable = get_hydrogenic_n_phixstable(lambda_angstrom, int(n))
                 phixstable[:, 1] *= scale
                 self.store_table(phixstable)
             return
@@ -1578,17 +1665,23 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         phixs_targetconfigfractions_of_levelname[lowerlevelname] = combined.fractions
         if len(combined.factors) > 1:
             factortext = ", ".join(f"{target}: {factor:.4e} Mb" for target, factor in combined.factors)
-            droppedtext = "".join(
-                f" The target {target} has less than {PHIXS_TARGET_FRACTION_CUT:.0%} of the total, so the output drops it."
-                for target, _ in combined.dropped
-            )
             log_detail(
                 flog,
                 ("phixsdata",),
                 "level with more than one route",
                 f"{lowerlevelname} has a cross section table in {len(combined.factors)} photoionisation files."
-                f" The sums of the reduced tables are {factortext}.{droppedtext}",
+                f" The sums of the reduced tables are {factortext}.",
             )
+            # a kind of its own, so that the comment block shows a dropped target also when the
+            # first level with more than one route drops none
+            for target, _ in combined.dropped:
+                log_detail(
+                    flog,
+                    ("phixsdata",),
+                    "target below the cut",
+                    f"The target {target} of {lowerlevelname} has less than {PHIXS_TARGET_FRACTION_CUT:.0%} of the"
+                    " total, so the output drops it.",
+                )
 
     # one summary for the ion, not one per photoionisation file. The counts below accumulate
     # over every file, so a log inside that loop repeated them with partial totals.
@@ -1596,7 +1689,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # .get(): the branch below fires for exactly the types that this parser does not handle.
         # Those are the types least likely to have a label, so an index lookup would fail in the
         # report.
-        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
+        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross section type")
         if crosssectiontype in reader.unknown_phixs_types:
             log_comment(
                 flog,
@@ -1805,6 +1898,21 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
+def get_kramers_phixstable(lambda_angstrom, n):
+    """Evaluate the Kramers cross section of a whole shell with a Gaunt factor of 1.
+
+    CMFGEN does this for a type 3 table with n above 30 (sub_phot_gen.f), where the Gaunt tables
+    end. The energy grid is the ratio grid of the largest n of the tables. Returns (energy in
+    Rydberg, cross section in Megabarns) pairs.
+    """
+    read_hyd_phixsdata()
+    energygrid = np.asarray(hyd_gaunt_energygrid_ryd[max_hyd_gaunt_n])
+    thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+    energydivthreshold = energygrid / energygrid[0]
+    crosssection = 7.91 / thresholdenergyryd / n / energydivthreshold**3
+    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
+
+
 def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (CMFGEN type 5).
 
@@ -1923,6 +2031,68 @@ def get_level_valence_n(levelname: str) -> int | None:
     return parse_orbital_n(orbitals[-1]) if orbitals else None
 
 
+# The collision data files whose temperature header gives log10(T/K), and not T/1e4 K. CMFGEN reads
+# them as T/1e4 K also (gen_omega_rd_v2.f). Ne V, Na VI, Mg VII, Al VI and Al VIII give 3.0 to 5.0.
+# Mg VIII gives log10 of 100 K to 50000 K times 49 (the square of the ion charge).
+coldata_log10_temperature_ions = frozenset({(10, 5), (11, 6), (12, 7), (12, 8), (13, 6), (13, 8)})
+
+
+def split_coldata_row(row: list[str]) -> tuple[str, str, list[str]]:
+    """Split a row of a CMFGEN collision data file into the two level names and the values.
+
+    The names come first and the values after them, as CMFGEN reads a row (gen_omega_rd_v2.f).
+    The first value is the first token after the first token that is a number. A row can have more
+    values than the header declares: the P II file writes a value of 10 or more as two tokens
+    ('1  1.539'). The caller takes the first values.
+    """
+    firstvalue = next((index for index, token in enumerate(row) if index > 0 and isfloat(token)), len(row))
+    namefromnameto = "".join(row[:firstvalue])
+    if "-" in namefromnameto:
+        namefrom, nameto = map(str.strip, namefromnameto.split("-"))
+    else:
+        # Assume there is just a space between them (as is the case in Ni XIV)
+        namefrom, nameto = row[:2]
+    return namefrom, nameto, row[firstvalue:]
+
+
+def coldata_filename(atomic_number: int, ion_stage: int) -> Path | None:
+    """Path of the CMFGEN collision data file of one ion, or None if ions_data names no such file."""
+    ionfiles = ions_data.get((atomic_number, ion_stage))
+    if ionfiles is None or not ionfiles.coldatafilename:
+        return None
+    return Path(hillier_ion_folder(atomic_number, ion_stage)) / ionfiles.folder / ionfiles.coldatafilename
+
+
+def collision_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
+    """Give the level names of the rows of one ion's collision data file, with no check of the values.
+
+    The level reader keeps a level that this file names, also if no radiative transition names
+    it. The scan stops where read_coldata() stops.
+    """
+    filename = coldata_filename(atomic_number, ion_stage)
+    # a missing file gives no names here. read_coldata() stops with the error when it reads the file.
+    if filename is None or find_file_check_extension(filename) is None:
+        return set()
+    names: set[str] = set()
+    inside_table = False
+    with xopen_check_extension(filename) as fcoldata:
+        for line in fcoldata:
+            row = line.split()
+            if not row:
+                continue
+            if inside_table and re.match(r"^\*{5,}+", line.strip()):
+                break
+            if line.startswith(("dln_OMEGA_dlnT = T/OMEGA* dOMEGAdt for HE2", "Johnson values")):
+                break
+            if line.lstrip().startswith(r"Transition\T"):
+                inside_table = True
+                continue
+            if inside_table:
+                namefrom, nameto, _ = split_coldata_row(row)
+                names.update((namefrom, nameto))
+    return names
+
+
 def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, flog):
     """Read one ion's CMFGEN effective collision strengths at the requested electron temperature.
 
@@ -1931,7 +2101,12 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
     then shares the value over the term's J levels in proportion to g_i * g_j. The sum over the
     term recovers the file's value.
     """
-    t_scale_factor = 1e4  # Hillier gives the temperatures as T_4
+    logtemperatures = (atomic_number, ion_stage) in coldata_log10_temperature_ions
+
+    def temperature_k(label: str) -> float:
+        # the header gives T/1e4 K, or log10(T/K) for the files of coldata_log10_temperature_ions
+        return 10.0 ** fortran_float(label) if logtemperatures else fortran_float(label) * 1e4
+
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
     if not coldatafilename:
         log_comment(flog, ("transitiondata",), "CMFGEN has no collision data file for this ion.")
@@ -2038,17 +2213,21 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 # whether "!" is a token of its own or the start of a token ("!0.5").
                 row = row[: next((i for i, token in enumerate(row) if token.startswith("!")), len(row))]
                 temperatures = row[-num_expected_t_values:]
-                best_temperature = min(
-                    temperatures,
-                    key=lambda t: abs(fortran_float(t) * t_scale_factor - args.electrontemperature),
-                )
+                best_temperature = min(temperatures, key=lambda t: abs(temperature_k(t) - args.electrontemperature))
                 temperature_index = temperatures.index(best_temperature)
+                if logtemperatures:
+                    log_comment(
+                        flog,
+                        ("transitiondata",),
+                        "The temperature header of the collision data file gives log10(T/K) and not T/1e4 K, so the"
+                        " reader converts it. CMFGEN reads it as T/1e4 K.",
+                    )
                 # .10g: a plain number up to ten digits, so 1.8e6 K prints as 1800000
-                temperatures_in_k = ", ".join(f"{fortran_float(t) * t_scale_factor:.10g}" for t in temperatures)
+                temperatures_in_k = ", ".join(f"{temperature_k(t):.10g}" for t in temperatures)
                 log_comment(
                     flog,
                     ("transitiondata",),
-                    f"The collision strengths are the values at {fortran_float(best_temperature) * t_scale_factor:g} K."
+                    f"The collision strengths are the values at {temperature_k(best_temperature):g} K."
                     f" The collision data file gives these temperatures [K]: {temperatures_in_k}.",
                 )
                 continue
@@ -2068,14 +2247,16 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                     raise ValueError(msg)
 
             if header_row != []:
-                namefromnameto = "".join(row[:-num_expected_t_values])
-                upsilonvalues = row[-num_expected_t_values:]
-
-                if "-" in namefromnameto:
-                    namefrom, nameto = map(str.strip, namefromnameto.split("-"))
-                else:
-                    # Assume there is just a space between them (as is the case in Ni XIV)
-                    namefrom, nameto = row[:2]
+                namefrom, nameto, upsilonvalues = split_coldata_row(row)
+                if len(upsilonvalues) > num_expected_t_values:
+                    log_detail(
+                        flog,
+                        ("transitiondata",),
+                        "collision row with more values",
+                        f"WARNING: The collision data file gives {len(upsilonvalues):d} values for {namefrom} ->"
+                        f" {nameto}, and its header declares {num_expected_t_values:d}. The reader takes the first"
+                        f" {num_expected_t_values:d} values, as CMFGEN does.",
+                    )
                 upsilon = fortran_float(upsilonvalues[temperature_index])
                 coll_lines_in += 1
 
@@ -2147,6 +2328,17 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                             )
                         else:
                             upsilondict[key] = upsilonscaled
+
+    if number_expected_transitions == 0 and coll_lines_in > 0:
+        # CMFGEN takes no value from such a file (gen_omega_rd_v2.f). Co I gives six lines of 1.0
+        # and the text "Set to zero for the time being".
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: The collision data file declares 0 transitions but has {coll_lines_in:d} lines. The reader takes"
+            " no collision strength from it, as CMFGEN does.",
+        )
+        return pl.DataFrame(schema=upsilon_schema)
 
     if termnamed_lines > 0:
         log_comment(
@@ -2451,8 +2643,8 @@ def extend_ion_list(
 ):
     """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
 
-    include_hydrogen=False leaves out H I. The built-in selection of ionhandlers.py passes True,
-    so that list holds H I.
+    include_hydrogen=False leaves out H I and H II. The built-in selection of ionhandlers.py passes
+    True, so that list holds both.
     """
     cmfgenions = [
         (atomic_number, ion_stage) for atomic_number, ion_stage in ions_data if include_hydrogen or atomic_number != 1

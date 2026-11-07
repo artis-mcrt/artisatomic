@@ -11,7 +11,10 @@ import re
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import elsymbols
 from artisatomic.base import fixed_width_column
+from artisatomic.base import get_nist_ionization_energies_ev
+from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import ion_filename_pattern
 from artisatomic.base import ions_from_filenames
@@ -19,6 +22,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
+from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 
 jpltfolder = PYDIR / ".." / "atomic-data-tanaka-jplt"
@@ -34,6 +38,9 @@ description = (
 
 # the name of a data file, e.g. 26_2.txt or 26_2.txt.zst
 jplt_filename_pattern = ion_filename_pattern(".txt")
+
+# a header value that differs from the NIST value by more than this fraction gets a warning
+ionization_energy_warning_fraction = 0.02
 
 
 def extend_ion_list(
@@ -94,8 +101,16 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # ion. The last of them repeats the ion name. A paper line can continue on a line with no #,
     # so join such a line to the line before it. The log file and the comment blocks get each
     # joined line with no # of its own.
+    # Two files write the paper line and the ion name on one line ("... 248 (2020) 17.# Eu II"), so
+    # the reader cuts the ion name from the end of the last line, and drops that line if nothing is left.
+    ionname = f"# {elsymbols[atomic_number]} {roman_numerals[ion_stage]}"
+    beforeion = headerlines[:linenumber]
+    if beforeion and beforeion[-1].endswith(ionname):
+        beforeion[-1] = beforeion[-1].removesuffix(ionname).strip()
+        if not beforeion[-1]:
+            beforeion = beforeion[:-1]
     provenance: list[str] = []
-    for readlinein in headerlines[: linenumber - 1]:
+    for readlinein in beforeion:
         if readlinein.startswith("#") or not provenance:
             provenance.append(readlinein.removeprefix("#").strip())
         else:
@@ -109,6 +124,14 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     ionization_energy_in_ev = float(headerlines[linenumber + 3].removeprefix("# IP = "))
     log_and_print(flog, f"The file header gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    nist_ev = get_nist_ionization_energies_ev().get((atomic_number, ion_stage))
+    if nist_ev is not None and abs(ionization_energy_in_ev / nist_ev - 1.0) > ionization_energy_warning_fraction:
+        log_comment(
+            flog,
+            ("adata",),
+            f"WARNING: the file gives an ionisation energy of {ionization_energy_in_ev} eV, and the NIST value is"
+            f" {nist_ev} eV. The output keeps the value of the file.",
+        )
     require(headerlines[linenumber + 4] == "# Energy levels", "no '# Energy levels' line after the ionisation energy")
     expected_column_headers = ["#", "num", "weight", "parity", "E(eV)", "configuration"]
     read_column_headers = headerlines[linenumber + 5].split()  # v2.1 has extra column
@@ -121,12 +144,13 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     dflines = scan_file_lines(jpltpath / filename, skip_lines=linenumber + 6)
 
     # the transitions follow the levels, after a section title that some files leave out
-    sectionheaders = dflines.slice(levelcount, 2).collect()["line"].to_list()
-    line = sectionheaders[0].strip()
+    sectionheaders = [(text or "").strip() for text in dflines.slice(levelcount, 2).collect()["line"].to_list()]
+    require(len(sectionheaders) == 2, "the file ends after the level section")
+    line = sectionheaders[0]
     transitionheader = "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
     require(line in {"# Transitions", transitionheader}, f"unexpected line after the level section: {line!r}")
     if line == "# Transitions":
-        require(sectionheaders[1].strip() == transitionheader, "no transition column header after '# Transitions'")
+        require(sectionheaders[1] == transitionheader, "no transition column header after '# Transitions'")
     transitionsectionstart = levelcount + (2 if line == "# Transitions" else 1)
 
     dflevels = (
@@ -175,6 +199,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             # the file numbers levels from one; level ids are zero-based in memory
             lowerlevel=pl.col("fields").list.get(1).cast(pl.Int64) - 1,
             upperlevel=pl.col("fields").list.get(0).cast(pl.Int64) - 1,
+            wavelength_nm=pl.col("fields").list.get(2).cast(pl.Float64),
             g_u_times_A=pl.col("fields").list.get(3).cast(pl.Float64),
         )
         .collect()
@@ -199,6 +224,22 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
                 f" {levelid_min + 1} to {levelid_max + 1}, but the file has {levelcount} levels"
             )
             raise ValueError(msg)
+
+    check_wavelengths_against_levels(dftransitions, dflevels, filename, flog)
+
+    # a row that repeats the levels, the wavelength and g_u*A of an earlier row is the same line two
+    # times. ARTIS adds the A values of two rows of one level pair, so it would double the line.
+    nrows = dftransitions.height
+    dftransitions = dftransitions.unique(
+        ["upperlevel", "lowerlevel", "wavelength_nm", "g_u_times_A"], keep="first", maintain_order=True
+    )
+    if dftransitions.height < nrows:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: The file gives {nrows - dftransitions.height:d} transition rows two times. The reader drops each"
+            " repeat, because ARTIS adds the A values of two rows of one level pair.",
+        )
 
     dftransitions = (
         dftransitions.join(
@@ -226,6 +267,54 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         dftransitions = dftransitions_filtered
 
     return ionization_energy_in_ev, dflevels, dftransitions
+
+
+# a wavelength more than this fraction away from the energy difference of its two levels does not fit them
+wavelength_tolerance_fraction = 0.01
+# the absolute part of the tolerance [eV], for the energies that the file gives to 6 decimal places
+wavelength_tolerance_ev = 3e-6
+# a file with more rows than this fraction that do not fit their levels stops the read
+wavelength_misfit_limit_fraction = 0.01
+
+
+def check_wavelengths_against_levels(dftransitions: pl.DataFrame, dflevels: pl.DataFrame, filename: str, flog) -> None:
+    """Compare the wavelength of each transition with the energy difference of the two levels that it names.
+
+    The file gives the wavelength in its own column, so the comparison finds a transition list that
+    does not use the numbers of the level list. The GRASP file of As II (grasp_v2.1/33_2.txt) has
+    such a list: 825 of its 931 rows do not fit. Each other file of data_v2.1 has at most 0.01% of
+    such rows, which are pairs of levels that are nearly at one energy.
+    """
+    if dftransitions.is_empty():
+        return
+    energies = dflevels.select("levelid", energy_ev=pl.col("energyabovegsinpercm") * hc_in_ev_cm)
+    deltae = (
+        dftransitions.join(energies.rename({"levelid": "upperlevel", "energy_ev": "e_upper"}), on="upperlevel")
+        .join(energies.rename({"levelid": "lowerlevel", "energy_ev": "e_lower"}), on="lowerlevel")
+        .select(
+            deltae=(pl.col("e_upper") - pl.col("e_lower")).abs(),
+            photon=hc_in_ev_angstrom / (10.0 * pl.col("wavelength_nm")),
+        )
+    )
+    difference = (pl.col("photon") - pl.col("deltae")).abs()
+    nmisfit = deltae.filter(
+        (difference > wavelength_tolerance_fraction * pl.col("deltae")) & (difference > wavelength_tolerance_ev)
+    ).height
+    if nmisfit > wavelength_misfit_limit_fraction * dftransitions.height:
+        msg = (
+            f"{filename}: {nmisfit} of {dftransitions.height} transitions have a wavelength that does not fit the energy"
+            " difference of the two levels that they name, so the transition list does not use the level numbers of"
+            " the level list. The GRASP file 33_2.txt (As II) of grasp_v2.1 has this defect. setup_jplt_data.sh"
+            " keeps the data_v2.0 file of that ion: delete data_v2.1/33_2.txt.zst and run the script again."
+        )
+        raise ValueError(msg)
+    if nmisfit:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {nmisfit} of {dftransitions.height} transitions have a wavelength more than"
+            f" {wavelength_tolerance_fraction:.0%} away from the energy difference of their two levels.",
+        )
 
 
 def get_level_valence_n(levelname: str) -> int | None:

@@ -24,6 +24,7 @@ import polars as pl
 # readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import check_no_nulls
 from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
@@ -37,7 +38,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -178,6 +179,13 @@ class ADASEnergyLevel(t.NamedTuple):
     lsterm_twosplusone: int | None = None
 
 
+# The ions whose adf04 file the built-in selection does not take. An ion handlers JSON file can still
+# name the adas handler for them. The OPEN-ADAS Ca III file 20_3.adf04 is the test file of the
+# Eissner notation (tests/adas). It has 86 LS terms, 65 of them above the ionisation energy, and no
+# cross sections. CMFGEN Ca III has 232 J levels and its own cross sections.
+ions_not_offered = frozenset({(20, 3)})
+
+
 def extend_ion_list(
     ion_handlers,
     *,
@@ -189,7 +197,7 @@ def extend_ion_list(
     # the files ship compressed or plain, so match every form of the name that a reader accepts
     adasfiles = [f for ext in compression_extensions for f in adaspath.glob(f"*_*.adf04{ext}")]
     # each name holds the atomic number and the ion stage, e.g. 26_2.adf04
-    adasions = ions_from_filenames(adasfiles, adas_filename_pattern)
+    adasions = [ion for ion in ions_from_filenames(adasfiles, adas_filename_pattern) if ion not in ions_not_offered]
 
     return add_handlers_if_not_set(
         ion_handlers,
@@ -202,6 +210,17 @@ def extend_ion_list(
 
 
 adf04_section_end = "-1"
+
+
+def without_unclosed_parent_term(config: str) -> str:
+    """Remove a parent term at the end of a configuration that has no closing parenthesis.
+
+    The configuration column of an adf04 file has 18 characters, so a long configuration can end in
+    the middle of a parent term: '3s23p63d5(4P)4s(3P'. The letter of that term is not an orbital.
+    """
+    if config.count("(") > config.count(")"):
+        return config[: config.rfind("(")]
+    return config
 
 
 def adf04_first_field(line: str) -> str:
@@ -547,7 +566,7 @@ def read_adf04(
             # L in their own columns (read just above). A cut of a term off the end would lose
             # the last orbital of '3S2 3P6 3D5 4P1'. It would also read the bare '5s2' as a term
             # and not as an orbital. That is how every level of some files came out even.
-            parity = get_config_parity(config, hasterm=False)
+            parity = get_config_parity(without_unclosed_parent_term(config), hasterm=False)
 
             levelname = "{:}_{:d}{:}{:}{:}_id={:}".format(
                 energylevel.levelname,
@@ -580,16 +599,29 @@ def read_adf04(
         # line is not a bad row, so the counter skips it.
         collision_lines: list[str] = []
         skipped_rows = 0
+        blockended = False
         for line in fleveltrans:
             firstfield = adf04_first_field(line)
             if firstfield == adf04_section_end:
+                blockended = True
                 break
             if not firstfield:
                 continue
+            # The comment lines come after the data. The Co III file of Tyndall gives them with no
+            # -1 row before them, so the first comment line also ends the collision block.
+            if firstfield[0] == "C":
+                blockended = True
+                break
             if firstfield[0].isalpha():
                 skipped_rows += 1
                 continue
             collision_lines.append(line)
+        if not blockended:
+            msg = (
+                f"The collision block of {filepath} ends with no -1 row and no comment line. The file is"
+                " incomplete, for example after a download that stopped."
+            )
+            raise ValueError(msg)
 
         nearest_index = min(
             range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
@@ -632,6 +664,16 @@ def read_adf04(
                 f"The reader could not parse any of the {rowcount} collision rows of {filepath}. Each row must have"
                 ' the process code " ", "1", "2" or "3" and the fixed columns of the adf04 specification'
                 " (a1,i3,i4,16e8.2)."
+            )
+            raise ValueError(msg)
+
+        # a negative value would be the mark of the writer for "forbidden, no value" (output.resolve_coll_str())
+        negative = goodrows.filter(pl.col("upsilon") < 0.0)
+        if not negative.is_empty():
+            upper, lower, _, upsilon = negative.row(0)
+            msg = (
+                f"{filepath} gives {negative.height} negative effective collision strengths at the selected"
+                f" temperature, for example {upsilon} for the file indices {lower} -> {upper}"
             )
             raise ValueError(msg)
 
@@ -771,9 +813,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         # The header of adf04_v1 gives 330397 cm^-1 (40.96 eV). NIST and the CMFGEN data of Co III
         # give 33.50 eV, so the header value is wrong.
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
         transitionfile = tyndall_co3_path / "adf04rad_v1"
         log_comment(
@@ -809,9 +849,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
         dfupsilon = pl.DataFrame(schema=upsilon_schema)
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
@@ -828,6 +866,18 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         adas_transitions = adas_transitions_frame(
             len(adas_energylevels), collisiondf.filter(pl.col("avalue") > 2e-30), atom_filepath
         )
+        # The upsilons of a level pair keep the first row (read_adf04()), so the A values do also. ARTIS
+        # adds the A values of two rows of one pair, so a repeated row would double the line.
+        isfirst = pl.struct("lowerlevel", "upperlevel").is_first_distinct()
+        nrepeated = adas_transitions.height - adas_transitions.filter(isfirst).height
+        if nrepeated:
+            log_comment(
+                flog,
+                ("transitiondata",),
+                f"WARNING: {atom_filepath.name} gives the A value of a level pair on more than one row for"
+                f" {nrepeated:d} rows. The reader keeps the first row of each pair, as for the collision strengths.",
+            )
+            adas_transitions = adas_transitions.filter(isfirst)
 
     else:
         msg = f"No ADAS data available for Z={atomic_number} ion_stage {ion_stage} (no file {atom_filepath})"
@@ -884,9 +934,8 @@ def _fill_co2_phixs(
             f"The cross sections of level {lowerlevelid + 1} come from {path_in_data_folder(filename, adasfolder)}.",
         )
         photdata = tableread.result()
-        if photdata.null_count().sum_horizontal().item() > 0:
-            msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
-            raise ValueError(msg)
+        # a missing value means that the columns are not in their expected positions
+        check_no_nulls(photdata, str(filename))
         # a cross section is never negative, so a negative value is an error in the file
         nnegative = photdata.select(pl.sum_horizontal((pl.col(name) < 0.0).sum() for name in columnnames[1:])).item()
         if nnegative > 0:
@@ -1068,7 +1117,7 @@ def _fill_co3_phixs(
     # The downsample takes the first column in Rydberg. The weight of a bin depends on the
     # energy of the photon, and not on its ratio to the threshold. The threshold of the ground
     # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
-    # quartet lie within 0.12 eV of each other, so the one table covers each of them.
+    # quartet lie within 0.23 eV of each other (1866.8 cm^-1), so the one table covers each of them.
     # The downsample runs also for the grid of the table itself. Every table of the output file is
     # the average over the frequency bin of each point, as the file comment says. The point values
     # of the table are not those averages.
@@ -1157,6 +1206,7 @@ def get_level_valence_n(levelname: str) -> int | None:
 
     if part[-1] == ")" and "(" in part:
         part = part[: part.rfind("(")]
+    part = without_unclosed_parent_term(part)
 
     if not part:
         return None
