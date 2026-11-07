@@ -907,7 +907,8 @@ def write_transition_data(
         if nrows < transition_rows_for_the_pool:
             ftransitiondata.write(format_transition_rows(columns))
         else:
-            nchunks = os.cpu_count() or 1
+            # one chunk for each worker of the run-wide pool, which has the default size of ProcessPoolExecutor
+            nchunks = os.process_cpu_count() or 1
             bounds = np.linspace(0, nrows, nchunks + 1, dtype=np.int64)
             chunks = [tuple(column[start:end] for column in columns) for start, end in itertools.pairwise(bounds)]
             ftransitiondata.writelines(map_chunks(format_transition_rows, chunks))
