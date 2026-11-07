@@ -1697,6 +1697,31 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
 
 
+def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_path, monkeypatch):
+    """Another process can make the output folder between the two renames. The backup must stay.
+
+    The output folder that exists then is not the new tables, so the backup is the only copy of
+    the earlier tables.
+    """
+    outputfolder = tmp_path / "data"
+    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    original_rename = Path.rename
+
+    def rename_after_another_process(self, target):
+        if self.name == "new":
+            outputfolder.mkdir()
+            msg = "the output folder exists"
+            raise OSError(msg)
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename_after_another_process)
+    with pytest.raises(RuntimeError, match="could not put back") as excinfo:
+        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+    monkeypatch.undo()
+    backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
+    assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [1.0]
+
+
 def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     """The output folder of data.parquet.h5 is data.parquet. The script keeps a file of that name."""
     outputfolder = tmp_path / "data.parquet"
@@ -6390,8 +6415,11 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
 
 
-def test_cli_restores_the_earlier_output_at_a_sigterm_during_the_moves(tmp_path, monkeypatch):
-    """A SIGTERM during install_files() must give SystemExit, so that the files of the earlier run come back."""
+def test_cli_finishes_the_install_before_a_sigterm_during_the_moves(tmp_path, monkeypatch):
+    """A SIGTERM during install_files() must wait for the end of the install and its cleanup.
+
+    The run then stops with SystemExit, and the output folder holds the full output of the new run.
+    """
     import os
     import signal
 
@@ -6409,9 +6437,9 @@ def test_cli_restores_the_earlier_output_at_a_sigterm_during_the_moves(tmp_path,
     with pytest.raises(SystemExit):
         cli_run_with_stub_writer(tmp_path, monkeypatch)
     outputfolder = tmp_path / "artis_files"
-    for filename in ("adata.txt", "phixsdata_v2.txt", "artisatomiclog.txt"):
-        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
-    assert not list(outputfolder.glob(".artisatomic_run_*"))
+    for filename in ("adata.txt", "transitiondata.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of the new run\n"
+    assert not list(outputfolder.glob(".artisatomic_*"))
 
 
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
