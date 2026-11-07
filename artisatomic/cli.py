@@ -191,8 +191,10 @@ def main() -> None:
             raise
 
         # Two runs into one output folder can end at the same time. The lock lets only one run change
-        # the files in the output folder, so the folder holds the files of one run.
-        with output_folder_lock(outputfolder):
+        # the files in the output folder, so the folder holds the files of one run. A signal waits
+        # until the end of the install and its cleanup. Between the last move and the cleanup, no
+        # handler could tell a full install from a part install.
+        with output_folder_lock(outputfolder), signals_held():
             try:
                 earlierfolder = install_files(workfolder, outputfolder)
             except BaseException:
@@ -236,6 +238,35 @@ def stop_signals_as_exit() -> Generator[None]:
     finally:
         for signum, handler in previous.items():
             signal.signal(signum, handler)
+
+
+@contextmanager
+def signals_held() -> Generator[None]:
+    """Hold SIGINT, SIGTERM and SIGHUP until the end of the block, and then raise each held signal again.
+
+    A handler records each signal during the block. A signal mask is not enough, because the system
+    can give a signal to another thread, and Python then runs the handler in the main thread.
+    """
+    signums = [getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    held: list[int] = []
+
+    def hold(signum: int, _frame: object) -> None:
+        held.append(signum)
+
+    try:
+        previous = {signum: signal.signal(signum, hold) for signum in signums}
+    except ValueError:
+        # signal.signal() works only in the main thread
+        yield
+        return
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        # the handler of the block around this one acts on the signal now, as if it came at this point
+        for signum in dict.fromkeys(held):
+            signal.raise_signal(signum)
 
 
 def remove_stale_work_folders(outputfolder: Path) -> None:

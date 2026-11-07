@@ -1139,16 +1139,20 @@ def parallel_map[ResultType](
         return list(executor.map(fn, *lists))
 
 
-def map_chunks[ItemType, ResultType](fn: Callable[[ItemType], ResultType], chunks: list[ItemType]) -> list[ResultType]:
-    """Map fn over a few large chunks of work in the run-wide pool, and keep their order.
+def map_chunks[ItemType, ResultType](
+    fn: Callable[[ItemType], ResultType], chunks: list[ItemType]
+) -> Iterator[ResultType]:
+    """Map fn over a few large chunks of work in the run-wide pool, and give the results in order.
 
     parallel_map() does a list of 32 items or fewer in this process, because a small item costs
-    more in IPC than in work. A chunk here is large, so each chunk goes to the pool.
+    more in IPC than in work. A chunk here is large, so each chunk goes to the pool. The results
+    come one at a time, so a caller can write each result and release it before the next one.
     """
     if not sys._is_gil_enabled():  # ruff: ignore[private-member-access]
         with ThreadPoolExecutor() as executor:
-            return list(executor.map(fn, chunks))
-    return list(get_process_pool().map(fn, chunks))
+            yield from executor.map(fn, chunks)
+        return
+    yield from get_process_pool().map(fn, chunks)
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
