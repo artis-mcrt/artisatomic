@@ -146,15 +146,21 @@ def match_tagged_levels(
 
     tagged1000percm holds the tagged energy of each level id. The match uses the tagged energy
     first. An energy with no tagged level inside TAG_TOLERANCE_1000PERCM takes the closest level
-    energy. The function gives the level ids, the second closest level ids of the energy match, and
-    a mask of the energies that take the energy match.
+    energy. The function gives the level ids, the positions of the energies without a tag, and the
+    second closest level id of each such energy. Only those energies get the second search, because
+    an ion can have 45 million transitions.
     """
     order = np.argsort(tagged1000percm, kind="stable")
-    nearest, _ = get_nearest_level_indices(tagged1000percm[order], energies1000percm)
-    taggedlevels = order[nearest]
-    tagmatched = np.abs(tagged1000percm[taggedlevels] - energies1000percm) <= TAG_TOLERANCE_1000PERCM
-    closest, second = get_nearest_level_indices(sorted_energies_percm, energies1000percm * 1000)
-    return np.where(tagmatched, taggedlevels, closest), second, ~tagmatched
+    sorted_tagged = tagged1000percm[order]
+    right = np.searchsorted(sorted_tagged, energies1000percm).clip(1, max(len(order) - 1, 1))
+    left = right - 1
+    leftisnearer = np.abs(energies1000percm - sorted_tagged[left]) <= np.abs(energies1000percm - sorted_tagged[right])
+    levels = order[np.where(leftisnearer, left, right)] if len(order) > 1 else np.zeros(len(energies1000percm), int)
+    del right, left, leftisnearer
+    untagged = np.flatnonzero(np.abs(tagged1000percm[levels] - energies1000percm) > TAG_TOLERANCE_1000PERCM)
+    closest, second = get_nearest_level_indices(sorted_energies_percm, energies1000percm[untagged] * 1000)
+    levels[untagged] = closest
+    return levels, untagged, second
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
@@ -204,10 +210,10 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     energy_levels_upper_1000percm = energy_levels_lower_1000percm + 1e5 / transition_wavelength_A
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
     energy_levels_upper_percm = energy_levels_upper_1000percm * 1000
-    lowerlevels, lowerlevels_second, lower_untagged = match_tagged_levels(
+    lowerlevels, lower_untagged, lowerlevels_second = match_tagged_levels(
         tagged_levels1000percm, energiesabovegsinpercm, energy_levels_lower_1000percm
     )
-    upperlevels, upperlevels_second, upper_untagged = match_tagged_levels(
+    upperlevels, upper_untagged, upperlevels_second = match_tagged_levels(
         tagged_levels1000percm, energiesabovegsinpercm, energy_levels_upper_1000percm
     )
 
@@ -222,7 +228,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         " transition file. n is the position of the level in its block of one J in the level file, from 1. The"
         f" largest difference between the energies of the two files is {maxmismatch_percm:.3g} cm^-1.",
     )
-    untaggedcount = int(lower_untagged.sum() + upper_untagged.sum())
+    untaggedcount = len(lower_untagged) + len(upper_untagged)
     if untaggedcount > 0:
         log_comment(
             flog,
@@ -242,12 +248,12 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     # keeps the closest level, and the count says how much of the ion depends on that choice.
     ambiguouscount = int(
         (
-            lower_untagged
-            & (np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second]) <= MATCH_TOLERANCE_PERCM)
+            np.abs(energy_levels_lower_percm[lower_untagged] - energiesabovegsinpercm[lowerlevels_second])
+            <= MATCH_TOLERANCE_PERCM
         ).sum()
         + (
-            upper_untagged
-            & (np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second]) <= MATCH_TOLERANCE_PERCM)
+            np.abs(energy_levels_upper_percm[upper_untagged] - energiesabovegsinpercm[upperlevels_second])
+            <= MATCH_TOLERANCE_PERCM
         ).sum()
     )
     if ambiguouscount > 0:

@@ -4530,9 +4530,9 @@ def test_mons_tagged_energy_names_the_level():
     )
 
     transitionenergies = np.array([tagged[1], tagged[2], 50.0])
-    levels, _, untagged = readmonsdata.match_tagged_levels(tagged, energies * 1000, transitionenergies)
+    levels, untagged, _ = readmonsdata.match_tagged_levels(tagged, energies * 1000, transitionenergies)
     assert levels.tolist() == [1, 2, 0]
-    assert untagged.tolist() == [False, False, True]
+    assert untagged.tolist() == [2]
     closest, _ = readmonsdata.get_nearest_level_indices(energies * 1000, transitionenergies[:1] * 1000)
     assert closest.tolist() == [2]
 
