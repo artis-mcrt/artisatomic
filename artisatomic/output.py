@@ -251,7 +251,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     selection rules, each on the levels that carry the quantum number it needs:
 
     - Laporte: E1 changes the parity, so two levels of the same parity cannot be E1.
-    - Delta J: E1 has `|J_upper - J_lower| <= 1`, and J = 0 -> J = 0 is forbidden outright.
+    - Delta J: E1 has |J_upper - J_lower| <= 1, and J = 0 -> J = 0 is forbidden outright.
 
     Either rule is sufficient on its own, so the function ORs the two. Neither rule can fire on a
     level that does not carry the quantum number it needs. A data set that gives no J gets the
@@ -279,7 +279,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 
     A level that is an LS term has no J. A reader can give its L and its 2S + 1 in the columns
     lsterm_l and lsterm_twosplusone. Between two such levels, the rules of LS coupling apply in place
-    of the delta J rule. These rules are `|delta L| <= 1`, no L = 0 -> 0, and delta S = 0. A strong
+    of the delta J rule. These rules are |delta L| <= 1, no L = 0 -> 0, and delta S = 0. A strong
     line wins over them in the same way.
     """
     if dftransitions_ion.is_empty():
@@ -381,7 +381,7 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
 def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str) -> None:
     """Report the transitions whose J or LS labels and oscillator strength contradict each other.
 
-    A transition with `|delta J| > 1`, or with J = 0 at both ends, is not an electric dipole
+    A transition with |delta J| > 1, or with J = 0 at both ends, is not an electric dipole
     transition. A large oscillator strength says that it is. The function add_level_ids_forbidden()
     lets the oscillator strength win over the delta J rule and over the rules of LS coupling. This
     function reports how often a data set needed that, with one line for each rule. A transition

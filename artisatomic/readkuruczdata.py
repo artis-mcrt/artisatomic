@@ -250,7 +250,7 @@ def with_j_limits(dfgfall: pl.DataFrame, nelectrons: int) -> pl.DataFrame:
     """Add the columns twoj, twojmin, twojmax and possible for each side of the gfall rows.
 
     A level of an ion with an odd number of electrons has an odd 2J, and other levels have an even
-    2J. Where the label ends with a clear LS term, J is also in the range `|L - S|` to L + S.
+    2J. Where the label ends with a clear LS term, J is also in the range |L - S| to L + S.
     twojmin and twojmax give that range, and they are null for a label with no clear term.
     possible is True where the J satisfies these limits.
     """
@@ -288,7 +288,6 @@ def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
     change, because a wrong label can also cause it.
 
     The function changes a row only if all of these conditions are true:
-
     - The row is a whole line, and not an isotope or hyperfine component.
     - The label of the level has a clear LS term.
     - The labels of the two levels give two different parities, so the line is an E1 line.

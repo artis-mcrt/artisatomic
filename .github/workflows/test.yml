@@ -74,9 +74,10 @@ jobs:
             - name: Setup uv
               uses: astral-sh/setup-uv@v7
 
-            # readthedocs.org builds with the same options from .readthedocs.yaml, and it also stops on a warning
+            # readthedocs.org builds with the same options and the same Python version from .readthedocs.yaml,
+            # so the two builds give the same warnings. Both stop on a warning.
             - name: Build the documentation
-              run: uv run --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
+              run: uv run --python 3.14 --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
     pytest:
         runs-on: ubuntu-26.04-arm

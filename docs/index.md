@@ -7,5 +7,4 @@
 
 commands
 tests
-modules
 ```

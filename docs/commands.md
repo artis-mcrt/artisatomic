@@ -29,7 +29,8 @@ spectrum for each nuclide that has gamma lines.
 ## hdf5_to_parquet.py
 
 `artisatomic/hdf5_to_parquet.py` is a script and not a console script. It converts an HDF5 file to
-Parquet files for the DREAM and AOIFE readers. Refer to {py:mod}`artisatomic.hdf5_to_parquet`.
+Parquet files for the DREAM and AOIFE readers. The docstring at the top of the script explains the
+layouts that it reads.
 
 ```{program-output} python -m artisatomic.hdf5_to_parquet --help
 ```
