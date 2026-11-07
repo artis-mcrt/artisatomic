@@ -34,3 +34,6 @@ coverage.xml
 .coverage*
 !.coveragerc
 htmlcov/
+
+# written by sphinx-build
+docs/_build/
