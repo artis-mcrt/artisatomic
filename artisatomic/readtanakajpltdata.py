@@ -138,12 +138,12 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
 
     # the transitions follow the levels, after a section title that some files leave out
     sectionheaders = [(text or "").strip() for text in dflines.slice(levelcount, 2).collect()["line"].to_list()]
-    require(len(sectionheaders) == 2, "the file ends after the level section")
+    require(len(sectionheaders) >= 1, "the file ends after the level section")
     line = sectionheaders[0]
     transitionheader = "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)"
     require(line in {"# Transitions", transitionheader}, f"unexpected line after the level section: {line!r}")
     if line == "# Transitions":
-        require(sectionheaders[1] == transitionheader, "no transition column header after '# Transitions'")
+        require(sectionheaders[1:] == [transitionheader], "no transition column header after '# Transitions'")
     transitionsectionstart = levelcount + (2 if line == "# Transitions" else 1)
 
     dflevels = (

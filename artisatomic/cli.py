@@ -186,15 +186,15 @@ def main() -> None:
         try:
             write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
         except BaseException:
-            with output_folder_lock(outputfolder):
+            with signals_held(), output_folder_lock(outputfolder):
                 discard_run(workfolder, outputfolder)
             raise
 
         # Two runs into one output folder can end at the same time. The lock lets only one run change
         # the files in the output folder, so the folder holds the files of one run. A signal waits
-        # until the end of the install and its cleanup. Between the last move and the cleanup, no
-        # handler could tell a full install from a part install.
-        with output_folder_lock(outputfolder), signals_held():
+        # until the end of the install and its cleanup, also during the wait for the lock. Between the
+        # last move and the cleanup, no handler could tell a full install from a part install.
+        with signals_held(), output_folder_lock(outputfolder):
             try:
                 earlierfolder = install_files(workfolder, outputfolder)
             except BaseException:

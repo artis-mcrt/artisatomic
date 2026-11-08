@@ -1715,6 +1715,26 @@ def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_p
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [1.0]
 
 
+def test_hdf5_to_parquet_finishes_when_an_interrupt_follows_the_last_rename(tmp_path, monkeypatch):
+    """An interrupt after the last rename finds the new tables in their place, so the backup goes away."""
+    outputfolder = tmp_path / "data"
+    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    original_rename = Path.rename
+
+    def rename_then_interrupt(self, target):
+        result = original_rename(self, target)
+        if self.name == "new":
+            raise KeyboardInterrupt
+        return result
+
+    monkeypatch.setattr(Path, "rename", rename_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+    monkeypatch.undo()
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
+    assert [child.name for child in tmp_path.iterdir()] == ["data"]
+
+
 def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     """The output folder of data.parquet.h5 is data.parquet. The script keeps a file of that name."""
     outputfolder = tmp_path / "data.parquet"
@@ -6348,6 +6368,33 @@ def test_cli_finishes_the_install_before_a_sigterm_during_the_moves(tmp_path, mo
     assert not list(outputfolder.glob(".artisatomic_*"))
 
 
+def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path, monkeypatch):
+    """A SIGTERM during the wait for the lock must wait for the end of the install also."""
+    import os
+    import signal
+    from contextlib import contextmanager
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or os.name != "posix":
+        pytest.skip("the test sends SIGTERM to its own process")
+    original_lock = cli.output_folder_lock
+
+    @contextmanager
+    def lock_after_a_signal(outputfolder: Path):
+        os.kill(os.getpid(), signal.SIGTERM)
+        with original_lock(outputfolder):
+            yield
+
+    monkeypatch.setattr(cli, "output_folder_lock", lock_after_a_signal)
+    with pytest.raises(SystemExit):
+        cli_run_with_stub_writer(tmp_path, monkeypatch)
+    outputfolder = tmp_path / "artis_files"
+    for filename in ("adata.txt", "transitiondata.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of the new run\n"
+    assert not list(outputfolder.glob(".artisatomic_*"))
+
+
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
     """A second run must not change the files of the output folder while the first run moves its files."""
     import fcntl
@@ -7417,6 +7464,16 @@ def test_readtanakajpltdata_stops_for_wavelengths_that_do_not_fit_the_levels(tmp
     monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
     with pytest.raises(ValueError, match="2 of 2 transitions have a wavelength that does not fit"):
         readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+
+
+def test_readtanakajpltdata_reads_a_file_with_only_a_transition_column_header(tmp_path, monkeypatch):
+    """A file with no transition can leave out the optional section title, so one header line is enough."""
+    lines = [line for line in jplt_lines([]) if line != "# Transitions "]
+    (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+    assert dflevels.height == 3
+    assert dftransitions.is_empty()
 
 
 def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
