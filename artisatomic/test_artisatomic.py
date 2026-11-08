@@ -807,6 +807,30 @@ def test_read_hyd_table_file_stops_for_a_file_that_ends_inside_a_table(tmp_path)
         rhd.read_hyd_table_file(str(filepath), "!L_ST_U", "!L_DEL_U")
 
 
+def test_cmfgen_keeps_an_unsplit_level_when_the_collision_file_names_it_with_a_j(monkeypatch):
+    """read_coldata() takes a line '5p_2Po[1/2]' as a line of the unsplit level '5p_2Po', so that level must stay."""
+    if not Path(rhd.hillier_ion_folder(6, 4)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(6, 4, io.StringIO())
+    groundname = dflevels["levelname"][0]
+    targetname = "5p_2Po"
+    assert targetname in dflevels["levelname"].to_list()
+    original_parse = rhd.parse_transition_lines
+
+    def parse_with_no_line_of_the_level(dflines, filename, flog):
+        return original_parse(dflines, filename, flog).with_columns(
+            pl.col(column).replace(targetname, groundname) for column in ("namefrom", "nameto")
+        )
+
+    monkeypatch.setattr(rhd, "parse_transition_lines", parse_with_no_line_of_the_level)
+    for collisionnames, kept in ((set(), False), ({f"{targetname}[1/2]"}, True)):
+        monkeypatch.setattr(rhd, "collision_file_level_names", lambda _z, _stage, names=collisionnames: names)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _ = rhd.read_levels_and_transitions(6, 4, io.StringIO())
+        assert (targetname in dflevels["levelname"].to_list()) == kept
+
+
 def test_cmfgen_keeps_a_level_when_the_collision_file_names_its_term(monkeypatch):
     """A collision row with no J goes to each J level of the term, so a level with no line must stay."""
     with contextlib.redirect_stdout(io.StringIO()):

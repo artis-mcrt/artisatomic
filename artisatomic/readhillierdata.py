@@ -767,7 +767,11 @@ def read_levels_and_transitions_from_file(
     # level can have collision data and no radiative transition (Ca VIII 3s_3p(3P)3d_4Fo[7/2]). The
     # collision file can name a term with no J. read_coldata() shares such a row over the J levels.
     collision_names = pl.Series(sorted(collision_file_level_names(atomic_number, ion_stage)), dtype=pl.String)
-    names_to_keep = pl.concat([dftransitions["namefrom"], dftransitions["nameto"], collision_names])
+    # The file can also name an unsplit level with a J, and read_coldata() takes that as a line of the level.
+    collision_names_no_j = collision_names.str.split("[").list.first()
+    names_to_keep = pl.concat(
+        [dftransitions["namefrom"], dftransitions["nameto"], collision_names, collision_names_no_j]
+    )
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
         # implode(): polars deprecates is_in() with a bare Series of the same dtype
         pl.col("levelname").is_in(names_to_keep.implode())
