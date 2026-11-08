@@ -12,6 +12,7 @@ import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import re
 import typing as t
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -38,6 +39,7 @@ from artisatomic.base import h_in_ev_seconds
 from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
+from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import output_xgrid
 from artisatomic.base import PhixsData
@@ -265,11 +267,9 @@ def test_interpret_configuration():
 
 def test_hydrogenic_phixs():
     """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
-    ryd_to_ev = rhd.ryd_to_ev
-
     rhd.read_hyd_phixsdata()
 
-    oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / ryd_to_ev
+    oneryd_lambda_angstrom = hc_in_ev_angstrom / ryd_to_ev
     expected_n1 = np.array(
         [
             [1.0, 6.30341644],
@@ -291,7 +291,7 @@ def test_hydrogenic_phixs():
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 1)
     assert np.allclose(expected_n1, phixstable_n[:10], rtol=1e-3)
 
-    oneryd_lambda_angstrom = rhd.hc_in_ev_angstrom / (5**2 * ryd_to_ev)
+    oneryd_lambda_angstrom = hc_in_ev_angstrom / (5**2 * ryd_to_ev)
     expected_n5 = np.array(
         [
             [2.50000000e01, 5.91880525e-02],
@@ -328,11 +328,9 @@ def test_hydrogenic_nl_phixs_offset_type8():
 
     rhd.read_hyd_phixsdata()
 
-    ryd_to_ev = rhd.ryd_to_ev
-
     # real Fe II parameters from FE/II/10sep16/phot_op.dat: n=4, l=1, nu_o=0.88936
     threshold_ev, n, l_start, l_end, nu_o, zion = 7.90, 4, 1, 1, 0.88936, 2
-    lambda_angstrom = rhd.hc_in_ev_angstrom / threshold_ev
+    lambda_angstrom = hc_in_ev_angstrom / threshold_ev
     e_o_ev = nu_o * 1e15 * h_in_ev_seconds
 
     phixstable = rhd.get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=nu_o, zion=zion)
@@ -376,27 +374,25 @@ def test_hydrogenic_phixs_effective_charge_scaling():
     The H (Z=1) cases in test_hydrogenic_phixs() cannot detect a spurious extra factor of
     Z_eff**2, so check the scaling explicitly for Z > 1.
     """
-    ryd_to_ev = rhd.ryd_to_ev
-
     rhd.read_hyd_phixsdata()
 
-    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
+    sigma_hydrogen_1s = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / ryd_to_ev, 1)[0][1]
 
     for atomic_number in (1, 2, 3, 6, 26):
         for n in (1, 2, 5):
             # a hydrogenic level of charge Z and principal quantum number n ionises at Z**2 / n**2 Ryd
             threshold_ev = atomic_number**2 * ryd_to_ev / n**2
-            phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, n)
+            phixstable = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / threshold_ev, n)
 
             # Kramers (1923, Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244):
             # sigma_threshold = 7.91 Mb * n / Z**2 * g_bf, and g_bf at threshold
             # depends only on n. A comparison at the same n therefore leaves a ratio of exactly n / Z**2
-            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
+            same_n_hydrogen = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / (ryd_to_ev / n**2), n)
             assert np.isclose(phixstable[0][1], same_n_hydrogen[0][1] / atomic_number**2, rtol=1e-6)
 
         # the n=1 threshold cross section must fall exactly as 1 / Z**2
         threshold_ev = atomic_number**2 * ryd_to_ev
-        phixstable = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / threshold_ev, 1)
+        phixstable = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / threshold_ev, 1)
         assert np.isclose(phixstable[0][1], sigma_hydrogen_1s / atomic_number**2, rtol=1e-6)
 
 
@@ -408,8 +404,6 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     E_th = 11 eV, n = 5 valence level).
     """
     rhd.read_hyd_phixsdata()
-
-    ryd_to_ev = rhd.ryd_to_ev
 
     # a single hydrogenic n=1 level of a Z=2 ion: threshold is 4 Ryd, so sigma_th = 6.307 / 4 Mb
     ionization_energy_ev = 4 * ryd_to_ev
@@ -436,7 +430,7 @@ def test_match_hydrogenic_phixs_is_not_double_scaled():
     assert thresholds[0] == ionization_energy_ev
     assert targetfractions[0] == [(0, 1.0)]  # the upper ion's ground state
 
-    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(rhd.hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
+    expected_threshold_mb = rhd.get_hydrogenic_n_phixstable(hc_in_ev_angstrom / ionization_energy_ev, 1)[0][1]
     assert abs(expected_threshold_mb - 6.3067 / 4) < 1e-3  # exact hydrogenic value for He II 1s
     # the downsampled first point is a bin average, so allow a few percent
     assert abs(crosssections[0][0] / expected_threshold_mb - 1) < 0.05
@@ -469,7 +463,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
     """-nlevels_hydrogenic_for_unknown_phixs sets how many of the lowest levels get an estimate."""
     rhd.read_hyd_phixsdata()
 
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     nlevels = 5
     dflevels = pl.DataFrame(
         {
@@ -532,7 +526,7 @@ def test_nlevels_hydrogenic_for_unknown_phixs_caps_the_level_count():
 def test_match_hydrogenic_phixs_takes_the_lowest_levels_by_energy():
     """A reader that keeps its file's order still gets the estimate for its lowest levels by energy."""
     rhd.read_hyd_phixsdata()
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     # row 0 is the highest level and row 1 the ground state
     dflevels = pl.DataFrame(
         {
@@ -614,44 +608,33 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
     )
 
 
-def test_resolve_photoion_targetfractions():
+def test_resolve_photoion_targetfractions(tmp_path: Path):
     """Each non-top ion gets its targets resolved against the next ion up; the top ion gets none."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     # the lower ion names the upper ion's ground state as its only target configuration
     lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
     upper = make_iondata(2, is_top_ion=True)
-    resolve_photoion_targetfractions([lower, upper])
+    resolve_photoion_targetfractions([lower, upper], 26, tmp_path / "log.txt")
 
     assert lower.photoionization_targetfractions == [[(0, 1.0)]]
     # the top ion has no upper ion to photoionise to, so the resolver leaves it as the reader gave it
     assert upper.photoionization_targetfractions == []
 
 
-def test_resolve_photoion_targetfractions_keeps_reader_supplied():
+def test_resolve_photoion_targetfractions_keeps_reader_supplied(tmp_path: Path):
     """An ion whose reader already gave per-level fractions (e.g. the hydrogenic estimate) keeps them."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     # a target list the Hillier resolver would never produce, so an overwrite would be visible
     supplied = [[(7, 1.0)]]
     lower = make_iondata(1, is_top_ion=False, targetfractions=supplied, targetconfigs=[[("gs2", 1.0)]])
-    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)])
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)], 26, tmp_path / "log.txt")
 
     assert lower.photoionization_targetfractions == supplied
 
 
-def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
-    """A caller must give both atomic_number and logpath, or neither, so a log is not lost silently."""
-    from artisatomic.iondata import resolve_photoion_targetfractions
-
-    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
-    upper = make_iondata(2, is_top_ion=True)
-
-    with pytest.raises(ValueError, match="both atomic_number and logpath"):
-        resolve_photoion_targetfractions([lower, upper], 8)
-
-
-def test_resolve_photoion_targetfractions_rejects_misordered_ions():
+def test_resolve_photoion_targetfractions_rejects_misordered_ions(tmp_path: Path):
     """The resolver rejects a list that is not one element's ions in ascending order.
 
     The resolver matches each ion against the next entry as its upper ion. A top ion anywhere but
@@ -660,11 +643,15 @@ def test_resolve_photoion_targetfractions_rejects_misordered_ions():
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     with pytest.raises(ValueError, match="ascending ion stage order"):
-        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
+        resolve_photoion_targetfractions(
+            [make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)], 26, tmp_path / "log.txt"
+        )
 
     # a list whose last ion is not the top ion lacks the upper ion that the last entry needs
     with pytest.raises(ValueError, match="ascending ion stage order"):
-        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
+        resolve_photoion_targetfractions(
+            [make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)], 26, tmp_path / "log.txt"
+        )
 
 
 def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
@@ -787,7 +774,9 @@ def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
     sums = [reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table).sum() for table in tables]
     assert sums[0] > 0.0
     assert [fraction for _, fraction in targets] == pytest.approx([tablesum / sum(sums) for tablesum in sums])
-    assert "so it will have no phixs" not in log
+    # the values on their own, so that a worker that reads the zero row at the repeated edge fails
+    assert [fraction for _, fraction in targets] == pytest.approx([0.85387, 0.14613], abs=1e-4)
+    assert "so its levels get no table" not in log
 
 
 def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
@@ -802,7 +791,37 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "The target target1 has less than 2% of the total, so the output drops it." in log
+    assert "The target target1 of ground has less than 2% of the total, so the output drops it." in log
+
+
+def test_read_hyd_table_file_stops_for_a_file_that_ends_inside_a_table(tmp_path):
+    """The energy grid has the size of the values, so a short last table would change the cross sections."""
+    filepath = tmp_path / "hyd_l_data.dat"
+    filepath.write_text("30 !Maximum principal quantum number\n\n1 0 3\n1.0 2.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"ends inside the table \[1, 0\]"):
+        rhd.read_hyd_table_file(str(filepath), "!L_ST_U", "!L_DEL_U")
+
+
+def test_cmfgen_keeps_a_level_when_the_collision_file_names_its_term(monkeypatch):
+    """A collision row with no J goes to each J level of the term, so a level with no line must stay."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(26, 2, io.StringIO())
+    levelnames = dflevels["levelname"].to_list()
+    groundname, targetname = levelnames[0], levelnames[-1]
+    assert "[" in targetname
+    original_parse = rhd.parse_transition_lines
+
+    def parse_with_no_line_of_the_level(dflines, filename, flog):
+        return original_parse(dflines, filename, flog).with_columns(
+            pl.col(column).replace(targetname, groundname) for column in ("namefrom", "nameto")
+        )
+
+    monkeypatch.setattr(rhd, "parse_transition_lines", parse_with_no_line_of_the_level)
+    for collisionnames, kept in ((set(), False), ({targetname.split("[")[0]}, True)):
+        monkeypatch.setattr(rhd, "collision_file_level_names", lambda _z, _stage, names=collisionnames: names)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _ = rhd.read_levels_and_transitions(26, 2, io.StringIO())
+        assert (targetname in dflevels["levelname"].to_list()) == kept
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -968,6 +987,11 @@ def test_read_coldata_term_to_j_redistribution():
     # and the reader splits it over the lower levels in proportion to g_i (1 : 3 : 5 out of g_L = 9)
     for g_lower, total in zip([1.0, 3.0, 5.0], sums_from_lower, strict=True):
         assert abs(total - upsilon_term * g_lower / 9.0) < 1e-3
+    # and over the upper levels in proportion to g_j (7 : 5 : 3 out of g_U = 15), for each pair
+    assert sorted(gvalues[j] for j in upper_ids) == [3.0, 5.0, 7.0]
+    for i in lower_ids:
+        for j in upper_ids:
+            assert upsilondict[i, j] == pytest.approx(upsilon_term * gvalues[i] / 9.0 * gvalues[j] / 15.0, rel=1e-3)
 
     # Fe II collision data is already J-resolved, so every value passes through unscaled. The
     # first row of col_data, a6De[9/2] -> a6De[7/2], gives 3.230 in the T = 0.5e4 K column
@@ -1142,8 +1166,8 @@ def test_log_deltaj_contradictions_judges_f_and_a_separately():
         }
     )
     log = warnings_for(twokinds)
-    assert "WARNING: 1 transitions of Test II break the delta J rule" in log
-    assert "so these transitions stay permitted" in log
+    assert "WARNING: 1 transition of Test II breaks the delta J rule" in log
+    assert "so each such transition stays permitted" in log
     assert "WARNING: 2 transitions of Test II break the delta J rule but carry A > 100000 (largest 2e+06)" in log
     assert "the same parity, so the output writes it as forbidden" in log
 
@@ -1697,6 +1721,51 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
 
 
+def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_path, monkeypatch):
+    """Another process can make the output folder between the two renames. The backup must stay.
+
+    The output folder that exists then is not the new tables, so the backup is the only copy of
+    the earlier tables.
+    """
+    outputfolder = tmp_path / "data"
+    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    original_rename = Path.rename
+
+    def rename_after_another_process(self, target):
+        if self.name == "new":
+            outputfolder.mkdir()
+            msg = "the output folder exists"
+            raise OSError(msg)
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", rename_after_another_process)
+    with pytest.raises(RuntimeError, match="could not put back") as excinfo:
+        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+    monkeypatch.undo()
+    backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
+    assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [1.0]
+
+
+def test_hdf5_to_parquet_finishes_when_an_interrupt_follows_the_last_rename(tmp_path, monkeypatch):
+    """An interrupt after the last rename finds the new tables in their place, so the backup goes away."""
+    outputfolder = tmp_path / "data"
+    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    original_rename = Path.rename
+
+    def rename_then_interrupt(self, target):
+        result = original_rename(self, target)
+        if self.name == "new":
+            raise KeyboardInterrupt
+        return result
+
+    monkeypatch.setattr(Path, "rename", rename_then_interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+    monkeypatch.undo()
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
+    assert [child.name for child in tmp_path.iterdir()] == ["data"]
+
+
 def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     """The output folder of data.parquet.h5 is data.parquet. The script keeps a file of that name."""
     outputfolder = tmp_path / "data.parquet"
@@ -1977,7 +2046,7 @@ def test_readlisbondata_drops_the_levels_above_the_ionisation_energy(tmp_path, m
     ]
     # the four lines are 0-1, 1-2, 2-3 and 3-4. The last two name a dropped level
     assert transitions.select("lowerlevel", "upperlevel").rows() == [(0, 1), (1, 2)]
-    assert "The reader dropped 2 levels that are above the ionisation energy." in flog.getvalue()
+    assert "The reader dropped 2 levels above the ionisation energy." in flog.getvalue()
     assert "skipped 2 transitions" in flog.getvalue()
 
 
@@ -2026,7 +2095,7 @@ def test_readlisbondata_stops_on_a_level_with_no_energy(tmp_path, monkeypatch):
     write_lisbon_fixture(tmp_path, [0.0, "", 2000.0])
     monkeypatch.setenv("ARTISATOMIC_LISBON_PATH", str(tmp_path))
 
-    with pytest.raises(ValueError, match="level with no energy"):
+    with pytest.raises(ValueError, match="The Lisbon levels file has rows with no value"):
         readlisbondata.read_levels_and_transitions(60, 3, io.StringIO())
 
 
@@ -2173,92 +2242,37 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
-def test_add_handlers_if_not_set_applies_the_limits():
+def test_keep_ions_within_limits():
     """A limit keeps an ion out of the list, and every element in the list keeps one ion or more."""
-    add_with_limits = functools.partial(add_handlers_if_not_set, minionstage=2, maxionstage=3, maxatomicnumber=30)
+    from artisatomic.ionhandlers import keep_ions_within_limits
 
-    assert add_with_limits([], [(26, 2)], "cmfgen") == [(26, [(2, "cmfgen")])]
-    assert add_with_limits([], [(26, 1)], "cmfgen") == []
-    assert add_with_limits([], [(26, 4)], "cmfgen") == []
-    assert add_with_limits([], [(38, 2)], "cmfgen") == []
+    ion_handlers = [(26, [(1, "cmfgen"), (2, "cmfgen"), (4, "cmfgen")]), (38, [(2, "kurucz")])]
 
-    # A limit of None includes every ion, which is what a direct call to a reader gets. A lower
-    # limit of None excludes no ion stage, not even 0.
-    assert add_handlers_if_not_set([], [(38, 9)], "cmfgen") == [(38, [(9, "cmfgen")])]
-    assert add_handlers_if_not_set([], [(38, 0)], "cmfgen") == [(38, [(0, "cmfgen")])]
-
-    # a rejected ion returns a new sorted list, as an accepted ion does
-    unsorted = [(38, [(2, "cmfgen")]), (26, [(1, "cmfgen")])]
-    assert add_with_limits(unsorted, [(26, 9)], "cmfgen") == [
-        (26, [(1, "cmfgen")]),
-        (38, [(2, "cmfgen")]),
-    ]
+    assert keep_ions_within_limits(ion_handlers, 2, 3, 30) == [(26, [(2, "cmfgen")])]
+    assert keep_ions_within_limits(ion_handlers, 5, 6, None) == []
+    assert keep_ions_within_limits(ion_handlers, None, None, None) == ion_handlers
 
 
-# every module that offers extend_ion_list()
-extend_ion_list_modules = [
-    "groundstatesonlynist",
-    "readdreamdata",
-    "readfacdata",
-    "readfloers25data",
-    "readhillierdata",
-    "readmonsdata",
-    "readadasdata",
-    "readtanakajpltdata",
-]
+def test_process_exists_sends_no_signal_on_windows(monkeypatch):
+    """On Windows, os.kill() does not test a process, so the function must not call it."""
+    from artisatomic import cli
+
+    def fail_kill(_pid, _signum):
+        msg = "os.kill() must not run on Windows"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli.os, "kill", fail_kill)
+    assert cli.process_exists(123456)
 
 
-def keep_ions_within_limits(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    minionstage: int,
-    maxionstage: int,
-    maxatomicnumber: int,
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Drop every ion outside the limits, and every element that then holds no ion."""
-    kept = [
-        (atomic_number, [ion for ion in listions if minionstage <= ion[0] <= maxionstage])
-        for atomic_number, listions in ion_handlers
-        if atomic_number <= maxatomicnumber
-    ]
-    return [(atomic_number, listions) for atomic_number, listions in kept if listions]
-
-
-@pytest.mark.parametrize("modulename", extend_ion_list_modules)
-def test_extend_ion_list_forwards_the_limits(modulename):
-    """Each reader gives the three limits to add_handlers_if_not_set(), which keeps its own ions out.
-
-    get_ion_handlers() gives the limits to each reader by keyword. A reader that drops one of them
-    changes which ions a run writes. No checksum set finds that, because each set reads an ion
-    handlers file instead. The limits below come from the ions of the reader itself, so each one
-    excludes a part of them whatever the data set holds.
-    """
-    module = importlib.import_module(f"artisatomic.{modulename}")
-    try:
-        allions = module.extend_ion_list([])
-    except FileNotFoundError as exc:
-        pytest.skip(f"the data set of {modulename} is not available here: {exc}")
-
-    if not allions:
-        if module is readhillierdata:
-            msg = "the CMFGEN corpus is missing"
-            raise AssertionError(msg)
-        pytest.skip(f"{modulename} found no ion here")
-
-    ion_stages = sorted({ion_stage for _, listions in allions for ion_stage, _ in listions})
-    atomic_numbers = sorted(atomic_number for atomic_number, _ in allions)
-    # each limit excludes at least one ion where the reader offers more than one value
-    limitsets = [
-        (ion_stages[-1], ion_stages[-1], atomic_numbers[-1]),
-        (ion_stages[0], ion_stages[0], atomic_numbers[-1]),
-        (ion_stages[0], ion_stages[-1], atomic_numbers[0]),
-    ]
-
-    for minionstage, maxionstage, maxatomicnumber in limitsets:
-        result = module.extend_ion_list(
-            [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
-        )
-        assert result == keep_ions_within_limits(allions, minionstage, maxionstage, maxatomicnumber)
-        assert result, "a limit that comes from the ions of the reader must keep one ion or more"
+def test_read_csv_columns_stops_for_an_empty_field(tmp_path, monkeypatch):
+    """An empty field reads as a null, and all() ignores a null unless the check fills it."""
+    with zipfile.ZipFile(tmp_path / "archive.zip", "w") as ziparchive:
+        ziparchive.writestr("member.csv", "1.0,2.0\n,3.0\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    with pytest.raises(ValueError, match="not a finite number, or an empty value"):
+        readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
 
 
 def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
@@ -2423,13 +2437,11 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
 
 
 def test_hillier_extend_ion_list():
-    """The CMFGEN ion list names the cmfgen handler, and it excludes hydrogen by default."""
+    """The CMFGEN ion list names the cmfgen handler, and it holds hydrogen."""
     result = readhillierdata.extend_ion_list([])
-    assert all(atomic_number != 1 for atomic_number, _ in result)
+    assert any(atomic_number == 1 for atomic_number, _ in result)
     assert all(handler == "cmfgen" for _, listions in result for _, handler in listions)
     assert {(2, 1), (26, 1)} <= {(atomic_number, ion_stage) for atomic_number, l in result for ion_stage, _ in l}
-
-    assert any(atomic_number == 1 for atomic_number, _ in readhillierdata.extend_ion_list([], include_hydrogen=True))
 
 
 def test_combine_phixs_routes():
@@ -2642,7 +2654,7 @@ def test_is_adf04_terminator():
 
 
 def read_adf04_sample_lines() -> list[str]:
-    """Return the lines of the committed adf04 sample, which stops inside the collision block."""
+    """Return the lines of the committed adf04 sample. It holds a part of the collision rows, and the two -1 rows."""
     with xopen_check_extension(adf04_sample_path()) as fsample:
         return fsample.readlines()
 
@@ -2653,8 +2665,9 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     # an ADAS process-code row sits inside the collision block; the trailer follows the terminator
     processrow = "R  1  +1" + " 3.24-13" * 22 + "\n"
     trailer = ["  -1\n", "  -1  -1\n", "C-----\n", "C PRODUCER: test\n", "   1   2 9.99+99\n"]
+    assert lines[-2:] == ["  -1\n", "  -1  -1\n"]
     filepath = tmp_path / "27_3.adf04"
-    filepath.write_text("".join([*lines, processrow, *trailer]))
+    filepath.write_text("".join([*lines[:-2], processrow, *trailer]))
 
     flog = io.StringIO()
     _, energylevels, dfupsilon, _ = readadasdata.read_adf04(filepath, flog, 5010.0, 27, 3)
@@ -2662,7 +2675,6 @@ def test_read_adf04_stops_at_the_collision_terminator(tmp_path):
     assert len(dfupsilon) == 235
     assert "The reader skipped 1 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "The levels, the transitions and the collision strengths come from " in flog.getvalue()
-    assert "level pairs" not in flog.getvalue()
 
 
 def test_read_adf04_keeps_the_rows_after_a_negative_value(tmp_path):
@@ -2742,10 +2754,21 @@ def test_rename_old_data_directory_does_not_move_the_data_of_a_symbolic_link(tmp
     assert (old / "27_3.adf04").exists()
 
 
-def test_extend_ion_list_finds_a_compressed_adf04():
-    """Ion discovery must find an adf04 file that is compressed."""
-    assert (38, [(1, "adas")]) in readadasdata.extend_ion_list({})
-    assert (20, [(3, "adas")]) in readadasdata.extend_ion_list({})
+def test_extend_ion_list_finds_a_compressed_adf04(tmp_path, monkeypatch):
+    """Ion discovery must find an adf04 file that is compressed.
+
+    The OPEN-ADAS Ca III file is the test file of the Eissner notation. The built-in selection does
+    not take it, so a default run takes CMFGEN Ca III.
+    """
+    import shutil
+
+    # a folder with the two tracked files, so that a private file of the real folder cannot change the result
+    for name in ("38_1.adf04.zst", "20_3.adf04.zst"):
+        shutil.copy(readadasdata.adaspath / name, tmp_path / name)
+    monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
+    ions = readadasdata.extend_ion_list({})
+    assert (38, [(1, "adas")]) in ions
+    assert all(atomic_number != 20 for atomic_number, _ in ions)
 
 
 def test_convert_eissner_to_standard():
@@ -2942,12 +2965,11 @@ def test_read_adf04_skips_the_rows_of_a_different_process(tmp_path):
         "   2   1 6.27+08 4.29-01 5.29-01",
         " P  2   1 1.00-10 1.00-10 1.00-10",
         "R  1  +1         3.24-13 3.24-13",
-        "C a comment",
     ]
     flog = io.StringIO()
     upsilons = upsilon_dict(readadasdata.read_adf04(write_hydrogen_adf04(tmp_path, rows), flog, 5000.0, 1, 1)[2])
     assert upsilons == {(0, 1): pytest.approx(0.429)}
-    assert "The reader skipped 3 collision rows that are not an electron impact excitation." in flog.getvalue()
+    assert "The reader skipped 2 collision rows that are not an electron impact excitation." in flog.getvalue()
     assert "could not parse" not in flog.getvalue()
 
 
@@ -3517,7 +3539,7 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
             chars[start:end] = list(f"{text:>{end - start}}")
         return "".join(chars).rstrip()
 
-    # La II ionises at 11.06 eV, so the third level is above the ionisation energy
+    # La II ionises at 11.18 eV, so the third level is above the ionisation energy
     iondir = tmp_path / "OptimizedFAC_lanthanides_calibrated" / "57LaII_calib"
     iondir.mkdir(parents=True)
     levels = fac_levels_header("FAC", 3)
@@ -3542,7 +3564,7 @@ def test_readfacdata_warns_on_an_ion_whose_transitions_are_all_above_the_ionisat
     assert len(energy_levels) == 2
     assert transitions.is_empty()
     assert "The reader skipped all 2 transitions" in flog.getvalue()
-    assert "The reader dropped 1 levels that are above the ionisation energy." in flog.getvalue()
+    assert "The reader dropped 1 level above the ionisation energy." in flog.getvalue()
 
 
 def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_energy(tmp_path, monkeypatch):
@@ -3564,7 +3586,7 @@ def test_readfacdata_stops_on_an_ion_whose_levels_are_all_above_the_ionisation_e
             chars[start:end] = list(f"{text:>{end - start}}")
         return "".join(chars).rstrip()
 
-    # La II ionises at 11.06 eV, so both levels are above the ionisation energy
+    # La II ionises at 11.18 eV, so both levels are above the ionisation energy
     iondir = tmp_path / "OptimizedFAC_lanthanides_calibrated" / "57LaII_calib"
     iondir.mkdir(parents=True)
     levels = fac_levels_header("FAC", 2)
@@ -3828,7 +3850,7 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     rhd.read_hyd_phixsdata()
     assert rhd.max_hyd_gaunt_n == 30
 
-    ionization_energy_ev = 4 * rhd.ryd_to_ev
+    ionization_energy_ev = 4 * ryd_to_ev
     dflevels = pl.DataFrame(
         {
             "levelid": [0, 1, 2],
@@ -3972,11 +3994,11 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
         "# Energy levels ",
         "# num  weight parity      E(eV)      configuration ",
         "      1   5.0  even  0.0000000e+00 {  4s+ 2  4p- 2  4p+ 2 } ",
-        "      2   3.0  even  2.3450344e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
-        "      3   1.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
+        "      2   3.0  even  3.1167385e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
+        "      3   3.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
         "# Transitions ",
         "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
-        "      3       1       330.290     5.619e+05        -3.037 ",
+        "      3       1      3977.982     5.619e+05        -3.037 ",
         "      3       2 1290010779.045     2.386e-13        -8.225 ",
     ]
     (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -3987,7 +4009,8 @@ def test_readtanakajpltdata_reads_a_transition_with_a_wide_wavelength_field(tmp_
     )
 
     assert dflevels.height == 3
-    assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5, 2.386e-13], rel=1e-12)
+    # the file gives g_u * A, and the upper level has g = 3
+    assert dftransitions.sort("lowerlevel")["A"].to_list() == pytest.approx([5.619e5 / 3, 2.386e-13 / 3], rel=1e-12)
 
 
 def test_readtanakajpltdata_records_the_header_with_a_joined_paper_line(tmp_path, monkeypatch):
@@ -4076,7 +4099,9 @@ def test_get_photoiontargetfractions_merges_targets_that_match_one_level():
     # the first route matches the ground state, and the second matches nothing and falls back to it
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1Se", 0.7), ("3s2_3p6_1So", 0.3)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     # one entry only, with the two fractions added, and not the same target two times
     assert targetlist == [[(0, 1.0)]]
@@ -4096,7 +4121,9 @@ def test_get_photoiontargetfractions_shares_a_target_over_its_j_levels():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3_2Do", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 0.6), (2, 0.4)]]
 
@@ -4115,7 +4142,9 @@ def test_get_photoiontargetfractions_matches_a_parenthesised_target():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     # the two J levels of 2Do, by statistical weight, and not the ground state fallback
     assert targetlist == [[(1, 0.6), (2, 0.4)]]
@@ -4135,7 +4164,9 @@ def test_get_photoiontargetfractions_matches_a_target_with_no_separators():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2p3Po", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 1.0)]]
 
@@ -4154,7 +4185,9 @@ def test_get_photoiontargetfractions_keeps_the_ground_state_for_a_different_term
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1So", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(0, 1.0)]]
 
@@ -4175,7 +4208,9 @@ def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3d6(5D)4sa6De", 1.0)]]
 
     with pytest.raises(ValueError, match="matched more than one level name"):
-        readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+        readhillierdata.get_photoiontargetfractions(
+            dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+        )
 
 
 def test_get_photoiontargetfractions_matches_a_slash_target_with_separators_removed():
@@ -4193,7 +4228,9 @@ def test_get_photoiontargetfractions_matches_a_slash_target_with_separators_remo
     # each part matches exactly one name, so the parts share the fraction as the exact comparison does
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)/2s2_2p3(2Po)", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 0.75), (2, 0.25)]]
 
@@ -4435,7 +4472,6 @@ def test_get_nist_ionization_energies_ev():
     must stay out of the result, so a caller gets a KeyError and not a NaN.
     """
     from artisatomic.base import get_nist_ionization_energies_ev
-    from artisatomic.base import get_nist_ionization_provenance
 
     energies = get_nist_ionization_energies_ev()
 
@@ -4445,8 +4481,6 @@ def test_get_nist_ionization_energies_ev():
     assert all(isinstance(value, float) and np.isfinite(value) for value in energies.values())
     # Rf XV has a blank energy
     assert (104, 15) not in energies
-    # the table names its source, so the output files can quote it
-    assert any("NIST" in line for line in get_nist_ionization_provenance())
 
 
 def test_parse_nist_ionization_table():
@@ -4514,6 +4548,39 @@ def test_get_nearest_level_indices():
     assert onelevel_second.tolist() == [0, 0]
 
 
+def test_readmonsdata_matches_the_tagged_energy_of_a_single_level():
+    """An ion with one level has no pair of neighbours to compare, so each energy gets that level."""
+    levels, untagged, second = readmonsdata.match_tagged_levels(
+        np.array([1.0]), np.array([1000.0]), np.array([1.0, 2.0])
+    )
+    assert levels.tolist() == [0, 0]
+    assert untagged.tolist() == [1]
+    assert second.tolist() == [0]
+
+
+def test_mons_tagged_energy_names_the_level():
+    """The tag of the transition file picks the level where the closest energy picks its neighbour.
+
+    The levels 1 and 2 are 2e-6 apart (1000 cm^-1). Level 1 has J = 6, so its tag of 6.01e-6 puts its
+    transition energy nearer to level 2 than to level 1.
+    """
+    energies = np.array([0.0, 100.0, 100.000002])
+    j_arr = np.array([0.0, 6.0, 1.0])
+    tagged = readmonsdata.tagged_level_energies(energies, j_arr)
+    assert tagged.tolist() == pytest.approx([1e-8, 100.0 + 6e-6 + 1e-8, 100.000002 + 1e-6 + 1e-8], abs=1e-12)
+    # two levels of one J: the second has n = 2
+    assert readmonsdata.tagged_level_energies(np.array([5.0, 6.0]), np.array([2.0, 2.0])).tolist() == pytest.approx(
+        [5.0 + 2e-6 + 1e-8, 6.0 + 2e-6 + 2e-8], abs=1e-12
+    )
+
+    transitionenergies = np.array([tagged[1], tagged[2], 50.0])
+    levels, untagged, _ = readmonsdata.match_tagged_levels(tagged, energies * 1000, transitionenergies)
+    assert levels.tolist() == [1, 2, 0]
+    assert untagged.tolist() == [2]
+    closest, _ = readmonsdata.get_nearest_level_indices(energies * 1000, transitionenergies[:1] * 1000)
+    assert closest.tolist() == [2]
+
+
 def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path):
     """The per-type Floers+25 files merge duplicate level pairs and set the forbidden flag.
 
@@ -4529,7 +4596,9 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
     transheader = header + " Lower Upper A Type\n"
     (tmp_path / "57LaII_transitions_calib_E1.txt").write_text(transheader + " 0 1 1.0e+06 E1\n")
     # the row to level 9 references a level that the levels file does not list: discard it
-    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(transheader + " 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n")
+    (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(
+        transheader + " 0 1 2.0e+00 M1\n 0 2 2.0e+00 M1\n 0 9 4.0e+00 M1\n"
+    )
     # the E2 row is in reverse order on purpose: it must swap and then merge with the M1 row
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(transheader + " 2 0 3.0e+00 E2\n")
 
@@ -4547,7 +4616,8 @@ def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path
         (lower, upper): (A, forbidden)
         for upper, lower, A, forbidden in dftransitions[["upperlevel", "lowerlevel", "A", "forbidden"]].iter_rows()
     }
-    assert rows == {(0, 1): (1.0e6, False), (0, 2): (5.0, True)}
+    # the pair 0-1 has an E1 line and an M1 line, so it is permitted
+    assert rows == {(0, 1): (1.0e6 + 2.0, False), (0, 2): (5.0, True)}
     assert dflevels["levelname"].to_list() == ["5d1 J=0 index=0", "5p1 J=1 index=1", "4f1 J=2 index=2"]
     assert transition_count_of_level(dftransitions, dflevels.height) == [2, 1, 1]
 
@@ -5140,7 +5210,8 @@ def test_cmfgen_fit_functions():
     table7 = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=nu_o_1e15hz)
     assert table7[0, 1] == 0.0
     assert table7[200, 1] == 0.0  # u = 1.8
-    assert table7[300, 1] > 0.0  # u = 2.8
+    # u = 2.8 is the ratio 1.4 to the moved edge, where the Seaton fit gives its value
+    assert table7[300, 1] == pytest.approx(2.0 * (0.5 + 0.5 / 1.4) * 1.4**-3.0)
 
     # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
     table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
@@ -5163,6 +5234,10 @@ def test_cmfgen_fit_functions():
     table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.0, 0.0, 0.5, 0.0, -2.0, 0.0)
     assert table6[0, 1] == pytest.approx(10.0)
     assert table6[500, 1] == pytest.approx(6.0**-2.0)
+    # a break above u = 6 tests the cubic at a point other than x = 0
+    table6 = readhillierdata.get_hummer_phixstable(lambda_angstrom, 1.0, -1.0, 0.5, 0.25, 1.0, 0.0, -2.0, 0.0)
+    x6 = np.log10(6.0)
+    assert table6[500, 1] == pytest.approx(10 ** (1.0 - x6 + 0.5 * x6**2 + 0.25 * x6**3))
 
     # type 9: the H I ground-state fit of Verner & Yakovlev (1995, A&AS, 109, 125-133, bibcode
     # 1995A&AS..109..125V) gives the 6.3 Mb threshold cross section
@@ -5588,7 +5663,6 @@ def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     assert not phixstext.splitlines()[-1].startswith("#")
     # the file holds the two grid numbers and the tables of each ion already
     assert "Downsample" not in phixstext
-    assert "Writing" not in phixstext
     lines = phixstext.splitlines()
     # ARTIS reads the first two numbers with no comment skip
     assert int(lines[0]) == nphixspoints
@@ -5704,7 +5778,7 @@ def test_hydrogenic_estimate_records_its_source_only_with_a_table():
     sourceline = flog.comments["phixsdata"][0]
     assert sourceline.startswith("source: the hydrogenic estimate of artisatomic")
     assert "gbf_n_data.dat" in sourceline
-    assert "/Users/" not in sourceline
+    assert sourceline.endswith("atomic-data-hillier/atomic_21jun23/HYD/I/5dec96/gbf_n_data.dat")
 
 
 def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
@@ -5712,6 +5786,8 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
     from artisatomic import cli
 
     monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
+    # main() moves the files of atomic-data-qub of the repository, which a test must not do
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     cli.main()
 
@@ -6187,6 +6263,7 @@ def test_readfloers25data_skips_a_sync_copy_of_a_pertype_file(monkeypatch, tmp_p
 
     write_floers25_lanthanum_files(tmp_path, {"E1": "E1", "E1 (1)": "E1"})
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
+    monkeypatch.setattr(readfloers25data, "floers_data_folder", tmp_path)
     flog = IonLog(io.StringIO())
     _, _, dftransitions = readfloers25data.read_levels_and_transitions(57, 2, flog, calibrated=True, withforbidden=True)
     assert dftransitions["A"].to_list() == [1.0e6]
@@ -6277,6 +6354,9 @@ def cli_run_with_stub_writer(
     from artisatomic import cli
     from artisatomic.base import log_path
 
+    # main() moves the files of atomic-data-qub of the repository, which a test must not do
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+
     def write_files(_ion_handlers, args):
         for filename in ("adata.txt", "transitiondata.txt"):
             Path(args.output_folder, filename).write_text("the output of the new run\n", encoding="utf-8")
@@ -6347,6 +6427,60 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     assert "the cleanup of the output folder failed: the cleanup failed" in capsys.readouterr().out
 
 
+def test_cli_finishes_the_install_before_a_sigterm_during_the_moves(tmp_path, monkeypatch):
+    """A SIGTERM during install_files() must wait for the end of the install and its cleanup.
+
+    The run then stops with SystemExit, and the output folder holds the full output of the new run.
+    """
+    import os
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or os.name != "posix":
+        pytest.skip("the test sends SIGTERM to its own process")
+    original_install_files = cli.install_files
+
+    def install_files(workfolder: Path, outputfolder: Path) -> Path:
+        os.kill(os.getpid(), signal.SIGTERM)
+        return original_install_files(workfolder, outputfolder)
+
+    monkeypatch.setattr(cli, "install_files", install_files)
+    with pytest.raises(SystemExit):
+        cli_run_with_stub_writer(tmp_path, monkeypatch)
+    outputfolder = tmp_path / "artis_files"
+    for filename in ("adata.txt", "transitiondata.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of the new run\n"
+    assert not list(outputfolder.glob(".artisatomic_*"))
+
+
+def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path, monkeypatch):
+    """A SIGTERM during the wait for the lock must wait for the end of the install also."""
+    import os
+    import signal
+    from contextlib import contextmanager
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or os.name != "posix":
+        pytest.skip("the test sends SIGTERM to its own process")
+    original_lock = cli.output_folder_lock
+
+    @contextmanager
+    def lock_after_a_signal(outputfolder: Path):
+        os.kill(os.getpid(), signal.SIGTERM)
+        with original_lock(outputfolder):
+            yield
+
+    monkeypatch.setattr(cli, "output_folder_lock", lock_after_a_signal)
+    with pytest.raises(SystemExit):
+        cli_run_with_stub_writer(tmp_path, monkeypatch)
+    outputfolder = tmp_path / "artis_files"
+    for filename in ("adata.txt", "transitiondata.txt"):
+        assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of the new run\n"
+    assert not list(outputfolder.glob(".artisatomic_*"))
+
+
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
     """A second run must not change the files of the output folder while the first run moves its files."""
     import fcntl
@@ -6385,6 +6519,10 @@ def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
         return original_import(name, *import_args, **import_kwargs)
 
     monkeypatch.setattr(builtins, "__import__", import_without_fcntl)
+    # a new import of the module, so that an import of fcntl at the top of cli.py fails here also
+    from artisatomic import cli
+
+    importlib.reload(cli)
     outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
 
@@ -6417,7 +6555,7 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
         lambda _path: pl.DataFrame({"Z": [26], "lowermost_ion_stage": [1], "uppermost_ion_stage": [3]}),
     )
 
-    def read_rrcfile(filename, noprint=False):  # ruff: ignore[unused-function-argument]
+    def read_rrcfile(filename):
         if Path(filename).name == "fe2.rrc.txt":
             msg = "the file has no header row"
             raise ValueError(msg)
@@ -6472,11 +6610,10 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
 
     args = build_parser().parse_args([])
     crosssections = np.zeros((8, args.nphixspoints))
-    thresholds = np.zeros(8)
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     stream = io.StringIO()
     flog = IonLog(stream)
-    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, thresholds, targetfractions)  # ruff: ignore[private-member-access]
+    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, targetfractions)  # ruff: ignore[private-member-access]
 
     assert targetfractions[2] == []
     assert all(targetfractions[levelid] for levelid in range(8) if levelid != 2)
@@ -6497,7 +6634,7 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     with pytest.raises(ValueError, match=r"3\.gz has 800 negative cross sections in the columns of the 4 targets"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), targetfractions
         )
 
 
@@ -6522,7 +6659,7 @@ def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monke
     flog = io.StringIO()
     with pytest.raises(ValueError, match=r"artisatomic cannot read .*3\.gz: conversion from `str` to `f64` failed"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), targetfractions
         )
     assert "The cross sections of level 3 come from" in flog.getvalue().splitlines()[-1]
 
@@ -6904,6 +7041,8 @@ def test_read_photoionizations_downsamples_the_co3_table_on_its_own_grid():
     # the table falls from 9.338 Mb at the threshold to 7.016 Mb one step above it, so the
     # average over the first bin is below the value at the threshold
     assert 8.0 < phixs.crosssections[0][0] < 9.338
+    # the value of the table with its energies in Rydberg. eV or a ratio to the threshold give 9.31 or 8.87
+    assert phixs.crosssections[0][0] == pytest.approx(9.0212, abs=1e-3)
     assert phixs.crosssections[4].tolist() == [0.0] * 100
     assert phixs.targetfractions == [[(0, 1.0)]] * 5
 
@@ -6975,3 +7114,759 @@ def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level
     upsilons = upsilon_dict(dfupsilon)
     assert upsilons[names.index("2s_2Se[1/2]"), names.index("5p_2Po")] == pytest.approx(0.0779)
     assert "The reader discarded upsilon" not in flog.getvalue()
+
+
+def test_write_adata_rejects_an_ion_that_artis_cannot_read():
+    """An ion with no levels, a level energy that is not finite, or a bad g stops the run before any output."""
+
+    def levels(energies: list[float], gvalues: list[float]) -> pl.DataFrame:
+        return leveltuples_to_pldataframe(
+            pl.DataFrame({"levelname": ["a"] * len(energies), "energyabovegsinpercm": energies, "g": gvalues})
+        )
+
+    cases = [
+        (levels([], []), 10.0, "has no levels"),
+        (levels([0.0, float("nan")], [1.0, 3.0]), 10.0, "not a\n? ?finite number"),
+        (levels([0.0, 10.0], [1.0, 0.0]), 10.0, "finite positive number"),
+        (levels([0.0, 10.0], [1.0, float("inf")]), 10.0, "finite positive number"),
+        (levels([0.0], [1.0]), float("nan"), "ionisation energy nan"),
+    ]
+    for dflevels, ionization_energy, message in cases:
+        buf = io.StringIO()
+        with pytest.raises(ValueError, match=message):
+            write_adata(buf, 26, 2, dflevels, ionization_energy, [0] * dflevels.height, io.StringIO())
+        assert not buf.getvalue()
+
+
+def test_write_transition_data_rejects_values_that_artis_cannot_read():
+    """A NaN or negative A, or a collision strength that is not finite, stops the run before the header line."""
+    for avalue, collstr in ((float("nan"), -1.0), (-1.0, -1.0), (1.0, float("nan")), (float("inf"), 0.5)):
+        dftransitions = pl.DataFrame(
+            {"lowerlevel": [0], "upperlevel": [1], "A": [avalue], "coll_str": [collstr], "forbidden": [False]}
+        )
+        out = io.StringIO()
+        with pytest.raises(ValueError, match="not a finite number"):
+            write_transition_data(out, 26, 2, dftransitions, io.StringIO())
+        assert not out.getvalue()
+
+
+def test_resolve_coll_str_keeps_a_nan_upsilon_for_the_writer_check():
+    """Polars orders NaN above every number, so a NaN upsilon reaches coll_str, and the writer stops on it."""
+    from artisatomic.output import resolve_coll_str
+
+    dftransitions = pl.DataFrame(
+        {"lowerlevel": [0], "upperlevel": [1], "A": [1.0], "forbidden": [False], "upsilon": [float("nan")]}
+    ).pipe(resolve_coll_str)
+    with pytest.raises(ValueError, match="collision strength that is not a finite number"):
+        write_transition_data(io.StringIO(), 26, 2, dftransitions, io.StringIO())
+
+
+def test_log_repeated_level_pairs():
+    """Two transitions of one level pair get one counted warning, because ARTIS adds their A values."""
+    from artisatomic.output import log_repeated_level_pairs
+
+    dftransitions = pl.DataFrame({"lowerlevel": [0, 0, 0, 1], "upperlevel": [1, 1, 2, 2], "A": [1.0, 2.0, 3.0, 4.0]})
+    flog = IonLog(io.StringIO(), {"transitiondata": []})
+    log_repeated_level_pairs(flog, dftransitions)
+    assert flog.comments["transitiondata"] == [
+        (
+            "WARNING: the count of transitions that name the same pair of levels as the transition before them is"
+            " 1. ARTIS adds the A values of such transitions into one transition."
+        )
+    ]
+
+    flog = IonLog(io.StringIO(), {"transitiondata": []})
+    log_repeated_level_pairs(flog, dftransitions.unique(["lowerlevel", "upperlevel"], maintain_order=True))
+    assert flog.comments["transitiondata"] == []
+
+
+def test_write_phixs_data_rejects_tables_with_no_table_for_the_ground_level():
+    """ARTIS stops for an ion with a table for an excited level and none for the ground level."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[0.0, 0.0], [1.0, 0.5]])
+    targetfractions = [[], [(0, 1.0)]]
+    thresholds = np.array([np.nan, 13.6])
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="none for the ground level"):
+        write_phixs_data(out, 27, 3, crosssections, targetfractions, thresholds, args, io.StringIO())
+    assert not out.getvalue()
+
+
+def test_write_phixs_data_rejects_a_target_fraction_that_prints_as_zero():
+    """ARTIS stops for a target fraction that is not above zero, and it reads the printed value."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+    crosssections = np.array([[1.0, 0.5]])
+    targetfractions = [[(0, 1.0 - 1e-7), (1, 1e-7)]]
+
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="prints as zero"):
+        write_phixs_data(out, 8, 1, crosssections, targetfractions, np.array([13.6]), args, io.StringIO())
+    assert not out.getvalue()
+
+
+def test_match_hydrogenic_phixs_gives_no_table_when_the_ground_level_has_none():
+    """A ground level name with no principal quantum number gives the whole ion no table.
+
+    ARTIS stops for an ion with a table for an excited level and none for the ground level. The
+    Kurucz Co III ground level 'd7 a4F' is such a case.
+    """
+    rhd.read_hyd_phixsdata()
+    dflevels = pl.DataFrame(
+        {
+            "levelid": [0, 1],
+            "energyabovegsinpercm": [0.0, 1000.0],
+            "g": [10.0, 2.0],
+            "levelname": ["N(1S)2H 1,enpercm=0.0,j=4.5", "s1s  1S,enpercm=1000.0,j=0.5"],
+        }
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "phixsdata": []})
+    crosssections, targetfractions, thresholds = match_hydrogenic_phixs(
+        atomic_number=27,
+        energy_levels=dflevels,
+        ionization_energy_ev=4 * ryd_to_ev,
+        ion_handler="kurucz",
+        get_level_valence_n=readkuruczdata.get_level_valence_n,
+        args=phixs_args(),
+        flog=flog,
+    )
+    assert crosssections.size == 0
+    assert targetfractions == []
+    assert thresholds.size == 0
+    assert flog.comments["adata"][0].startswith("WARNING: the ground level gets no hydrogenic photoionisation table")
+    assert flog.comments["phixsdata"] == []
+
+
+def test_xopen_check_extension_closes_a_compressed_file_early_with_no_thread_error(tmp_path, monkeypatch):
+    """A reader that reads only the header of a .zst file must not make a thread of xopen raise.
+
+    The zstd program makes the file, as the setup scripts do. With threads above 0, xopen read such
+    a file through a pipe, and an early close gave a BrokenPipeError in most reads.
+    """
+    import shutil
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]  # the test runs the zstd program
+    import threading
+
+    zstdpath = shutil.which("zstd")
+    if zstdpath is None:
+        pytest.skip("the zstd program is not installed")
+    values = np.random.default_rng(1).random((100_000, 2))
+    filepath = tmp_path / "table.txt"
+    filepath.write_text(
+        "".join(f"{index:d} {first:.12e} {second:.12e}\n" for index, (first, second) in enumerate(values.tolist())),
+        encoding="utf-8",
+    )
+    subprocess.run([zstdpath, "-q", "-15", "--rm", str(filepath)], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+
+    errors: list[BaseException | None] = []
+    monkeypatch.setattr(threading, "excepthook", lambda hookargs: errors.append(hookargs.exc_value))
+    for _ in range(20):
+        with xopen_check_extension(filepath, mode="rt", encoding="utf-8") as fin:
+            assert fin.readline().startswith("0 ")
+    assert errors == []
+
+
+def test_rewrite_file_as_utf8_keeps_the_compression_and_leaves_no_temporary_file(tmp_path):
+    """The rewrite of a compressed file gives the same compression, and no temporary file stays in the folder."""
+    text = "Reference: Galavís M.E. 1998\n"
+    filepath = tmp_path / "osc_data.gz"
+    with xopen(filepath, "wb") as fout:
+        fout.write(text.encode("iso-8859-1"))
+
+    assert rewrite_file_as_utf8(tmp_path / "osc_data")
+    with xopen(filepath, "rb") as fin:
+        assert fin.read() == text.encode("utf-8")
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["osc_data.gz"]
+
+
+def test_atomic_weights_give_each_element_a_mass():
+    """Each element has a mass. An element with no stable isotope has the mass number of its longest-lived isotope."""
+    from artisatomic.base import atomic_weights
+    from artisatomic.base import elsymbols
+
+    assert len(atomic_weights) == len(elsymbols) == 119
+    assert all(isinstance(mass, float) and mass > 0.0 for mass in atomic_weights[1:])
+    assert (elsymbols[43], atomic_weights[43]) == ("Tc", 98.0)
+    assert (elsymbols[61], atomic_weights[61]) == ("Pm", 145.0)
+    assert (elsymbols[84], atomic_weights[84]) == ("Po", 209.0)
+    assert (elsymbols[88], atomic_weights[88]) == ("Ra", 226.0)
+    assert atomic_weights[26] == 55.845
+
+
+def test_leveltuples_to_pldataframe_infers_the_types_from_all_rows():
+    """A column that starts with 100 integers keeps a later float, and one that starts with 100 nulls keeps a later value."""
+    from artisatomic.base import EnergyLevel
+
+    levels = [
+        EnergyLevel(f"level{index}", 0 if index < 120 else 1234.5, 2, None if index < 120 else 1)
+        for index in range(200)
+    ]
+    dflevels = leveltuples_to_pldataframe(levels)
+    assert dflevels["energyabovegsinpercm"][150] == 1234.5
+    assert dflevels["parity"][150] == 1
+
+
+def test_get_level_parity_keeps_the_stated_parity_of_a_name_with_l_not_below_n():
+    """Only a w or z merge marker overrides the parity letter at the end of a CMFGEN level name.
+
+    Co I names two levels by their energy, and P VI has 5i and 6i levels. The test l >= n read such
+    names as merged levels and removed their parity.
+    """
+    assert readhillierdata.get_level_parity("59947oo[11/2]") == 1
+    assert readhillierdata.get_level_parity("54989ee[9/2]") == 0
+    assert readhillierdata.get_level_parity("2s_2p3(3Do)3f_4De") == 0
+    assert readhillierdata.get_level_parity("2s2_2p5_5i_3Ho[4]") == 1
+    assert readhillierdata.get_level_parity("2s2_13w_2W") == -1
+    assert readhillierdata.get_level_parity("3s2_18w_2W") == -1
+    assert readhillierdata.get_level_parity("2s2_2p3(4So)5z_5Z") == -1
+
+
+def test_split_coldata_row_takes_the_names_first_and_then_the_values():
+    """A row with more values than the header declares keeps its level names (P II col_data, line 61)."""
+    row = ["3s2_3p2_3Pe[0]-3s_3p3_3So[1]", "0.624", "0.626", "0.627", "7.355", "1", "1.539"]
+    namefrom, nameto, values = readhillierdata.split_coldata_row(row)
+    assert (namefrom, nameto) == ("3s2_3p2_3Pe[0]", "3s_3p3_3So[1]")
+    assert values == ["0.624", "0.626", "0.627", "7.355", "1", "1.539"]
+
+    # Ni XIV puts only a space between the two names
+    assert readhillierdata.split_coldata_row(["2s2_2p3_4So", "2s2_2p3_2Do", "0.5", "0.6"]) == (
+        "2s2_2p3_4So",
+        "2s2_2p3_2Do",
+        ["0.5", "0.6"],
+    )
+
+
+def cmfgen_corpus_or_skip() -> None:
+    """Skip a test that reads the CMFGEN data where the data is not present."""
+    if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+
+
+def test_read_coldata_converts_a_log10_temperature_header():
+    """The Ne V header gives log10(T/K), so the reader takes the column at 10^3.8 K for 6000 K, and not 1000 K."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(10, 5, flog)
+    readhillierdata.read_coldata(10, 5, dflevels, phixs_args(electrontemperature=6000), flog)
+    assert any(
+        line.startswith("The collision strengths are the values at 6309.57 K.")
+        for line in flog.comments["transitiondata"]
+    )
+
+
+def test_read_coldata_takes_no_value_from_a_file_that_declares_no_transitions():
+    """The Co I collision file declares 0 transitions and gives six placeholder lines, which CMFGEN ignores."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(27, 1, flog)
+    dfupsilon = readhillierdata.read_coldata(27, 1, dflevels, phixs_args(), flog)
+    assert dfupsilon.is_empty()
+    assert any("declares 0 transitions but has 6 lines" in line for line in flog.comments["transitiondata"])
+
+
+def test_read_levels_keeps_a_level_that_only_the_collision_file_names():
+    """Ca VIII 3s_3p(3P)3d_4Fo[7/2] has no radiative transition, but its collision data stays."""
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(20, 8, flog)
+    assert "3s_3p(3P)3d_4Fo[7/2]" in dflevels["levelname"].to_list()
+    readhillierdata.read_coldata(20, 8, dflevels, phixs_args(), flog)
+    assert not any(line.startswith("The reader discarded upsilon") for line in flog.comments["transitiondata"])
+
+
+def test_read_levels_takes_the_nist_ionisation_energy_for_sc_i():
+    """The Sc I header gives 8.0166 eV, the limit to an excited Sc II level. The reader takes NIST and moves Lam(A)."""
+    from artisatomic.base import get_nist_ionization_energies_ev
+
+    cmfgen_corpus_or_skip()
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    ionization_energy_ev, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(21, 1, flog)
+    nist_ev = get_nist_ionization_energies_ev()[21, 1]
+    assert ionization_energy_ev == nist_ev
+    # the ground level threshold is the ionisation energy, to the four figures of Lam(A)
+    assert hc_in_ev_angstrom / dflevels["lambdaangstrom"][0] == pytest.approx(nist_ev, rel=1e-3)
+    # a level above the NIST limit has a negative Lam(A), as CMFGEN writes it
+    above = dflevels.filter(pl.col("energyabovegsinpercm") * hc_in_ev_cm > nist_ev + 0.01)
+    assert not above.is_empty()
+    assert (above["lambdaangstrom"] < 0.0).all()
+
+
+def test_read_levels_and_transitions_names_an_ion_that_cmfgen_lacks():
+    """An ion outside ions_data stops with a message that names the handler and the ion, and not a bare KeyError."""
+    with pytest.raises(ValueError, match=r"cmfgen handler has no data for Z=23 ion_stage=1"):
+        readhillierdata.read_levels_and_transitions_from_file(23, 1, io.StringIO())
+    with pytest.raises(ValueError, match=r"Z=29 ion_stage=2"):
+        readhillierdata.read_levels_and_transitions_from_file(29, 2, io.StringIO())
+
+
+def test_kurucz_get_level_valence_n_with_the_electron_count():
+    """With the electron count of the ion, a label that gives only counts gets the lowest n outside the core."""
+    valence_n = readkuruczdata.get_level_valence_n
+    # Co I 3d7 4s2 and Co III 3d7: the counts sum to the electrons outside the argon core
+    assert valence_n("d7s2 a4F,enpercm=0.0,j=4.5", nelectrons=27) == 4
+    assert valence_n("d7 a4F,enpercm=0.0,j=4.5", nelectrons=25) == 3
+    # Ca V 3s2 3p4: the parser read the count 2 as n
+    assert valence_n("s2p4 3P,enpercm=0.0,j=2.0", nelectrons=16) == 3
+    # C I 2p 3s: the counts also sum to 4, but 2p then 2s is not in the order of a label
+    assert valence_n("p3s 3P,enpercm=60000.0,j=1.0", nelectrons=6) == 3
+    # Y I 4d 5s2 gives its n, and the counts 5 + 2 do not sum to 3
+    assert valence_n("d5s2 a2D,enpercm=0.0,j=1.5", nelectrons=39) == 5
+    # Ce I 4f 5d2 6s
+    assert valence_n("fd2s 1G,enpercm=0.0,j=4.0", nelectrons=58) == 6
+    # an n below the lowest n of the orbital outside the core is a count read as n
+    assert valence_n("2p 2P,enpercm=1000.0,j=0.5", nelectrons=13) is None
+    # without the electron count, the parser reads the label alone
+    assert valence_n("d7s2 a4F,enpercm=0.0,j=4.5") == 7
+
+
+def test_kurucz_label_parity_reads_each_configuration_word():
+    """Y I "5s2 5p z2P" is odd: the parity comes from all the words before the term."""
+    assert readkuruczdata.kurucz_label_parity("5s2 5p z2P") == 1
+    assert readkuruczdata.kurucz_label_parity("sp6 10p 1P") == 1
+    assert readkuruczdata.kurucz_label_parity("5s2 a1S") == 0
+    assert readkuruczdata.kurucz_label_parity("3s *5S") == 1
+
+
+def kurucz_rows(**columns: list[float]) -> pl.DataFrame:
+    """Build gfall rows with the columns that the J functions read."""
+    base = {
+        "label_lower": ["a"] * len(columns["j_lower"]),
+        "label_upper": ["b"] * len(columns["j_lower"]),
+        "loggf": [0.0] * len(columns["j_lower"]),
+    }
+    return pl.DataFrame({**base, **columns})
+
+
+def test_kurucz_round_j_to_half_integers():
+    """A J that is not a multiple of 1/2 gets the nearest J with the 2J parity of the ion (Eu I J = 6.6)."""
+    dfgfall = kurucz_rows(
+        energyabovegsinpercm_lower=[0.0, 0.0],
+        j_lower=[3.5, 3.5],
+        energyabovegsinpercm_upper=[13778.68, 20000.0],
+        j_upper=[6.6, 4.5],
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    # Eu I has 63 electrons, so 2J is odd: 6.6 becomes 6.5
+    result = readkuruczdata.round_j_to_half_integers(dfgfall, 63, flog)
+    assert result["j_upper"].to_list() == [6.5, 4.5]
+    assert flog.comments["adata"][0].startswith("WARNING: On 1 line, the file gives a J that is not a multiple of 1/2")
+    # an even count of electrons gives an even 2J: 6.6 becomes 7.0
+    assert readkuruczdata.round_j_to_half_integers(dfgfall, 62, io.StringIO())["j_upper"][0] == 7.0
+
+
+def test_kurucz_drop_lines_of_a_second_ground_j():
+    """One row that gives the ground level another J (S I 3p4 3P J = 0 at 0 cm^-1) loses its line."""
+    dfgfall = kurucz_rows(
+        energyabovegsinpercm_lower=[0.0, 0.0, 0.0, 396.055],
+        j_lower=[2.0, 2.0, 0.0, 1.0],
+        energyabovegsinpercm_upper=[50000.0, 51000.0, 74976.14, 50000.0],
+        j_upper=[1.0, 2.0, 1.0, 1.0],
+    )
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    result = readkuruczdata.drop_lines_of_a_second_ground_j(dfgfall, flog)
+    assert result["j_lower"].to_list() == [2.0, 2.0, 1.0]
+    assert "keeps J = 2.0" in flog.comments["adata"][0]
+    # one J at 0 cm^-1 changes nothing
+    assert readkuruczdata.drop_lines_of_a_second_ground_j(result, io.StringIO()).equals(result)
+
+
+def test_kurucz_reader_rejects_a_file_of_another_ion(monkeypatch):
+    """A gfall file of another ion stops the read, and does not give its levels to the requested ion."""
+    srii = readkuruczdata.find_gfall(38, 1)
+    monkeypatch.setattr(readkuruczdata, "find_gfall", lambda *_: srii)
+    with pytest.raises(ValueError, match=r"holds the lines of Z=38 ion_stage=2, and not of Z=38 ion_stage=1"):
+        readkuruczdata.read_levels_and_transitions(38, 1, io.StringIO())
+
+
+def test_read_adf04_ends_the_collision_block_at_a_comment_line(tmp_path):
+    """A comment line ends the collision block, as in the Co III file of Tyndall, which has no -1 row."""
+    filepath = tmp_path / "1_1.adf04"
+    rows = ["   2   1 6.27+08 4.29-01 5.29-01"]
+    filepath.write_text(
+        "\n".join([hydrogen_header, *hydrogen_levels, "   -1", two_temperatures, *rows, "C---", "C DATE:", ""]),
+        encoding="utf-8",
+    )
+    flog = io.StringIO()
+    upsilons = upsilon_dict(readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)[2])
+    assert upsilons == {(0, 1): pytest.approx(0.429)}
+    assert "skipped" not in flog.getvalue()
+
+
+def test_read_adf04_rejects_a_file_that_ends_inside_the_collision_block(tmp_path):
+    """A file with no -1 row and no comment line after its collision rows is incomplete."""
+    filepath = tmp_path / "27_3.adf04"
+    filepath.write_text("".join(read_adf04_sample_lines()[:-2]))
+    with pytest.raises(ValueError, match="ends with no -1 row and no comment line"):
+        readadasdata.read_adf04(filepath, io.StringIO(), 5010.0, 27, 3)
+
+
+def test_read_adf04_rejects_a_negative_collision_strength(tmp_path):
+    """A negative upsilon is the mark of the writer for a forbidden pair with no value, so a file must not give one."""
+    with pytest.raises(ValueError, match="negative effective collision strengths"):
+        read_hydrogen_adf04(tmp_path, ["   2   1 6.27+08-4.29-01 5.29-01"])
+
+
+def test_adas_reader_keeps_one_a_value_for_a_repeated_pair(tmp_path, monkeypatch):
+    """ARTIS adds the A values of two rows of one pair, so the reader keeps the first row, as for the upsilons."""
+    write_hydrogen_adf04(tmp_path, ["   2   1 6.27+08 4.29-01 5.29-01", "   2   1 6.27+08 4.29-01 5.29-01"])
+    monkeypatch.setattr(readadasdata, "adaspath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    result = readadasdata.read_adas_levels_and_transitions(1, 1, flog, phixs_args(electrontemperature=5000.0))
+    dftransitions = result[2]
+    assert dftransitions.height == 1
+    assert any("on more than one row for 1 rows" in line for line in flog.comments["transitiondata"])
+
+
+def test_adas_parity_and_valence_n_ignore_an_unclosed_parent_term():
+    """The 18 characters of the configuration column can end inside a parent term: '3s23p63d5(4P)4s(3P'."""
+    config = "3s23p63d5(4P)4s(3P"
+    assert readadasdata.without_unclosed_parent_term(config) == "3s23p63d5(4P)4s"
+    assert get_config_parity(readadasdata.without_unclosed_parent_term(config), hasterm=False) == 0
+    assert readadasdata.get_level_valence_n(f"{config}_4Pe[3/2]_id=7") == 4
+
+
+def test_split_orbitals_reads_a_two_digit_n_after_an_occupation():
+    """'5s110p1' is 5s1 10p1. The reading 5s11 0p1 gives n = 0, which is not possible."""
+    assert get_config_parity("4p65s110p1", hasterm=False) == 1
+    assert get_config_parity("4p610s1", hasterm=False) == 0
+    assert get_config_parity("4p6 5s1 10p1", hasterm=False) == 1
+    # the occupation-1 reading still wins where both readings are possible: 3d1 4s2
+    assert get_config_parity("3d14s2", hasterm=False) == 0
+
+
+def jplt_lines(
+    transitions: list[str],
+    *,
+    header: tuple[str, ...] = ("# Japan-Lithuania Opacity Database for Kilonova (version 2.1)", "# Se I "),
+) -> list[str]:
+    """Give the lines of a small JPLT file of Se I, with three levels and the transition rows given."""
+    return [
+        *header,
+        "# 34 1 ",
+        f"# 3 {len(transitions)} ",
+        "# CLOSED=  1s+  2s+ ",
+        "# IP = 9.752 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)      configuration ",
+        "      1   5.0  even  0.0000000e+00 {  4s+ 2  4p- 2  4p+ 2 } ",
+        "      2   3.0  even  2.3450344e-01 {  4s+ 2  4p- 1  4p+ 3 } ",
+        "      3   3.0   odd  3.1167481e-01 {  4s+ 2  4p+ 4 } ",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+        *transitions,
+    ]
+
+
+def test_readtanakajpltdata_stops_for_wavelengths_that_do_not_fit_the_levels(tmp_path, monkeypatch):
+    """A transition list that does not use the level numbers of the level list stops the read (As II of grasp_v2.1)."""
+    # the right wavelengths are 3977.98 nm (3 -> 1) and 16066.1 nm (3 -> 2)
+    rows = [
+        "      3       1      5287.000     5.619e+05        -3.037 ",
+        "      3       2      2000.000     1.0e+05     -3.0 ",
+    ]
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines(rows)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    with pytest.raises(ValueError, match="2 of 2 transitions have a wavelength that does not fit"):
+        readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+
+
+def test_readtanakajpltdata_reads_a_file_with_only_a_transition_column_header(tmp_path, monkeypatch):
+    """A file with no transition can leave out the optional section title, so one header line is enough."""
+    lines = [line for line in jplt_lines([]) if line != "# Transitions "]
+    (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+    assert dflevels.height == 3
+    assert dftransitions.is_empty()
+
+
+def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
+    """A row that repeats the levels, the wavelength and g_u*A is one line two times, which ARTIS would add."""
+    row = "      3       1      3977.982     5.619e+05        -3.037 "
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines([row, row])) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    _, _, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
+    assert dftransitions.height == 1
+    assert any("gives 1 transition rows two times" in line for line in flog.comments["transitiondata"])
+
+
+def test_readtanakajpltdata_keeps_a_paper_line_that_ends_with_the_ion_name(tmp_path, monkeypatch):
+    """63_2.txt and 66_2.txt write the paper and the ion name on one line, and the paper must stay in the comment."""
+    header = (
+        "# Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        "# L. Radziute et al., ApJS 248 (2020) 17.# Se I",
+    )
+    row = "      3       1      3977.982     5.619e+05        -3.037 "
+    (tmp_path / "34_1.txt").write_text("\n".join(jplt_lines([row], header=header)) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
+    assert "L. Radziute et al., ApJS 248 (2020) 17." in flog.comments["adata"]
+
+
+def test_readboyledata_drops_a_line_that_the_table_gives_two_times(monkeypatch):
+    """The AOIFE table gives two He I lines two times. ARTIS adds the A values of two rows, so one row must go."""
+    from artisatomic import readboyledata
+
+    table = pl.DataFrame(
+        {
+            "line_id": [566306, 566307, 566308, 566309],
+            "wavelength": [8866.82, 20586.9, 8866.82, 20586.9],
+            "atomic_number": [2] * 4,
+            "ion_number": [0] * 4,
+            "level_number_lower": [1.0, 2.0, 1.0, 2.0],
+            "level_number_upper": [4.0, 4.0, 4.0, 4.0],
+            "A_ul": [1.55, 1.9746e6, 1.55, 1.9746e6],
+        }
+    )
+    monkeypatch.setattr(readboyledata, "read_aoife_table", lambda _name: table)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    dftransitions = readboyledata.read_lines_data(2, 1, {1: 1, 2: 2, 4: 4}, flog)
+    assert dftransitions["A"].to_list() == [1.55, 1.9746e6]
+    assert "gives 2 lines two times" in flog.comments["transitiondata"][0]
+
+
+def test_readdreamdata_rejects_a_level_key_that_is_nan():
+    """Polars takes NaN as equal to NaN in unique() and joins, so a NaN g would give a level with g = NaN."""
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [0.0],
+            "Lower_Type": ["(e)"],
+            "Lower_g": [9.0],
+            "Upper_Level": [20000.0],
+            "Upper_Type": ["(o)"],
+            "Upper_g": [float("nan")],
+        }
+    )
+    with pytest.raises(ValueError, match="Upper level with no value of g"):
+        readdreamdata.level_frame(dflines)
+
+
+def test_readmonsdata_rejects_a_value_that_is_not_finite(tmp_path, monkeypatch):
+    """Polars casts the text NaN to a float with no error, and a NaN energy passed the match tolerance."""
+    with zipfile.ZipFile(tmp_path / "levels.zip", "w") as archive:
+        archive.writestr("member.txt", " 0.000, 1.5\n NaN, 2.5\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    with pytest.raises(ValueError, match="not a finite number"):
+        readmonsdata.read_csv_columns("levels.zip", "member.txt", 2)
+
+
+def test_readfacdata_puts_the_e0_level_first_among_the_lowest_levels(tmp_path):
+    """Dy III gives Ilev 0 and Ilev 62 at 0.0. The header line E0 names the ground level, and it becomes level id 0."""
+
+    def levelrow(ilev: str, energy: str, parity: str, twoj: str, config: str) -> str:
+        chars = [" "] * 125
+        for text, start, end in ((ilev, 0, 7), (energy, 14, 30), (parity, 30, 31), (twoj, 38, 43), (config, 76, 125)):
+            chars[start:end] = list(f"{text:>{end - start}}")
+        return "".join(chars).rstrip()
+
+    header = fac_levels_header("FAC", 3)
+    header[7] = "E0\t= 1, -3.30187428E+05"
+    lines = [
+        *header,
+        levelrow("0", "0.0000000000E+00", "0", "12", "4f8"),
+        levelrow("1", "0.0000000000E+00", "0", "16", "4f8.6p2"),
+        levelrow("2", "5.0000000000E+00", "1", "4", "4f7.5d1"),
+        "",
+    ]
+    (tmp_path / "dy.lev.asc").write_text("\n".join(lines) + "\n")
+    energy_levels, levelid_of_fileindex = readfacdata.read_levels_data(readfacdata.GetLevels(tmp_path / "dy.lev.asc"))
+    assert levelid_of_fileindex == {1: 0, 0: 1, 2: 2}
+    assert energy_levels[0].g == 17
+
+
+def test_readfloers25data_stops_for_a_table_with_fewer_rows_than_its_header_declares(tmp_path):
+    """A file that a download or a copy cut between two rows stops the read."""
+    from artisatomic import readfloers25data
+
+    filepath = tmp_path / "57LaII_levels_calib.txt"
+    filepath.write_text("Energy levels of La II\nNumber of levels: 3\n--\n--\n--\n Index Energy\n 0 0.0\n 1 100.0\n")
+    with pytest.raises(ValueError, match="declares Number of levels = 3 but holds 2 rows"):
+        readfloers25data.read_dashed_table(filepath, usecols=["Index", "Energy"])
+
+
+def test_floers25_withforbidden_source_line_in_the_test_mode(monkeypatch):
+    """In the test mode the withforbidden handler reads the public test sample, so its source line must not say private."""
+    from artisatomic import readfloers25data
+
+    monkeypatch.setattr(readfloers25data, "TESTMODE", True)
+    assert "not public" not in readfloers25data.description_calibrated_withforbidden(70, 2)
+    monkeypatch.setattr(readfloers25data, "TESTMODE", False)
+    assert "It is not public" in readfloers25data.description_calibrated_withforbidden(70, 2)
+
+
+def test_readfacdata_sorts_levels_that_the_file_gives_out_of_energy_order(tmp_path):
+    """The level ids follow the energies, and a transition finds its levels through the map of the file indices."""
+    write_fac_fixture(tmp_path)
+    levels = readfacdata.GetLevels(tmp_path / "fac.lev.asc").reverse()
+    _, levelid_of_fileindex = readfacdata.read_levels_data(levels)
+    # Ilev 1 and 2 have one energy, and the stable sort keeps the order of the rows (here reversed)
+    assert levelid_of_fileindex == {0: 0, 2: 1, 1: 2}
+
+
+def test_readdreamdata_level_frame_sorts_by_energy():
+    """A line can name a lower level that is below a level that an earlier line names, and the ids follow the energy."""
+    from artisatomic import readdreamdata
+
+    dflines = pl.DataFrame(
+        {
+            "Lower_Level": [500.0, 0.0],
+            "Lower_Type": ["(o)", "(e)"],
+            "Lower_g": [3.0, 9.0],
+            "Upper_Level": [20000.0, 500.0],
+            "Upper_Type": ["(e)", "(o)"],
+            "Upper_g": [1.0, 3.0],
+        }
+    )
+    dflevels = readdreamdata.level_frame(dflines)
+    assert dflevels["Level"].cast(pl.Float64).to_list() == [0.0, 500.0, 20000.0]
+
+
+def test_hillier_ions_data_names_files_that_exist():
+    """Each folder and each file that ions_data names exists in the CMFGEN data set."""
+    cmfgen_corpus_or_skip()
+    for (atomic_number, ion_stage), ionfiles in readhillierdata.ions_data.items():
+        if not ionfiles.folder:
+            continue  # the bare nucleus of H II has no file
+        folder = Path(readhillierdata.hillier_ion_folder(atomic_number, ion_stage)) / ionfiles.folder
+        assert folder.is_dir(), folder
+        names = [ionfiles.levelstransitionsfilename, *ionfiles.photfilenames]
+        if ionfiles.coldatafilename:
+            names.append(ionfiles.coldatafilename)
+        for name in names:
+            assert find_file_check_extension_or_raise(folder / name)
+
+
+def test_rename_old_data_directory_gives_a_warning_when_the_move_fails(tmp_path, monkeypatch, capsys):
+    """A failure of the move does not stop the run, because the conversion can continue without the old folder."""
+    old, new = tmp_path / "atomic-data-qub", tmp_path / "atomic-data-adas"
+    old.mkdir()
+
+    def fail(_oldpath, _newpath):
+        msg = "a read-only folder"
+        raise OSError(msg)
+
+    monkeypatch.setattr(readadasdata, "_move_old_data_directory", fail)
+    readadasdata.rename_old_data_directory(old, new)
+    assert "WARNING: could not move the files of" in capsys.readouterr().out
+
+
+def test_output_folder_lock_continues_when_the_file_system_gives_no_lock(tmp_path, monkeypatch, capsys):
+    """Lustre with noflock and NFS with no lock daemon refuse flock(), and the run must not fail after its work."""
+    import errno
+
+    fcntl = pytest.importorskip("fcntl")
+    from artisatomic import cli
+
+    def refuse(_fd, _operation):
+        raise OSError(errno.ENOSYS, "Function not implemented")
+
+    monkeypatch.setattr(fcntl, "flock", refuse)
+    with cli.output_folder_lock(tmp_path):
+        pass
+    assert "gives no lock" in capsys.readouterr().out
+
+
+def test_stop_signals_raise_system_exit():
+    """SIGTERM inside the block becomes SystemExit, so the cleanup of a failed run runs, and the old handler comes back."""
+    import os
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGTERM") or not hasattr(os, "kill"):
+        pytest.skip("no SIGTERM here")
+    before = signal.getsignal(signal.SIGTERM)
+    with cli.stop_signals_as_exit(), pytest.raises(SystemExit):
+        os.kill(os.getpid(), signal.SIGTERM)
+    assert signal.getsignal(signal.SIGTERM) == before
+
+
+def test_remove_stale_work_folders(tmp_path, capsys):
+    """A work folder of a process that no longer exists goes. The folder of a live run and an old name stay."""
+    import os
+    import socket
+
+    from artisatomic import cli
+
+    hostname = socket.gethostname()
+    live = tmp_path / f"{cli.workfolder_prefix}{os.getpid()}@{hostname}@abc_1"
+    # a process id far above any real one
+    stale = tmp_path / f"{cli.workfolder_prefix}999999999@{hostname}@def_2"
+    oldname = tmp_path / f"{cli.workfolder_prefix}pb449vi5"
+    for folder in (live, stale, oldname):
+        folder.mkdir()
+    cli.remove_stale_work_folders(tmp_path)
+    assert live.is_dir()
+    assert not stale.exists()
+    assert oldname.is_dir()
+    assert "Remove it if no run uses it" in capsys.readouterr().out
+
+
+def test_parse_ion_handlers_rejects_a_bad_atomic_number_or_ion_stage():
+    """A JSON true is an int in Python, and int() cut 2.7 to 2, so the parser checks the types and the ranges."""
+    from artisatomic.ionhandlers import parse_ion_handlers
+
+    assert parse_ion_handlers([[26, [[2, "cmfgen"]]]]) == [(26, [(2, "cmfgen")])]
+    for loaded, message in (
+        ([[26, [[0, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[26, [[2.7, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[26, [[True, "cmfgen"]]]], "is not a whole number from 1 to 27"),
+        ([[2, [[4, "cmfgen"]]]], "is not a whole number from 1 to 3"),
+        ([[0, [[1, "cmfgen"]]]], "The atomic number 0"),
+        ([[26.9, [[1, "cmfgen"]]]], "The atomic number 26.9"),
+    ):
+        with pytest.raises(ValueError, match=message):
+            parse_ion_handlers(loaded)
+    with pytest.raises(TypeError, match=r"is not an \[atomic_number, \[ions\]\] pair"):
+        parse_ion_handlers([[26]])
+
+
+def test_read_nahar_rrcfile_rejects_a_file_with_no_rows(tmp_path):
+    """ARTIS stops for an ion block with no temperature, so a Nahar file with a header and no row stops here."""
+    from artisatomic import makerecombratefile
+
+    filepath = tmp_path / "fe2.rrc.ls.txt"
+    filepath.write_text("TOTAL RECOMBINATION RATE\n\n\n  log(T)  RRC(low n)  RRC(total)\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="has a header row and no data rows"):
+        makerecombratefile.read_nahar_rrcfile(filepath)
+
+
+def test_hdf5_to_parquet_attribute_text_escapes_a_byte_that_is_not_utf8():
+    """h5py gives such a byte of a variable-length string as a lone surrogate, which write_parquet() cannot take."""
+    pytest.importorskip("h5py")
+    text = hdf5_to_parquet.attribute_text("abc\udcff", None)
+    assert text == "abc\\xff"
+    assert hdf5_to_parquet.attribute_text("Å", None) == "Å"
+    # the metadata of a Parquet file takes the text
+    pl.DataFrame({"x": [1]}).write_parquet(io.BytesIO(), metadata={"units": text})
+
+
+def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
+    """The chunks of the process pool must give the same lines as one format in this process."""
+    from artisatomic import output
+
+    rng = np.random.default_rng(7)
+    nrows = 1000
+    lower = rng.integers(0, 50, nrows)
+    dftransitions = pl.DataFrame(
+        {
+            "lowerlevel": lower,
+            "upperlevel": lower + rng.integers(1, 50, nrows),
+            "A": 10.0 ** rng.uniform(-3, 9, nrows),
+            "coll_str": np.where(rng.random(nrows) < 0.5, -1.0, rng.uniform(0.0, 5.0, nrows)),
+            "forbidden": rng.integers(0, 2, nrows).astype(bool),
+        }
+    )
+    texts = []
+    for rowsforpool in (10**9, 1):
+        monkeypatch.setattr(output, "transition_rows_for_the_pool", rowsforpool)
+        ftransitiondata = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            output.write_transition_data(ftransitiondata, 26, 2, dftransitions, io.StringIO())
+        texts.append(ftransitiondata.getvalue())
+    assert texts[0] == texts[1]
+    assert texts[0].count("\n") > nrows

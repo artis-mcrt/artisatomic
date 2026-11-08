@@ -3,7 +3,9 @@ name: Test
 permissions:
     contents: read
 on:
+    # branches only: a push of a tag ran every job on old code
     push:
+        branches: ['**']
     merge_group:
     schedule:
         - cron: 0 13 * * 1
@@ -41,6 +43,12 @@ jobs:
                   makeartischargetransferfile --help > /dev/null
                   makeartisrecombratefile --help > /dev/null
 
+            # UV_FROZEN makes the uv-lock hook check only that uv.lock exists, so this step checks that it is
+            # up to date. The explicit option wins over UV_FROZEN.
+            - name: Check that uv.lock agrees with pyproject.toml
+              if: always()
+              run: uv lock --check
+
             - name: Run Ruff
               if: always()
               run: |
@@ -61,6 +69,23 @@ jobs:
 
             - name: Run prek pre-commit checks
               uses: j178/prek-action@v3.1.0
+
+    docs:
+        name: Build the documentation
+        runs-on: ubuntu-26.04-arm
+        steps:
+            - name: Checkout Code
+              uses: actions/checkout@v7
+              with:
+                  fetch-depth: 0
+
+            - name: Setup uv
+              uses: astral-sh/setup-uv@v7
+
+            # readthedocs.org builds with the same options and the same Python version from .readthedocs.yaml,
+            # so the two builds give the same warnings. Both stop on a warning.
+            - name: Build the documentation
+              run: uv run --python 3.14 --group docs sphinx-build -W --keep-going -b html docs docs/_build/html
 
     pytest:
         runs-on: ubuntu-26.04-arm
@@ -197,9 +222,9 @@ jobs:
             - name: Install artisatomic
               run: uv sync --compile-bytecode
 
-            # every matrix entry needs this, not just the cmfgen ones: artisatomic reads the
-            # hydrogenic photoionisation tables from HYD/I on any run without --nophixs, so gating this
-            # on the test name breaks the other jobs as a phixsdata_v2.txt checksum mismatch
+            # every matrix entry but mons needs this, not just the cmfgen ones: the hydrogenic estimate of
+            # a handler with a level-name parser reads the tables of HYD/I on any run without --nophixs,
+            # so gating this on the test name breaks those jobs as a phixsdata_v2.txt checksum mismatch
             - name: Cache CMFGEN atomic data
               uses: actions/cache@v6
               id: cache-cmfgendata
@@ -217,14 +242,13 @@ jobs:
               working-directory: atomic-data-floers25/
               run: tar -xJvf testdata.tar.xz
 
-            # no cache-hit guard on the download below, unlike CMFGEN's: setup_jplt_data.sh already
-            # no-ops when the data is there, while setup_cmfgen_data.sh extracts and converts again
+            # no cache-hit guard on the download below: setup_jplt_data.sh does nothing when the data is there
             - name: Cache JPLT atomic data
               if: matrix.testname == 'jplt'
               uses: actions/cache@v6
               with:
                   path: atomic-data-tanaka-jplt/data_v2.1/**
-                  key: atomic-data-tanaka-jplt-files-v2.1
+                  key: atomic-data-tanaka-jplt-files-v2.1-${{ hashFiles('atomic-data-tanaka-jplt/setup_jplt_data.sh') }}
 
             - name: Download/extract JPLT atomic data
               if: matrix.testname == 'jplt'
