@@ -78,10 +78,6 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with a MONS level file to ion_handlers.
 
@@ -102,9 +98,6 @@ def extend_ion_list(
         ion_handlers,
         monsions,
         "mons",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 

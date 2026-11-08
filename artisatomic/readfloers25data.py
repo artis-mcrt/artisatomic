@@ -64,9 +64,6 @@ def get_basepath(withforbidden: bool) -> Path:
 def extend_ion_list(
     ion_handlers,
     *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
     calibrated=True,
 ):
     """Add every ion with a Floers+25 data file to ion_handlers.
@@ -116,9 +113,6 @@ def extend_ion_list(
             ion_handlers,
             floersions,
             handlername,
-            minionstage=minionstage,
-            maxionstage=maxionstage,
-            maxatomicnumber=maxatomicnumber,
         )
 
     return ion_handlers

@@ -23,10 +23,9 @@ class RecombRow(t.NamedTuple):
     RRC_total: float
 
 
-def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
+def read_nahar_rrcfile(filename) -> list[RecombRow]:
     """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
-    if not noprint:
-        print(f"  reading {filename}")
+    print(f"  reading {filename}")
 
     header_row: list[str] = []
     with Path(filename).open(encoding="utf-8") as filein:

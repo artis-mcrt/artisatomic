@@ -44,10 +44,6 @@ def read_dreamdata() -> pl.DataFrame:
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion in the DREAM line list to ion_handlers under the "dream" handler."""
     dreamions = [
@@ -59,9 +55,6 @@ def extend_ion_list(
         ion_handlers,
         dreamions,
         "dream",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 

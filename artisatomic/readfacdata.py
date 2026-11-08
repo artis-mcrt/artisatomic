@@ -236,10 +236,6 @@ def GetLines(filename: Path | str) -> pl.DataFrame:
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with an FAC data file to ion_handlers under the "fac" handler."""
     basepath = get_basepath()
@@ -270,9 +266,6 @@ def extend_ion_list(
         ion_handlers,
         sorted(facions),
         "fac",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 

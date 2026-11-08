@@ -620,8 +620,8 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     return path_for_log(filepath)
 
 
-# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
-# get_nist_ionization_provenance()). The export does not record the version of the database.
+# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst. The export does
+# not record the version of the database.
 nist_ionization_energy_comment = (
     "The ionisation energy does not come from the data set of the levels. It comes from the NIST Atomic Spectra"
     " Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23)."
@@ -1070,11 +1070,6 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return _read_nist_ionization_table()[1]
 
 
-def get_nist_ionization_provenance() -> list[str]:
-    """Get the provenance lines of the NIST table: the source, the query, and the date."""
-    return _read_nist_ionization_table()[0]
-
-
 _process_pool: ProcessPoolExecutor | None = None
 
 
@@ -1217,22 +1212,12 @@ def add_handlers_if_not_set(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     ions: Iterable[tuple[int | str, int | str]],
     handler: str,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new sorted ion_handlers list with the handler added to each (atomic_number, ion_stage) of ions.
 
-    An ion that the list already holds keeps the handler that it has. Every reader adds its ions
-    here, so this is where the limits apply. An ion outside a limit never enters the list, and no
-    later step removes it again. A limit of None includes every ion. The function does not modify
+    An ion that the list already holds keeps the handler that it has. The function does not modify
     the input list, so the caller must use the return value.
     """
-    minstage = -sys.maxsize if minionstage is None else minionstage
-    maxstage = sys.maxsize if maxionstage is None else maxionstage
-    maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
-
     ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = [
         (atomic_number, list(list_ions_handlers)) for atomic_number, list_ions_handlers in ion_handlers
     ]
@@ -1244,8 +1229,6 @@ def add_handlers_if_not_set(
         # integers. Normalise them here and not in each caller.
         atomic_number = int(ion[0])
         ion_stage = int(ion[1])
-        if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-            continue
 
         list_ions_handlers_out = list_ions_of_element.get(atomic_number)
         if list_ions_handlers_out is None:
