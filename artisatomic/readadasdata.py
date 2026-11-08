@@ -24,6 +24,7 @@ import polars as pl
 # readhillierdata imports nothing from this module, so the import is not circular.
 from artisatomic import readhillierdata
 from artisatomic.base import add_handlers_if_not_set
+from artisatomic.base import check_no_nulls
 from artisatomic.base import compression_extensions
 from artisatomic.base import empty_transitions_schema
 from artisatomic.base import find_file_check_extension
@@ -37,7 +38,7 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
@@ -187,10 +188,6 @@ ions_not_offered = frozenset({(20, 3)})
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with an ADAS adf04 file to ion_handlers under the "adas" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
@@ -202,9 +199,6 @@ def extend_ion_list(
         ion_handlers,
         adasions,
         "adas",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 
@@ -339,8 +333,8 @@ def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: 
     return ionization_energy_percm * hc_in_ev_cm
 
 
-def _read_adf04_temperatures(line: str, filepath: str | Path) -> tuple[list[str], list[float]]:
-    """Return the temperature fields of the line that holds ZEFF, ITYP and the temperatures, as text and as numbers.
+def _read_adf04_temperatures(line: str, filepath: str | Path) -> list[float]:
+    """Return the temperatures of the line that holds ZEFF, ITYP and the temperatures.
 
     The fields must be in the fixed columns of the specification, because the reader takes each
     collision row from the same columns. A file in a different layout stops here with an error.
@@ -375,7 +369,7 @@ def _read_adf04_temperatures(line: str, filepath: str | Path) -> tuple[list[str]
         )
         raise ValueError(msg)
     try:
-        return temperatures, [adf04_number(text) for text in temperatures]
+        return [adf04_number(text) for text in temperatures]
     except ValueError:
         msg = f"{filepath} has a temperature that is not a number: {line!r}"
         raise ValueError(msg) from None
@@ -591,7 +585,7 @@ def read_adf04(
                 )
                 raise ValueError(msg)
 
-        temperatures, temperature_values = _read_adf04_temperatures(fleveltrans.readline(), filepath)
+        temperature_values = _read_adf04_temperatures(fleveltrans.readline(), filepath)
 
         # ADAS writes the other processes with a letter in column 1: R for recombination, S and I
         # for ionisation, P for proton impact. A comment line starts with a letter too. A blank
@@ -623,7 +617,7 @@ def read_adf04(
             raise ValueError(msg)
 
         nearest_index = min(
-            range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
+            range(len(temperature_values)), key=lambda index: abs(temperature_values[index] - electrontemperature)
         )
         log_comment(
             flog,
@@ -812,9 +806,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         # The header of adf04_v1 gives 330397 cm^-1 (40.96 eV). NIST and the CMFGEN data of Co III
         # give 33.50 eV, so the header value is wrong.
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
         transitionfile = tyndall_co3_path / "adf04rad_v1"
         log_comment(
@@ -850,9 +842,7 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
         )
         adas_transitions = pl.DataFrame(schema=empty_transitions_schema)
         dfupsilon = pl.DataFrame(schema=upsilon_schema)
-        ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-        log_comment(flog, ("adata",), nist_ionization_energy_comment)
-        log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+        ionization_energy_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     elif find_file_check_extension(atom_filepath) is not None:
         # the same test that extend_ion_list() makes when it discovers these ions with a glob of
@@ -898,7 +888,6 @@ def _fill_co2_phixs(
     args,
     flog,
     photoionization_crosssections,
-    photoionization_thresholds_ev,
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co II. The tables are for the CMFGEN levels of Co II."""
@@ -937,9 +926,8 @@ def _fill_co2_phixs(
             f"The cross sections of level {lowerlevelid + 1} come from {path_in_data_folder(filename, adasfolder)}.",
         )
         photdata = tableread.result()
-        if photdata.null_count().sum_horizontal().item() > 0:
-            msg = f"A value is missing in {filename}, so the columns are not in their expected positions."
-            raise ValueError(msg)
+        # a missing value means that the columns are not in their expected positions
+        check_no_nulls(photdata, str(filename))
         # a cross section is never negative, so a negative value is an error in the file
         nnegative = photdata.select(pl.sum_horizontal((pl.col(name) < 0.0).sum() for name in columnnames[1:])).item()
         if nnegative > 0:
@@ -992,9 +980,6 @@ def _fill_co2_phixs(
                 " that target.",
             )
 
-        # NaN, the arrays' initial value, says: the threshold energy comes from the level
-        # energies, not from the first energy point of the cross section table
-        photoionization_thresholds_ev[lowerlevelid] = np.nan
         photoionization_targetfractions[lowerlevelid] = combined.fractions
         photoionization_crosssections[lowerlevelid] = combined.table
 
@@ -1006,7 +991,6 @@ def _fill_co3_phixs(
     args,
     flog,
     photoionization_crosssections,
-    photoionization_thresholds_ev,
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co III. The table is for the QUB levels of Co III."""
@@ -1121,7 +1105,7 @@ def _fill_co3_phixs(
     # The downsample takes the first column in Rydberg. The weight of a bin depends on the
     # energy of the photon, and not on its ratio to the threshold. The threshold of the ground
     # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
-    # quartet lie within 0.12 eV of each other, so the one table covers each of them.
+    # quartet lie within 0.23 eV of each other (1866.8 cm^-1), so the one table covers each of them.
     # The downsample runs also for the grid of the table itself. Every table of the output file is
     # the average over the frequency bin of each point, as the file comment says. The point values
     # of the table are not those averages.
@@ -1147,7 +1131,6 @@ def _fill_co3_phixs(
     # quartet gets the tabulated cross section, and the higher levels get an explicit
     # all-zero table.
     for levelid in range(levelcount):
-        photoionization_thresholds_ev[levelid] = np.nan
         photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
         if levelid < 4:
             photoionization_crosssections[levelid] = phixsvalues
@@ -1182,7 +1165,6 @@ def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args
         args,
         flog,
         photoionization_crosssections,
-        photoionization_thresholds_ev,
         photoionization_targetfractions,
     )
     return PhixsData(

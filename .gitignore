@@ -1,6 +1,5 @@
 artis_files*
 *.pdf
-!artis_files_example_old
 __pycache__
 .eggs
 *.pyc
@@ -18,7 +17,6 @@ output.txt
 .idea
 .tags*
 testoutput
-testoutput/*
 # written by the checksum verification runs in tests/*/
 tests/*/output/
 # the ion selection file that the checksum recipe copies into the root, and its sync copies
@@ -29,10 +27,8 @@ build
 
 # coverage
 coverage.xml
-# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms,
-# but not the .coveragerc config file that the glob would otherwise swallow
+# .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms
 .coverage*
-!.coveragerc
 htmlcov/
 
 # written by sphinx-build

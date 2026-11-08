@@ -1,7 +1,9 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
+import itertools
 import math
+import os
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -23,6 +25,7 @@ from artisatomic.base import IonLog
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_path
+from artisatomic.base import map_chunks
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
@@ -510,8 +513,15 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
                 # an anti join, not set.difference() over iter_rows(): that built a Python tuple
                 # for each of the millions of transitions of a cmfgen ion
-                dfupsilon_only_transitions = dfupsilon.join(
-                    dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
+                # 243 ions of a default run have no upsilon value, and the join then has nothing to find
+                dfupsilon_only_transitions = (
+                    dfupsilon
+                    if dfupsilon.is_empty()
+                    else dfupsilon.join(
+                        dftransitions_ion.select("lowerlevel", "upperlevel"),
+                        on=["lowerlevel", "upperlevel"],
+                        how="anti",
+                    )
                 )
 
             # a negative upsilon is a mark of the reader and not a collision strength (see resolve_coll_str())
@@ -544,8 +554,12 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 # of the ion (2.6M of them for the cmfgen set). A Python callback for each row
                 # would cost more than the whole rest of the write. maintain_order keeps the
                 # frame in the order the reader produced it.
-                dftransitions_ion = dftransitions_ion.join(
-                    dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
+                dftransitions_ion = (
+                    dftransitions_ion.with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
+                    if dfupsilon.is_empty()
+                    else dftransitions_ion.join(
+                        dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
+                    )
                 ).pipe(resolve_coll_str)
 
             # the counts come from the final transition frame, so they include the upsilon-only
@@ -731,18 +745,14 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
     if dftransitions_ion.is_empty() or "energyabovegsinpercm" not in dfenergylevels_ion.columns:
         return
 
-    energy = dfenergylevels_ion.select("levelid", "energyabovegsinpercm")
-    notabove = (
-        dftransitions_ion.join(
-            energy.select(pl.col("levelid").alias("lowerlevel"), pl.col("energyabovegsinpercm").alias("e_lower")),
-            on="lowerlevel",
-        )
-        .join(
-            energy.select(pl.col("levelid").alias("upperlevel"), pl.col("energyabovegsinpercm").alias("e_upper")),
-            on="upperlevel",
-        )
-        .filter(pl.col("e_lower") >= pl.col("e_upper"))
-    )
+    # a gather by level id, and not two joins: the writer already checked that each id names a level
+    levelids = dfenergylevels_ion["levelid"].to_numpy()
+    energy_of_levelid = np.full(int(levelids.max()) + 1, np.nan)
+    energy_of_levelid[levelids] = dfenergylevels_ion["energyabovegsinpercm"].to_numpy()
+    notabove = dftransitions_ion.with_columns(
+        e_lower=energy_of_levelid[dftransitions_ion["lowerlevel"].to_numpy()],
+        e_upper=energy_of_levelid[dftransitions_ion["upperlevel"].to_numpy()],
+    ).filter(pl.col("e_lower") >= pl.col("e_upper"))
     if notabove.is_empty():
         return
 
@@ -793,6 +803,19 @@ def log_repeated_level_pairs(flog, dftransitions_ion: pl.DataFrame) -> None:
         )
 
 
+# an ion with fewer rows formats them in this process (see write_transition_data())
+transition_rows_for_the_pool = 50_000
+
+
+def format_transition_rows(columns: tuple[np.ndarray, ...]) -> str:
+    """Give the transition lines of transitiondata.txt for the columns lower, upper, A, coll_str and forbidden.
+
+    One %-format over Python lists, and not an f-string for each row. The two forms give the same bytes
+    for every value, and this form is faster.
+    """
+    return "".join(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*(column.tolist() for column in columns), strict=True)))
+
+
 def write_transition_data(
     ftransitiondata,
     atomic_number: int,
@@ -840,7 +863,7 @@ def write_transition_data(
             )
             raise ValueError(msg)
 
-    # sums, and not a filtered copy of the frame for each count: a cmfgen ion has 2.6M rows
+    # sums, and not a filtered copy of the frame for each count: a Floers+25 ion has up to 21M rows
     num_forbidden_transitions, num_collision_strengths_applied = (
         (0, 0)
         if dftransitions_ion.is_empty()
@@ -867,18 +890,25 @@ def write_transition_data(
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        # One %-format over the column lists, not an f-string for each row from iter_rows(). This
-        # runs 2.6M times for the cmfgen set and was the largest single cost of the build. The two
-        # forms give the same bytes for every value. Level ids are zero-based in memory, but the
-        # output format numbers them from one.
-        columns = [
-            (dftransitions_ion["lowerlevel"] + 1).to_list(),
-            (dftransitions_ion["upperlevel"] + 1).to_list(),
-            dftransitions_ion["A"].to_list(),
-            dftransitions_ion["coll_str"].to_list(),
-            dftransitions_ion["forbidden"].to_list(),
-        ]
-        ftransitiondata.writelines(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*columns, strict=True)))
+        # Level ids are zero-based in memory, but the output format numbers them from one.
+        columns = (
+            (dftransitions_ion["lowerlevel"] + 1).to_numpy(),
+            (dftransitions_ion["upperlevel"] + 1).to_numpy(),
+            dftransitions_ion["A"].to_numpy(),
+            dftransitions_ion["coll_str"].to_numpy(),
+            dftransitions_ion["forbidden"].to_numpy(),
+        )
+        nrows = dftransitions_ion.height
+        # The format of the rows was 60% of the time of a default run (474 ns for each row). The
+        # pool does a large ion in chunks. A small ion stays here, because the IPC costs more.
+        if nrows < transition_rows_for_the_pool:
+            ftransitiondata.write(format_transition_rows(columns))
+        else:
+            # one chunk for each worker of the run-wide pool, which has the default size of ProcessPoolExecutor
+            nchunks = os.process_cpu_count() or 1
+            bounds = np.linspace(0, nrows, nchunks + 1, dtype=np.int64)
+            chunks = [tuple(column[start:end] for column in columns) for start, end in itertools.pairwise(bounds)]
+            ftransitiondata.writelines(map_chunks(format_transition_rows, chunks))
 
     ftransitiondata.write("\n")
 

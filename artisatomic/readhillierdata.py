@@ -1309,7 +1309,7 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
             self.in_header = True  # All phot_data_* in 19apr23 have this line
             if row[0] != "Megabarns":
-                msg = f"Wrong cross-section unit: {row[0]}"
+                msg = f"Wrong cross section unit: {row[0]}"
                 raise ValueError(msg)
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
@@ -1689,7 +1689,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         # .get(): the branch below fires for exactly the types that this parser does not handle.
         # Those are the types least likely to have a label, so an index lookup would fail in the
         # report.
-        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross-section type")
+        typelabel = phixs_type_labels.get(crosssectiontype, "unrecognised cross section type")
         if crosssectiontype in reader.unknown_phixs_types:
             log_comment(
                 flog,
@@ -2381,7 +2381,7 @@ def get_photoiontargetfractions(
     dfenergy_levels,
     dfenergy_levels_upperion,
     photoion_targetconfigs: list[list[tuple[str, float]] | None] | None,
-    flog=None,
+    flog,
 ) -> list[list[tuple[int, float]]]:
     """Resolve each level's photoionisation targets from configuration names to upper-ion ids.
 
@@ -2396,14 +2396,6 @@ def get_photoiontargetfractions(
     In the second comparison, each part of the name must come to one level name of the upper ion.
     A part that matches more than one name is ambiguous, and this function raises a ValueError.
     """
-
-    def logprint(strout: str) -> None:
-        """Write to stdout, and to the log file when the caller gave one."""
-        if flog is None:
-            print(strout)
-        else:
-            log_and_print(flog, strout)
-
     targetlist: list[list[tuple[int, float]]] = [[] for _ in range(dfenergy_levels.height)]
     targetlist_of_targetconfig: dict[str, list[tuple[int, float]]] = {}
 
@@ -2461,7 +2453,7 @@ def get_photoiontargetfractions(
                                     " The match ignores the name separators. The part is ambiguous, so"
                                     " artisatomic cannot share the fraction."
                                 )
-                                logprint(f"ERROR: {msg}")
+                                log_and_print(flog, f"ERROR: {msg}")
                                 raise ValueError(msg)
                         matchednames = sorted(
                             {name for partnames in names_of_strippedname.values() for name in partnames}
@@ -2471,10 +2463,7 @@ def get_photoiontargetfractions(
                             f"Photoionisation target '{targetconfig}' matched {matchednames} of the upper ion"
                             " with the name separators removed"
                         )
-                        if flog is None:
-                            print(separatorsmessage)
-                        else:
-                            log_comment(flog, ("phixsdata",), separatorsmessage)
+                        log_comment(flog, ("phixsdata",), separatorsmessage)
                 if not upperionlevelids:
                     # This choice sets the upper_level of each table of this target. The loop comes
                     # here one time for each target name, so the comment block gets the line also.
@@ -2482,10 +2471,7 @@ def get_photoiontargetfractions(
                         f"WARNING: photoionisation target '{targetconfig}' matched no level of the upper ion,"
                         " so the ground level of the upper ion is the target."
                     )
-                    if flog is None:
-                        print(fallbackwarning)
-                    else:
-                        log_comment(flog, ("phixsdata",), fallbackwarning)
+                    log_comment(flog, ("phixsdata",), fallbackwarning)
                     upperionlevelids = [0]  # the upper ion's ground state
 
                 summed_statistical_weights = sum(
@@ -2505,22 +2491,64 @@ def get_photoiontargetfractions(
     return targetlist
 
 
-def read_hyd_phixsdata(force: bool = False) -> None:
+def read_hyd_table_file(
+    filename: str, start_marker: str, del_marker: str
+) -> tuple[int, float, float, list[tuple[tuple[int, ...], list[float]]]]:
+    """Read a CMFGEN hydrogenic table file: the largest n, the start and step of log10(u), and the tables.
+
+    Each table has the integer key of its header line (n, or n and l) and its values. A marker is the
+    second token of its line, because the Gaunt file has more text after its marker.
+    """
+    max_n = -1
+    start_u = 0.0
+    del_u = 0.0
+    tables: list[tuple[tuple[int, ...], list[float]]] = []
+    with xopen_check_extension(filename) as fhyd:
+        for line in fhyd:
+            row = line.split()
+            if " ".join(row[1:]) == "!Maximum principal quantum number":
+                max_n = int(row[0])
+
+            if len(row) > 1:
+                if row[1] == start_marker:
+                    start_u = fortran_float(row[0])
+                elif row[1] == del_marker:
+                    del_u = fortran_float(row[0])
+
+            if max_n >= 0 and not line.strip():
+                break
+
+        for line in fhyd:
+            if not line.strip():
+                continue
+
+            *key, num_points = (int(x) for x in line.split())
+
+            values: list[float] = []
+            for valueline in fhyd:
+                values += [float(x) for x in valueline.split()]
+                if len(values) == num_points:
+                    break
+                if len(values) > num_points:
+                    msg = f"too many data points for {key}: the table declares {num_points} but has {len(values)}"
+                    raise ValueError(msg)
+
+            tables.append((tuple(key), values))
+
+    return max_n, start_u, del_u, tables
+
+
+def read_hyd_phixsdata() -> None:
     """Load the hydrogenic photoionisation tables that the type 2, 3 and 8 fits interpolate.
 
     Fills the module-level hyd_phixs / hyd_gaunt tables. get_hydrogenic_n_phixstable() and
     read_phixs_tables() call this first. A caller of get_hydrogenic_nl_phixstable() must call it
-    itself. A second call does nothing unless
-    force is set. The thresholds come from the H I level list, so the index of that list must be
-    the principal quantum number.
+    itself. A second call does nothing. The thresholds come from the H I level list, so the index
+    of that list must be the principal quantum number.
     """
     global max_hyd_l_n, max_hyd_gaunt_n
-    if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1 and not force:
+    if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1:
         return
-
-    # the cached (2l+1)-weighted sums come from the tables that the code below fills, so a
-    # reload must not keep sums from the previous tables
-    get_hydrogenic_sigma_summed_over_l.cache_clear()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         _hillier_ionization_energy_ev, dfhillier_energy_levels, _transitions = read_levels_and_transitions(
@@ -2543,118 +2571,35 @@ def read_hyd_phixsdata(force: bool = False) -> None:
 
     hyd_filename = hillier_ion_folder(1, 1) + "/5dec96/hyd_l_data.dat"
     print(f"Reading hydrogen photoionisation cross sections from {hyd_filename}")
-    max_n = -1
-    l_start_u = 0.0
-    l_del_u = 0.0
-    with xopen_check_extension(hyd_filename) as fhyd:
-        for line in fhyd:
-            row = line.split()
-            if " ".join(row[1:]) == "!Maximum principal quantum number":
-                max_n = int(row[0])
-                max_hyd_l_n = max_n
-
-            if " ".join(row[1:]) == "!L_ST_U":
-                l_start_u = fortran_float(row[0])
-
-            if " ".join(row[1:]) == "!L_DEL_U":
-                l_del_u = fortran_float(row[0])
-
-            if max_n >= 0 and not line.strip():
-                break
-
-        for line in fhyd:
-            if not line.strip():
-                continue
-
-            n, l, num_points = (int(x) for x in line.split())
-            e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
-
-            xs_values: list[float] = []
-            for line in fhyd:
-                values_thisline = [float(x) for x in line.split()]
-                xs_values += values_thisline
-                if len(xs_values) == num_points:
-                    break
-                if len(xs_values) > num_points:
-                    msg = (
-                        f"too many data points for (n,l)=({n},{l}): the table declares {num_points}"
-                        f" but has {len(xs_values)}"
-                    )
-                    raise ValueError(msg)
-
-            hyd_phixs_energygrid_ryd[n, l] = np.array(
-                [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(num_points)]
-            )
-            # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
-            # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
-            hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
+    max_hyd_l_n, l_start_u, l_del_u, l_tables = read_hyd_table_file(hyd_filename, "!L_ST_U", "!L_DEL_U")
+    for (n, l), xs_values in l_tables:
+        e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
+        hyd_phixs_energygrid_ryd[n, l] = np.array(
+            [e_threshold_ev / ryd_to_ev * 10 ** (l_start_u + l_del_u * index) for index in range(len(xs_values))]
+        )
+        # cross sections in Megabarns: the table holds log10(sigma) in CMFGEN's internal
+        # unit of 1e-10 cm^2, and 1 Mb = 1e-18 cm^2
+        hyd_phixs[n, l] = np.array([10 ** (8 + logxs) for logxs in xs_values])
 
     hyd_filename = hyd_gaunt_filename()
     print(f"Reading hydrogen Gaunt factors from {hyd_filename}")
-    max_n = -1
-    n_start_u = 0.0
-    n_del_u = 0.0
-    with xopen_check_extension(hyd_filename) as fhyd:
-        for line in fhyd:
-            row = line.split()
-            if " ".join(row[1:]) == "!Maximum principal quantum number":
-                max_n = int(row[0])
-                max_hyd_gaunt_n = max_n
-
-            if len(row) > 1:
-                if row[1] == "!N_ST_U":
-                    n_start_u = fortran_float(row[0])
-                elif row[1] == "!N_DEL_U":
-                    n_del_u = fortran_float(row[0])
-
-            if max_n >= 0 and not line.strip():
-                break
-
-        for line in fhyd:
-            if not line.strip():
-                continue
-
-            n, num_points = (int(x) for x in line.split())
-            e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
-
-            gaunt_values: list[float] = []
-            for line in fhyd:
-                values_thisline = [float(x) for x in line.split()]
-                gaunt_values += values_thisline
-                if len(gaunt_values) == num_points:
-                    break
-                if len(gaunt_values) > num_points:
-                    msg = f"too many data points for n={n}: the table declares {num_points} but has {len(gaunt_values)}"
-                    raise ValueError(msg)
-
-            hyd_gaunt_energygrid_ryd[n] = [
-                e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(num_points)
-            ]
-            hyd_gaunt_factor[n] = gaunt_values
+    max_hyd_gaunt_n, n_start_u, n_del_u, gaunt_tables = read_hyd_table_file(hyd_filename, "!N_ST_U", "!N_DEL_U")
+    for (n,), gaunt_values in gaunt_tables:
+        e_threshold_ev = hc_in_ev_angstrom / lambdaangstrom_of_n[n - 1]
+        hyd_gaunt_energygrid_ryd[n] = [
+            e_threshold_ev / ryd_to_ev * 10 ** (n_start_u + n_del_u * index) for index in range(len(gaunt_values))
+        ]
+        hyd_gaunt_factor[n] = gaunt_values
 
 
 def extend_ion_list(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
-    include_hydrogen: bool | None = False,
 ):
-    """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler.
-
-    include_hydrogen=False leaves out H I. The built-in selection of ionhandlers.py passes True,
-    so that list holds H I.
-    """
-    cmfgenions = [
-        (atomic_number, ion_stage) for atomic_number, ion_stage in ions_data if include_hydrogen or atomic_number != 1
-    ]
+    """Add every ion with CMFGEN data to ion_handlers under the "cmfgen" handler."""
+    cmfgenions = list(ions_data)
 
     return add_handlers_if_not_set(
         ion_handlers,
         cmfgenions,
         "cmfgen",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )

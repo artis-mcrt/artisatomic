@@ -3,7 +3,6 @@ repos:
     - repo: https://github.com/pre-commit/pre-commit-hooks
       rev: v6.0.0
       hooks:
-          - id: check-ast
           - id: check-case-conflict
           - id: check-docstring-first
           - id: check-executables-have-shebangs
@@ -37,8 +36,9 @@ repos:
       rev: 0.13.6
       hooks:
           - id: uv-lock
+          # the command of the Setup section of AGENTS.md: the project in editable mode, and no extra
           - id: uv-sync
-            args: [--frozen, --all-extras, --no-install-project]
+            args: [--frozen]
 
 ci:
     autoupdate_schedule: quarterly

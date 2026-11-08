@@ -620,12 +620,20 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     return path_for_log(filepath)
 
 
-# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
-# get_nist_ionization_provenance()). The export does not record the version of the database.
+# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst. The export does
+# not record the version of the database.
 nist_ionization_energy_comment = (
     "The ionisation energy does not come from the data set of the levels. It comes from the NIST Atomic Spectra"
     " Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23)."
 )
+
+
+def nist_ionization_energy_ev(atomic_number: int, ion_stage: int, flog) -> float:
+    """Give the NIST ionisation energy of an ion in eV, and record in adata.txt that it comes from NIST."""
+    ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+    return ionization_energy_ev
 
 
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
@@ -671,9 +679,9 @@ def fortran_float(text: str) -> float:
 def isfloat(value: t.Any) -> bool:
     """Whether a string parses as a float, with Fortran's D exponent (1.5D-3) permitted.
 
-    The CMFGEN oscillator reader calls this once for each field of every line (5.3M times for the
-    cmfgen test set). The function therefore calls replace() only when the field contains a D.
-    This avoids a copy of every field.
+    The CMFGEN oscillator reader calls this once for each field of each level line (about 186000
+    times for the cmfgen test set). The function calls replace() only when the field contains a D,
+    which avoids a copy of every field.
     """
     try:
         float(value.replace("D", "E") if "D" in value else value)
@@ -1061,11 +1069,6 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return _read_nist_ionization_table()[1]
 
 
-def get_nist_ionization_provenance() -> list[str]:
-    """Get the provenance lines of the NIST table: the source, the query, and the date."""
-    return _read_nist_ionization_table()[0]
-
-
 _process_pool: ProcessPoolExecutor | None = None
 
 
@@ -1123,12 +1126,28 @@ def parallel_map[ResultType](
         if chunksize is None:
             # Without a chunk size, items go to the workers one at a time, and the IPC for each item
             # costs more than the work.
-            chunksize = max(1, nitems // (mp.cpu_count() * 4))
+            chunksize = max(1, nitems // ((os.process_cpu_count() or 1) * 4))
         return list(get_process_pool().map(fn, *lists, chunksize=chunksize))
 
     # ThreadPoolExecutor.map() ignores a chunk size
     with ThreadPoolExecutor() as executor:
         return list(executor.map(fn, *lists))
+
+
+def map_chunks[ItemType, ResultType](
+    fn: Callable[[ItemType], ResultType], chunks: list[ItemType]
+) -> Iterator[ResultType]:
+    """Map fn over a few large chunks of work in the run-wide pool, and give the results in order.
+
+    parallel_map() does a list of 32 items or fewer in this process, because a small item costs
+    more in IPC than in work. A chunk here is large, so each chunk goes to the pool. The results
+    come one at a time, so a caller can write each result and release it before the next one.
+    """
+    if not sys._is_gil_enabled():  # ruff: ignore[private-member-access]
+        with ThreadPoolExecutor() as executor:
+            yield from executor.map(fn, chunks)
+        return
+    yield from get_process_pool().map(fn, chunks)
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
@@ -1162,8 +1181,8 @@ def sort_ion_handlers(
 
     process_files() relies on the ion stages in order from lowest to highest to identify the top
     ion and to find each ion's photoionisation target. This function normalises the order before
-    main() writes the handler list to artisatomicionhandlers.json and passes it to
-    write_compositionfile().
+    write_files() in cli.py writes the handler list to artisatomicionhandlers_used.json and passes it
+    to write_compositionfile().
 
     This function rejects a duplicated element or ion stage, because the code downstream trusts
     the list. The ion count of write_compositionfile() is max - min + 1, so it cannot see a
@@ -1192,22 +1211,12 @@ def add_handlers_if_not_set(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     ions: Iterable[tuple[int | str, int | str]],
     handler: str,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new sorted ion_handlers list with the handler added to each (atomic_number, ion_stage) of ions.
 
-    An ion that the list already holds keeps the handler that it has. Every reader adds its ions
-    here, so this is where the limits apply. An ion outside a limit never enters the list, and no
-    later step removes it again. A limit of None includes every ion. The function does not modify
+    An ion that the list already holds keeps the handler that it has. The function does not modify
     the input list, so the caller must use the return value.
     """
-    minstage = -sys.maxsize if minionstage is None else minionstage
-    maxstage = sys.maxsize if maxionstage is None else maxionstage
-    maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
-
     ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = [
         (atomic_number, list(list_ions_handlers)) for atomic_number, list_ions_handlers in ion_handlers
     ]
@@ -1215,12 +1224,10 @@ def add_handlers_if_not_set(
     list_ions_of_element = dict(ion_handlers_out)
 
     for ion in ions:
-        # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+        # Readers derive these from numpy data, and json.dump() in write_files() cannot serialise numpy
         # integers. Normalise them here and not in each caller.
         atomic_number = int(ion[0])
         ion_stage = int(ion[1])
-        if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-            continue
 
         list_ions_handlers_out = list_ions_of_element.get(atomic_number)
         if list_ions_handlers_out is None:

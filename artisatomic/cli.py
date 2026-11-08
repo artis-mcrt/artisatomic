@@ -7,6 +7,8 @@ import json
 import math
 import os
 import shutil
+import signal
+import socket
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -14,16 +16,8 @@ from pathlib import Path
 
 import argcomplete
 
-from artisatomic import readadasdata
-from artisatomic.base import check_ion_stages_contiguous
-from artisatomic.base import log_path
-from artisatomic.iondata import read_ion_data
-from artisatomic.iondata import resolve_photoion_targetfractions
-from artisatomic.ionhandlers import get_ion_handlers
-from artisatomic.ionhandlers import inputhandlersfile
-from artisatomic.output import clear_files
-from artisatomic.output import write_compositionfile
-from artisatomic.output import write_output_files
+# The functions import the modules of the package only when they need them. The package imports
+# polars and numpy, which took 0.3 s, so "--help" and the tab completion waited for them.
 
 # the record of the ions and the handlers of a run, in the output folder
 handlersrecordname = "artisatomicionhandlers_used.json"
@@ -89,6 +83,17 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def get_ion_handlers(
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Give the ion selection of ionhandlers.get_ion_handlers(), with the import only at the call."""
+    from artisatomic import ionhandlers
+
+    return ionhandlers.get_ion_handlers(
+        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+    )
+
+
 def main() -> None:
     """Write an ARTIS atomic database from the configured ions and handlers."""
     parser = build_parser()
@@ -103,6 +108,10 @@ def main() -> None:
     for name in ionlimits:
         if getattr(args, name) is None:
             setattr(args, name, parser.get_default(name))
+
+    from artisatomic import readadasdata
+    from artisatomic.base import check_ion_stages_contiguous
+    from artisatomic.ionhandlers import inputhandlersfile
 
     # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so that
     # file selects the ions itself. Not an assert: this validates the command line and must
@@ -163,35 +172,136 @@ def main() -> None:
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)
+    remove_stale_work_folders(outputfolder)
 
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
-    # that fails then leaves the output of the earlier run. The level ids of one file refer to the others.
-    workfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_run_", dir=outputfolder))
-    try:
-        write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
-    except BaseException:
-        with output_folder_lock(outputfolder):
-            discard_run(workfolder, outputfolder)
-        raise
-
-    # Two runs into one output folder can end at the same time. The lock lets only one run change
-    # the files in the output folder, so the folder holds the files of one run.
-    with output_folder_lock(outputfolder):
+    # that fails then leaves the output of the earlier run. The level ids of one file refer to the
+    # others. The name holds the host and the process id, so a later run can find a stale folder.
+    workfolder = Path(
+        tempfile.mkdtemp(prefix=f"{workfolder_prefix}{os.getpid()}@{socket.gethostname()}@", dir=outputfolder)
+    )
+    # The signal handler stays active until the end of the install, so a SIGTERM during the moves
+    # also restores the files of the earlier run.
+    with stop_signals_as_exit():
         try:
-            earlierfolder = install_files(workfolder, outputfolder)
+            write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
         except BaseException:
-            discard_run(workfolder, outputfolder)
+            with signals_held(), output_folder_lock(outputfolder):
+                discard_run(workfolder, outputfolder)
             raise
 
-        # The output folder holds the full new output now. A failure of the cleanup must not make
-        # the run fail, because the files of the earlier run are gone from the output folder.
-        try:
-            shutil.rmtree(earlierfolder)
-            workfolder.rmdir()
-            (outputfolder / failedlogname).unlink(missing_ok=True)
-            remove_old_log_folder(outputfolder)
-        except OSError as error:
-            print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+        # Two runs into one output folder can end at the same time. The lock lets only one run change
+        # the files in the output folder, so the folder holds the files of one run. A signal waits
+        # until the end of the install and its cleanup, also during the wait for the lock. Between the
+        # last move and the cleanup, no handler could tell a full install from a part install.
+        with signals_held(), output_folder_lock(outputfolder):
+            try:
+                earlierfolder = install_files(workfolder, outputfolder)
+            except BaseException:
+                discard_run(workfolder, outputfolder)
+                raise
+
+            # The output folder holds the full new output now. A failure of the cleanup must not make
+            # the run fail, because the files of the earlier run are gone from the output folder.
+            try:
+                shutil.rmtree(earlierfolder)
+                workfolder.rmdir()
+                (outputfolder / failedlogname).unlink(missing_ok=True)
+                remove_old_log_folder(outputfolder)
+            except OSError as error:
+                print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
+
+
+workfolder_prefix = ".artisatomic_run_"
+
+
+@contextmanager
+def stop_signals_as_exit() -> Generator[None]:
+    """Turn SIGTERM and SIGHUP into SystemExit, so that the cleanup of a failed run runs for them also.
+
+    A batch system sends SIGTERM at the end of the time of a job. Python stops at such a signal with
+    no cleanup, and the work folder stayed in the output folder.
+    """
+    signums = [getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)]
+
+    def raise_exit(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    try:
+        previous = {signum: signal.signal(signum, raise_exit) for signum in signums}
+    except ValueError:
+        # signal.signal() works only in the main thread
+        yield
+        return
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+@contextmanager
+def signals_held() -> Generator[None]:
+    """Hold SIGINT, SIGTERM and SIGHUP until the end of the block, and then raise each held signal again.
+
+    A handler records each signal during the block. A signal mask is not enough, because the system
+    can give a signal to another thread, and Python then runs the handler in the main thread.
+    """
+    signums = [getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    held: list[int] = []
+
+    def hold(signum: int, _frame: object) -> None:
+        held.append(signum)
+
+    try:
+        previous = {signum: signal.signal(signum, hold) for signum in signums}
+    except ValueError:
+        # signal.signal() works only in the main thread
+        yield
+        return
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+        # the handler of the block around this one acts on the signal now, as if it came at this point
+        for signum in dict.fromkeys(held):
+            signal.raise_signal(signum)
+
+
+def remove_stale_work_folders(outputfolder: Path) -> None:
+    """Remove the work folders of earlier runs on this host whose process no longer exists.
+
+    A run that the system kills (SIGKILL), or that stops while it removes its work folder, leaves the
+    folder behind. A folder of another host, or of an earlier release with no process id in its name,
+    gets a warning only, because the function cannot know that no run uses it.
+    """
+    hostname = socket.gethostname()
+    for folder in sorted(outputfolder.glob(f"{workfolder_prefix}*")):
+        # the name is <prefix><pid>@<host>@<random part of mkdtemp()>
+        nameparts = folder.name.removeprefix(workfolder_prefix).split("@")
+        if len(nameparts) == 3 and nameparts[1] == hostname and nameparts[0].isdigit():
+            pid = int(nameparts[0])
+            if pid == os.getpid() or process_exists(pid):
+                continue
+            print(f"Removing the work folder of a run that stopped: {folder}")
+            shutil.rmtree(folder, ignore_errors=True)
+        else:
+            print(f"WARNING: {folder} is the work folder of another run. Remove it if no run uses it.")
+
+
+def process_exists(pid: int) -> bool:
+    """Whether a process with this id exists on this host."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        # Windows gives a different error for a process that does not exist
+        return False
+    return True
 
 
 @contextmanager
@@ -199,7 +309,9 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
     """Hold an exclusive lock on the output folder. A second run waits until the first run releases it.
 
     The operating system releases the lock when the process stops, so a run that crashes leaves no
-    lock. Windows has no flock(), so there the function gives no lock.
+    lock. Windows has no flock(), so there the function gives no lock. Some file systems refuse
+    flock() (Lustre with the option noflock, NFS with no lock daemon). There the function gives a
+    warning and no lock, so a run does not fail after all of its work.
     """
     try:
         import fcntl
@@ -208,7 +320,12 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
         return
     folderfd = os.open(outputfolder, os.O_RDONLY)
     try:
-        fcntl.flock(folderfd, fcntl.LOCK_EX)
+        try:
+            fcntl.flock(folderfd, fcntl.LOCK_EX)
+        except OSError as error:
+            print(
+                f"WARNING: The file system of {outputfolder} gives no lock ({error}). The run continues with no lock."
+            )
         yield
     finally:
         os.close(folderfd)
@@ -216,6 +333,8 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
 
 def discard_run(workfolder: Path, outputfolder: Path) -> None:
     """Remove the work folder of a run that failed. Keep its log as failedlogname in the output folder."""
+    from artisatomic.base import log_path
+
     if log_path(workfolder).is_file():
         log_path(workfolder).replace(outputfolder / failedlogname)
     shutil.rmtree(workfolder)
@@ -252,6 +371,10 @@ def install_files(workfolder: Path, outputfolder: Path) -> Path:
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
     """Write all output files of the run, the log file, and the record of the ion handlers to args.output_folder."""
+    from artisatomic.base import log_path
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_compositionfile
+
     # this makes the log file. The passes of each ion append to the file.
     log_path(args.output_folder).write_text("", encoding="utf-8")
 
@@ -295,6 +418,11 @@ def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: a
     targets are levels of the next ion up, so the loop knows them already. The order also
     identifies the top ion, which gets no cross sections.
     """
+    from artisatomic.base import log_path
+    from artisatomic.iondata import read_ion_data
+    from artisatomic.iondata import resolve_photoion_targetfractions
+    from artisatomic.output import write_output_files
+
     for atomic_number, listions in ion_handlers:
         if not listions:
             continue

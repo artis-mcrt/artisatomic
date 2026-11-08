@@ -3,3 +3,4 @@ atomic*/
 *.tar.gz
 *.tar.xz
 !*.md5
+*.conversion_failed.txt

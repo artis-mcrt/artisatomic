@@ -44,7 +44,7 @@ hdf5 = ["h5py>=3.10.0"]
 
 [dependency-groups]
 # its own group so the workflow's combine job can install the coverage the lockfile pinned without
-# building the project and its 76 packages to run one tool
+# building the project and all of its dependencies to run one tool
 coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
@@ -186,7 +186,6 @@ where = ["."]
 include = ["artisatomic*"]
 
 [tool.setuptools_scm]
-write_to = "_version.py"
 local_scheme = "no-local-version"
 
 [tool.ty.rules]
