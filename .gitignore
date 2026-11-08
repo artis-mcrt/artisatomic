@@ -30,3 +30,6 @@ coverage.xml
 # .coverage plus the per-worker ".coverage.<host>.<pid>" and duplicate ".coverage 2" forms
 .coverage*
 htmlcov/
+
+# written by sphinx-build
+docs/_build/
