@@ -24,13 +24,13 @@ exclude_patterns = ["_build"]
 
 myst_heading_anchors = 3
 
-# The canonical link of a page names the version that a search engine must show, so the versions of
-# the site do not compete with each other.
+# The canonical link of a page names the version that a search engine must show.
+# The versions of the site then do not compete with each other.
 html_baseurl = os.environ.get("READTHEDOCS_CANONICAL_URL", "")
 
-# The "Edit this page" link of each page points at the branch or the tag that Read the Docs builds. A
-# build of a pull request gives the number of the request, which is not a branch, so the link then
-# points at the main branch.
+# The "Edit this page" link of each page points at the branch or the tag that Read the Docs builds.
+# A build of a pull request gives the number of the request, which is not a branch.
+# The link then points at the main branch.
 source_branch = os.environ.get("READTHEDOCS_GIT_IDENTIFIER", "main")
 if os.environ.get("READTHEDOCS_VERSION_TYPE") == "external":
     source_branch = "main"
@@ -43,7 +43,8 @@ html_theme_options = {
     "source_directory": "docs/",
 }
 
-# The program-output directive starts the console scripts. The Python that runs Sphinx can be in a
-# virtual environment that is not on PATH, and argparse wraps the help text to the terminal width.
+# The program-output directive starts the console scripts.
+# The Python that runs Sphinx can be in a virtual environment that is not on PATH.
+# argparse wraps the help text to the terminal width.
 os.environ["PATH"] = f"{Path(sys.executable).parent}{os.pathsep}{os.environ.get('PATH', '')}"
 os.environ["COLUMNS"] = "80"
