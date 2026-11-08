@@ -892,7 +892,14 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         firstindex_of_name.setdefault(levelname, levelindex)
         firstindex_of_namenoj.setdefault(levelname.split("[")[0], levelindex)
     reader = rhd.PhotFileReader(
-        8, 1, 2, dflevels["lambdaangstrom"].to_list(), firstindex_of_name, firstindex_of_namenoj, io.StringIO()
+        8,
+        1,
+        2,
+        dflevels["lambdaangstrom"].to_list(),
+        firstindex_of_name,
+        firstindex_of_namenoj,
+        io.StringIO(),
+        levelnames=levelnames,
     )
     reduced_of_filenum = []
     for filenum, photfilename in enumerate(ionfiles.photfilenames):
@@ -7125,6 +7132,51 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
+    """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
+
+    CMFGEN evaluates the fit with the edge of each level. The reader gave each level the table of
+    the first level of the name. The levels [4] and [5] thus got 4.269 Mb at the threshold in place of 4.877 Mb.
+    """
+    if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = readhillierdata.read_levels_and_transitions(19, 2, flog)
+        phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, phixs_args(), flog)
+    names = dflevels["levelname"].to_list()
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2692, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8767, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8767, rel=1e-3)
+    # fill_missing_phixs_thresholds() gives each threshold from the first target of the level
+    assert np.isnan(phixs.thresholds_ev).all()
+
+
+def test_shared_table_moves_to_the_edge_of_each_level():
+    """A table of a type outside edge_dependent_fit_types moves to the edge of each level of its name.
+
+    The downsample weights each bin with the absolute frequency. A level must therefore use the
+    table at its own edge, and not at the edge of the first level of the name.
+    """
+    lambdaangstroms = [911.0, 1000.0, 0.0]
+    names = ["2p_3Po[0]", "2p_3Po[1]", "2p_3Po[2]"]
+    reader = readhillierdata.PhotFileReader(
+        7, 3, 1, lambdaangstroms, {}, {"2p_3Po": 0}, io.StringIO(), levelnames=names
+    )
+    edge0_ryd = hc_in_ev_angstrom / 911.0 / ryd_to_ev
+    edge1_ryd = hc_in_ev_angstrom / 1000.0 / ryd_to_ev
+    table = np.column_stack([np.array([1.0, 2.0]) * edge0_ryd, [1.0, 0.125]])
+    reader.phixstables[0]["2p_3Po"] = table
+    reader.shared_edge_ryd[0]["2p_3Po"] = edge0_ryd
+
+    assert reader.shared_table_at_level_edge(0, "2p_3Po", 0) is table
+    moved = reader.shared_table_at_level_edge(0, "2p_3Po", 1)
+    assert moved is not None
+    assert moved[:, 0].tolist() == pytest.approx([edge1_ryd, 2.0 * edge1_ryd])
+    assert moved[:, 1].tolist() == [1.0, 0.125]
+    assert reader.shared_table_at_level_edge(0, "2p_3Po", 2) is None
 
 
 def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level():
