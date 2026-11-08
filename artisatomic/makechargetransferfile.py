@@ -254,10 +254,12 @@ def format_header(source_counts: Counter[str]) -> str:
         "",
         "PARAMETERS",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
-        f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total at",
-        f"  {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that the fit used. A curve with",
-        f"  fewer than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K entry, with tmin = tmax =",
-        f"  {SS11_FLAT_TEMP} K. The comment of each line gives the largest relative error of the fit or the flat value",
+        f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total of",
+        f"  a reaction that releases energy at {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that",
+        f"  the fit used. A curve with fewer than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K",
+        f"  entry, with tmin = tmax = {SS11_FLAT_TEMP} K. A reaction that needs energy and has fewer usable points has no",
+        "  line. ARTIS then takes the rate of its reverse reaction (autoreverse = 1 on that line).",
+        "  The comment of each line gives the largest relative error of the fit or the flat value",
         "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
         "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
         "autoreverse: set from the full list of reactions in this file, not from one source alone.",
@@ -423,9 +425,11 @@ def get_he_entries(sourcedir: Path) -> list[CTEntry]:
 def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
     """Sum the final-state resolved channels of an SS11 CDS table into rates for each (element, charge).
 
-    The CDS tables floor each channel at the radiative rate 1e-14 cm3/s, while the paper floors the
-    total. The code excludes the channel values that sit exactly on the floor. Then it floors the
-    sum. This reproduces the totals that the paper prints.
+    The CDS tables floor each channel of an exothermic reaction at the radiative rate 1e-14 cm3/s,
+    while the paper floors the total. The code excludes the channel values that sit exactly on the
+    floor, and floors the sum of a column that has such a channel. A reaction that needs energy
+    (Rb+ + H, 9.42 eV) has no channel on the floor, and its tabulated rate can be far below it
+    (1.17e-46 cm3/s at 2e4 K). Its total stays as the table gives it.
     """
     channelvalues: dict[tuple[str, int], list[list[float]]] = {}
     for rawline in text.split("\n"):
@@ -448,7 +452,7 @@ def read_cds_totals(text: str) -> dict[tuple[str, int], list[float]]:
         row = []
         for col in cols:
             total = sum(v for v in col if v != SS11_FLOOR)
-            row.append(max(total, SS11_FLOOR))
+            row.append(max(total, SS11_FLOOR) if SS11_FLOOR in col else total)
         totals[key] = row
     return totals
 
@@ -518,6 +522,19 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             z = SS11_ZNUM[elsymbol]
             fit = fit_ss11_curve(ks)
             direction = "rec" if is_recombination else "ion"
+            # A total below the radiative floor is a reaction that needs energy. A flat value of such a
+            # curve holds its 2e4 K rate at all temperatures, which is far too large below 2e4 K. The
+            # file then has no line for it, and ARTIS takes the rate of the reverse reaction with the
+            # Boltzmann factor (autoreverse).
+            needs_energy = any(
+                k < SS11_FLOOR for temp, k in zip(SS11_TGRID, ks, strict=True) if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX
+            )
+            if needs_energy and fit.npts < SS11_MIN_POINTS:
+                report.append(
+                    f"{direction} {elsymbol} q={q}: no line. The reaction needs energy, and its table gives fewer than"
+                    f" {SS11_MIN_POINTS} usable points."
+                )
+                continue
             warning = "  WARNING: the fit error is large" if fit.maxerr > MAXERR_WARN else ""
             report.append(
                 f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f} eexp={fit.eexp:.0f}"

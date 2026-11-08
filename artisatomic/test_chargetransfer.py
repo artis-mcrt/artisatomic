@@ -51,8 +51,8 @@ def test_makechargetransferfile_cds_totals_and_fit():
     assert totals["Ge", 1] == pytest.approx(powerlaw, rel=0.01)
     # every channel on the floor gives the floor itself, not zero
     assert totals["Ge", 2] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
-    # the paper floors the total, so a sum below the floor also becomes the floor
-    assert totals["Ge", 3] == pytest.approx([1.00e-14] * len(makechargetransferfile.SS11_TGRID))
+    # a reaction that needs energy has no channel on the floor, so its total stays below the floor
+    assert totals["Ge", 3] == pytest.approx([5.00e-21] * len(makechargetransferfile.SS11_TGRID))
 
     fit = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
     assert fit.a == pytest.approx(3.0e-10, rel=0.01)
@@ -198,7 +198,8 @@ def test_committed_source_files_build_the_expected_entries():
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
-    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
+    # four SS11 reactions that need energy have no line (see get_ss11_entries())
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 32)
     entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
 
