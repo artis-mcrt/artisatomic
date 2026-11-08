@@ -718,7 +718,8 @@ def split_levels_above_ionization(
         log_comment(
             flog,
             ("adata",),
-            f"WARNING: The reader dropped {len(fileindices_above_ionization):d} levels that are above the ionisation energy.",
+            f"WARNING: The reader dropped {count_text(len(fileindices_above_ionization), 'level')} above the"
+            " ionisation energy.",
         )
 
     dfboundlevels = dflevels.filter(~above_ionization)

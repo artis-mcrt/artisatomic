@@ -16,6 +16,7 @@ from artisatomic.base import atomic_weights
 from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import check_ion_stages_contiguous
 from artisatomic.base import comment_lines
+from artisatomic.base import count_text
 from artisatomic.base import creation_time_utc
 from artisatomic.base import drop_handlers
 from artisatomic.base import elsymbols
@@ -415,15 +416,17 @@ def log_deltaj_contradictions(flog, dftransitions_ion: pl.DataFrame, ionstr: str
                 continue
             largest = rows[strengthcol].abs().max()
             outcome = (
-                f"The output keeps the {strengthcol} values, so these transitions stay permitted."
+                f"The output keeps the {strengthcol} values, so each such transition stays permitted."
                 if kept_permitted
                 else "The two levels of each transition have the same parity, so the output writes it as forbidden."
             )
             log_comment(
                 flog,
                 ("transitiondata",),
-                f"WARNING: {rows.height:d} transitions of {ionstr} break {rulename} but"
-                f" carry {strengthcol} > {minstrength:g} (largest {largest:.3g}). The level names and the"
+                f"WARNING: {count_text(rows.height, 'transition')} of {ionstr}"
+                f" {'breaks' if rows.height == 1 else 'break'} {rulename} but"
+                f" {'carries' if rows.height == 1 else 'carry'} {strengthcol} > {minstrength:g}"
+                f" (largest {largest:.3g}). The level names and the"
                 f" {strengthcol} values of this data set disagree. {outcome}",
             )
 

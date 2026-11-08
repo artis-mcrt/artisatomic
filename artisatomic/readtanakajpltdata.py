@@ -31,7 +31,7 @@ jpltpath = jpltfolder.resolve() / "data_v2.1"
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
-    "the Japan-Lithuania opacity database for kilonovae, of 26 <= Z <= 88. Tanaka, M., Kato, D., Gaigalas, G.,"
+    "the Japan-Lithuania opacity database for kilonovae. Tanaka, M., Kato, D., Gaigalas, G.,"
     " Kawaguchi, K. (2020), MNRAS, 496, 1369-1392, doi:10.1093/mnras/staa1576 (version 1), and Kato, D., Tanaka, M.,"
     " Gaigalas, G., Kitovienė, L., Rynkun, P. (2024), MNRAS, 535, 2670-2686, doi:10.1093/mnras/stae2504 (version 2)"
 )

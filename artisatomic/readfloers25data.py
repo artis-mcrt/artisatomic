@@ -19,12 +19,12 @@ from artisatomic.base import find_file_check_extension
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import nist_ionization_energy_ev
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
 from artisatomic.base import scan_file_lines
 from artisatomic.base import split_element_ionstage_str
 from artisatomic.base import TESTMODE
-from artisatomic.base import without_compression_extension
 from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
 
@@ -46,6 +46,9 @@ description_uncalibrated_withforbidden = description_withforbidden_template.form
 transition_type_regex = re.compile(r"[EM][0-9]+")
 
 
+floers_data_folder = PYDIR / ".." / "atomic-data-floers25"
+
+
 def get_basepath(withforbidden: bool) -> Path:
     """Directory that holds the Floers+25 level and transitions files.
 
@@ -53,10 +56,9 @@ def get_basepath(withforbidden: bool) -> Path:
     transitions. The public OutputFiles directory holds the published data. In the test mode,
     every request resolves to the test_sample directory from testdata.tar.xz.
     """
-    datapath = PYDIR / ".." / "atomic-data-floers25"
     if TESTMODE:
-        return datapath / "test_sample"
-    return datapath / ("OutputFiles_withforbidden" if withforbidden else "OutputFiles")
+        return floers_data_folder / "test_sample"
+    return floers_data_folder / ("OutputFiles_withforbidden" if withforbidden else "OutputFiles")
 
 
 def extend_ion_list(
@@ -336,7 +338,8 @@ def read_levels_and_transitions(
                 log_comment(
                     flog,
                     ("transitiondata",),
-                    f"WARNING: The reader skipped the file {basepath.name}/{name}, because its name does not end"
+                    f"WARNING: The reader skipped the file {path_in_data_folder(filepath, floers_data_folder)}, because"
+                    " its name does not end"
                     " with the transition types of the file.",
                 )
                 continue
@@ -351,15 +354,12 @@ def read_levels_and_transitions(
         msg = f"Found no Floers+25 transitions files for {ionstr} ({calibstr}) in {basepath}"
         raise FileNotFoundError(msg)
 
-    # the name of the folder and of the file only, so a line does not depend on the machine
-    log_comment(
-        flog, ("adata",), f"The levels come from {basepath.name}/{without_compression_extension(levels_file.name)}."
-    )
+    log_comment(flog, ("adata",), f"The levels come from {path_in_data_folder(levels_file, floers_data_folder)}.")
     for transition_file in transition_files:
         log_comment(
             flog,
             ("transitiondata",),
-            f"The transitions come from {basepath.name}/{without_compression_extension(transition_file.name)}.",
+            f"The transitions come from {path_in_data_folder(transition_file, floers_data_folder)}.",
         )
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
