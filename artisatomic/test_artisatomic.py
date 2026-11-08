@@ -807,6 +807,30 @@ def test_read_hyd_table_file_stops_for_a_file_that_ends_inside_a_table(tmp_path)
         rhd.read_hyd_table_file(str(filepath), "!L_ST_U", "!L_DEL_U")
 
 
+def test_cmfgen_keeps_an_unsplit_level_when_the_collision_file_names_it_with_a_j(monkeypatch):
+    """read_coldata() takes a line '5p_2Po[1/2]' as a line of the unsplit level '5p_2Po', so that level must stay."""
+    if not Path(rhd.hillier_ion_folder(6, 4)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(6, 4, io.StringIO())
+    groundname = dflevels["levelname"][0]
+    targetname = "5p_2Po"
+    assert targetname in dflevels["levelname"].to_list()
+    original_parse = rhd.parse_transition_lines
+
+    def parse_with_no_line_of_the_level(dflines, filename, flog):
+        return original_parse(dflines, filename, flog).with_columns(
+            pl.col(column).replace(targetname, groundname) for column in ("namefrom", "nameto")
+        )
+
+    monkeypatch.setattr(rhd, "parse_transition_lines", parse_with_no_line_of_the_level)
+    for collisionnames, kept in ((set(), False), ({f"{targetname}[1/2]"}, True)):
+        monkeypatch.setattr(rhd, "collision_file_level_names", lambda _z, _stage, names=collisionnames: names)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _ = rhd.read_levels_and_transitions(6, 4, io.StringIO())
+        assert (targetname in dflevels["levelname"].to_list()) == kept
+
+
 def test_cmfgen_keeps_a_level_when_the_collision_file_names_its_term(monkeypatch):
     """A collision row with no J goes to each J level of the term, so a level with no line must stay."""
     with contextlib.redirect_stdout(io.StringIO()):
@@ -7101,6 +7125,24 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
         "enpercm=0,even,g=9.0",
         "enpercm=0,even,g=7.0",
     ]
+
+
+def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level():
+    """C IV col_data names '5p_2Po[1/2]' and '5p_2Po[3/2]', and osc_data gives '5p_2Po' with no J.
+
+    CMFGEN takes each such line as a line of the unsplit level and adds the lines of one pair
+    (gen_omega_rd_v2.f). The two lines 2s -> 5p give 0.0260 and 0.0519 at 6000 K.
+    """
+    if not Path(readhillierdata.hillier_ion_folder(6, 4)).is_dir():
+        pytest.skip("the CMFGEN atomic data is not present")
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = readhillierdata.read_levels_and_transitions_from_file(6, 4, flog)
+        dfupsilon = readhillierdata.read_coldata(6, 4, dflevels, phixs_args(electrontemperature=6000), flog)
+    names = dflevels["levelname"].to_list()
+    upsilons = upsilon_dict(dfupsilon)
+    assert upsilons[names.index("2s_2Se[1/2]"), names.index("5p_2Po")] == pytest.approx(0.0779)
+    assert "The reader discarded upsilon" not in flog.getvalue()
 
 
 def test_tabulated_cross_section_starts_at_the_threshold():
