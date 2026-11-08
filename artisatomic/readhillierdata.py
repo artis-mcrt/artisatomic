@@ -1865,9 +1865,6 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     for levelindex, (phixstable, fractions) in reduced_phixs_of_levelid.items():
         photoionization_crosssections[levelindex] = phixstable
         photoionization_targetconfig_fractions[levelindex] = fractions
-        # the ground-state edge of the level, as in the loop above
-        if lambdaangstroms[levelindex] != 0.0:
-            photoionization_thresholds_ev[levelindex] = hc_in_ev_angstrom / abs(lambdaangstroms[levelindex])
 
     return PhixsData(
         photoionization_crosssections,

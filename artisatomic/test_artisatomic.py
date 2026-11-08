@@ -7126,6 +7126,8 @@ def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
     assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2692, rel=1e-3)
     assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8767, rel=1e-3)
     assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8767, rel=1e-3)
+    # fill_missing_phixs_thresholds() gives each threshold from the first target of the level
+    assert np.isnan(phixs.thresholds_ev).all()
 
 
 def test_shared_table_moves_to_the_edge_of_each_level():
