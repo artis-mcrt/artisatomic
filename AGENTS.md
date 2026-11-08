@@ -54,8 +54,9 @@ Run all commands through uv so they use the locked environment:
 - Format: `uv run ruff format .`
 - Type checks: `uv run pyrefly check`, `uv run ty check`
 - Pre-commit hooks: `prek install` once, then hooks run on each commit
+- Documentation: `uv run --python 3.14 --group docs sphinx-build -W --keep-going -b html docs docs/_build/html`
 
-CI (`.github/workflows/test.yml`) runs the lint check, the format check, both type checks, the prek hooks, the tests, and the output checksums. Run them locally before you push.
+CI (`.github/workflows/test.yml`) runs the lint check, the format check, both type checks, the prek hooks, the tests, the output checksums, and the documentation build. Run them locally before you push.
 
 ## Output checksums
 
@@ -79,7 +80,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - Each comment block needs exactly one line that starts with `source:`, and `write_comment_block()` stops the run if it finds none or two. `base.comment_lines()` turns text into `#` lines in ASCII. The writer of chargetransfer.txt uses it also.
 - The run writes one log file for all ions, `artisatomiclog.txt`, and the record `artisatomicionhandlers_used.json`. Both are in the output folder, beside adata.txt. The record has a different name from the input file `artisatomicionhandlers.json`, so a run never takes the record of an earlier run as its ion selection. `log_path()` in `base.py` gives the path of the log file. The run empties it at its start, and each pass of each ion appends to it.
 - `main()` in `cli.py` writes all files into a work folder in the output folder. It moves the files into the output folder only at the end of a good run. A run that fails keeps the files of the earlier run, and puts its log into `artisatomiclog_failed.txt`.
-- A reader calls `log_comment()` from `base.py` for a summary line that belongs in a comment block. `log_source()` records a `source:` line, with a label in the log file that says what the source is for. A line that can occur for many levels or transitions of one ion goes through `log_detail()`. The log file then gets each line, and the comment block gets the first line of each kind with the count. A line goes through `log_and_print()` only if it has no information for a user of the output files. It also calls `log_and_print()` for a line that only repeats a number of the data header line of the ion. Examples are the count of levels, the count of transitions, and the ionisation energy.
+- A reader calls `log_comment()` from `base.py` for a summary line that belongs in a comment block. `log_source()` records a `source:` line, with a label in the log file that says what the source is for. A line that can occur for many levels or transitions of one ion goes through `log_detail()`. The log file then gets each line, and the comment block gets the first line of each kind with the count. A line goes through `log_and_print()` only if it has no information for a user of the output files. A reader also calls `log_and_print()` for a line that only repeats a number of the data header line of the ion. Examples are the count of levels, the count of transitions, and the ionisation energy.
 - A comment line must not depend on the machine. Give the path of a file in a data folder of the repository through `path_in_data_folder()`, which starts the path with the repository name of that folder. Use `path_for_log()` with `relative_to` for a data folder outside the repository.
 - A reader that takes its ionisation energy from the NIST table records `nist_ionization_energy_comment`, because the `source:` line names a different data set.
 - Each reader module holds a `description`: the name of its data source, with the full reference where the repository holds one. `read_ion_data()` records it as the `source:` line of adata.txt and transitiondata.txt.
@@ -87,6 +88,7 @@ When a change alters the output on purpose, verify the new values, then regenera
 - `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
 - `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
+- `docs/` holds the Sphinx documentation, which readthedocs.org builds from `.readthedocs.yaml`. All pages use MyST Markdown. Do not add a reStructuredText page. `docs/index.md` includes README.md, and `docs/tests.md` includes tests/README.md. Sphinx reads no docstring, so the docs have no module reference. `.github/workflows/linkcheck.yml` checks the links of the docs each week.
 - `tests/` contains test configurations and reference checksums for the data sources that CI covers. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
 - The pytest settings in `pyproject.toml` fail the run if a test gives a warning (`max_warnings = "0"`). Do not use `filterwarnings = ["error"]` for this. polars gives some deprecations from its Rust core, and that filter hides them.
 
@@ -101,5 +103,4 @@ When a change alters the output on purpose, verify the new values, then regenera
 ## Version control
 
 - Commit messages: write a short imperative summary line in STE.
-- `_version.py` is generated by setuptools_scm. Do not edit or commit it.
 - `uv.lock` is managed by the uv pre-commit hooks. Change dependencies in `pyproject.toml` and let `uv lock` update the lockfile.

@@ -1,21 +1,35 @@
 #!/usr/bin/env zsh
 
-if [[ ! -f OutputFiles/57LaII_levels_calib.txt && ! -f OutputFiles/57LaII_levels_calib.txt.zst ]]; then
+# Download the public Floers+25 data (Zenodo record 19335084) into OutputFiles, and compress each
+# table with zstd. The floers25calib handler reads the calibrated files, and floers25uncalib reads
+# the uncalibrated files. An archive counts as done only after its last step, so run the script
+# again after a stop. To download an archive again, delete its marker OutputFiles/.<archive>.done.
 
-  if [[ ! -f GSI_lanthanides_calibrated_levels.zip ]]; then curl -O https://zenodo.org/records/19335084/files/GSI_lanthanides_calibrated_levels.zip?download=1; fi
+set -e
+cd "$(dirname "$0")"
 
-  unzip -j -o -d OutputFiles GSI_lanthanides_calibrated_levels.zip
-  rm -f OutputFiles/.DS_Store OutputFiles/.*
-  zstd --rm -f -T0 -15 -v OutputFiles/*.txt
+record="https://zenodo.org/records/19335084/files"
+mkdir -p OutputFiles
 
-fi
-
-if [[ ! -f OutputFiles/57LaII_transitions_calib.txt && ! -f OutputFiles/57LaII_transitions_calib.txt.zst ]]; then
-
-  if [[ ! -f GSI_lanthanides_calibrated_transitions.zip ]]; then curl -O https://zenodo.org/records/19335084/files/GSI_lanthanides_calibrated_transitions.zip?download=1; fi
-
-  unzip -j -o -d OutputFiles GSI_lanthanides_calibrated_transitions.zip
-  rm -f OutputFiles/.DS_Store OutputFiles/.*
-  zstd --rm -f -T0 -15 -v OutputFiles/*.txt
-
-fi
+for archive in GSI_lanthanides_calibrated_levels GSI_lanthanides_calibrated_transitions \
+  GSI_lanthanides_uncalibrated_levels GSI_lanthanides_uncalibrated_transitions; do
+  if [[ -f "OutputFiles/.$archive.done" ]]; then
+    echo "$archive is done, skipped"
+    continue
+  fi
+  if [[ ! -f "$archive.zip" ]]; then
+    echo "downloading $archive.zip"
+    curl -fL --retry 3 -o "$archive.zip.part" "$record/$archive.zip?download=1"
+    # a server that sends an error page with a 200 status must not leave a bad file behind
+    if ! unzip -tqq "$archive.zip.part" > /dev/null 2>&1; then
+      rm -f "$archive.zip.part"
+      echo "ERROR: $archive.zip is not a zip archive" >&2
+      exit 1
+    fi
+    mv "$archive.zip.part" "$archive.zip"
+  fi
+  # -j puts each table directly into OutputFiles. The __MACOSX members are AppleDouble files.
+  unzip -j -o -q -d OutputFiles "$archive.zip" -x '__MACOSX/*'
+  find OutputFiles -maxdepth 1 -name '*.txt' -type f -exec zstd --rm -f -q -T0 -15 {} +
+  touch "OutputFiles/.$archive.done"
+done

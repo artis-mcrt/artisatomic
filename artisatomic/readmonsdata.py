@@ -13,11 +13,10 @@ import polars as pl
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
@@ -42,6 +41,10 @@ description = (
 # The transition file quotes the lower level energy to about 8 significant digits, so it differs
 # from the level file by up to 0.02 cm^-1. A larger difference means that the two files disagree.
 MATCH_TOLERANCE_PERCM = 0.05
+
+# The transition file adds a tag to each level energy (see tagged_level_energies()). The tagged
+# energies of the two files agree to 2e-13 (1000 cm^-1) in the sample.
+TAG_TOLERANCE_1000PERCM = 1e-9
 
 
 def levels_member(atomic_number: int, ion_stage: int) -> str:
@@ -70,15 +73,15 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
             schema_overrides=dict.fromkeys(columnnames, pl.String),
         ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
 
+    # polars casts the text "NaN" or "inf" to a float with no error, and a NaN energy passes the tolerance test
+    if dfcolumns.select(pl.all().is_finite().fill_null(value=False).all()).row(0) != (True,) * columncount:
+        msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
+        raise ValueError(msg)
     return [dfcolumns[name].to_numpy() for name in columnnames]
 
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with a MONS level file to ion_handlers.
 
@@ -99,9 +102,6 @@ def extend_ion_list(
         ion_handlers,
         monsions,
         "mons",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 
@@ -122,13 +122,56 @@ def get_nearest_level_indices(sorted_energies: np.ndarray, energies: np.ndarray)
     return np.where(leftisnearer, idx_left, idx_right), np.where(leftisnearer, idx_right, idx_left)
 
 
+def tagged_level_energies(energies1000percm: np.ndarray, j_arr: np.ndarray) -> np.ndarray:
+    """Give the energy of each level with the tag of the transition file, in 1000 cm^-1.
+
+    The transition file gives the energy of a level as E + J * 1e-6 + n * 1e-8. n is the position
+    of the level in its block of one J in the level file, from 1. The tag thus names one level,
+    also where two levels have almost the same energy.
+    """
+    levelpositions = np.arange(len(j_arr))
+    newblock = np.r_[True, j_arr[1:] != j_arr[:-1]]
+    blockstarts = np.maximum.accumulate(np.where(newblock, levelpositions, 0))
+    return energies1000percm + j_arr * 1e-6 + (levelpositions - blockstarts + 1) * 1e-8
+
+
+def match_tagged_levels(
+    tagged1000percm: np.ndarray, sorted_energies_percm: np.ndarray, energies1000percm: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Find the level of each transition energy.
+
+    tagged1000percm holds the tagged energy of each level id. The match uses the tagged energy
+    first. An energy with no tagged level inside TAG_TOLERANCE_1000PERCM takes the closest level
+    energy. The function gives the level ids, the positions of the energies without a tag, and the
+    second closest level id of each such energy. Only those energies get the second search, because
+    an ion can have 45 million transitions.
+    """
+    order = np.argsort(tagged1000percm, kind="stable")
+    sorted_tagged = tagged1000percm[order]
+    if len(order) > 1:
+        right = np.searchsorted(sorted_tagged, energies1000percm).clip(1, len(order) - 1)
+        left = right - 1
+        leftisnearer = np.abs(energies1000percm - sorted_tagged[left]) <= np.abs(
+            energies1000percm - sorted_tagged[right]
+        )
+        levels = order[np.where(leftisnearer, left, right)]
+        del right, left, leftisnearer
+    else:
+        levels = np.zeros(len(energies1000percm), int)
+    untagged = np.flatnonzero(np.abs(tagged1000percm[levels] - energies1000percm) > TAG_TOLERANCE_1000PERCM)
+    closest, second = get_nearest_level_indices(sorted_energies_percm, energies1000percm[untagged] * 1000)
+    levels[untagged] = closest
+    return levels, untagged, second
+
+
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     """Read one ion from the MONS zip archives.
 
     The level file gives the energy (in 1000 cm^-1) and J of each level, in no particular order.
     The transition file gives the wavelength, the lower level energy and the weighted oscillator
-    strength of each E1 transition. The reader finds the levels of a transition by their energy:
-    the upper level energy is the lower level energy plus the photon energy. Each level name is
+    strength of each E1 transition. The reader finds the levels of a transition by their tagged
+    energy (see tagged_level_energies()). The upper level energy is the lower level energy plus the
+    photon energy. Each level name is
     the energy plus the zero-based level id, so two levels with one energy keep separate names.
     NIST supplies the ionisation energy.
     """
@@ -139,6 +182,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_and_print(flog, f"The reader got {len(energy_levels1000percm)} levels.")
 
     sortorder = np.argsort(energy_levels1000percm, kind="stable")
+    tagged_levels1000percm = tagged_level_energies(energy_levels1000percm, j_arr)[sortorder]
     energiesabovegsinpercm = energy_levels1000percm[sortorder] * 1000
     j_arr = j_arr[sortorder]
     g_arr = 2 * j_arr + 1
@@ -164,10 +208,15 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     )
     log_and_print(flog, f"The reader got {len(energy_levels_lower_1000percm)} transitions.")
 
+    energy_levels_upper_1000percm = energy_levels_lower_1000percm + 1e5 / transition_wavelength_A
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
-    energy_levels_upper_percm = energy_levels_lower_percm + 1e8 / transition_wavelength_A
-    lowerlevels, lowerlevels_second = get_nearest_level_indices(energiesabovegsinpercm, energy_levels_lower_percm)
-    upperlevels, upperlevels_second = get_nearest_level_indices(energiesabovegsinpercm, energy_levels_upper_percm)
+    energy_levels_upper_percm = energy_levels_upper_1000percm * 1000
+    lowerlevels, lower_untagged, lowerlevels_second = match_tagged_levels(
+        tagged_levels1000percm, energiesabovegsinpercm, energy_levels_lower_1000percm
+    )
+    upperlevels, upper_untagged, upperlevels_second = match_tagged_levels(
+        tagged_levels1000percm, energiesabovegsinpercm, energy_levels_upper_1000percm
+    )
 
     maxmismatch_percm = max(
         np.abs(energiesabovegsinpercm[lowerlevels] - energy_levels_lower_percm).max(),
@@ -176,8 +225,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
     log_comment(
         flog,
         ("transitiondata",),
-        f"The reader finds the levels of a transition by their energy. The largest difference is {maxmismatch_percm:.3g} cm^-1.",
+        "The reader finds the levels of a transition by the tagged energy E + J * 1e-6 + n * 1e-8 (1000 cm^-1) of the"
+        " transition file. n is the position of the level in its block of one J in the level file, from 1. The"
+        f" largest difference between the energies of the two files is {maxmismatch_percm:.3g} cm^-1.",
     )
+    untaggedcount = len(lower_untagged) + len(upper_untagged)
+    if untaggedcount > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {untaggedcount} of {2 * len(lowerlevels)} level matches found no tagged energy. They take the"
+            " closest level energy.",
+        )
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
         msg = (
             f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
@@ -186,12 +245,16 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
         raise ValueError(msg)
 
-    # a second level inside the match tolerance makes the match a guess. The reader keeps the
-    # closest level, and the count says how much of the ion depends on that choice.
+    # A match without a tag is a guess where a second level is inside the match tolerance. The reader
+    # keeps the closest level, and the count says how much of the ion depends on that choice.
     ambiguouscount = int(
-        (np.abs(energy_levels_lower_percm - energiesabovegsinpercm[lowerlevels_second]) <= MATCH_TOLERANCE_PERCM).sum()
+        (
+            np.abs(energy_levels_lower_percm[lower_untagged] - energiesabovegsinpercm[lowerlevels_second])
+            <= MATCH_TOLERANCE_PERCM
+        ).sum()
         + (
-            np.abs(energy_levels_upper_percm - energiesabovegsinpercm[upperlevels_second]) <= MATCH_TOLERANCE_PERCM
+            np.abs(energy_levels_upper_percm[upper_untagged] - energiesabovegsinpercm[upperlevels_second])
+            <= MATCH_TOLERANCE_PERCM
         ).sum()
     )
     if ambiguouscount > 0:
@@ -201,9 +264,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
             f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
         )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
     # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does

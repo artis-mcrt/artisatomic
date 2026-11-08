@@ -44,7 +44,7 @@ hdf5 = ["h5py>=3.10.0"]
 
 [dependency-groups]
 # its own group so the workflow's combine job can install the coverage the lockfile pinned without
-# building the project and its 76 packages to run one tool
+# building the project and all of its dependencies to run one tool
 coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
@@ -54,6 +54,13 @@ dev = [
     "ruff>=0.16.4",
     "ty>=0.0.74",
     "types-requests>=2.32.0.20241016",
+]
+docs = [
+    "furo>=2025.12.19",
+    "myst-parser>=5.1.0",
+    "sphinx>=9.2.0",
+    "sphinx-copybutton>=0.5.2",
+    "sphinxcontrib-programoutput>=0.20",
 ]
 
 [project.urls]
@@ -158,6 +165,10 @@ unfixable = [
     "unused-import",
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Sphinx runs docs/conf.py as a script, so the folder is not a package
+"docs/conf.py" = ["implicit-namespace-package"]
+
 [tool.ruff.lint.pydocstyle]
 # Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and
 # leaves Args/Returns/Raises sections optional.
@@ -175,7 +186,6 @@ where = ["."]
 include = ["artisatomic*"]
 
 [tool.setuptools_scm]
-write_to = "_version.py"
 local_scheme = "no-local-version"
 
 [tool.ty.rules]
