@@ -341,8 +341,13 @@ def test_hydrogenic_nl_phixs_offset_type8():
     # zero everywhere below the offset edge, including at the true threshold
     assert below_offset_edge[0]
     assert np.all(phixstable[below_offset_edge, 1] == 0.0)
-    # and non-zero immediately above it
-    assert np.all(phixstable[~below_offset_edge, 1] > 0.0)
+    # a step at the offset edge: a row of zero and a row of the value at U = 1, both at the edge
+    stepindex = int(np.flatnonzero(~below_offset_edge)[0])
+    assert energy_ev[stepindex] == pytest.approx(threshold_ev + e_o_ev)
+    assert energy_ev[stepindex + 1] == energy_ev[stepindex]
+    assert phixstable[stepindex, 1] == 0.0
+    # and non-zero from the upper row of the step on
+    assert np.all(phixstable[stepindex + 1 :, 1] > 0.0)
 
     # independent reimplementation of the CMFGEN branch
     grid = rhd.hyd_phixs_energygrid_ryd[n, l_start]
@@ -352,9 +357,9 @@ def test_hydrogenic_nl_phixs_offset_type8():
         sigma_table += (2 * l + 1) * rhd.hyd_phixs[n, l]
 
     for index, en_ev in enumerate(energy_ev):
-        if en_ev < threshold_ev + e_o_ev:
+        if en_ev < threshold_ev + e_o_ev or index == stepindex:
             continue
-        u = en_ev / (threshold_ev + e_o_ev)
+        u = max(en_ev / (threshold_ev + e_o_ev), 1.0)
         expected = 10 ** np.interp(np.log10(u), np.log10(u_grid), np.log10(sigma_table))
         expected /= zion**2 * (l_end - l_start + 1) * (l_end + l_start + 1)
         assert np.isclose(phixstable[index, 1], expected, rtol=1e-10)
