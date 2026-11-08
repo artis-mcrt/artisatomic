@@ -7155,6 +7155,40 @@ def test_shared_table_moves_to_the_edge_of_each_level():
     assert reader.shared_table_at_level_edge(0, "2p_3Po", 2) is None
 
 
+def test_tabulated_cross_section_starts_at_the_threshold():
+    """A tabulated table (types 20 to 22) loses its rows below x = 1 and gets a row at x = 1 by interpolation.
+
+    The downsample takes the first energy of a table as its threshold. A row below the edge
+    therefore moved each output value to a lower energy. N VII 5g_2Ge starts at x = 0.75.
+    """
+    flog = io.StringIO()
+    reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, flog)
+    reader.thresholdenergyryd = 2.0
+    reader.pending_levelname = "5g_2Ge"
+    cut = reader.cut_below_threshold
+
+    x = np.array([0.75, 0.9, 1.1, 2.0])
+    energyryd, sigma = cut(x * 2.0, np.array([1.0, 0.5, 0.3, 0.1]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.2, 4.0])
+    # linear between x = 0.9 (0.5) and x = 1.1 (0.3)
+    assert sigma.tolist() == pytest.approx([0.4, 0.3, 0.1])
+
+    # a step at x = 1 keeps both of its rows
+    energyryd, sigma = cut(np.array([0.5, 1.0, 1.0, 1.5]) * 2.0, np.array([0.0, 0.0, 1.372, 0.5]))
+    assert sigma.tolist() == [0.0, 1.372, 0.5]
+
+    # a table that ends below the threshold continues as nu^-3 from its last row
+    energyryd, sigma = cut(np.array([0.5, 0.8]) * 2.0, np.array([1.0, 0.512]))
+    assert energyryd.tolist() == [2.0]
+    assert sigma.tolist() == pytest.approx([0.512 * 0.8**3])
+    assert "continues the table as nu^-3" in flog.getvalue()
+
+    # a table that starts at the threshold stays as it is
+    table = (np.array([2.0, 3.0]), np.array([1.0, 0.5]))
+    assert cut(*table) is not None
+    assert cut(*table)[0] is table[0]
+
+
 def test_write_adata_rejects_an_ion_that_artis_cannot_read():
     """An ion with no levels, a level energy that is not finite, or a bad g stops the run before any output."""
 
