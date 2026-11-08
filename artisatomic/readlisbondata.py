@@ -12,12 +12,11 @@ from artisatomic.base import check_row_count
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import elsymbols
 from artisatomic.base import find_file_check_extension_or_raise
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import levelid_of_fileindex_map
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_for_log
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelid_columns
@@ -39,7 +38,7 @@ def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: st
     between two rows, and the count finds such a file.
 
     skip_lines, not skip_rows: skip_rows reads CSV rows, so a quote character in the provenance
-    text would swallow the header. The schema gives the dtype of each column. An inference from the
+    text would join the header to the provenance text. The schema gives the dtype of each column. An inference from the
     first rows can give Int64 to a float column, and an inference from all rows is slow for a file
     with millions of rows.
 
@@ -237,9 +236,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         raise FileNotFoundError(msg)
 
     # from NIST, as every other reader whose data set carries no ionisation energy does
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     iondir = lisbonpath / elsym / f"{elsym}{ion_stage_roman}"
     levelsfile = iondir / f"{elsym}{ion_stage_roman}_Levels.csv"
@@ -253,9 +250,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     # not an assert: a blank energy sorts before every number in polars, so it would take level
     # id 0 and shift every other id. float() on it then reports neither the file nor the row.
     # This runs before the drop below, which keeps such a level but cannot see it
-    if dfalllevels["energy"].null_count() > 0:
-        msg = "The Lisbon levels file has a level with no energy"
-        raise ValueError(msg)
+    check_no_nulls(dfalllevels.select("energy"), "The Lisbon levels file")
 
     # drop the levels above the ionisation energy, as the FAC reader does, but keep their file
     # indices. With them, the filter below knows whether a line names a dropped level

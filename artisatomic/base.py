@@ -46,8 +46,12 @@ def _read_atomic_properties() -> tuple[list[str], list[float]]:
     columns = rows[0]
     symbolcolumn, numbercolumn, masscolumn = columns.index("symbol"), columns.index("number"), columns.index("mass")
     symbols = [row[symbolcolumn] for row in rows[1:]]
-    # estimate an unknown atomic mass ("NA" in the file) as Z / 0.45
-    masses = [float(row[masscolumn]) if row[masscolumn] != "NA" else int(row[numbercolumn]) / 0.45 for row in rows[1:]]
+    # every element has a mass: an element with no stable isotope has the mass number of its
+    # longest-lived isotope. compositiondata.txt gives the mass, and ARTIS divides by it.
+    masses = [float(row[masscolumn]) for row in rows[1:]]
+    if [int(row[numbercolumn]) for row in rows[1:]] != list(range(1, len(rows))):
+        msg = "atomic_properties.txt must list the elements in the order of the atomic number, from Z = 1"
+        raise ValueError(msg)
     return symbols, masses
 
 
@@ -228,7 +232,9 @@ def leveltuples_to_pldataframe(energy_levels) -> pl.DataFrame:
     if isinstance(energy_levels, pl.DataFrame):
         dflevels = energy_levels
     elif energy_levels:
-        dflevels = pl.DataFrame(energy_levels)
+        # all rows, and not the first 100: a column that starts with 100 integers would become an
+        # integer column and cut a later float, and a column that starts with 100 nulls would raise
+        dflevels = pl.DataFrame(energy_levels, infer_schema_length=None)
     else:
         # An empty list carries no column names, and write_adata() selects the level columns
         # by name. An ion with no levels therefore gets the columns that every reader supplies.
@@ -614,12 +620,20 @@ def path_in_data_folder(filepath: str | Path, datafolder: Path) -> str:
     return path_for_log(filepath)
 
 
-# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst (see
-# get_nist_ionization_provenance()). The export does not record the version of the database.
+# The date is from the provenance lines of artisatomic/nist_ionization.txt.zst. The export does
+# not record the version of the database.
 nist_ionization_energy_comment = (
     "The ionisation energy does not come from the data set of the levels. It comes from the NIST Atomic Spectra"
     " Database, https://physics.nist.gov/asd, doi:10.18434/T4W30F (a table that artisatomic got on 2022-11-23)."
 )
+
+
+def nist_ionization_energy_ev(atomic_number: int, ion_stage: int, flog) -> float:
+    """Give the NIST ionisation energy of an ion in eV, and record in adata.txt that it comes from NIST."""
+    ionization_energy_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
+    log_comment(flog, ("adata",), nist_ionization_energy_comment)
+    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_ev} eV.")
+    return ionization_energy_ev
 
 
 def path_for_log(filepath: str | Path, relative_to: Path | None = None) -> str:
@@ -665,9 +679,9 @@ def fortran_float(text: str) -> float:
 def isfloat(value: t.Any) -> bool:
     """Whether a string parses as a float, with Fortran's D exponent (1.5D-3) permitted.
 
-    The CMFGEN oscillator reader calls this once for each field of every line (5.3M times for the
-    cmfgen test set). The function therefore calls replace() only when the field contains a D.
-    This avoids a copy of every field.
+    The CMFGEN oscillator reader calls this once for each field of each level line (about 186000
+    times for the cmfgen test set). The function calls replace() only when the field contains a D,
+    which avoids a copy of every field.
     """
     try:
         float(value.replace("D", "E") if "D" in value else value)
@@ -894,9 +908,14 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     The data sets ship some files compressed and some not, and the set of compressed files varies
     between downloads. Callers name the plain file, and this function finds the form that is
     present.
+
+    The default threads=0 decompresses in this process. With threads above 0, xopen starts a process
+    that writes into a pipe. A reader that closes the file before its end, for example after the
+    header lines, then makes that thread of xopen print a BrokenPipeError.
     """
     from xopen import xopen
 
+    kwargs.setdefault("threads", 0)
     return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
@@ -923,16 +942,26 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
     print(f"{filepath} is not utf-8. artisatomic rewrites the file as utf-8 from iso-8859-1.")
     # every byte is a character in iso-8859-1, so this decode cannot fail
     text = filebytes.decode("iso-8859-1")
+    # A temporary file beside the data file, and then a replace, so that an interrupt cannot leave a
+    # part of the data file. The temporary name keeps the compression extension, because xopen
+    # selects the compression from it.
+    extension = next((ext for ext in compression_extensions if ext and filepath.name.endswith(ext)), "")
+    temppath = filepath.with_name(f"{filepath.name.removesuffix(extension)}.{secrets.token_hex(8)}.tmp{extension}")
     try:
-        with xopen(filepath, "wt", encoding="utf-8") as fout:
+        with xopen(temppath, "wt", encoding="utf-8") as fout:
             fout.write(text)
+        temppath.replace(filepath)
     except OSError as exc:
+        temppath.unlink(missing_ok=True)
         msg = (
             f"Could not rewrite {filepath} as utf-8: {exc}\n"
             f"Convert the file by hand. Then run this again:\n"
             f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
         )
         raise RuntimeError(msg) from exc
+    except BaseException:
+        temppath.unlink(missing_ok=True)
+        raise
 
     return True
 
@@ -1041,11 +1070,6 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return _read_nist_ionization_table()[1]
 
 
-def get_nist_ionization_provenance() -> list[str]:
-    """Get the provenance lines of the NIST table: the source, the query, and the date."""
-    return _read_nist_ionization_table()[0]
-
-
 _process_pool: ProcessPoolExecutor | None = None
 
 
@@ -1103,12 +1127,28 @@ def parallel_map[ResultType](
         if chunksize is None:
             # Without a chunk size, items go to the workers one at a time, and the IPC for each item
             # costs more than the work.
-            chunksize = max(1, nitems // (mp.cpu_count() * 4))
+            chunksize = max(1, nitems // ((os.process_cpu_count() or 1) * 4))
         return list(get_process_pool().map(fn, *lists, chunksize=chunksize))
 
     # ThreadPoolExecutor.map() ignores a chunk size
     with ThreadPoolExecutor() as executor:
         return list(executor.map(fn, *lists))
+
+
+def map_chunks[ItemType, ResultType](
+    fn: Callable[[ItemType], ResultType], chunks: list[ItemType]
+) -> Iterator[ResultType]:
+    """Map fn over a few large chunks of work in the run-wide pool, and give the results in order.
+
+    parallel_map() does a list of 32 items or fewer in this process, because a small item costs
+    more in IPC than in work. A chunk here is large, so each chunk goes to the pool. The results
+    come one at a time, so a caller can write each result and release it before the next one.
+    """
+    if not sys._is_gil_enabled():  # ruff: ignore[private-member-access]
+        with ThreadPoolExecutor() as executor:
+            yield from executor.map(fn, chunks)
+        return
+    yield from get_process_pool().map(fn, chunks)
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:
@@ -1142,8 +1182,8 @@ def sort_ion_handlers(
 
     process_files() relies on the ion stages in order from lowest to highest to identify the top
     ion and to find each ion's photoionisation target. This function normalises the order before
-    main() writes the handler list to artisatomicionhandlers.json and passes it to
-    write_compositionfile().
+    write_files() in cli.py writes the handler list to artisatomicionhandlers_used.json and passes it
+    to write_compositionfile().
 
     This function rejects a duplicated element or ion stage, because the code downstream trusts
     the list. The ion count of write_compositionfile() is max - min + 1, so it cannot see a
@@ -1172,22 +1212,12 @@ def add_handlers_if_not_set(
     ion_handlers: list[tuple[int, list[tuple[int, str]]]],
     ions: Iterable[tuple[int | str, int | str]],
     handler: str,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Return a new sorted ion_handlers list with the handler added to each (atomic_number, ion_stage) of ions.
 
-    An ion that the list already holds keeps the handler that it has. Every reader adds its ions
-    here, so this is where the limits apply. An ion outside a limit never enters the list, and no
-    later step removes it again. A limit of None includes every ion. The function does not modify
+    An ion that the list already holds keeps the handler that it has. The function does not modify
     the input list, so the caller must use the return value.
     """
-    minstage = -sys.maxsize if minionstage is None else minionstage
-    maxstage = sys.maxsize if maxionstage is None else maxionstage
-    maxatomic = sys.maxsize if maxatomicnumber is None else maxatomicnumber
-
     ion_handlers_out: list[tuple[int, list[tuple[int, str]]]] = [
         (atomic_number, list(list_ions_handlers)) for atomic_number, list_ions_handlers in ion_handlers
     ]
@@ -1195,12 +1225,10 @@ def add_handlers_if_not_set(
     list_ions_of_element = dict(ion_handlers_out)
 
     for ion in ions:
-        # Readers derive these from numpy data, and json.dump() in main() cannot serialise numpy
+        # Readers derive these from numpy data, and json.dump() in write_files() cannot serialise numpy
         # integers. Normalise them here and not in each caller.
         atomic_number = int(ion[0])
         ion_stage = int(ion[1])
-        if not (minstage <= ion_stage <= maxstage and atomic_number <= maxatomic):
-            continue
 
         list_ions_handlers_out = list_ions_of_element.get(atomic_number)
         if list_ions_handlers_out is None:

@@ -14,13 +14,12 @@ import polars as pl
 from artisatomic.base import breaks_deltaj_rule
 from artisatomic.base import find_file_check_extension
 from artisatomic.base import fixed_width_column
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
@@ -28,6 +27,7 @@ from artisatomic.base import scan_file_lines
 from artisatomic.base import TESTMODE
 from artisatomic.levelnames import lchars
 from artisatomic.levelnames import split_count_and_n
+from artisatomic.levelnames import subshell_capacity
 
 kuruczfolder = PYDIR / ".." / "atomic-data-kurucz"
 kuruczdatapath = kuruczfolder.resolve()
@@ -165,8 +165,8 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
 def find_gfall(atomic_number: int, ion_charge: int) -> Path:
     """Locate one ion's Kurucz line list in the extendedatoms layout or the zztar layout.
 
-    Raises FileNotFoundError if the ion has no file, which is how callers detect that Kurucz
-    has no data for it.
+    Raises FileNotFoundError if the ion has no file. get_ion_handlers() calls it to check the files
+    of the built-in selection before the read starts.
     """
     stems = [
         kuruczdatapath / "extendedatoms" / f"gf{atomic_number:02d}{ion_charge:02d}.lines",
@@ -201,24 +201,41 @@ def kurucz_label_parity(label: str) -> int | None:
     the n of the next one. For example, "p25s" can be p2 5s or p 25s. The function tries each
     reading, and it gives None if the readings give different parities.
     """
-    configuration, _, term = label.partition(" ")
+    configurationwords, term = label_words(label)
     if "*" in term:
         return 1
-    if not term or label_configuration_regex.fullmatch(configuration) is None:
+    if not term or not configurationwords:
         return None
-    orbitals = re.findall(r"([spdfgh])(\d*)", configuration)
+    if any(label_configuration_regex.fullmatch(word) is None for word in configurationwords):
+        return None
     parities = {0}
-    for index, (letter, digits) in enumerate(orbitals):
-        l = orbital_l[letter]
-        isnotlast = index < len(orbitals) - 1
-        orbitalparities = set()
-        for countlength in range(len(digits) + 1) if isnotlast else [len(digits)]:
-            count = int(digits[:countlength]) if countlength > 0 else 1
-            if digits[countlength:].startswith("0") or not 1 <= count <= 4 * l + 2:
-                continue
-            orbitalparities.add(count * l % 2)
-        parities = {(a + b) % 2 for a in parities for b in orbitalparities}
+    # each word on its own: a digit run can join two orbitals only inside one word ("p25s")
+    for word in configurationwords:
+        orbitals = re.findall(r"([spdfgh])(\d*)", word)
+        for index, (letter, digits) in enumerate(orbitals):
+            l = orbital_l[letter]
+            isnotlast = index < len(orbitals) - 1
+            orbitalparities = set()
+            for countlength in range(len(digits) + 1) if isnotlast else [len(digits)]:
+                count = int(digits[:countlength]) if countlength > 0 else 1
+                if digits[countlength:].startswith("0") or not 1 <= count <= subshell_capacity(l):
+                    continue
+                orbitalparities.add(count * l % 2)
+            parities = {(a + b) % 2 for a in parities for b in orbitalparities}
     return parities.pop() if len(parities) == 1 else None
+
+
+def label_words(label: str) -> tuple[list[str], str]:
+    """Split a Kurucz level label into its configuration words and its term.
+
+    The term is the last word, or the last two words where the last one is a number ("3P 2"). A
+    label can give the configuration in more than one word, as Y I "5s2 5p z2P" does.
+    """
+    words = label.split()
+    if len(words) < 2:
+        return [], ""
+    termstart = len(words) - 2 if len(words) > 2 and words[-1].isdigit() else len(words) - 1
+    return words[:termstart], " ".join(words[termstart:])
 
 
 def is_line_component() -> pl.Expr:
@@ -381,6 +398,69 @@ def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFra
     return dfgfall.select(
         pl.exclude("gfallrow", "side", "knownj", "weight", "^twoj.*$", "^possible_.*$", "^parity_.*$")
     )
+
+
+def round_j_to_half_integers(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
+    """Round a J that is not a multiple of 1/2 to the nearest J that the ion can have.
+
+    Two gfall files give such a J: Eu I "d6s a10D" at 13778.68 cm^-1 has J = 6.6, and one W II row
+    gives "6p z6F" at 46493.43 cm^-1 J = 4.7. g = 2J + 1 is then not a whole number. A level of an
+    ion with an odd count of electrons has an odd 2J, and other levels have an even 2J.
+    """
+    for side in ("lower", "upper"):
+        twoj = 2 * pl.col(f"j_{side}")
+        nothalf = (twoj - twoj.round()).abs() > 1e-6
+        rows = dfgfall.filter(nothalf)
+        if rows.is_empty():
+            continue
+        nearest = twoj.round()
+        # the nearest 2J with the parity of the electron count
+        allowed = (
+            pl.when(nearest % 2 == nelectrons % 2)
+            .then(nearest)
+            .otherwise(pl.when(twoj > nearest).then(nearest + 1).otherwise(nearest - 1))
+        )
+        example = rows.select(f"label_{side}", f"energyabovegsinpercm_{side}", f"j_{side}").row(0)
+        log_comment(
+            flog,
+            ("adata", "transitiondata"),
+            f"WARNING: On {lines_text(rows.height)}, the file gives a J that is not a multiple of 1/2, for example"
+            f" J = {example[2]} for '{example[0]}' at {example[1]} cm^-1. The reader rounds such a J to the"
+            " nearest J that the ion can have.",
+        )
+        dfgfall = dfgfall.with_columns(
+            pl.when(nothalf).then(allowed / 2).otherwise(pl.col(f"j_{side}")).alias(f"j_{side}")
+        )
+    return dfgfall
+
+
+def drop_lines_of_a_second_ground_j(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
+    """Keep one J for the levels at 0 cm^-1, and drop the lines that give another J there.
+
+    A gfall row can give the ground level a wrong J. S I gives one line from "3p4 3P" at 0.000 cm^-1
+    with J = 0 (3P0 is at 573.64 cm^-1), and Mg IV and Dy I have one such line each. The reader keys
+    a level on its energy and J, so such a row makes a second level at 0 cm^-1, and the sort can make
+    it the first level of the ion. The J that most lines give at 0 cm^-1 stays.
+    """
+    groundj = pl.concat(
+        dfgfall.filter(pl.col(f"energyabovegsinpercm_{side}") == 0.0).select(j=pl.col(f"j_{side}"))
+        for side in ("lower", "upper")
+    )
+    jcounts = groundj["j"].value_counts(sort=True)
+    if jcounts.height < 2:
+        return dfgfall
+    keptj = jcounts["j"][0]
+    stray = ((pl.col("energyabovegsinpercm_lower") == 0.0) & (pl.col("j_lower") != keptj)) | (
+        (pl.col("energyabovegsinpercm_upper") == 0.0) & (pl.col("j_upper") != keptj)
+    )
+    ndropped = dfgfall.filter(stray).height
+    log_comment(
+        flog,
+        ("adata", "transitiondata"),
+        f"WARNING: The file gives the level at 0 cm^-1 with {jcounts.height:d} J values. The reader keeps J = {keptj},"
+        f" which {lines_text(jcounts['count'][0])} give, and drops the {lines_text(ndropped)} with another J at 0 cm^-1.",
+    )
+    return dfgfall.filter(~stray)
 
 
 def warn_impossible_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> None:
@@ -652,9 +732,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     if dfgfall.select(pl.n_unique("atomic_number"), pl.n_unique("ion_charge")).row(0) != (1, 1):
         msg = f"Expected exactly one unique ion in file {path_gfall}, but found multiple"
         raise ValueError(msg)
+    fileion = dfgfall.select(pl.first("atomic_number"), pl.first("ion_charge")).row(0)
+    if fileion != (atomic_number, ion_stage - 1):
+        msg = (
+            f"{path_gfall} holds the lines of Z={fileion[0]} ion_stage={fileion[1] + 1}, and not of"
+            f" Z={atomic_number} ion_stage={ion_stage}"
+        )
+        raise ValueError(msg)
 
+    dfgfall = round_j_to_half_integers(dfgfall, atomic_number - ion_charge, flog)
     dfgfall = assign_missing_j(dfgfall, atomic_number - ion_charge, flog)
     dfgfall = combine_line_components(dfgfall, flog)
+    dfgfall = drop_lines_of_a_second_ground_j(dfgfall, flog)
     warn_impossible_j(dfgfall, atomic_number - ion_charge, flog)
     gfall = dfgfall.lazy()
 
@@ -781,15 +870,17 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
 
     log_and_print(flog, f"The reader got {len(transitions):d} transitions.")
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     return ionization_energy_in_ev, dflevels, transitions
 
 
-def get_level_valence_n(levelname: str) -> int | None:
+def get_level_valence_n(levelname: str, nelectrons: int | None = None) -> int | None:
     """Principal quantum number of the valence electron, read from a Kurucz level label.
+
+    nelectrons is the count of electrons of the ion. With it, the function finds a label that gives
+    electron counts and no n (Co I "d7s2"), and an n that is a count read as n (Ca V "s2p4").
+    iondata.py gives it, because the handler registry marks this parser as one that takes it.
 
     Returns None for a label that it cannot parse. The caller, match_hydrogenic_phixs(), then
     gives the level no estimate and writes a warning to the log file. A guessed n would give the
@@ -802,6 +893,86 @@ def get_level_valence_n(levelname: str) -> int | None:
     Kept separate from the other readers' versions. Each data source names its levels
     differently, so a shared parser would have to guess the convention of each name.
     """
+    n = label_valence_n(levelname)
+    if nelectrons is None:
+        return n
+
+    # The label of a level often gives no n at all, only the electron counts: Co I "d7s2" is
+    # 3d7 4s2, and Co III "d7" is 3d7. The parser then reads a count as n. If the counts of the
+    # configuration words sum to the electrons outside the noble gas core of the ion, the label
+    # gives no n, and the valence orbital takes its lowest n outside the core.
+    label = levelname.split(",", maxsplit=1)[0]
+    configurationwords, _ = label_words(label)
+    core = max(corecount for corecount in noble_gas_cores if corecount < nelectrons)
+    countsonly = [re.fullmatch(r"(?:[spdfgh]\d*)+", word.rstrip("*'")) for word in configurationwords]
+    if configurationwords and all(countsonly):
+        orbitals = [orbital for word in configurationwords for orbital in re.findall(r"([spdfgh])(\d*)", word)]
+        counts = [int(digits) if digits else 1 for _, digits in orbitals]
+        # (n, l) of each orbital in this reading. A label gives its orbitals in the order of n, and
+        # of l for one n. C I "p3s" is 2p 3s: its counts also sum to 4, but 2p then 2s is out of order.
+        shells = [(lowest_n_outside_core(core, orbital_l[letter]), orbital_l[letter]) for letter, _ in orbitals]
+        if (
+            sum(counts) == nelectrons - core
+            and all(count <= subshell_capacity(l) for (_, l), count in zip(shells, counts, strict=True))
+            and all(first < second for first, second in itertools.pairwise(shells))
+        ):
+            return shells[-1][0]
+
+    # an n below the lowest n of the orbital outside the core is a count that the parser read as n
+    valenceletter = label_valence_letter(levelname)
+    if n is not None and valenceletter in orbital_l and n < lowest_n_outside_core(core, orbital_l[valenceletter]):
+        return None
+    return n
+
+
+# the electron counts of the noble gases, and the subshells that each one fills
+noble_gas_cores = (0, 2, 10, 18, 36, 54, 86)
+core_subshells = {
+    0: (),
+    2: ((1, 0),),
+    10: ((1, 0), (2, 0), (2, 1)),
+    18: ((1, 0), (2, 0), (2, 1), (3, 0), (3, 1)),
+    36: ((1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2), (4, 0), (4, 1)),
+    54: ((1, 0), (2, 0), (2, 1), (3, 0), (3, 1), (3, 2), (4, 0), (4, 1), (4, 2), (5, 0), (5, 1)),
+    86: (
+        (1, 0),
+        (2, 0),
+        (2, 1),
+        (3, 0),
+        (3, 1),
+        (3, 2),
+        (4, 0),
+        (4, 1),
+        (4, 2),
+        (4, 3),
+        (5, 0),
+        (5, 1),
+        (5, 2),
+        (6, 0),
+        (6, 1),
+    ),
+}
+
+
+def lowest_n_outside_core(core: int, l: int) -> int:
+    """Give the lowest n of an orbital with angular momentum l that the noble gas core does not fill."""
+    filled = core_subshells[core]
+    return next(n for n in itertools.count(l + 1) if (n, l) not in filled)
+
+
+def label_valence_letter(levelname: str) -> str | None:
+    """Give the orbital letter of the valence orbital of a Kurucz level name, or None."""
+    namesplit = levelname.replace("  ", " ").split(" ")
+    if len(namesplit) < 2 or not (part := namesplit[-2]):
+        return None
+    if part.endswith(")") and "(" in part:
+        part = part[: part.rfind("(")]
+    letters = re.findall(r"[spdfgh]", part.rstrip("*'"))
+    return letters[-1] if letters else None
+
+
+def label_valence_n(levelname: str) -> int | None:
+    """Give the n that a Kurucz level label writes for its valence orbital, or None (see get_level_valence_n())."""
     namesplit = levelname.replace("  ", " ").split(" ")
     if len(namesplit) < 2 or not (part := namesplit[-2]):
         return None

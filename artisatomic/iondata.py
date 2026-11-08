@@ -1,7 +1,7 @@
 """Read a single ion's levels, transitions, and photoionisation data from its source data set."""
 
 import argparse
-import contextlib
+import functools
 import itertools
 import typing as t
 from collections.abc import Callable
@@ -80,7 +80,8 @@ class Handler:
 
     get_level_valence_n is the handler's own level-name parser. The hydrogenic photoionisation
     estimate uses it. None leaves the ion without cross sections, and match_hydrogenic_phixs()
-    then writes a warning.
+    then writes a warning. With valence_n_takes_nelectrons, read_ion_data() gives the parser the
+    count of electrons of the ion as the keyword nelectrons.
 
     read_coldata, when set, takes (atomic_number, ion_stage, dfenergylevels, args, flog). It is for
     a data set that keeps the collision strengths in their own file. It returns them as a frame of
@@ -100,7 +101,9 @@ class Handler:
 
     description: str | Callable[[int, int], str]
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
-    get_level_valence_n: Callable[[str], int | None] | None = None
+    get_level_valence_n: Callable[..., int | None] | None = None
+    # the parser takes the keyword nelectrons, the count of electrons of the ion
+    valence_n_takes_nelectrons: bool = False
     returns_upsilons: bool = False
     reader_takes_args: bool = False
     read_coldata: Callable[..., pl.DataFrame] | None = None
@@ -116,6 +119,7 @@ handlers: dict[str, Handler] = {
         readkuruczdata.description,
         readkuruczdata.read_levels_and_transitions,
         readkuruczdata.get_level_valence_n,
+        valence_n_takes_nelectrons=True,
     ),
     "dream": Handler(
         readdreamdata.description,
@@ -123,7 +127,7 @@ handlers: dict[str, Handler] = {
     ),
     "lisbon": Handler(readlisbondata.description, readlisbondata.read_levels_and_transitions),
     "floers25calibwithforbidden": Handler(
-        readfloers25data.description_withforbidden,
+        readfloers25data.description_calibrated_withforbidden,
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
     ),
@@ -254,6 +258,8 @@ def read_ion_data(
             and args.nlevels_hydrogenic_for_unknown_phixs > 0
         ):
             get_level_valence_n = handlerspec.get_level_valence_n
+            if get_level_valence_n is not None and handlerspec.valence_n_takes_nelectrons:
+                get_level_valence_n = functools.partial(get_level_valence_n, nelectrons=atomic_number - ion_stage + 1)
             (
                 photoionization_crosssections,
                 photoionization_targetfractions,
@@ -262,7 +268,10 @@ def read_ion_data(
                 atomic_number, dfenergylevels, ionization_energy_ev, handler, get_level_valence_n, args, flog
             )
 
-    dftransitions = transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions)
+    # all rows, and not the first 100 (see leveltuples_to_pldataframe())
+    dftransitions = (
+        transitions if isinstance(transitions, pl.DataFrame) else pl.DataFrame(transitions, infer_schema_length=None)
+    )
 
     return IonData(
         ion_stage=ion_stage,
@@ -280,9 +289,7 @@ def read_ion_data(
     )
 
 
-def resolve_photoion_targetfractions(
-    iondatalist: list[IonData], atomic_number: int | None = None, logpath: str | Path | None = None
-) -> None:
+def resolve_photoion_targetfractions(iondatalist: list[IonData], atomic_number: int, logpath: str | Path) -> None:
     """Fill in the photoionisation target fractions of each ion whose reader supplied none.
 
     An ion's targets are levels of the next ion up. This function can therefore resolve the
@@ -290,15 +297,10 @@ def resolve_photoion_targetfractions(
     has no upper ion to photoionise to), or an ion whose reader already gave per-level fractions.
 
     Call this before write_output_files() unless the user switched cross sections off entirely.
-    The writer needs the fractions and does not resolve them itself. Give atomic_number and
-    logpath (see base.log_path()) to append the resolve messages to the log file of the run. The
-    log file holds all ions, so the messages of each ion come after a line that names the ion.
+    The writer needs the fractions and does not resolve them itself. The resolve messages go to
+    the log file of the run (see base.log_path()). The log file holds all ions, so the messages
+    of each ion come after a line that names the ion.
     """
-    # a half-given pair is always a caller bug, so the function raises
-    if (atomic_number is None) != (logpath is None):
-        msg = "give both atomic_number and logpath, or neither"
-        raise ValueError(msg)
-
     if not iondatalist:
         return
 
@@ -314,21 +316,17 @@ def resolve_photoion_targetfractions(
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
         if not iondata.photoionization_targetfractions:
-            # the IonLog records into the comment lists of the read pass
-            logcontext = (
-                Path(logpath).open("a", encoding="utf-8")  # ruff: ignore[open-file-with-context-handler]
-                if logpath is not None and atomic_number is not None
-                else contextlib.nullcontext()
-            )
-            with logcontext as logstream:
-                flog = None if logstream is None else IonLog(logstream, iondata.comments)
+            with Path(logpath).open("a", encoding="utf-8") as logstream:
+                # the IonLog records into the comment lists of the read pass
+                flog = IonLog(logstream, iondata.comments)
                 # an ion with no target names has nothing to resolve, so its section would be empty
-                if flog is not None and atomic_number is not None and iondata.photoion_targetconfigs is not None:
-                    ionlabel = ion_label(atomic_number, iondata.ion_stage)
-                    log_and_print(flog, f"\n===========> {ionlabel} photoionisation targets:")
+                if iondata.photoion_targetconfigs is not None:
+                    log_and_print(
+                        flog, f"\n===========> {ion_label(atomic_number, iondata.ion_stage)} photoionisation targets:"
+                    )
                 iondata.photoionization_targetfractions = readhillierdata.get_photoiontargetfractions(
                     iondata.dfenergylevels,
                     upperiondata.dfenergylevels,
                     iondata.photoion_targetconfigs,
-                    flog=flog,
+                    flog,
                 )

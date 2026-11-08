@@ -1,6 +1,9 @@
 """Write the ARTIS output files: adata.txt, transitiondata.txt, phixsdata_v2.txt, compositiondata.txt."""
 
 import argparse
+import itertools
+import math
+import os
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -23,6 +26,7 @@ from artisatomic.base import IonLog
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_path
+from artisatomic.base import map_chunks
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
@@ -528,8 +532,15 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 log_deltaj_contradictions(flog, dftransitions_ion, ionstr)
                 # an anti join, not set.difference() over iter_rows(): that built a Python tuple
                 # for each of the millions of transitions of a cmfgen ion
-                dfupsilon_only_transitions = dfupsilon.join(
-                    dftransitions_ion.select("lowerlevel", "upperlevel"), on=["lowerlevel", "upperlevel"], how="anti"
+                # 243 ions of a default run have no upsilon value, and the join then has nothing to find
+                dfupsilon_only_transitions = (
+                    dfupsilon
+                    if dfupsilon.is_empty()
+                    else dfupsilon.join(
+                        dftransitions_ion.select("lowerlevel", "upperlevel"),
+                        on=["lowerlevel", "upperlevel"],
+                        how="anti",
+                    )
                 )
 
             # a negative upsilon is a mark of the reader and not a collision strength (see resolve_coll_str())
@@ -562,8 +573,12 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 # of the ion (2.6M of them for the cmfgen set). A Python callback for each row
                 # would cost more than the whole rest of the write. maintain_order keeps the
                 # frame in the order the reader produced it.
-                dftransitions_ion = dftransitions_ion.join(
-                    dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
+                dftransitions_ion = (
+                    dftransitions_ion.with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
+                    if dfupsilon.is_empty()
+                    else dftransitions_ion.join(
+                        dfupsilon, on=["lowerlevel", "upperlevel"], how="left", maintain_order="left"
+                    )
                 ).pipe(resolve_coll_str)
 
             # the counts come from the final transition frame, so they include the upsilon-only
@@ -591,6 +606,7 @@ def write_output_files(atomic_number: int, iondatalist: list[IonData], args: arg
                 else dftransitions_ion.sort(by=("lowerlevel", "upperlevel"), maintain_order=True)
             )
             log_degenerate_transitions(flog, dfenergylevels_ion, dftransitions_ion)
+            log_repeated_level_pairs(flog, dftransitions_ion)
             with (outdir / "transitiondata.txt").open("a", encoding="utf-8") as ftransitiondata:
                 write_transition_data(
                     ftransitiondata,
@@ -678,19 +694,40 @@ def write_adata(
     targets of the ion below also name level id 0 as the ground state (see match_hydrogenic_phixs()
     in phixs.py). A reader that keeps the order of its file can give a different level first. The
     function therefore stops the run when level id 0 is not a level of the lowest energy.
+
+    The function also stops the run for an ion with no levels, for an energy or an ionisation energy
+    that is not a finite number, and for a statistical weight that is not a finite positive number.
+    ARTIS stops for each of these when it reads the file.
     """
     log_and_print(flog, f"artisatomic writes {dfenergylevels.height} levels to adata.txt.")
     # not an assert: this guards written output and must survive python -O
-    if dfenergylevels.height > 0:
-        energies = dfenergylevels["energyabovegsinpercm"]
-        lowestlevelid = energies.arg_min()
-        if lowestlevelid is not None and energies[0] > energies[lowestlevelid]:
-            msg = (
-                f"Z={atomic_number} ion_stage={ion_stage}: level id 0 has the energy {energies[0]} cm^-1, but level"
-                f" id {lowestlevelid} has the lower energy {energies[lowestlevelid]} cm^-1. ARTIS takes the first"
-                " level as the ground level, so the reader must give the lowest level first."
-            )
-            raise ValueError(msg)
+    if dfenergylevels.height == 0:
+        msg = f"Z={atomic_number} ion_stage={ion_stage} has no levels. ARTIS needs one level or more for each ion."
+        raise ValueError(msg)
+    if not math.isfinite(ionization_energy):
+        msg = f"Z={atomic_number} ion_stage={ion_stage} has the ionisation energy {ionization_energy}"
+        raise ValueError(msg)
+    badlevels = dfenergylevels.filter(
+        ~pl.col("energyabovegsinpercm").cast(pl.Float64).is_finite().fill_null(False)
+        | ~(pl.col("g").cast(pl.Float64).is_finite() & (pl.col("g").cast(pl.Float64) > 0.0)).fill_null(False)
+    )
+    if not badlevels.is_empty():
+        levelid, energy, g = badlevels.select("levelid", "energyabovegsinpercm", "g").row(0)
+        msg = (
+            f"Z={atomic_number} ion_stage={ion_stage} has {badlevels.height} levels with an energy that is not a"
+            f" finite number or a statistical weight that is not a finite positive number, for example level id"
+            f" {levelid} with the energy {energy} cm^-1 and g = {g}"
+        )
+        raise ValueError(msg)
+    energies = dfenergylevels["energyabovegsinpercm"]
+    lowestlevelid = energies.arg_min()
+    if lowestlevelid is not None and energies[0] > energies[lowestlevelid]:
+        msg = (
+            f"Z={atomic_number} ion_stage={ion_stage}: level id 0 has the energy {energies[0]} cm^-1, but level"
+            f" id {lowestlevelid} has the lower energy {energies[lowestlevelid]} cm^-1. ARTIS takes the first"
+            " level as the ground level, so the reader must give the lowest level first."
+        )
+        raise ValueError(msg)
     write_comment_block(fatommodels, "adata", titlelines, flog)
     fatommodels.write(f"{atomic_number:12d}{ion_stage:12d}{dfenergylevels.height:12d}{ionization_energy:15.7f}\n")
 
@@ -727,18 +764,14 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
     if dftransitions_ion.is_empty() or "energyabovegsinpercm" not in dfenergylevels_ion.columns:
         return
 
-    energy = dfenergylevels_ion.select("levelid", "energyabovegsinpercm")
-    notabove = (
-        dftransitions_ion.join(
-            energy.select(pl.col("levelid").alias("lowerlevel"), pl.col("energyabovegsinpercm").alias("e_lower")),
-            on="lowerlevel",
-        )
-        .join(
-            energy.select(pl.col("levelid").alias("upperlevel"), pl.col("energyabovegsinpercm").alias("e_upper")),
-            on="upperlevel",
-        )
-        .filter(pl.col("e_lower") >= pl.col("e_upper"))
-    )
+    # a gather by level id, and not two joins: the writer already checked that each id names a level
+    levelids = dfenergylevels_ion["levelid"].to_numpy()
+    energy_of_levelid = np.full(int(levelids.max()) + 1, np.nan)
+    energy_of_levelid[levelids] = dfenergylevels_ion["energyabovegsinpercm"].to_numpy()
+    notabove = dftransitions_ion.with_columns(
+        e_lower=energy_of_levelid[dftransitions_ion["lowerlevel"].to_numpy()],
+        e_upper=energy_of_levelid[dftransitions_ion["upperlevel"].to_numpy()],
+    ).filter(pl.col("e_lower") >= pl.col("e_upper"))
     if notabove.is_empty():
         return
 
@@ -762,6 +795,46 @@ def log_degenerate_transitions(flog, dfenergylevels_ion: pl.DataFrame, dftransit
         )
 
 
+def log_repeated_level_pairs(flog, dftransitions_ion: pl.DataFrame) -> None:
+    """Report the transitions that share a pair of levels with an earlier transition.
+
+    ARTIS adds the A values of two lines of one level pair into one transition (input.cc). That is
+    right for two distinct lines that a data set gives to one pair. It doubles a line that a data
+    set lists two times. A reader removes such exact repeats. This function reports the rest, so
+    that a reader of the output file knows that ARTIS merges them.
+
+    The frame must be in the order of the level pairs, as the writer sorts it.
+    """
+    if dftransitions_ion.is_empty():
+        return
+    nrepeated = dftransitions_ion.select(
+        (
+            (pl.col("lowerlevel") == pl.col("lowerlevel").shift())
+            & (pl.col("upperlevel") == pl.col("upperlevel").shift())
+        ).sum()
+    ).item()
+    if nrepeated:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: the count of transitions that name the same pair of levels as the transition before them is"
+            f" {nrepeated:d}. ARTIS adds the A values of such transitions into one transition.",
+        )
+
+
+# an ion with fewer rows formats them in this process (see write_transition_data())
+transition_rows_for_the_pool = 50_000
+
+
+def format_transition_rows(columns: tuple[np.ndarray, ...]) -> str:
+    """Give the transition lines of transitiondata.txt for the columns lower, upper, A, coll_str and forbidden.
+
+    One %-format over Python lists, and not an f-string for each row. The two forms give the same bytes
+    for every value, and this form is faster.
+    """
+    return "".join(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*(column.tolist() for column in columns), strict=True)))
+
+
 def write_transition_data(
     ftransitiondata,
     atomic_number: int,
@@ -775,6 +848,9 @@ def write_transition_data(
     Level ids are zero-based in memory but numbered from one in the output. The writer lists the
     lower id of every transition first. The comment block of the ion comes before the header line
     (see write_comment_block()).
+
+    The function stops the run for an A value that is not a finite number of 0 or more, and for a
+    collision strength that is not a finite number. ARTIS stops when it reads "nan" or "inf".
     """
     log_and_print(flog, f"artisatomic writes {dftransitions_ion.height} transitions to transitiondata.txt.")
 
@@ -791,8 +867,22 @@ def write_transition_data(
                 f" name the lower level id first, e.g. {levelid_lower} -> {levelid_upper}"
             )
             raise ValueError(msg)
+        badvalues = dftransitions_ion.filter(
+            ~(pl.col("A").is_finite() & (pl.col("A") >= 0.0)).fill_null(False)
+            | ~pl.col("coll_str").is_finite().fill_null(False)
+        )
+        if not badvalues.is_empty():
+            levelid_lower, levelid_upper, avalue, collstr = badvalues.select(
+                "lowerlevel", "upperlevel", "A", "coll_str"
+            ).row(0)
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} has {badvalues.height} transitions with an A value that is"
+                f" not a finite number of 0 or more, or a collision strength that is not a finite number, for"
+                f" example level ids {levelid_lower} -> {levelid_upper} with A = {avalue} and coll_str = {collstr}"
+            )
+            raise ValueError(msg)
 
-    # sums, and not a filtered copy of the frame for each count: a cmfgen ion has 2.6M rows
+    # sums, and not a filtered copy of the frame for each count: a Floers+25 ion has up to 21M rows
     num_forbidden_transitions, num_collision_strengths_applied = (
         (0, 0)
         if dftransitions_ion.is_empty()
@@ -819,18 +909,25 @@ def write_transition_data(
     ftransitiondata.write(f"{atomic_number:7d}{ion_stage:7d}{dftransitions_ion.height:12d}\n")
 
     if not dftransitions_ion.is_empty():
-        # One %-format over the column lists, not an f-string for each row from iter_rows(). This
-        # runs 2.6M times for the cmfgen set and was the largest single cost of the build. The two
-        # forms give the same bytes for every value. Level ids are zero-based in memory, but the
-        # output format numbers them from one.
-        columns = [
-            (dftransitions_ion["lowerlevel"] + 1).to_list(),
-            (dftransitions_ion["upperlevel"] + 1).to_list(),
-            dftransitions_ion["A"].to_list(),
-            dftransitions_ion["coll_str"].to_list(),
-            dftransitions_ion["forbidden"].to_list(),
-        ]
-        ftransitiondata.writelines(map("%4d %4d %11.5e %9.2e %d\n".__mod__, zip(*columns, strict=True)))
+        # Level ids are zero-based in memory, but the output format numbers them from one.
+        columns = (
+            (dftransitions_ion["lowerlevel"] + 1).to_numpy(),
+            (dftransitions_ion["upperlevel"] + 1).to_numpy(),
+            dftransitions_ion["A"].to_numpy(),
+            dftransitions_ion["coll_str"].to_numpy(),
+            dftransitions_ion["forbidden"].to_numpy(),
+        )
+        nrows = dftransitions_ion.height
+        # The format of the rows was 60% of the time of a default run (474 ns for each row). The
+        # pool does a large ion in chunks. A small ion stays here, because the IPC costs more.
+        if nrows < transition_rows_for_the_pool:
+            ftransitiondata.write(format_transition_rows(columns))
+        else:
+            # one chunk for each worker of the run-wide pool, which has the default size of ProcessPoolExecutor
+            nchunks = os.process_cpu_count() or 1
+            bounds = np.linspace(0, nrows, nchunks + 1, dtype=np.int64)
+            chunks = [tuple(column[start:end] for column in columns) for start, end in itertools.pairwise(bounds)]
+            ftransitiondata.writelines(map_chunks(format_transition_rows, chunks))
 
     ftransitiondata.write("\n")
 
@@ -960,6 +1057,15 @@ def write_phixs_data(
         msg = f"Z={atomic_number} ion_stage={ion_stage} ground state has zero photoionisation cross section"
         log_and_print(flog, f"ERROR: {msg}")
         raise ValueError(msg)
+    # ARTIS stops when an ion has a table for an excited level and none for its ground level (input.cc)
+    if levelids_to_write and 0 not in levelids_to_write:
+        msg = (
+            f"Z={atomic_number} ion_stage={ion_stage} has photoionisation cross sections for {len(levelids_to_write)}"
+            f" levels but none for the ground level (the lowest level with a table is level id {levelids_to_write[0]})."
+            " ARTIS stops for such an ion."
+        )
+        log_and_print(flog, f"ERROR: {msg}")
+        raise ValueError(msg)
 
     # ARTIS gives each entry of a target list its own target level and fraction (input.cc). A
     # repeated target level would get two fractions of the same recombination, and a bad
@@ -984,6 +1090,14 @@ def write_phixs_data(
             msg = (
                 f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: phixs target fractions"
                 f" sum to {probability_sum:.5f} != 1.0 ({targetlist})"
+            )
+            log_and_print(flog, f"ERROR: {msg}")
+            raise ValueError(msg)
+        # ARTIS stops for a target fraction that is not above zero, and it reads the printed value
+        if len(targetlist) > 1 and any(float(f"{fraction:12f}") <= 0.0 for _, fraction in targetlist):
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: a phixs target fraction"
+                f" prints as zero or less ({targetlist})"
             )
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
