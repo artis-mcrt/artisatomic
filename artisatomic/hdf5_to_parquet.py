@@ -569,7 +569,6 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
     newfolder.mkdir()
     backupfolder = workfolder / "old"
     keepworkfolder = False
-    installed = False
     try:
         for relativepath, table, metadata in tables:
             outputpath = newfolder / relativepath
@@ -580,9 +579,9 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             if outputfolder.exists():
                 outputfolder.rename(backupfolder)
             newfolder.rename(outputfolder)
-            installed = True
         except BaseException as exc:
-            if backupfolder.exists():
+            # with no new folder in the work folder, the install is complete and an interrupt came after it
+            if newfolder.exists() and backupfolder.exists():
                 try:
                     # an outputfolder that exists now is not the new tables: another process made it
                     if outputfolder.exists():
@@ -598,7 +597,7 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
         # the state of the disk, and not only the flag: the backup can be the only copy of the
         # earlier tables also after an interrupt in the handler above. A backup is safe to delete
         # only when the new tables are in their place.
-        if backupfolder.exists() and not installed:
+        if backupfolder.exists() and newfolder.exists():
             keepworkfolder = True
         if not keepworkfolder:
             shutil.rmtree(workfolder, ignore_errors=True)
