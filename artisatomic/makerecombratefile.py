@@ -23,10 +23,9 @@ class RecombRow(t.NamedTuple):
     RRC_total: float
 
 
-def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
+def read_nahar_rrcfile(filename) -> list[RecombRow]:
     """Read a Nahar total recombination rate file (.rrc) as a table of temperature and rate."""
-    if not noprint:
-        print(f"  reading {filename}")
+    print(f"  reading {filename}")
 
     header_row: list[str] = []
     with Path(filename).open(encoding="utf-8") as filein:
@@ -55,6 +54,11 @@ def read_nahar_rrcfile(filename, noprint=False) -> list[RecombRow]:
                     msg = f"The row does not have the number of items of the header:\n{header_row}\n{row}"
                     raise ValueError(msg)
                 records.append(RecombRow(*[float(row[index]) for index in [index_logt, index_low_n, index_tot]]))
+
+    # ARTIS stops for an ion with no temperature in its block, so a file with no rows must stop here
+    if not records:
+        msg = f"{filename} has a header row and no data rows"
+        raise ValueError(msg)
 
     return records
 
@@ -102,6 +106,10 @@ def import_chianti_core(firstion: str) -> t.Any:
         raise ModuleNotFoundError(msg) from err
 
 
+# the largest atomic number of the CHIANTI database
+max_chianti_atomic_number = 30
+
+
 def main():
     """Write recombrates.txt from the Nahar recombination rate files."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -135,6 +143,16 @@ def main():
             (atomic_number, lowerionstage, find_nahar_file(naharpath, atomic_number, lowerionstage))
             for lowerionstage in range(int(lowermost_ion_stage), int(uppermost_ion_stage))
         )
+
+    # CHIANTI holds the ions of Z <= 30 only, and ChiantiPy gives an error that names no ion for
+    # another one. ARTIS keeps its own rate for an ion with no block in recombrates.txt.
+    for atomic_number, lowerionstage, naharfilename in ionsources:
+        if naharfilename is None and atomic_number > max_chianti_atomic_number:
+            print(
+                f"WARNING: Z={atomic_number} {elsymbols[atomic_number]} ion stage {lowerionstage + 1} has no Nahar file,"
+                " and CHIANTI has no data above Z = 30. recombrates.txt gives no rates for this ion."
+            )
+    ionsources = [source for source in ionsources if source[2] is not None or source[0] <= max_chianti_atomic_number]
 
     firstchiantiion = next(
         (
