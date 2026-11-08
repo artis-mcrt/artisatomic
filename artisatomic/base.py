@@ -542,6 +542,11 @@ def to_ascii(text: str) -> str:
     )
 
 
+def count_text(count: int, noun: str, plural: str | None = None) -> str:
+    """Give a count with its noun, for example "1 transition" or "3 transitions"."""
+    return f"{count:d} {noun}" if count == 1 else f"{count:d} {plural or noun + 's'}"
+
+
 def comment_lines(lines: Iterable[str]) -> Iterator[str]:
     """Turn text lines into the comment lines of an ARTIS input file, in ASCII, each with its line end.
 
@@ -699,7 +704,8 @@ def split_levels_above_ionization(
         log_comment(
             flog,
             ("adata",),
-            f"WARNING: The reader dropped {len(fileindices_above_ionization):d} levels that are above the ionisation energy.",
+            f"WARNING: The reader dropped {count_text(len(fileindices_above_ionization), 'level')} above the"
+            " ionisation energy.",
         )
 
     dfboundlevels = dflevels.filter(~above_ionization)

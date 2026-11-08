@@ -768,7 +768,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         log_comment(
             flog,
             ("transitiondata",),
-            f"The reader dropped {transitions_in - transitions.height:d} lines that gfall lists more than one time.",
+            f"The reader dropped {lines_text(transitions_in - transitions.height)} that gfall lists more than one time.",
         )
 
     # the level ids follow a sort on (energy, J), but the file ordered its pair by energy alone.

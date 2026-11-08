@@ -13,7 +13,7 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import EnergyLevel
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import path_for_log
+from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 
 datafilepath = PYDIR / ".." / "atomic-data-groundstatesonlynist" / "groundstates.dat"
@@ -41,7 +41,7 @@ def read_ground_levels(atomic_number, ion_stage, flog):
     log_comment(
         flog,
         ("adata", "transitiondata"),
-        f"The ground level and the ionisation energy come from {path_for_log(datafilepath)}.",
+        f"The ground level and the ionisation energy come from {path_in_data_folder(datafilepath, datafilepath.parent)}.",
     )
     groundstatesdata = read_groundstates_table()
 
