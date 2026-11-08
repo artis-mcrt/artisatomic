@@ -265,7 +265,6 @@ def reduce_phixs_tables[KeyType](
     )
 
 
-# the nodes on [-1, 1] and the weights of the Gauss-Legendre rule of three points
 gauss_legendre_3 = ((-np.sqrt(0.6), 5.0 / 9.0), (0.0, 8.0 / 9.0), (np.sqrt(0.6), 5.0 / 9.0))
 
 
@@ -358,8 +357,8 @@ def reduce_phixs_tables_worker(
     # - a segment narrower than 0.25 kT takes a Gauss-Legendre rule of three points, with an error
     #   below 2e-10;
     # - a wider segment takes the exact integral of a polynomial times exp(-a s).
-    # Each rule fails where the other works. The exact form loses digits in a narrow segment, and three
-    # points miss the weight at the low end of a segment that is many kT wide.
+    # Each rule fails where the other works. The exact form loses digits in a narrow segment.
+    # Three points miss the weight at the low end of a segment that is many kT wide.
     a_hz = -minus_h_over_kb_t
     nu_start = grid_energyryd[:-1] * ryd_to_hz
     width_hz = np.diff(grid_energyryd) * ryd_to_hz
