@@ -175,7 +175,6 @@ where = ["."]
 include = ["artisatomic*"]
 
 [tool.setuptools_scm]
-write_to = "_version.py"
 local_scheme = "no-local-version"
 
 [tool.ty.rules]

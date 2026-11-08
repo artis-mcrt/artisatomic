@@ -13,7 +13,6 @@ from artisatomic.base import elsymbols
 from artisatomic.base import h_over_kb_in_K_sec
 from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
-from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_source
@@ -80,10 +79,8 @@ def match_hydrogenic_phixs(
     phixstables = {}
     # The lowest levels by energy, whatever order the reader kept them in. The stable sort keeps
     # levels of one energy in id order, and the code indexes every array here by level id.
-    lowest_levels = (
-        leveltuples_to_pldataframe(energy_levels)
-        .sort("energyabovegsinpercm", maintain_order=True)
-        .head(args.nlevels_hydrogenic_for_unknown_phixs)
+    lowest_levels = energy_levels.sort("energyabovegsinpercm", maintain_order=True).head(
+        args.nlevels_hydrogenic_for_unknown_phixs
     )
     # the counts of the levels that get no table, for one summary line in the comment block
     levels_above_ionization = 0

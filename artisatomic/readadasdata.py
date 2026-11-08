@@ -188,10 +188,6 @@ ions_not_offered = frozenset({(20, 3)})
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with an ADAS adf04 file to ion_handlers under the "adas" handler."""
     # the files ship compressed or plain, so match every form of the name that a reader accepts
@@ -203,9 +199,6 @@ def extend_ion_list(
         ion_handlers,
         adasions,
         "adas",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 
@@ -340,8 +333,8 @@ def _read_adf04_header(line: str, atomic_number: int, ion_stage: int, filepath: 
     return ionization_energy_percm * hc_in_ev_cm
 
 
-def _read_adf04_temperatures(line: str, filepath: str | Path) -> tuple[list[str], list[float]]:
-    """Return the temperature fields of the line that holds ZEFF, ITYP and the temperatures, as text and as numbers.
+def _read_adf04_temperatures(line: str, filepath: str | Path) -> list[float]:
+    """Return the temperatures of the line that holds ZEFF, ITYP and the temperatures.
 
     The fields must be in the fixed columns of the specification, because the reader takes each
     collision row from the same columns. A file in a different layout stops here with an error.
@@ -376,7 +369,7 @@ def _read_adf04_temperatures(line: str, filepath: str | Path) -> tuple[list[str]
         )
         raise ValueError(msg)
     try:
-        return temperatures, [adf04_number(text) for text in temperatures]
+        return [adf04_number(text) for text in temperatures]
     except ValueError:
         msg = f"{filepath} has a temperature that is not a number: {line!r}"
         raise ValueError(msg) from None
@@ -592,7 +585,7 @@ def read_adf04(
                 )
                 raise ValueError(msg)
 
-        temperatures, temperature_values = _read_adf04_temperatures(fleveltrans.readline(), filepath)
+        temperature_values = _read_adf04_temperatures(fleveltrans.readline(), filepath)
 
         # ADAS writes the other processes with a letter in column 1: R for recombination, S and I
         # for ionisation, P for proton impact. A comment line starts with a letter too. A blank
@@ -624,7 +617,7 @@ def read_adf04(
             raise ValueError(msg)
 
         nearest_index = min(
-            range(len(temperatures)), key=lambda index: abs(temperature_values[index] - electrontemperature)
+            range(len(temperature_values)), key=lambda index: abs(temperature_values[index] - electrontemperature)
         )
         log_comment(
             flog,
@@ -895,7 +888,6 @@ def _fill_co2_phixs(
     args,
     flog,
     photoionization_crosssections,
-    photoionization_thresholds_ev,
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co II. The tables are for the CMFGEN levels of Co II."""
@@ -988,9 +980,6 @@ def _fill_co2_phixs(
                 " that target.",
             )
 
-        # NaN, the arrays' initial value, says: the threshold energy comes from the level
-        # energies, not from the first energy point of the cross section table
-        photoionization_thresholds_ev[lowerlevelid] = np.nan
         photoionization_targetfractions[lowerlevelid] = combined.fractions
         photoionization_crosssections[lowerlevelid] = combined.table
 
@@ -1002,7 +991,6 @@ def _fill_co3_phixs(
     args,
     flog,
     photoionization_crosssections,
-    photoionization_thresholds_ev,
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co III. The table is for the QUB levels of Co III."""
@@ -1143,7 +1131,6 @@ def _fill_co3_phixs(
     # quartet gets the tabulated cross section, and the higher levels get an explicit
     # all-zero table.
     for levelid in range(levelcount):
-        photoionization_thresholds_ev[levelid] = np.nan
         photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
         if levelid < 4:
             photoionization_crosssections[levelid] = phixsvalues
@@ -1178,7 +1165,6 @@ def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args
         args,
         flog,
         photoionization_crosssections,
-        photoionization_thresholds_ev,
         photoionization_targetfractions,
     )
     return PhixsData(

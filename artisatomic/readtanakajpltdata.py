@@ -45,10 +45,6 @@ ionization_energy_warning_fraction = 0.02
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with a Tanaka et al. Japan-Lithuania data file to ion_handlers."""
     # each name holds the atomic number and the ion stage, e.g. 26_2.txt
@@ -58,9 +54,6 @@ def extend_ion_list(
         ion_handlers,
         tanakaions,
         "tanakajplt",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 

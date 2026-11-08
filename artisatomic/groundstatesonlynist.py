@@ -70,10 +70,6 @@ def read_ground_levels(atomic_number, ion_stage, flog):
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion in the NIST ground-state table to ion_handlers under the "gsnist" handler."""
     groundstatesdata = read_groundstates_table()
@@ -83,7 +79,4 @@ def extend_ion_list(
         ion_handlers,
         groundstatesdata.select("Z", "ion").iter_rows(),
         "gsnist",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )

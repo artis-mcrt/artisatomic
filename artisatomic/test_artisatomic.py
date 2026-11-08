@@ -607,44 +607,33 @@ def make_iondata(ion_stage, is_top_ion, targetfractions=None, targetconfigs=None
     )
 
 
-def test_resolve_photoion_targetfractions():
+def test_resolve_photoion_targetfractions(tmp_path: Path):
     """Each non-top ion gets its targets resolved against the next ion up; the top ion gets none."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     # the lower ion names the upper ion's ground state as its only target configuration
     lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
     upper = make_iondata(2, is_top_ion=True)
-    resolve_photoion_targetfractions([lower, upper])
+    resolve_photoion_targetfractions([lower, upper], 26, tmp_path / "log.txt")
 
     assert lower.photoionization_targetfractions == [[(0, 1.0)]]
     # the top ion has no upper ion to photoionise to, so the resolver leaves it as the reader gave it
     assert upper.photoionization_targetfractions == []
 
 
-def test_resolve_photoion_targetfractions_keeps_reader_supplied():
+def test_resolve_photoion_targetfractions_keeps_reader_supplied(tmp_path: Path):
     """An ion whose reader already gave per-level fractions (e.g. the hydrogenic estimate) keeps them."""
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     # a target list the Hillier resolver would never produce, so an overwrite would be visible
     supplied = [[(7, 1.0)]]
     lower = make_iondata(1, is_top_ion=False, targetfractions=supplied, targetconfigs=[[("gs2", 1.0)]])
-    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)])
+    resolve_photoion_targetfractions([lower, make_iondata(2, is_top_ion=True)], 26, tmp_path / "log.txt")
 
     assert lower.photoionization_targetfractions == supplied
 
 
-def test_resolve_photoion_targetfractions_rejects_a_half_given_log_pair():
-    """A caller must give both atomic_number and logpath, or neither, so a log is not lost silently."""
-    from artisatomic.iondata import resolve_photoion_targetfractions
-
-    lower = make_iondata(1, is_top_ion=False, targetconfigs=[[("gs2", 1.0)]])
-    upper = make_iondata(2, is_top_ion=True)
-
-    with pytest.raises(ValueError, match="both atomic_number and logpath"):
-        resolve_photoion_targetfractions([lower, upper], 8)
-
-
-def test_resolve_photoion_targetfractions_rejects_misordered_ions():
+def test_resolve_photoion_targetfractions_rejects_misordered_ions(tmp_path: Path):
     """The resolver rejects a list that is not one element's ions in ascending order.
 
     The resolver matches each ion against the next entry as its upper ion. A top ion anywhere but
@@ -653,11 +642,15 @@ def test_resolve_photoion_targetfractions_rejects_misordered_ions():
     from artisatomic.iondata import resolve_photoion_targetfractions
 
     with pytest.raises(ValueError, match="ascending ion stage order"):
-        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)])
+        resolve_photoion_targetfractions(
+            [make_iondata(1, is_top_ion=True), make_iondata(2, is_top_ion=True)], 26, tmp_path / "log.txt"
+        )
 
     # a list whose last ion is not the top ion lacks the upper ion that the last entry needs
     with pytest.raises(ValueError, match="ascending ion stage order"):
-        resolve_photoion_targetfractions([make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)])
+        resolve_photoion_targetfractions(
+            [make_iondata(1, is_top_ion=False), make_iondata(2, is_top_ion=False)], 26, tmp_path / "log.txt"
+        )
 
 
 def test_write_output_files_rejects_unresolved_targetfractions(tmp_path):
@@ -2198,111 +2191,15 @@ def test_parse_ion_handlers():
         parse_ion_handlers([[26, [[1, "cmfgen"], 2]]])
 
 
-def test_add_handlers_if_not_set_applies_the_limits():
+def test_keep_ions_within_limits():
     """A limit keeps an ion out of the list, and every element in the list keeps one ion or more."""
-    add_with_limits = functools.partial(add_handlers_if_not_set, minionstage=2, maxionstage=3, maxatomicnumber=30)
+    from artisatomic.ionhandlers import keep_ions_within_limits
 
-    assert add_with_limits([], [(26, 2)], "cmfgen") == [(26, [(2, "cmfgen")])]
-    assert add_with_limits([], [(26, 1)], "cmfgen") == []
-    assert add_with_limits([], [(26, 4)], "cmfgen") == []
-    assert add_with_limits([], [(38, 2)], "cmfgen") == []
+    ion_handlers = [(26, [(1, "cmfgen"), (2, "cmfgen"), (4, "cmfgen")]), (38, [(2, "kurucz")])]
 
-    # A limit of None includes every ion, which is what a direct call to a reader gets. A lower
-    # limit of None excludes no ion stage, not even 0.
-    assert add_handlers_if_not_set([], [(38, 9)], "cmfgen") == [(38, [(9, "cmfgen")])]
-    assert add_handlers_if_not_set([], [(38, 0)], "cmfgen") == [(38, [(0, "cmfgen")])]
-
-    # a rejected ion returns a new sorted list, as an accepted ion does
-    unsorted = [(38, [(2, "cmfgen")]), (26, [(1, "cmfgen")])]
-    assert add_with_limits(unsorted, [(26, 9)], "cmfgen") == [
-        (26, [(1, "cmfgen")]),
-        (38, [(2, "cmfgen")]),
-    ]
-
-
-# every module that offers extend_ion_list()
-extend_ion_list_modules = [
-    "groundstatesonlynist",
-    "readdreamdata",
-    "readfacdata",
-    "readfloers25data",
-    "readhillierdata",
-    "readmonsdata",
-    "readadasdata",
-    "readtanakajpltdata",
-]
-
-
-def keep_ions_within_limits(
-    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
-    minionstage: int,
-    maxionstage: int,
-    maxatomicnumber: int,
-) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Drop every ion outside the limits, and every element that then holds no ion."""
-    kept = [
-        (atomic_number, [ion for ion in listions if minionstage <= ion[0] <= maxionstage])
-        for atomic_number, listions in ion_handlers
-        if atomic_number <= maxatomicnumber
-    ]
-    return [(atomic_number, listions) for atomic_number, listions in kept if listions]
-
-
-@pytest.mark.parametrize("modulename", extend_ion_list_modules)
-def test_extend_ion_list_forwards_the_limits(modulename):
-    """Each reader gives the three limits to add_handlers_if_not_set(), which keeps its own ions out.
-
-    get_ion_handlers() gives the limits to each reader by keyword. A reader that drops one of them
-    changes which ions a run writes. No checksum set finds that, because each set reads an ion
-    handlers file instead. The limits below come from the ions of the reader itself, so each one
-    excludes a part of them whatever the data set holds.
-    """
-    module = importlib.import_module(f"artisatomic.{modulename}")
-    try:
-        allions = module.extend_ion_list([])
-    except FileNotFoundError as exc:
-        pytest.skip(f"the data set of {modulename} is not available here: {exc}")
-
-    # these readers read committed data or the CMFGEN data that CI downloads, so no ion is an error
-    if not allions:
-        if modulename in {
-            "groundstatesonlynist",
-            "readadasdata",
-            "readfloers25data",
-            "readhillierdata",
-            "readmonsdata",
-        }:
-            msg = f"{modulename} offers no ion"
-            raise AssertionError(msg)
-        pytest.skip(f"{modulename} found no ion here")
-
-    ion_stages = sorted({ion_stage for _, listions in allions for ion_stage, _ in listions})
-    atomic_numbers = sorted(atomic_number for atomic_number, _ in allions)
-    # each limit excludes at least one ion where the reader offers more than one value
-    limitsets = [
-        (ion_stages[-1], ion_stages[-1], atomic_numbers[-1]),
-        (ion_stages[0], ion_stages[0], atomic_numbers[-1]),
-        (ion_stages[0], ion_stages[-1], atomic_numbers[0]),
-    ]
-
-    for minionstage, maxionstage, maxatomicnumber in limitsets:
-        result = module.extend_ion_list(
-            [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
-        )
-        assert result == keep_ions_within_limits(allions, minionstage, maxionstage, maxatomicnumber)
-        assert result, "a limit that comes from the ions of the reader must keep one ion or more"
-
-    # A limit that excludes every ion must give no ion. This also tests a reader with only one ion
-    # stage or one element, where the limits above keep every ion.
-    for minionstage, maxionstage, maxatomicnumber in (
-        (ion_stages[-1] + 1, ion_stages[-1] + 1, atomic_numbers[-1]),
-        (1, ion_stages[0] - 1, atomic_numbers[-1]),
-        (ion_stages[0], ion_stages[-1], atomic_numbers[0] - 1),
-    ):
-        result = module.extend_ion_list(
-            [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
-        )
-        assert result == [], f"the limits {minionstage}, {maxionstage}, {maxatomicnumber} must exclude every ion"
+    assert keep_ions_within_limits(ion_handlers, 2, 3, 30) == [(26, [(2, "cmfgen")])]
+    assert keep_ions_within_limits(ion_handlers, 5, 6, None) == []
+    assert keep_ions_within_limits(ion_handlers, None, None, None) == ion_handlers
 
 
 def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
@@ -2467,13 +2364,11 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
 
 
 def test_hillier_extend_ion_list():
-    """The CMFGEN ion list names the cmfgen handler, and it excludes hydrogen by default."""
+    """The CMFGEN ion list names the cmfgen handler, and it holds hydrogen."""
     result = readhillierdata.extend_ion_list([])
-    assert all(atomic_number != 1 for atomic_number, _ in result)
+    assert any(atomic_number == 1 for atomic_number, _ in result)
     assert all(handler == "cmfgen" for _, listions in result for _, handler in listions)
     assert {(2, 1), (26, 1)} <= {(atomic_number, ion_stage) for atomic_number, l in result for ion_stage, _ in l}
-
-    assert any(atomic_number == 1 for atomic_number, _ in readhillierdata.extend_ion_list([], include_hydrogen=True))
 
 
 def test_combine_phixs_routes():
@@ -4131,7 +4026,9 @@ def test_get_photoiontargetfractions_merges_targets_that_match_one_level():
     # the first route matches the ground state, and the second matches nothing and falls back to it
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1Se", 0.7), ("3s2_3p6_1So", 0.3)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     # one entry only, with the two fractions added, and not the same target two times
     assert targetlist == [[(0, 1.0)]]
@@ -4151,7 +4048,9 @@ def test_get_photoiontargetfractions_shares_a_target_over_its_j_levels():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3_2Do", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 0.6), (2, 0.4)]]
 
@@ -4170,7 +4069,9 @@ def test_get_photoiontargetfractions_matches_a_parenthesised_target():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     # the two J levels of 2Do, by statistical weight, and not the ground state fallback
     assert targetlist == [[(1, 0.6), (2, 0.4)]]
@@ -4190,7 +4091,9 @@ def test_get_photoiontargetfractions_matches_a_target_with_no_separators():
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2p3Po", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 1.0)]]
 
@@ -4209,7 +4112,9 @@ def test_get_photoiontargetfractions_keeps_the_ground_state_for_a_different_term
     )
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3s2_3p6_1So", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(0, 1.0)]]
 
@@ -4230,7 +4135,9 @@ def test_get_photoiontargetfractions_rejects_an_ambiguous_stripped_match():
     targetconfigs: list[list[tuple[str, float]] | None] = [[("3d6(5D)4sa6De", 1.0)]]
 
     with pytest.raises(ValueError, match="matched more than one level name"):
-        readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+        readhillierdata.get_photoiontargetfractions(
+            dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+        )
 
 
 def test_get_photoiontargetfractions_matches_a_slash_target_with_separators_removed():
@@ -4248,7 +4155,9 @@ def test_get_photoiontargetfractions_matches_a_slash_target_with_separators_remo
     # each part matches exactly one name, so the parts share the fraction as the exact comparison does
     targetconfigs: list[list[tuple[str, float]] | None] = [[("2s2_2p3(2Do)/2s2_2p3(2Po)", 1.0)]]
 
-    targetlist = readhillierdata.get_photoiontargetfractions(dfenergy_levels, dfenergy_levels_upperion, targetconfigs)
+    targetlist = readhillierdata.get_photoiontargetfractions(
+        dfenergy_levels, dfenergy_levels_upperion, targetconfigs, IonLog(io.StringIO())
+    )
 
     assert targetlist == [[(1, 0.75), (2, 0.25)]]
 
@@ -4490,7 +4399,6 @@ def test_get_nist_ionization_energies_ev():
     must stay out of the result, so a caller gets a KeyError and not a NaN.
     """
     from artisatomic.base import get_nist_ionization_energies_ev
-    from artisatomic.base import get_nist_ionization_provenance
 
     energies = get_nist_ionization_energies_ev()
 
@@ -4500,8 +4408,6 @@ def test_get_nist_ionization_energies_ev():
     assert all(isinstance(value, float) and np.isfinite(value) for value in energies.values())
     # Rf XV has a blank energy
     assert (104, 15) not in energies
-    # the table names its source, so the output files can quote it
-    assert any("NIST" in line for line in get_nist_ionization_provenance())
 
 
 def test_parse_nist_ionization_table():
@@ -6515,7 +6421,7 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
         lambda _path: pl.DataFrame({"Z": [26], "lowermost_ion_stage": [1], "uppermost_ion_stage": [3]}),
     )
 
-    def read_rrcfile(filename, noprint=False):  # ruff: ignore[unused-function-argument]
+    def read_rrcfile(filename):
         if Path(filename).name == "fe2.rrc.txt":
             msg = "the file has no header row"
             raise ValueError(msg)
@@ -6570,11 +6476,10 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
 
     args = build_parser().parse_args([])
     crosssections = np.zeros((8, args.nphixspoints))
-    thresholds = np.zeros(8)
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     stream = io.StringIO()
     flog = IonLog(stream)
-    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, thresholds, targetfractions)  # ruff: ignore[private-member-access]
+    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, targetfractions)  # ruff: ignore[private-member-access]
 
     assert targetfractions[2] == []
     assert all(targetfractions[levelid] for levelid in range(8) if levelid != 2)
@@ -6595,7 +6500,7 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     with pytest.raises(ValueError, match=r"3\.gz has 800 negative cross sections in the columns of the 4 targets"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), targetfractions
         )
 
 
@@ -6620,7 +6525,7 @@ def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monke
     flog = io.StringIO()
     with pytest.raises(ValueError, match=r"artisatomic cannot read .*3\.gz: conversion from `str` to `f64` failed"):
         readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), np.zeros(8), targetfractions
+            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), targetfractions
         )
     assert "The cross sections of level 3 come from" in flog.getvalue().splitlines()[-1]
 
@@ -7767,7 +7672,7 @@ def test_read_nahar_rrcfile_rejects_a_file_with_no_rows(tmp_path):
     filepath = tmp_path / "fe2.rrc.ls.txt"
     filepath.write_text("TOTAL RECOMBINATION RATE\n\n\n  log(T)  RRC(low n)  RRC(total)\n", encoding="utf-8")
     with pytest.raises(ValueError, match="has a header row and no data rows"):
-        makerecombratefile.read_nahar_rrcfile(filepath, noprint=True)
+        makerecombratefile.read_nahar_rrcfile(filepath)
 
 
 def test_hdf5_to_parquet_attribute_text_escapes_a_byte_that_is_not_utf8():

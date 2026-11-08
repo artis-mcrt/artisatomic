@@ -25,6 +25,28 @@ from artisatomic.iondata import known_handlers
 inputhandlersfile = Path("artisatomicionhandlers.json")
 
 
+def keep_ions_within_limits(
+    ion_handlers: list[tuple[int, list[tuple[int, str]]]],
+    minionstage: int | None,
+    maxionstage: int | None,
+    maxatomicnumber: int | None,
+) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Drop each ion outside the limits, and each element that then has no ion. None applies no limit."""
+    kept = [
+        (
+            atomic_number,
+            [
+                ion
+                for ion in listions
+                if (minionstage is None or ion[0] >= minionstage) and (maxionstage is None or ion[0] <= maxionstage)
+            ],
+        )
+        for atomic_number, listions in ion_handlers
+        if maxatomicnumber is None or atomic_number <= maxatomicnumber
+    ]
+    return [(atomic_number, listions) for atomic_number, listions in kept if listions]
+
+
 def get_ion_handlers(
     minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
 ) -> list[tuple[int, list[tuple[int, str]]]]:
@@ -35,39 +57,35 @@ def get_ion_handlers(
     applies to it. Otherwise the function builds the built-in selection: the ions below plus every
     ion for which the readers' extend_ion_list() functions find data.
 
-    minionstage, maxionstage and maxatomicnumber limit that built-in selection. Every reader gets
-    the three limits, so no reader offers an ion that the limits exclude. A value of None applies
-    no limit. The caller states all three, because build_parser() holds their default values.
+    minionstage, maxionstage and maxatomicnumber limit that built-in selection. A value of None
+    applies no limit. The caller states all three, because build_parser() holds their default values.
     """
     if inputhandlersfile.exists():
         print(f"Reading {inputhandlersfile}")
         with inputhandlersfile.open(encoding="utf-8") as f:
             return sort_ion_handlers(parse_ion_handlers(json.load(f)))
 
-    # Include every ion that has data and that the limits keep.
+    # Include every ion that has data.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to
-    # this sequence to offer their ions too. The limits apply to a reader that you add, so a reader
-    # whose files start above the default -maxionstage needs a higher value.
+    # this sequence to offer their ions too. A reader whose files start above the default -maxionstage needs a
+    # higher value.
     #
     # The ADAS ions come before the Kurucz ions. The ADAS Sr I file gives collision strengths,
     # and the Kurucz line list of Sr I gives none.
-    ion_handlers = readadasdata.extend_ion_list(
-        [], minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
-    )
+    ion_handlers = readadasdata.extend_ion_list([])
     kuruczions = [
         (atomic_number, ion_stage)
         for atomic_number, ion_stages in ((38, (1, 2, 3)), (39, (1, 2)), (40, (1, 2, 3)))
         for ion_stage in ion_stages
     ]
-    ion_handlers = add_handlers_if_not_set(
-        ion_handlers,
-        kuruczions,
-        "kurucz",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
-    )
+    ion_handlers = add_handlers_if_not_set(ion_handlers, kuruczions, "kurucz")
+    ion_handlers = readhillierdata.extend_ion_list(ion_handlers)
+    ion_handlers = readfloers25data.extend_ion_list(ion_handlers, calibrated=True)
+    ion_handlers = readtanakajpltdata.extend_ion_list(ion_handlers)
+
+    ion_handlers = keep_ions_within_limits(ion_handlers, minionstage, maxionstage, maxatomicnumber)
+
     # The read of the lighter elements can take an hour, so a missing file stops the run here. Only the
     # ions that the Kurucz handler keeps count: ADAS can take Sr I, and the limits can exclude an ion.
     # The test mode reads the Kurucz sample, which holds the files of Sr I-II and Y I-II only.
@@ -85,23 +103,6 @@ def get_ion_handlers(
                         f" give an ion handlers file.\n{exc}"
                     )
                     raise FileNotFoundError(msg) from exc
-    ion_handlers = readhillierdata.extend_ion_list(
-        ion_handlers,
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
-        include_hydrogen=True,
-    )
-    ion_handlers = readfloers25data.extend_ion_list(
-        ion_handlers,
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
-        calibrated=True,
-    )
-    ion_handlers = readtanakajpltdata.extend_ion_list(
-        ion_handlers, minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
-    )
 
     return sort_ion_handlers(ion_handlers)
 
