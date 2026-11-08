@@ -152,11 +152,16 @@ def match_tagged_levels(
     """
     order = np.argsort(tagged1000percm, kind="stable")
     sorted_tagged = tagged1000percm[order]
-    right = np.searchsorted(sorted_tagged, energies1000percm).clip(1, max(len(order) - 1, 1))
-    left = right - 1
-    leftisnearer = np.abs(energies1000percm - sorted_tagged[left]) <= np.abs(energies1000percm - sorted_tagged[right])
-    levels = order[np.where(leftisnearer, left, right)] if len(order) > 1 else np.zeros(len(energies1000percm), int)
-    del right, left, leftisnearer
+    if len(order) > 1:
+        right = np.searchsorted(sorted_tagged, energies1000percm).clip(1, len(order) - 1)
+        left = right - 1
+        leftisnearer = np.abs(energies1000percm - sorted_tagged[left]) <= np.abs(
+            energies1000percm - sorted_tagged[right]
+        )
+        levels = order[np.where(leftisnearer, left, right)]
+        del right, left, leftisnearer
+    else:
+        levels = np.zeros(len(energies1000percm), int)
     untagged = np.flatnonzero(np.abs(tagged1000percm[levels] - energies1000percm) > TAG_TOLERANCE_1000PERCM)
     closest, second = get_nearest_level_indices(sorted_energies_percm, energies1000percm[untagged] * 1000)
     levels[untagged] = closest

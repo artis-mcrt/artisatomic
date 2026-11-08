@@ -4514,6 +4514,16 @@ def test_get_nearest_level_indices():
     assert onelevel_second.tolist() == [0, 0]
 
 
+def test_readmonsdata_matches_the_tagged_energy_of_a_single_level():
+    """An ion with one level has no pair of neighbours to compare, so each energy gets that level."""
+    levels, untagged, second = readmonsdata.match_tagged_levels(
+        np.array([1.0]), np.array([1000.0]), np.array([1.0, 2.0])
+    )
+    assert levels.tolist() == [0, 0]
+    assert untagged.tolist() == [1]
+    assert second.tolist() == [0]
+
+
 def test_mons_tagged_energy_names_the_level():
     """The tag of the transition file picks the level where the closest energy picks its neighbour.
 
