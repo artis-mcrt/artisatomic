@@ -82,10 +82,14 @@ def _split_orbitals(instr: str) -> list[str]:
                 # Single-digit occupation. A two-digit n survives ('10d1') only where the
                 # digits cannot belong to a preceding orbital. '3d14s2' is ambiguous
                 # (3d1 4s2 or 3d 14s2), and there the occupation-1 reading wins.
+                # A one-digit reading that gives n = 0 is not possible, so there the two-digit n
+                # wins: '5s110p1' is 5s1 10p1, and not 5s11 0p1.
                 two_digit_n = (
                     len(instr) >= 4
                     and is_two_digit_n(instr[-4:-2])
-                    and (len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars))
+                    and (
+                        len(instr) == 4 or not (instr[-5].isdigit() or instr[-5].upper() in lchars) or instr[-3] == "0"
+                    )
                 )
                 startpos = -4 if two_digit_n else -3
                 electron_config.insert(0, instr[startpos:])
@@ -190,7 +194,9 @@ def _last_letter_is_index(instr: str) -> bool:
     return len(instr) < 3 or not str.isdigit(instr[-2]) or instr[-3] in lchars_lower
 
 
-def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator[tuple[int, int, bool]]:
+def _iter_occupied_orbitals(
+    instr, warn: bool, hasterm: bool = True, letters_only: bool = False
+) -> Iterator[tuple[int, int, bool]]:
     """Walk the occupied orbitals of a configuration and yield (l, number of electrons, merged).
 
     Parent terms in parentheses are not occupied orbitals, and the walk skips them. An orbital
@@ -238,7 +244,10 @@ def _iter_occupied_orbitals(instr, warn: bool, hasterm: bool = True) -> Iterator
             # l >= n identifies a merge marker, but only where the token actually carried an n.
             # Tokens such as the 'sp' of '3d8(2H)sp_2Go' have none, and to call those merged
             # would discard the parity that their name states.
-            merged = orbitalchar in merged_orbital_letters or (nend > 0 and l >= principalquantumnumber)
+            # letters_only: only the w and z markers count, and not l >= n
+            merged = orbitalchar in merged_orbital_letters or (
+                not letters_only and nend > 0 and l >= principalquantumnumber
+            )
             yield l, nelec, merged
 
         if not foundorbital and warn:
@@ -255,6 +264,19 @@ def has_merged_orbital(instr, hasterm: bool = True) -> bool:
     unreadable one, and no suffix on the name can supply it.
     """
     return any(merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False, hasterm=hasterm))
+
+
+def has_merge_marker_letter(instr, hasterm: bool = True) -> bool:
+    """Whether the configuration contains a w or a z orbital, the merge markers of CMFGEN.
+
+    The test l >= n of has_merged_orbital() also finds names that are not merged levels. Co I
+    names two levels by their energy ('59947oo[11/2]'), and P VI has 5i and 6i levels with l >= n
+    by the letters of lchars. Such a name states its parity with its last letter, and only a w or a
+    z overrides that letter.
+    """
+    return any(
+        merged for _l, _nelec, merged in _iter_occupied_orbitals(instr, warn=False, hasterm=hasterm, letters_only=True)
+    )
 
 
 def get_config_parity(instr, warn: bool = False, hasterm: bool = True) -> int | None:

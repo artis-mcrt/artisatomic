@@ -13,11 +13,10 @@ import polars as pl
 from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import elsymbols
 from artisatomic.base import empty_transitions_schema
-from artisatomic.base import get_nist_ionization_energies_ev
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
-from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import PYDIR
 from artisatomic.base import roman_numerals
@@ -74,15 +73,15 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
             schema_overrides=dict.fromkeys(columnnames, pl.String),
         ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
 
+    # polars casts the text "NaN" or "inf" to a float with no error, and a NaN energy passes the tolerance test
+    if dfcolumns.select(pl.all().is_finite().fill_null(value=False).all()).row(0) != (True,) * columncount:
+        msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
+        raise ValueError(msg)
     return [dfcolumns[name].to_numpy() for name in columnnames]
 
 
 def extend_ion_list(
     ion_handlers,
-    *,
-    minionstage: int | None = None,
-    maxionstage: int | None = None,
-    maxatomicnumber: int | None = None,
 ):
     """Add every ion with a MONS level file to ion_handlers.
 
@@ -103,9 +102,6 @@ def extend_ion_list(
         ion_handlers,
         monsions,
         "mons",
-        minionstage=minionstage,
-        maxionstage=maxionstage,
-        maxatomicnumber=maxatomicnumber,
     )
 
 
@@ -268,9 +264,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
             f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
         )
 
-    ionization_energy_in_ev = get_nist_ionization_energies_ev()[atomic_number, ion_stage]
-    log_comment(flog, ("adata",), nist_ionization_energy_comment)
-    log_and_print(flog, f"The NIST table gives an ionisation energy of {ionization_energy_in_ev} eV.")
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
     # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
     # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
