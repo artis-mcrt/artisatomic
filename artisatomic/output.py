@@ -90,9 +90,19 @@ lower, upper  level_number of the lower level and of the upper level in adata.tx
 A             Einstein A coefficient of the spontaneous decay [s^-1]
 coll_str      effective collision strength (upsilon) at the temperature closest to {electrontemperature} K
               (option -electrontemperature).
-              -1: no value for a permitted transition. ARTIS then uses the formula of van Regemorter.
-              -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod.
-forbidden     1 for a forbidden transition, 0 for a permitted transition
+              -1: no value for a permitted transition. ARTIS then uses the formula of van Regemorter, H.
+                  (1962), ApJ, 136, 906-915, doi:10.1086/147445.
+              -2: no value for a forbidden transition. ARTIS then uses the approximation of Axelrod, T. S.
+                  (1980), PhD thesis, University of California, Santa Cruz.
+forbidden     1 for a forbidden transition, 0 for a permitted (electric dipole) transition.
+              A transition is forbidden if its two levels have the same parity. It is also forbidden if it
+              breaks the delta J rule: |delta J| > 1, or J = 0 to J = 0. Between two LS terms, the rules of
+              LS coupling apply in place of the delta J rule: |delta L| > 1, L = 0 to L = 0, or a different
+              2S+1.
+              The cmfgen handlers apply the delta J rule and the LS rules only where f <= {minf:g}.
+              The other handlers apply them only where A <= {mina:g} s^-1. A rule applies only where the
+              data set gives the values that it needs. The floers25 handlers take the flag from the type
+              of each line of the data set. The flag is also 1 for each transition with coll_str -2.
 
 NUMBERS START AT 1
 ion_stage, lower and upper start at 1, and not at 0. The numbers -1 and -2 in coll_str are not level numbers.
@@ -123,7 +133,10 @@ upper_level       level_number in adata.txt of the level of the upper ion that t
                   goes to. -1 means more than one such level, and the target list then comes next.
 fraction          fraction of the cross section that goes to this upper_level. The fractions of a
                   target list sum to 1 (see the target cut in OPTIONS OF THIS RUN).
-threshold_energy  [eV]. ARTIS does not use it. It takes the threshold from the level energies.
+threshold_energy  energy [eV] from this level to the first level of its target list, from the
+                  ionisation energy and the level energies of adata.txt. 0 where that energy is not
+                  positive. ARTIS does not use it. It takes the threshold of each target from the
+                  level energies.
 cross section     [Mb] for the frequency nu_threshold * (1 + i * step). The first line of a table is
                   i = 0, and the last line is i = npoints - 1. Each value is an average over the
                   frequency bin around its frequency. The bin of i = 0 starts at the threshold.
@@ -136,8 +149,9 @@ OPTIONS OF THIS RUN
 artisatomic downsamples each table of its data source to the grid of this file. It keeps the
 recombination rate constant at T={optimaltemperature} K (option -optimaltemperature).
 {hydrogenicrule}
-A target level with less than {targetcut:.0%} of the cross section of a level is not in the target list of that
-level. The fractions of the other target levels then sum to 1.
+A target with less than {targetcut:.0%} of the cross section of a level is not in the target list of that level. A
+target is a final state of the data source, which can be a term. The share of a term goes to its levels in
+proportion to their g, so a target level can have less than {targetcut:.0%}. The fractions then sum to 1.
 """
     + file_comment_end
 )
@@ -175,6 +189,8 @@ def clear_files(args: argparse.Namespace) -> None:
                 transitiondata_file_comment.format(
                     creationtime=creationtime,
                     electrontemperature=args.electrontemperature,
+                    minf=min_f_asserts_e1,
+                    mina=min_a_asserts_e1,
                     commentrule="",
                     blockposition="the header line",
                 ).splitlines()
@@ -974,12 +990,12 @@ def fill_missing_phixs_thresholds(iondata: IonData, upperiondata: IonData | None
             thresholds[levelid] = threshold_ev
             filled += 1
 
+    # the file comment defines the field, so the line is for the log file only
     if filled:
-        log_comment(
+        log_and_print(
             flog,
-            ("phixsdata",),
-            f"artisatomic computed the threshold energy of {filled} tables, because the reader gave none. The threshold"
-            " comes from the ionisation energy and the two level energies.",
+            f"artisatomic computed the threshold energy of {filled} tables from the ionisation energy and the two"
+            " level energies.",
         )
     return thresholds
 

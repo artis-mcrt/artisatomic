@@ -12,6 +12,7 @@ import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
 import re
 import typing as t
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -791,6 +792,36 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
     assert "The target target1 of ground has less than 2% of the total, so the output drops it." in log
+
+
+def test_read_hyd_table_file_stops_for_a_file_that_ends_inside_a_table(tmp_path):
+    """The energy grid has the size of the values, so a short last table would change the cross sections."""
+    filepath = tmp_path / "hyd_l_data.dat"
+    filepath.write_text("30 !Maximum principal quantum number\n\n1 0 3\n1.0 2.0\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"ends inside the table \[1, 0\]"):
+        rhd.read_hyd_table_file(str(filepath), "!L_ST_U", "!L_DEL_U")
+
+
+def test_cmfgen_keeps_a_level_when_the_collision_file_names_its_term(monkeypatch):
+    """A collision row with no J goes to each J level of the term, so a level with no line must stay."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(26, 2, io.StringIO())
+    levelnames = dflevels["levelname"].to_list()
+    groundname, targetname = levelnames[0], levelnames[-1]
+    assert "[" in targetname
+    original_parse = rhd.parse_transition_lines
+
+    def parse_with_no_line_of_the_level(dflines, filename, flog):
+        return original_parse(dflines, filename, flog).with_columns(
+            pl.col(column).replace(targetname, groundname) for column in ("namefrom", "nameto")
+        )
+
+    monkeypatch.setattr(rhd, "parse_transition_lines", parse_with_no_line_of_the_level)
+    for collisionnames, kept in ((set(), False), ({targetname.split("[")[0]}, True)):
+        monkeypatch.setattr(rhd, "collision_file_level_names", lambda _z, _stage, names=collisionnames: names)
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _ = rhd.read_levels_and_transitions(26, 2, io.StringIO())
+        assert (targetname in dflevels["levelname"].to_list()) == kept
 
 
 def test_read_phixs_tables_multiple_photoionisation_files():
@@ -2220,6 +2251,28 @@ def test_keep_ions_within_limits():
     assert keep_ions_within_limits(ion_handlers, 2, 3, 30) == [(26, [(2, "cmfgen")])]
     assert keep_ions_within_limits(ion_handlers, 5, 6, None) == []
     assert keep_ions_within_limits(ion_handlers, None, None, None) == ion_handlers
+
+
+def test_process_exists_sends_no_signal_on_windows(monkeypatch):
+    """On Windows, os.kill() does not test a process, so the function must not call it."""
+    from artisatomic import cli
+
+    def fail_kill(_pid, _signum):
+        msg = "os.kill() must not run on Windows"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+    monkeypatch.setattr(cli.os, "kill", fail_kill)
+    assert cli.process_exists(123456)
+
+
+def test_read_csv_columns_stops_for_an_empty_field(tmp_path, monkeypatch):
+    """An empty field reads as a null, and all() ignores a null unless the check fills it."""
+    with zipfile.ZipFile(tmp_path / "archive.zip", "w") as ziparchive:
+        ziparchive.writestr("member.csv", "1.0,2.0\n,3.0\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    with pytest.raises(ValueError, match="not a finite number, or an empty value"):
+        readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
 
 
 def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
@@ -7543,8 +7596,6 @@ def test_readdreamdata_rejects_a_level_key_that_is_nan():
 
 def test_readmonsdata_rejects_a_value_that_is_not_finite(tmp_path, monkeypatch):
     """Polars casts the text NaN to a float with no error, and a NaN energy passed the match tolerance."""
-    import zipfile
-
     with zipfile.ZipFile(tmp_path / "levels.zip", "w") as archive:
         archive.writestr("member.txt", " 0.000, 1.5\n NaN, 2.5\n")
     monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)

@@ -9,6 +9,7 @@ import os
 import shutil
 import signal
 import socket
+import sys
 import tempfile
 from collections.abc import Generator
 from contextlib import contextmanager
@@ -291,16 +292,18 @@ def remove_stale_work_folders(outputfolder: Path) -> None:
 
 
 def process_exists(pid: int) -> bool:
-    """Whether a process with this id exists on this host."""
+    """Whether a process with this id exists on this host. On Windows the function always gives True.
+
+    On Windows, os.kill() does not test a process: it sends a console event or stops the process.
+    """
+    if sys.platform == "win32":
+        return True
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
     except PermissionError:
         return True
-    except OSError:
-        # Windows gives a different error for a process that does not exist
-        return False
     return True
 
 
@@ -325,6 +328,7 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
         except OSError as error:
             print(
                 f"WARNING: The file system of {outputfolder} gives no lock ({error}). The run continues with no lock."
+                " Two runs that end at one time can mix their files."
             )
         yield
     finally:
