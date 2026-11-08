@@ -2539,8 +2539,8 @@ def read_hyd_table_file(
             *key, num_points = (int(x) for x in line.split())
 
             values: list[float] = []
-            for line in fhyd:
-                values += [float(x) for x in line.split()]
+            for valueline in fhyd:
+                values += [float(x) for x in valueline.split()]
                 if len(values) == num_points:
                     break
                 if len(values) > num_points:
