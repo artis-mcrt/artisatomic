@@ -90,7 +90,7 @@ def read_levels_data(atomic_number, ion_stage):
     return energy_levels, levelid_of_fileindex_map(dflevels["level_number"], sourcename)
 
 
-def read_lines_data(atomic_number, ion_stage, levelid_of_fileindex):
+def read_lines_data(atomic_number, ion_stage, levelid_of_fileindex, flog=None):
     """Read one ion's bound-bound transitions from the AOIFE lines_data table, with zero-based level ids.
 
     The table gives the file indices of the levels as floats. The table gives no collision
@@ -108,6 +108,18 @@ def read_lines_data(atomic_number, ion_stage, levelid_of_fileindex):
         if values.dtype.is_float() and not (values.is_finite() & (values == values.floor())).all():
             msg = f"{sourcename} gives a file index in the column {column} that is not a whole number"
             raise ValueError(msg)
+
+    # The table lists two He I lines two times, with all values equal but line_id. ARTIS adds the A
+    # values of two rows of one level pair, so a repeated row would double the line.
+    nrows = dflines.height
+    dflines = dflines.unique([*levelcolumns, "wavelength", "A_ul"], keep="first", maintain_order=True)
+    if dflines.height < nrows and flog is not None:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {sourcename} gives {nrows - dflines.height:d} lines two times. The reader drops each repeat,"
+            " because ARTIS adds the A values of two rows of one level pair.",
+        )
 
     dflevelids = resolve_transition_levelid_columns(
         dflines.with_columns(pl.col(levelcolumns).cast(pl.Int64)),
@@ -135,7 +147,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     )
     energy_levels, levelid_of_fileindex = read_levels_data(atomic_number, ion_stage)
 
-    transitions = read_lines_data(atomic_number, ion_stage, levelid_of_fileindex)
+    transitions = read_lines_data(atomic_number, ion_stage, levelid_of_fileindex, flog)
 
     ionization_energy_in_ev = read_ionization_data(atomic_number, ion_stage)
 
