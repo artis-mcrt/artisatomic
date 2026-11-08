@@ -762,17 +762,14 @@ def read_levels_and_transitions_from_file(
     )
 
     # A level stays if a transition names it or if the collision data file names it. A metastable
-    # level can have collision data and no radiative transition (Ca VIII 3s_3p(3P)3d_4Fo[7/2]).
-    names_to_keep = pl.concat(
-        [
-            dftransitions["namefrom"],
-            dftransitions["nameto"],
-            pl.Series(sorted(collision_file_level_names(atomic_number, ion_stage)), dtype=pl.String),
-        ]
-    )
+    # level can have collision data and no radiative transition (Ca VIII 3s_3p(3P)3d_4Fo[7/2]). The
+    # collision file can name a term with no J. read_coldata() shares such a row over the J levels.
+    collision_names = pl.Series(sorted(collision_file_level_names(atomic_number, ion_stage)), dtype=pl.String)
+    names_to_keep = pl.concat([dftransitions["namefrom"], dftransitions["nameto"], collision_names])
     dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
         # implode(): polars deprecates is_in() with a bare Series of the same dtype
         pl.col("levelname").is_in(names_to_keep.implode())
+        | pl.col("levelname").str.split("[").list.first().is_in(collision_names.implode())
     )
 
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
@@ -2546,6 +2543,12 @@ def read_hyd_table_file(
                 if len(values) > num_points:
                     msg = f"too many data points for {key}: the table declares {num_points} but has {len(values)}"
                     raise ValueError(msg)
+
+            if len(values) != num_points:
+                msg = (
+                    f"{filename} ends inside the table {key}: the table declares {num_points} values, not {len(values)}"
+                )
+                raise ValueError(msg)
 
             tables.append((tuple(key), values))
 
