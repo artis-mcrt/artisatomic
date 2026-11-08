@@ -7596,8 +7596,6 @@ def test_readdreamdata_rejects_a_level_key_that_is_nan():
 
 def test_readmonsdata_rejects_a_value_that_is_not_finite(tmp_path, monkeypatch):
     """Polars casts the text NaN to a float with no error, and a NaN energy passed the match tolerance."""
-    import zipfile
-
     with zipfile.ZipFile(tmp_path / "levels.zip", "w") as archive:
         archive.writestr("member.txt", " 0.000, 1.5\n NaN, 2.5\n")
     monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
