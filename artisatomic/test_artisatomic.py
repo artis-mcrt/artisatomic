@@ -7106,10 +7106,11 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
 def test_tabulated_cross_section_starts_at_the_threshold():
     """A tabulated table (types 20 to 22) loses its rows below x = 1 and gets a row at x = 1 by interpolation.
 
-    The downsample takes the first energy of a table as its threshold, so a row below the edge
-    moved each output value to a lower energy (N VII 5g_2Ge starts at x = 0.75).
+    The downsample takes the first energy of a table as its threshold. A row below the edge
+    therefore moved each output value to a lower energy. N VII 5g_2Ge starts at x = 0.75.
     """
-    reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, io.StringIO())
+    flog = io.StringIO()
+    reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, flog)
     reader.thresholdenergyryd = 2.0
     reader.pending_levelname = "5g_2Ge"
     cut = reader.cut_below_threshold
@@ -7128,6 +7129,7 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     energyryd, sigma = cut(np.array([0.5, 0.8]) * 2.0, np.array([1.0, 0.512]))
     assert energyryd.tolist() == [2.0]
     assert sigma.tolist() == pytest.approx([0.512 * 0.8**3])
+    assert "continues the table as nu^-3" in flog.getvalue()
 
     # a table that starts at the threshold stays as it is
     table = (np.array([2.0, 3.0]), np.array([1.0, 0.5]))

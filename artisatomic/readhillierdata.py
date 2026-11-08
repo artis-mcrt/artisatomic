@@ -1379,30 +1379,45 @@ class PhotFileReader:
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """Remove the rows of a tabulated table below the threshold, and start the table at the threshold.
 
-        CMFGEN uses a table only at frequencies at or above the edge (sub_phot_gen.f), and reads the
+        CMFGEN uses a table only at frequencies at or above the edge (sub_phot_gen.f). It reads the
         value at the edge by linear interpolation between the rows. reduce_phixs_tables_worker()
-        takes the first energy of a table as its threshold, so a row below the edge moved each output
-        value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data start below
-        x = 1. A table that ends below the threshold continues as nu^-3 from its last row, as in CMFGEN.
+        takes the first energy of a table as its threshold. A row below the edge therefore moved
+        each output value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data
+        start below x = 1. A table that ends below the threshold continues as nu^-3 from its last
+        row, as in CMFGEN.
         """
         x = energyryd / self.thresholdenergyryd
         # a tolerance, because x = 1 of the file comes back from a product and a division
         if x[0] >= 1.0 - 1e-12:
             return energyryd, sigma
         above = np.flatnonzero(x >= 1.0 - 1e-12)
-        log_detail(
-            self.flog,
-            ("phixsdata",),
-            "table that starts below the threshold",
-            f"The table of {self.pending_levelname} starts at {x[0]:.4g} times the threshold. The reader drops the"
-            " rows below the threshold and adds a row at the threshold by linear interpolation, as CMFGEN does.",
-        )
+        starttext = f"The table of {self.pending_levelname} starts at {x[0]:.4g} times the threshold."
         if above.size == 0:
+            log_detail(
+                self.flog,
+                ("phixsdata",),
+                "table that ends below the threshold",
+                f"{starttext} All its rows are below the threshold, so the reader continues the table as nu^-3 from"
+                " its last row, as CMFGEN does.",
+            )
             sigma_at_edge = phixs_nu_cubed_tail(float(sigma[-1]), float(x[-1]), 1.0)
             return np.array([self.thresholdenergyryd]), np.array([sigma_at_edge])
         first = int(above[0])
         if abs(x[first] - 1.0) <= 1e-12:
+            log_detail(
+                self.flog,
+                ("phixsdata",),
+                "table with a row at the threshold",
+                f"{starttext} The reader drops the rows below the threshold.",
+            )
             return energyryd[first:], sigma[first:]
+        log_detail(
+            self.flog,
+            ("phixsdata",),
+            "table that starts below the threshold",
+            f"{starttext} The reader drops the rows below the threshold and adds a row at the threshold by linear"
+            " interpolation, as CMFGEN does.",
+        )
         fraction = (1.0 - x[first - 1]) / (x[first] - x[first - 1])
         sigma_at_edge = sigma[first - 1] + fraction * (sigma[first] - sigma[first - 1])
         return (
