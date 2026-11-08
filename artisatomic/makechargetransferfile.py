@@ -34,6 +34,7 @@ import numpy as np
 
 from artisatomic.base import comment_lines
 from artisatomic.base import elsymbols
+from artisatomic.base import open_for_atomic_write
 from artisatomic.base import PYDIR
 from artisatomic.base import xopen_check_extension
 
@@ -589,7 +590,7 @@ def write_chargetransfer_file(entries: list[CTEntry], outdir: Path) -> None:
     # each comment starts with the tag of its source, so the header counts come from the entries
     source_counts = Counter(e.comment.split(";", 1)[0] for e in entries)
     outpath = outdir / "chargetransfer.txt"
-    with outpath.open("w", encoding="utf-8") as fout:
+    with open_for_atomic_write(outpath) as fout:
         fout.write(format_header(source_counts))
         fout.write(f"{len(entries)}\n")
         fout.write(f"#{COLUMN_NAMES}\n")

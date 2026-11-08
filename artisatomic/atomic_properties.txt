@@ -1,5 +1,6 @@
 # Periodic data
 # atomic weights (masses actually), are the iupac 2005 values, see Pure Appl. Chem., Vol. 78, No. 11, pp. 2051–2066, 2006 and http://www.iupac.org/
+# an element with no stable isotope has the mass number of its longest-lived isotope (the IUPAC value in brackets)
 # colors from http://bodr.svn.sourceforge.net/viewvc/bodr/trunk/bodr/elements/elements.xml?view=log (revision 34)
 # Covalent bond radii from Dalton Transactions 2008, 2832-2838
 # Van der Waals radii from J. Phys. Chem., 1996, 100 (18), pp 7384–7391
@@ -47,7 +48,7 @@ Yttrium Y 39 5 3 88.90585 3.8 2.4 1.9 False 0.58 1 1
 Zirconium Zr 40 5 4 91.224 6.44 2.3 1.75 False 0.58 0.88 0.88
 Niobium Nb 41 5 5 92.90638 NA 2.15 1.64 False 0.45 0.76 0.79
 Molybdenum Mo 42 5 6 95.94 9.01 2.1 1.54 False 0.33 0.71 0.71
-Technetium Tc 43 5 7 NA NA 2.05 1.47 True 0.23 0.62 0.62
+Technetium Tc 43 5 7 98 NA 2.05 1.47 True 0.23 0.62 0.62
 Ruthenium Ru 44 5 8 101.07 12.1 2.05 1.46 False 0.14 0.56 0.56
 Rhodium Rh 45 5 9 102.9055 12.44 2 1.42 False 0.04 0.49 0.55
 Palladium Pd 46 5 10 106.42 12.16 2.05 1.39 False 0 0.41 0.52
@@ -65,7 +66,7 @@ Lanthanum La 57 6 3 138.90547 6.15 2.5 2.07 False 0.44 0.83 1
 Cerium Ce 58 9 4 140.116 6.73 2.48 2.04 False 1 1 0.78
 Praesodymium Pr 59 9 5 140.90765 6.48 2.47 2.03 False 0.85 1 0.78
 Neodymium Nd 60 9 6 144.242 7 2.45 2.01 False 0.78 1 0.78
-Promethium Pm 61 9 7 NA NA 2.43 1.99 False 0.64 1 0.78
+Promethium Pm 61 9 7 145 NA 2.43 1.99 False 0.64 1 0.78
 Samarium Sm 62 9 8 150.36 7.75 2.42 1.98 False 0.56 1 0.78
 Europium Eu 63 9 9 151.964 NA 2.4 1.98 False 0.38 1 0.78
 Gadolinium Gd 64 9 10 157.25 NA 2.38 1.96 False 0.27 1 0.78
@@ -88,38 +89,38 @@ Mercury Hg 80 6 12 200.59 14.193 2.05 1.32 False 0.71 0.71 0.76
 Thallium Tl 81 6 13 204.3833 11.86 2.2 1.45 False 0.65 0.33 0.3
 Lead Pb 82 6 14 207.2 11.48 2.3 1.46 False 0.34 0.35 0.38
 Bismuth Bi 83 6 15 208.9804 9.86 2.3 1.48 False 0.62 0.31 0.71
-Polonium Po 84 6 16 NA NA 2 1.4 True 0.67 0.36 0
-Astatine At 85 6 17 NA NA 2 1.5 True 0.46 0.31 0.27
-Radon Rn 86 6 18 NA NA 2 1.5 True 0.26 0.51 0.59
-Francium Fr 87 7 1 NA NA 2 2.6 True 0.26 0 0.4
-Radium Ra 88 7 2 NA 5 2 2.21 True 0 0.49 0
-Actinium Ac 89 7 3 NA NA 2 2.15 True 0.44 0.67 0.98
+Polonium Po 84 6 16 209 NA 2 1.4 True 0.67 0.36 0
+Astatine At 85 6 17 210 NA 2 1.5 True 0.46 0.31 0.27
+Radon Rn 86 6 18 222 NA 2 1.5 True 0.26 0.51 0.59
+Francium Fr 87 7 1 223 NA 2 2.6 True 0.26 0 0.4
+Radium Ra 88 7 2 226 5 2 2.21 True 0 0.49 0
+Actinium Ac 89 7 3 227 NA 2 2.15 True 0.44 0.67 0.98
 Thorium Th 90 10 4 232.03806 NA 2.4 2.06 False 0 0.73 1
 Protactinium Pa 91 10 5 231.03588 NA 2 2 False 0 0.63 1
 Uranium U 92 10 6 238.02891 18.7 2.3 1.96 False 0 0.56 1
-Neptunium Np 93 10 7 NA NA 2 1.9 True 0 0.5 1
-Plutonium Pu 94 10 8 NA NA 2 1.87 True 0 0.42 1
-Americium Am 95 10 9 NA NA 2 1.8 True 0.33 0.36 0.95
-Curium Cm 96 10 10 NA NA 2 1.69 True 0.47 0.36 0.89
-Berkelium Bk 97 10 11 NA NA 2 NA True 0.54 0.31 0.89
-Californium Cf 98 10 12 NA NA 2 NA True 0.63 0.21 0.83
-Einsteinium Es 99 10 13 NA NA 2 NA True 0.7 0.12 0.83
-Fermium Fm 100 10 14 NA NA 2 NA True 0.7 0.12 0.73
-Mendelevium Md 101 10 15 NA NA 2 NA True 0.7 0.05 0.65
-Nobelium No 102 10 16 NA NA 2 NA True 0.74 0.05 0.53
-Lawrencium Lr 103 10 17 NA NA 2 NA True 0.78 0 0.4
-Rutherfordium Rf 104 7 4 NA NA 2 NA True 0.8 0 0.35
-Dubnium Db 105 7 5 NA NA 2 NA True 0.82 0 0.31
-Seaborgium Sg 106 7 6 NA NA 2 NA True 0.85 0 0.27
-Bohrium Bh 107 7 7 NA NA 2 NA True 0.88 0 0.22
-Hassium Hs 108 7 8 NA NA 2 NA True 0.9 0 0.18
-Meitnerium Mt 109 7 9 NA NA 2 NA True 0.91 0 0.15
-Ununnilium Uun 110 7 10 NA NA NA NA True 0.92 0 0.14
-Unununium Uuu 111 7 11 NA NA NA NA True 0.93 0 0.13
-Ununbium Uub 112 7 12 NA NA NA NA True 0.94 0 0.12
-Ununtrium Uut 113 7 13 NA NA NA NA True 0.95 0 0.11
-Ununquadium Uuq 114 7 14 NA NA NA NA True 0.96 0 0.1
-Ununpentium Uup 115 7 15 NA NA NA NA True 0.97 0 0.09
-Ununhexium Uuh 116 7 16 NA NA NA NA True 0.98 0 0.08
-Ununseptium Uus 117 7 17 NA NA NA NA True 0.99 0 0.07
-Ununoctium Uuo 118 7 18 NA NA NA NA True 1 0 0.06
+Neptunium Np 93 10 7 237 NA 2 1.9 True 0 0.5 1
+Plutonium Pu 94 10 8 244 NA 2 1.87 True 0 0.42 1
+Americium Am 95 10 9 243 NA 2 1.8 True 0.33 0.36 0.95
+Curium Cm 96 10 10 247 NA 2 1.69 True 0.47 0.36 0.89
+Berkelium Bk 97 10 11 247 NA 2 NA True 0.54 0.31 0.89
+Californium Cf 98 10 12 251 NA 2 NA True 0.63 0.21 0.83
+Einsteinium Es 99 10 13 252 NA 2 NA True 0.7 0.12 0.83
+Fermium Fm 100 10 14 257 NA 2 NA True 0.7 0.12 0.73
+Mendelevium Md 101 10 15 258 NA 2 NA True 0.7 0.05 0.65
+Nobelium No 102 10 16 259 NA 2 NA True 0.74 0.05 0.53
+Lawrencium Lr 103 10 17 266 NA 2 NA True 0.78 0 0.4
+Rutherfordium Rf 104 7 4 267 NA 2 NA True 0.8 0 0.35
+Dubnium Db 105 7 5 268 NA 2 NA True 0.82 0 0.31
+Seaborgium Sg 106 7 6 269 NA 2 NA True 0.85 0 0.27
+Bohrium Bh 107 7 7 270 NA 2 NA True 0.88 0 0.22
+Hassium Hs 108 7 8 269 NA 2 NA True 0.9 0 0.18
+Meitnerium Mt 109 7 9 278 NA 2 NA True 0.91 0 0.15
+Ununnilium Uun 110 7 10 281 NA NA NA True 0.92 0 0.14
+Unununium Uuu 111 7 11 282 NA NA NA True 0.93 0 0.13
+Ununbium Uub 112 7 12 285 NA NA NA True 0.94 0 0.12
+Ununtrium Uut 113 7 13 286 NA NA NA True 0.95 0 0.11
+Ununquadium Uuq 114 7 14 289 NA NA NA True 0.96 0 0.1
+Ununpentium Uup 115 7 15 290 NA NA NA True 0.97 0 0.09
+Ununhexium Uuh 116 7 16 293 NA NA NA True 0.98 0 0.08
+Ununseptium Uus 117 7 17 294 NA NA NA True 0.99 0 0.07
+Ununoctium Uuo 118 7 18 294 NA NA NA True 1 0 0.06
