@@ -2207,7 +2207,6 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-# an orbital of a CMFGEN level name: a full run of digits and a lower-case orbital letter
 valence_orbital_regex = re.compile(rf"(?<!\d)(\d+)([{lchars_lower}])")
 
 

@@ -5227,7 +5227,7 @@ def test_readhillierdata_get_level_valence_n():
     assert readhillierdata.get_level_valence_n("2s11s3Se") == 11  # C III, 2s 11s
     assert readhillierdata.get_level_valence_n("4s12s1Se") == 12  # Ca I, 4s 12s
     assert readhillierdata.get_level_valence_n("2s2_2p_10d_3Fo") == 10
-    # the n that remains must be above the l of the orbital: w is l = 17, so this is 2s 22w and not 2s2 2w
+    # the n that remains must be above the l of the orbital. w is l = 17, so this is 2s 22w and not 2s2 2w
     assert readhillierdata.get_level_valence_n("2s22w3W") == 22  # C III
     # the n that remains must not be below the n of the first orbital: 3s 21s, and not 3s2 1s
     assert readhillierdata.get_level_valence_n("3s21s1Se") == 21
