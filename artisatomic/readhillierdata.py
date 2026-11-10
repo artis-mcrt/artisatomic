@@ -1412,9 +1412,9 @@ class PhotFileReader:
 
         181 tables start above x = 1, for example the tables of K I at x = 1.01. The first energy of
         such a table was its threshold also. Below the first row, the index search of CMFGEN stops at
-        the first two rows, and the linear interpolation continues their line down to the edge
-        (sub_phot_gen.f, lines 246-271 and 380-385). The reader adds a row at the threshold from
-        that line. A cross section cannot be negative, so the row is not below zero.
+        the first two rows (sub_phot_gen.f, lines 246-271). The linear interpolation then continues
+        the line of those rows down to the edge (lines 380-385). The reader adds a row at the
+        threshold from that line. A cross section cannot be negative, so the row is not below zero.
         """
         x = energyryd / self.thresholdenergyryd
         # a tolerance, because x = 1 of the file comes back from a product and a division
