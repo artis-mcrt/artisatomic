@@ -68,7 +68,9 @@ def main():
         .filter(pl.col("tau[s]") > 0.0)
     )
 
-    assert dfbetaminus.height == dfbetaminus.unique(("Z", "A")).height
+    if dfbetaminus.height != dfbetaminus.unique(("Z", "A")).height:
+        msg = "The beta minus table holds a nuclide more than one time."
+        raise ValueError(msg)
 
     dfalpha = (
         pl.read_csv(
@@ -92,7 +94,9 @@ def main():
         .filter(pl.col("halflife_s") > 0.0)
         .unique(("Z", "A"), keep="last", maintain_order=True)
     )
-    assert dfalpha.height == dfalpha.unique(("Z", "A")).height
+    if dfalpha.height != dfalpha.unique(("Z", "A")).height:
+        msg = "The alpha table holds a nuclide more than one time."
+        raise ValueError(msg)
 
     # a set: the script downloads a nuclide in both lists once
     nuclist = sorted(
@@ -134,12 +138,13 @@ def main():
                 endindex = textdata.rfind("</pre>")
                 strtable = textdata[startindex:endindex].strip()
                 strheader = strtable.strip().split("\n")[0].strip()
-                assert (
-                    strheader
-                    == "A  	Element	Z  	N  	Par. Elevel	Unc. 	JPi       	Dec Mode	T1/2 (txt)    	T1/2 (num)       "
+                if strheader != (
+                    "A  	Element	Z  	N  	Par. Elevel	Unc. 	JPi       	Dec Mode	T1/2 (txt)    	T1/2 (num)       "
                     " 	Daughter	Radiation	Rad subtype 	Rad Ene.  	Unc       	EP Ene.   	Unc       	Rad Int.  	Unc      "
                     " 	Dose        	Unc"
-                )
+                ):
+                    msg = f"The NuDat table of {strnuclide} has a header that the script does not know: {strheader}"
+                    raise ValueError(msg)
 
                 dfnuclide = pl.read_csv(
                     io.StringIO(strtable), separator="\t", schema_overrides={"Par. Elevel": pl.Utf8}

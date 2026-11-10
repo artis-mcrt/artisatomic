@@ -165,6 +165,8 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             # a silent 0 would give the Laporte rule a parity the file did not state
             parity=pl.when(pl.col("parity") == "odd").then(1).when(pl.col("parity") == "even").then(0),
             g=pl.col("g").cast(pl.Float64),
+            # the weight column of the file is 2J + 1
+            j=(pl.col("g").cast(pl.Float64) - 1) / 2,
             # Every expression in one select() reads the INPUT frame. So both columns below hold
             # the file's own values, not the values that the same select() computes. The name
             # gets the file's 1-based number rather than the zero-based levelid, and the
@@ -259,7 +261,44 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
         )
         dftransitions = dftransitions_filtered
 
-    return ionization_energy_in_ev, dflevels, dftransitions
+    log_rule_breaks(dftransitions, dflevels, flog)
+
+    # The file lists electric dipole transitions only (readme_v2.1.txt), so no transition is
+    # forbidden. The reader gives the flag itself, so the writer does not derive it from the level labels.
+    return ionization_energy_in_ev, dflevels, dftransitions.with_columns(forbidden=pl.lit(value=False))
+
+
+def log_rule_breaks(dftransitions: pl.DataFrame, dflevels: pl.DataFrame, flog) -> None:
+    """Report the transitions whose levels break a selection rule of an electric dipole transition.
+
+    The two rules are a change of the parity, and |delta J| <= 1 with no J = 0 -> J = 0. The
+    transitions are electric dipole transitions, so a break shows a wrong level number in the
+    file. 14 GRASP files of the lanthanides have such transitions (1.7% of the transitions of
+    data_v2.1). A level less than 0.3 cm-1 from the named level fits 91% to 100% of them in each file.
+    """
+    if dftransitions.is_empty():
+        return
+    labels = dflevels.select("levelid", "parity", "j")
+    nbreaks = (
+        dftransitions.join(
+            labels.rename({"levelid": "lowerlevel", "parity": "lower_parity", "j": "lower_j"}), on="lowerlevel"
+        )
+        .join(labels.rename({"levelid": "upperlevel", "parity": "upper_parity", "j": "upper_j"}), on="upperlevel")
+        .filter(
+            (pl.col("lower_parity") == pl.col("upper_parity"))
+            | ((pl.col("upper_j") - pl.col("lower_j")).abs() > 1)
+            | ((pl.col("upper_j") == 0) & (pl.col("lower_j") == 0))
+        )
+        .height
+    )
+    if nbreaks:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {nbreaks} of {dftransitions.height} transitions break the parity rule or the delta J rule of an"
+            " electric dipole transition. The file lists electric dipole transitions only, so the output writes each"
+            " transition as permitted. Such a transition can belong to a different level of almost the same energy.",
+        )
 
 
 # a wavelength more than this fraction away from the energy difference of its two levels does not fit them
