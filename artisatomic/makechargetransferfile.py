@@ -257,8 +257,8 @@ def format_header(source_counts: Counter[str]) -> str:
         f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total of",
         f"  a reaction that releases energy at {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that",
         f"  the fit used. A curve with fewer than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K",
-        f"  entry, with tmin = tmax = {SS11_FLAT_TEMP} K. A reaction that needs energy and has fewer usable points has no",
-        "  line. ARTIS then takes the rate of its reverse reaction (autoreverse = 1 on that line).",
+        f"  entry, with tmin = tmax = {SS11_FLAT_TEMP} K. A reaction that needs energy has no floor in its table. If it",
+        "  has fewer usable points, the fit takes each tabulated total above zero in that temperature range.",
         "  The comment of each line gives the largest relative error of the fit or the flat value",
         "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
         "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
@@ -469,10 +469,10 @@ class SS11Fit(t.NamedTuple):
     tmax: float
 
 
-def fit_ss11_curve(ks: list[float]) -> SS11Fit:
+def fit_ss11_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11Fit:
     """Fit ln k = ln a + b ln t4 - eexp/T to a tabulated SS11 rate curve.
 
-    The usable points lie in the fit window and above SS11_USABLE_MIN. Charge transfer competes
+    The usable points lie in the fit window and above usable_min. Charge transfer competes
     with the other processes only in the nebular low-temperature regime. Also, some reactions
     have a floor and then a steep rise. The fit form cannot span that shape over the full
     tabulated range. tmin and tmax hold the span of the usable points.
@@ -486,7 +486,7 @@ def fit_ss11_curve(ks: list[float]) -> SS11Fit:
     pts = [
         (temp, k)
         for temp, k in zip(SS11_TGRID, ks, strict=True)
-        if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX and k > SS11_USABLE_MIN
+        if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX and k > usable_min
     ]
     if len(pts) < SS11_MIN_POINTS:
         flat = ks[SS11_TGRID.index(SS11_FLAT_TEMP)]
@@ -523,16 +523,21 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             fit = fit_ss11_curve(ks)
             direction = "rec" if is_recombination else "ion"
             # A total below the radiative floor is a reaction that needs energy. A flat value of such a
-            # curve holds its 2e4 K rate at all temperatures, which is far too large below 2e4 K. The
-            # file then has no line for it, and ARTIS takes the rate of the reverse reaction with the
-            # Boltzmann factor (autoreverse).
+            # curve holds its 2e4 K rate at all temperatures, which is far too large below 2e4 K. Its
+            # table has no floor, so each value above zero is a rate, and the fit takes all of them.
+            # The reverse rate from detailed balance is not a replacement: the forward total of
+            # H+ + Se goes to an excited term of Se+, and ARTIS balances it against the ground level.
+            # That gave Se+ + H 1.8e-13 cm3/s at 2e4 K, where the table gives 1.12e-21.
             needs_energy = any(
                 k < SS11_FLOOR for temp, k in zip(SS11_TGRID, ks, strict=True) if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX
             )
+            fit_takes_all_values = needs_energy and fit.npts < SS11_MIN_POINTS
+            if fit_takes_all_values:
+                fit = fit_ss11_curve(ks, usable_min=0.0)
             if needs_energy and fit.npts < SS11_MIN_POINTS:
                 report.append(
                     f"{direction} {elsymbol} q={q}: no line. The reaction needs energy, and its table gives fewer than"
-                    f" {SS11_MIN_POINTS} usable points."
+                    f" {SS11_MIN_POINTS} values above zero."
                 )
                 continue
             warning = "  WARNING: the fit error is large" if fit.maxerr > MAXERR_WARN else ""
@@ -546,6 +551,8 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                     f"fit to their tabulated k(T) over {fnum(fit.tmin)}-{fnum(fit.tmax)} K,"
                     f" max fit error {fit.maxerr * 100:.0f}%"
                 )
+                if fit_takes_all_values:
+                    source += " (the reaction needs energy, so the fit takes each value above zero)"
             elif fit.npts > 0:
                 source = (
                     f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry"
