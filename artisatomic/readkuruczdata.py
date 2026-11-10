@@ -693,9 +693,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     ]
     # The levels and the transitions come from the same rows, so read those rows once. Each
     # collect() of the lazy frame reads and parses the file again, and the file can be 150 MB.
-    # The levels need the predicted flags as well, and combine_line_components() needs the
-    # isotope fields. The reader reads no other field. gfall08oct17 writes F = 10 as "A" in the
-    # hyperfine F fields, so a read of those fields stops the read of V I, Mn I, Co I and Nb I-II.
+    # combine_line_components() needs the predicted flags and the isotope fields. The reader reads
+    # no other field. gfall08oct17 writes F = 10 as "A" in the hyperfine F fields, so a read of
+    # those fields stops the read of V I, Mn I, Co I and Nb I-II.
     dfgfall = gfall.select(
         [
             *transition_columns,

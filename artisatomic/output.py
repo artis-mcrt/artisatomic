@@ -1102,9 +1102,7 @@ def write_phixs_data(
             )
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
-
-    # ARTIS cannot read "nan" or "inf"
-    for lowerlevelid in levelids_to_write:
+        # ARTIS cannot read "nan" or "inf"
         if not np.isfinite(photoionization_crosssections[lowerlevelid]).all():
             msg = (
                 f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: a cross section is not a"

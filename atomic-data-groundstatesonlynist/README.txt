@@ -15,5 +15,4 @@ groundstates.dat is a table with a header line. A tab character separates the co
 - g: the statistical weight of the ground level;
 - config: the configuration of the ground level.
 
-The table holds 51 ions. All of them have ion stage 5. The table came into the repository in
-July 2024.
+The table holds 51 ions. All of them have ion stage 5.

@@ -4,6 +4,5 @@ doi:10.1093/mnras/stv2785, arXiv:1509.03164.
 
 storetetal2016-co-ii.txt is the VizieR export of 2016-10-27 for the 15 lowest levels of Co II.
 
-No code reads this file. PR #75 removed the reader readstoreydata.py, because no handler called it.
-The file stays here as a reference for a comparison with the Co II collision strengths of
+No code reads this file. It is a reference for a comparison with the Co II collision strengths of
 another source.

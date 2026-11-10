@@ -4735,7 +4735,7 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + transheader)
     # the E2 file has a blank line between the third rule and the column names
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(header + "\n" + transheader)
-    # the M2 file is an xz file with no data row. polars cannot scan the xz form, so that read is eager
+    # the M2 file is an xz file with no data row. xopen decompresses the xz form into memory for the scan
     with xopen(tmp_path / "57LaII_transitions_calib_M2.txt.xz", "wt", encoding="utf-8") as fout:
         fout.write(header + transheader)
 

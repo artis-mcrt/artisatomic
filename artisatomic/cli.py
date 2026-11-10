@@ -224,11 +224,7 @@ def signals_to_take_over(names: tuple[str, ...]) -> list[int]:
     object (signal.getsignal() gives None), so signal.signal() cannot put it back.
     """
     signums = [getattr(signal, name) for name in names if hasattr(signal, name)]
-    return [
-        signum
-        for signum in signums
-        if signal.getsignal(signum) is not signal.SIG_IGN and signal.getsignal(signum) is not None
-    ]
+    return [signum for signum in signums if signal.getsignal(signum) not in {signal.SIG_IGN, None}]
 
 
 @contextmanager
@@ -346,7 +342,7 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
             fcntl.flock(folderfd, fcntl.LOCK_EX)
         except OSError as error:
             print(
-                f"WARNING: The file system of {outputfolder} gives no lock ({error}). The run continues with no lock."
+                f"WARNING: {outputfolder} gives no lock ({error}). The run continues with no lock."
                 " Two runs that end at one time can mix their files."
             )
         yield
