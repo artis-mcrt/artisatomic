@@ -268,8 +268,8 @@ def test_interpret_configuration():
 def test_hydrogenic_phixs():
     """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
     rhd.read_hyd_phixsdata()
-    # a table has more points than the CMFGEN table: this count for each interval of the U grid
-    step = rhd.hyd_points_per_interval
+    # each interval of the U grid of a CMFGEN table becomes this count of intervals in the output table
+    subintervals = rhd.hydrogenic_subintervals_per_interval
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / ryd_to_ev
     expected_n1 = np.array(
@@ -288,10 +288,10 @@ def test_hydrogenic_phixs():
     )
 
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 1, 0, 0)
-    assert np.allclose(expected_n1, phixstable_nl[::step][:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_nl[::subintervals][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 1)
-    assert np.allclose(expected_n1, phixstable_n[::step][:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_n[::subintervals][:10], rtol=1e-3)
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / (5**2 * ryd_to_ev)
     expected_n5 = np.array(
@@ -309,10 +309,10 @@ def test_hydrogenic_phixs():
         ]
     )
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 5, 0, 4)
-    assert np.allclose(expected_n5, phixstable_nl[::step][:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_nl[::subintervals][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 5)
-    assert np.allclose(expected_n5, phixstable_n[::step][:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_n[::subintervals][:10], rtol=1e-3)
 
     # Between two table points, CMFGEN interpolates log10(sigma) of each l linearly in log10(U), and
     # the Gaunt factor of a shell linearly in log10(U). The downsample joins the points of a table
@@ -320,12 +320,17 @@ def test_hydrogenic_phixs():
     # above a cross section near nu^-3, and a line between two points of the refined grid is 1.4e-4
     # above it.
     for table in (phixstable_nl, phixstable_n):
-        u = table[:, 0] / table[0, 0]
-        assert np.allclose(u[1:] / u[:-1], 1.1 ** (1 / step), rtol=1e-6)
-        local_exponent = np.log(table[step, 1] / table[0, 1]) / np.log(u[step])
-        assert table[step // 2, 1] == pytest.approx(table[0, 1] * u[step // 2] ** local_exponent, rel=2e-3)
-        midpoint_of_table_line = 0.5 * (table[0, 1] + table[step, 1])
-        assert midpoint_of_table_line / np.interp(0.5 * (u[0] + u[step]), u, table[:, 1]) > 1.005
+        u_values = table[:, 0] / table[0, 0]
+        assert np.allclose(u_values[1:] / u_values[:-1], 1.1 ** (1 / subintervals), rtol=1e-6)
+        local_exponent = np.log(table[subintervals, 1] / table[0, 1]) / np.log(u_values[subintervals])
+        assert table[subintervals // 2, 1] == pytest.approx(
+            table[0, 1] * u_values[subintervals // 2] ** local_exponent, rel=2e-3
+        )
+        midpoint_of_table_line = 0.5 * (table[0, 1] + table[subintervals, 1])
+        assert (
+            midpoint_of_table_line / np.interp(0.5 * (u_values[0] + u_values[subintervals]), u_values, table[:, 1])
+            > 1.005
+        )
 
 
 def test_hydrogenic_nl_phixs_offset_type8():
