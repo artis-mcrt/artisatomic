@@ -5,6 +5,7 @@ committed files in atomic-data-chargetransfer, so a change of their format fails
 """
 
 import hashlib
+import math
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -111,6 +112,47 @@ def test_makechargetransferfile_ss11_autoreverse(patch_sources, tmp_path):
     assert autoreverse_of_reaction[1, 2, 32, 1] == 0
 
 
+def test_makechargetransferfile_ss11_fits_a_reaction_that_needs_energy(patch_sources, tmp_path):
+    """A reaction that needs energy gets a fit to each table value above zero, and not a flat value.
+
+    The curve 1e-12 exp(-60000 K / T) cm3/s has two values above the usable limit of 1.2e-14 cm3/s.
+    A flat value of its 2e4 K entry is 3e-12 times too large at 2000 K. The reverse reaction has
+    its own row, so both lines get autoreverse = 0.
+    """
+    # the table gives zero below 1000 K, where the value needs an exponent of three digits
+    boltzmann = [
+        1.0e-12 * math.exp(-60000.0 / temp) if temp >= 1000 else 0.0 for temp in makechargetransferfile.SS11_TGRID
+    ]
+    forward = [1.0e-12] * len(makechargetransferfile.SS11_TGRID)
+    patch_sources(
+        {
+            "ss11_table4.dat": _ss11_cds_line("Se", 1, "4s^2^4p^4^ ^3^P", boltzmann),
+            "ss11_table5.dat": _ss11_cds_line("Se", 0, "4s^2^4p^3^ ^2^P^o^", forward),
+        }
+    )
+
+    entries, report = makechargetransferfile.get_ss11_entries(tmp_path)
+    recombination, ionisation = makechargetransferfile.set_autoreverse_flags(entries)
+    assert (recombination.z_acc, recombination.ionstage_acc, recombination.z_don) == (34, 2, 1)
+    # the columns a and eexp: a is in units of 1e-9 cm3/s. The table has three significant digits.
+    assert recombination.a == pytest.approx(1.0e-3, rel=0.02)
+    assert recombination.eexp == pytest.approx(60000.0, rel=0.01)
+    assert (recombination.tmin, recombination.tmax) == (1000, 40000)
+    assert "takes each value above zero" in recombination.comment
+    assert (recombination.autoreverse, ionisation.autoreverse) == (0, 0)
+    assert not any("no line" in line for line in report)
+
+    # a curve with fewer than four values above zero has no line
+    fewvalues = [
+        value if temp >= 20000 else 0.0
+        for temp, value in zip(makechargetransferfile.SS11_TGRID, boltzmann, strict=True)
+    ]
+    patch_sources({"ss11_table4.dat": _ss11_cds_line("Se", 1, "4s^2^4p^4^ ^3^P", fewvalues), "ss11_table5.dat": ""})
+    entries, report = makechargetransferfile.get_ss11_entries(tmp_path)
+    assert entries == []
+    assert "no line" in report[0]
+
+
 def _cloudy_table(magic: str, ncols: int, rows: dict[tuple[int, int], list[float]]) -> str:
     """Build the text of a charge transfer file of Cloudy, with an empty row for each ion not given."""
     lines = [f"  {magic}"]
@@ -198,8 +240,7 @@ def test_committed_source_files_build_the_expected_entries():
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
     ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
-    # four SS11 reactions that need energy have no line (see get_ss11_entries())
-    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 32)
+    assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
     entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
 
