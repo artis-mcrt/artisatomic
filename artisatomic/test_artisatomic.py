@@ -7341,7 +7341,7 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, flog)
     reader.thresholdenergyryd = 2.0
     reader.pending_levelname = "5g_2Ge"
-    cut = reader.cut_below_threshold
+    cut = reader.start_at_threshold
 
     x = np.array([0.75, 0.9, 1.1, 2.0])
     energyryd, sigma = cut(x * 2.0, np.array([1.0, 0.5, 0.3, 0.1]))
@@ -7372,7 +7372,11 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     # the line cannot take the row below zero, and a table of one row keeps its value
     assert cut(np.array([1.5, 1.6]) * 2.0, np.array([0.1, 0.5]))[1].tolist() == [0.0, 0.1, 0.5]
     assert cut(np.array([3.0]), np.array([0.7]))[1].tolist() == [0.7, 0.7]
+    # two first rows at one energy give no line, so the row at the threshold has the first value
+    assert cut(np.array([1.2, 1.2, 2.0]) * 2.0, np.array([0.3, 0.5, 0.1]))[1].tolist() == [0.3, 0.3, 0.5, 0.1]
     assert "starts at 1 + 0.01 times the threshold. The reader adds a row at the threshold" in flog.getvalue()
+    # CMFGEN has no limit of zero, so the log does not name CMFGEN as the source of that row
+    assert "starts at 1 + 0.5 times the threshold. The line through the first two rows is below zero" in flog.getvalue()
 
 
 def test_write_adata_rejects_an_ion_that_artis_cannot_read():

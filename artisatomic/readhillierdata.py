@@ -1389,44 +1389,60 @@ class PhotFileReader:
                 f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
-        energyryd, sigma = self.cut_below_threshold(energyryd, sigma)
+        energyryd, sigma = self.start_at_threshold(energyryd, sigma)
         # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
         self.shared_edge_ryd[self.filenum][self.pending_levelname] = self.thresholdenergyryd
 
-    def cut_below_threshold(
+    def start_at_threshold(
         self, energyryd: npt.NDArray[np.float64], sigma: npt.NDArray[np.float64]
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Remove the rows of a tabulated table below the threshold, and start the table at the threshold.
+        """Give a tabulated table that starts at the threshold: with no row below it, and with a row at it.
 
-        CMFGEN uses a table only at frequencies at or above the edge (sub_phot_gen.f). It reads the
-        value at the edge by linear interpolation between the rows. reduce_phixs_tables_worker()
-        takes the first energy of a table as its threshold. A row below the edge therefore moved
-        each output value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data
-        start below x = 1. A table that ends below the threshold continues as nu^-3 from its last
-        row, as in CMFGEN.
+        reduce_phixs_tables_worker() takes the first energy of a table as its threshold, so that
+        energy must be the threshold. CMFGEN uses a table only at frequencies at or above the edge
+        (sub_phot_gen.f). It reads the value at the edge by linear interpolation between the rows.
+        13759 of the 31647 tabulated tables of the CMFGEN data start below x = 1. A table that ends
+        below the threshold continues as nu^-3 from its last row, as in CMFGEN.
 
-        181 tables start above x = 1, for example the tables of K I at x = 1.01. The first energy of
-        such a table was its threshold also. Below the first row, the index search of CMFGEN stops at
-        the first two rows (sub_phot_gen.f, lines 246-271). The linear interpolation then continues
-        the line of those rows down to the edge (lines 380-385). The reader adds a row at the
-        threshold from that line. A cross section cannot be negative, so the row is not below zero.
+        181 tables start above x = 1, for example the tables of K I at x = 1.01. Below the first
+        row, the index search of CMFGEN stops at the first two rows (sub_phot_gen.f, lines 246-271).
+        The linear interpolation then continues the line of those rows down to the edge (lines
+        380-385). The reader adds a row at the threshold from that line. A cross section cannot be
+        negative, so the row is not below zero.
         """
         x = energyryd / self.thresholdenergyryd
+
+        def sigma_at_threshold(index: int) -> float:
+            """Give the value at x = 1 of the line through the rows index and index + 1."""
+            fraction = (1.0 - x[index]) / (x[index + 1] - x[index])
+            return float(sigma[index] + fraction * (sigma[index + 1] - sigma[index]))
+
         # a tolerance, because x = 1 of the file comes back from a product and a division
         if x[0] > 1.0 + 1e-12:
-            slope = (sigma[1] - sigma[0]) / (x[1] - x[0]) if len(x) > 1 and x[1] > x[0] else 0.0
-            log_detail(
-                self.flog,
-                ("phixsdata",),
-                "table that starts above the threshold",
-                f"The table of {self.pending_levelname} starts at 1 + {x[0] - 1.0:.2g} times the threshold. The reader adds a"
-                " row at the threshold on the line through the first two rows, as CMFGEN does.",
-            )
+            starttext = f"The table of {self.pending_levelname} starts at 1 + {x[0] - 1.0:.2g} times the threshold."
+            # two first rows at one energy give no line, and a table of one row has none
+            sigma_on_line = sigma_at_threshold(0) if len(x) > 1 and x[1] > x[0] else float(sigma[0])
+            if sigma_on_line < 0.0:
+                log_detail(
+                    self.flog,
+                    ("phixsdata",),
+                    "table that starts above the threshold, with a line below zero",
+                    f"{starttext} The line through the first two rows is below zero at the threshold, so the reader"
+                    " adds a row of zero there. CMFGEN has no such limit.",
+                )
+            else:
+                log_detail(
+                    self.flog,
+                    ("phixsdata",),
+                    "table that starts above the threshold",
+                    f"{starttext} The reader adds a row at the threshold on the line through the first two rows, as"
+                    " CMFGEN does.",
+                )
             return (
                 np.concatenate(([self.thresholdenergyryd], energyryd)),
-                np.concatenate(([max(float(sigma[0] + slope * (1.0 - x[0])), 0.0)], sigma)),
+                np.concatenate(([max(sigma_on_line, 0.0)], sigma)),
             )
         if x[0] >= 1.0 - 1e-12:
             return energyryd, sigma
@@ -1458,11 +1474,9 @@ class PhotFileReader:
             f"{starttext} The reader drops the rows below the threshold and adds a row at the threshold by linear"
             " interpolation, as CMFGEN does.",
         )
-        fraction = (1.0 - x[first - 1]) / (x[first] - x[first - 1])
-        sigma_at_edge = sigma[first - 1] + fraction * (sigma[first] - sigma[first - 1])
         return (
             np.concatenate(([self.thresholdenergyryd], energyryd[first:])),
-            np.concatenate(([sigma_at_edge], sigma[first:])),
+            np.concatenate(([sigma_at_threshold(first - 1)], sigma[first:])),
         )
 
     def take_data_rows(self, start: int, end: int) -> None:
