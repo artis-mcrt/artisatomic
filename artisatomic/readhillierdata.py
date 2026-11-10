@@ -1978,7 +1978,8 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     """Evaluate a Seaton formula fit (CMFGEN cross section type 1, or type 7 with nu_o).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge has an
-    offset, so the cross section is zero up to the offset threshold.
+    offset, so the cross section is zero below the offset edge. The table then has two rows at
+    that edge, which give the step from zero to sigmat.
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
@@ -1997,14 +1998,32 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
             1 + (nu_o * 1e15 * h_in_ev_seconds) / threshold_energy_ev
         )
 
-        # the cross section is zero below the offset edge. np.where evaluates both arms, which is
-        # safe here: the ratio is positive everywhere, so the arm that np.where discards raises no
-        # domain error.
+        # the cross section is zero below the offset edge, and CMFGEN gives the fit at the edge
+        # itself (IF(RU .LE. 1.0D0)). np.where evaluates both arms, which is safe here: the ratio
+        # is positive everywhere, so the arm that np.where discards raises no domain error.
         crosssection = np.where(
-            offset_threshold_div_energy < 1.0,
+            offset_threshold_div_energy <= 1.0,
             sigmat * (beta + (1 - beta) * offset_threshold_div_energy) * offset_threshold_div_energy**s,
             0.0,
         )
+
+        # The offset edge falls between two points of the grid. Two rows at the edge give the step
+        # of CMFGEN (zero below, sigmat at the edge). Without them the downsample joins the zero
+        # point and the first open point with a ramp.
+        phixstable = np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
+        # the count of the grid points below the edge. The ratio decreases along the grid.
+        firstopen = int(np.count_nonzero(offset_threshold_div_energy > 1.0))
+        if 0 < firstopen < len(phixstable):
+            # the limits keep the energy column in order if the rounding puts the edge past a grid point
+            edge_ryd = float(
+                np.clip(
+                    (threshold_energy_ev + nu_o * 1e15 * h_in_ev_seconds) / ryd_to_ev,
+                    phixstable[firstopen - 1, 0],
+                    phixstable[firstopen, 0],
+                )
+            )
+            return np.insert(phixstable, firstopen, [[edge_ryd, 0.0], [edge_ryd, sigmat]], axis=0)
+        return phixstable
 
     return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
