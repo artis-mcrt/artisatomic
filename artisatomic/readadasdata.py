@@ -485,7 +485,6 @@ def read_adf04(
     list index n - 1. The reader therefore checks that the file indices are contiguous and 1-based.
     """
     energylevels: list[ADASEnergyLevel] = []
-    ionization_energy_ev = 0.0
     log_comment(flog, ("adata", "transitiondata"), f"{contents} come from {path_in_data_folder(filepath, adasfolder)}.")
     if origin is not None:
         log_comment(flog, ("adata", "transitiondata"), origin)
@@ -994,7 +993,7 @@ def _fill_co3_phixs(
     photoionization_targetfractions,
 ) -> None:
     """Fill the arrays with the QUB cross sections of Co III. The table is for the QUB levels of Co III."""
-    # photoionize to a single level ion
+    # photoionise to a single level ion
 
     phixsvalues_const = [
         9.3380692,

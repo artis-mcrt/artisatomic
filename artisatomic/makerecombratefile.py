@@ -34,8 +34,8 @@ def read_nahar_rrcfile(filename) -> list[RecombRow]:
             if not line:  # end of file, otherwise a file without the marker would loop forever
                 break
             if line.strip().startswith("TOTAL RECOMBINATION RATE"):
-                line = filein.readline()
-                line = filein.readline()
+                filein.readline()
+                filein.readline()
                 header_row = filein.readline().strip().replace(" n)", "-n)").split()
                 break
 

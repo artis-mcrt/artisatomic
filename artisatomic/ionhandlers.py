@@ -129,6 +129,9 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
     earlier elements. An unpacking error several frames later would name neither the element nor
     the file.
     """
+    if not isinstance(loaded, list):
+        msg = "artisatomicionhandlers.json does not hold a list of [atomic_number, [ions]] pairs."
+        raise TypeError(msg)
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
     for element in loaded:
         try:
@@ -136,6 +139,9 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
         except (TypeError, ValueError):
             msg = f"The entry {element!r} in artisatomicionhandlers.json is not an [atomic_number, [ions]] pair."
             raise TypeError(msg) from None
+        if not isinstance(listions, list):
+            msg = f"The entry {element!r} in artisatomicionhandlers.json has no list of [ion_stage, handler] pairs."
+            raise TypeError(msg)
         # a JSON true is a Python bool, which is an int, and int() cuts 26.9 to 26
         if (
             not isinstance(atomic_number, int)

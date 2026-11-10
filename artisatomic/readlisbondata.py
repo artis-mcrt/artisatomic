@@ -38,9 +38,9 @@ def read_csv_past_provenance(filename: Path | str, countkey: str, sourcename: st
     between two rows, and the count finds such a file.
 
     skip_lines, not skip_rows: skip_rows reads CSV rows, so a quote character in the provenance
-    text would join the header to the provenance text. The schema gives the dtype of each column. An inference from the
-    first rows can give Int64 to a float column, and an inference from all rows is slow for a file
-    with millions of rows.
+    text would join the header to the provenance text. The schema gives the dtype of each column.
+    An inference from the first rows can give Int64 to a float column, and an inference from all
+    rows is slow for a file with millions of rows.
 
     polars reads a plain, a gzip, or a zstd file itself. It cannot read the xz form, which xopen
     decompresses into memory instead, as scan_file_lines() does.
