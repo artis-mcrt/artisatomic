@@ -1963,6 +1963,19 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
             0.0,
         )
 
+        # The offset edge falls between two points of the grid. Two rows at the edge give the step
+        # of CMFGEN (zero below, sigmat at the edge). Without them the downsample joined the zero
+        # point and the first open point with a ramp.
+        firstopen = int(np.searchsorted(-offset_threshold_div_energy, -1.0, side="right"))
+        if 0 < firstopen < len(energy_div_threshold):
+            edge_ryd = (threshold_energy_ev + nu_o * 1e15 * h_in_ev_seconds) / ryd_to_ev
+            return np.insert(
+                np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection]),
+                firstopen,
+                [[edge_ryd, 0.0], [edge_ryd, sigmat]],
+                axis=0,
+            )
+
     return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
 
