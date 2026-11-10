@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from collections.abc import Iterable
 from functools import cache
+from functools import reduce
 from pathlib import Path
 from string import ascii_uppercase
 
@@ -2010,20 +2011,17 @@ def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.n
     Depends only on the quantum numbers, not on the level, so cache it: the callers below run
     once per level per ion.
     """
-    arr_sigma_summed_over_l: np.ndarray | None = None
+    sigma_of_each_l = []
     for l in range(l_start, l_end + 1):
         if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             msg = f"The hydrogenic energy grids of (n, l) = ({n}, {l}) and ({n}, {l_start}) differ"
             raise ValueError(msg)
-        sigma_of_l = (2 * l + 1) * interpolate_on_refined_grid(hyd_phixs[n, l], log_values=True)
-        arr_sigma_summed_over_l = (
-            sigma_of_l if arr_sigma_summed_over_l is None else arr_sigma_summed_over_l + sigma_of_l
-        )
+        sigma_of_each_l.append((2 * l + 1) * interpolate_on_refined_grid(hyd_phixs[n, l], log_values=True))
 
-    if arr_sigma_summed_over_l is None:
+    if not sigma_of_each_l:
         msg = f"The range of l from {l_start} to {l_end} of n = {n} is empty"
         raise ValueError(msg)
-    return arr_sigma_summed_over_l
+    return reduce(np.add, sigma_of_each_l)
 
 
 def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, zion=None):
@@ -2067,9 +2065,10 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # energy / (E_o + E_threshold), i.e. U measured from the offset edge and not from the true edge
         u_offset = thresholdenergyev * u_refined / (e_o_ev + thresholdenergyev)
 
-        # CMFGEN interpolates log10(cross section) linearly in log10(U) on a geometric U grid.
-        # This reproduces its RJ = LOG10(U) / L_DEL_U indexing. u_offset <= u_refined for
-        # e_o_ev >= 0, so the interpolation never extrapolates past the table end.
+        # CMFGEN interpolates log10(cross section) of each l linearly in log10(U), and then adds the
+        # l values. The points of the refined grid hold those sums. Between two such points, the code
+        # interpolates log10 of the sum, which differs from the CMFGEN value by less than 1e-5.
+        # u_offset <= u_refined for e_o_ev >= 0, so the interpolation never extrapolates past the table end.
         with np.errstate(divide="ignore"):
             log_sigma = np.log10(arr_sigma_summed_over_l)
         arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_refined), log_sigma) * scale_factor
@@ -2077,9 +2076,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # the cross section is zero below the offset edge
         arr_sigma[u_offset < 1.0] = 0.0
 
-        # The offset edge falls between two points of the U grid. Two rows at the
-        # edge give the step of CMFGEN (zero below, the value at U = 1 above). Without them the
-        # downsample joined the zero point and the full point with a ramp over one step.
+        # The offset edge falls between two points of the U grid. Two rows at the edge give the step
+        # of CMFGEN (zero below, the value at U = 1 above). Without them the downsample joins the
+        # zero point and the full point with a ramp over one step.
         firstopen = int(np.searchsorted(u_offset, 1.0, side="left"))
         if 0 < firstopen < len(u_offset):
             edge_ryd = (e_o_ev + thresholdenergyev) / ryd_to_ev

@@ -332,6 +332,24 @@ def test_hydrogenic_phixs():
         )
 
 
+def test_interpolate_on_refined_grid_has_a_log_mode_and_a_linear_mode():
+    """The cross sections and the U grid use the log mode, and the Gaunt factor uses the linear mode."""
+    subintervals = rhd.hydrogenic_subintervals_per_interval
+    table_values = np.array([1.0, 100.0, 1.0])
+    fraction = (subintervals // 2) / subintervals
+
+    log_mode = rhd.interpolate_on_refined_grid(table_values, log_values=True)
+    assert len(log_mode) == 2 * subintervals + 1
+    assert log_mode[::subintervals].tolist() == [1.0, 100.0, 1.0]
+    assert log_mode[subintervals // 2] == pytest.approx(100.0**fraction, rel=1e-12)
+
+    linear_mode = rhd.interpolate_on_refined_grid(table_values, log_values=False)
+    assert linear_mode[::subintervals].tolist() == [1.0, 100.0, 1.0]
+    assert linear_mode[subintervals // 2] == pytest.approx(1.0 + 99.0 * fraction, rel=1e-12)
+
+    assert np.array_equal(rhd.refined_u_grid(table_values), log_mode)
+
+
 def test_hydrogenic_nl_phixs_offset_type8():
     """CMFGEN cross section type 8 (modified hydrogenic split l).
 
