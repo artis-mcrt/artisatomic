@@ -77,7 +77,6 @@ class HillierTransition(t.NamedTuple):
     nameto: str
     f: float
     A: float
-    lambdaangstrom: float
     i: int
     j: int
     hilliertransitionid: int
@@ -453,8 +452,6 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path, flog) -> pl.Da
             nameto=part(1),
             f=pl.col("f"),
             A=pl.col("A"),
-            # the wavelength column holds a dash where the transition has no measured wavelength
-            lambdaangstrom=as_float(4).fill_null(-1.0),
             i=part(5).str.strip_chars_end("-").cast(pl.Int64),
             j=part(6).cast(pl.Int64),
             # the when() masks the id column before the cast, not after. The other layout can hold
@@ -2438,7 +2435,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 elif row_two_to_end.startswith("!Number of T values OMEGA tabulated at"):
                     num_expected_t_values = int(row[0])
                 elif (
-                    row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
+                    # the files write "non-FILE", "non-file" and "non-FILe"
+                    row_two_to_end.lower().startswith("!scaling factor for omega (non-file values)")
                     and fortran_float(row[0]) != 1.0
                 ):
                     msg = f"scaling factor for OMEGA is {row[0]}, not 1. The reader does not apply a scaling factor."

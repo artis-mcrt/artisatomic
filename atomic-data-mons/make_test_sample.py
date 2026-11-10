@@ -54,7 +54,7 @@ def main() -> None:
                 wavelength_A, lowerenergy1000percm, _ = (float(x) for x in line.split(","))
                 lowerenergypercm = lowerenergy1000percm * 1000
                 upperenergypercm = lowerenergypercm + 1e8 / wavelength_A
-                # the limit gets a margin, because the transition file rounds the energies
+                # the limit gets a margin, because the transition file adds a tag to each energy
                 if max(lowerenergypercm, upperenergypercm) <= energylimit + 1.0:
                     kepttransitions.append(line)
 

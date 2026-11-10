@@ -332,7 +332,8 @@ def read_levels_and_transitions(
     pertype_name_regex = re.compile(rf"{ionstr}_transitions_{calibstr}_(?:{transition_type_regex.pattern})+\.txt")
     pertype_file_of_name: dict[str, Path] = {}
     for ext in compression_extensions:
-        for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
+        # sorted: the order of a glob depends on the file system, and the warnings go to the output files
+        for filepath in sorted(basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}")):
             name = filepath.name.removesuffix(ext)
             if pertype_name_regex.fullmatch(name) is None:
                 log_comment(

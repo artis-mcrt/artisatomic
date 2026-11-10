@@ -38,12 +38,12 @@ description = (
     " doi:10.5281/zenodo.10635803"
 )
 
-# The transition file quotes the lower level energy to about 8 significant digits, so it differs
-# from the level file by up to 0.02 cm^-1. A larger difference means that the two files disagree.
+# The transition file adds a tag to each level energy (see tagged_level_energies()), so it differs
+# from the level file by the tag. The largest tag of the full level archive is 0.034 cm^-1. A larger
+# difference means that the two files disagree.
 MATCH_TOLERANCE_PERCM = 0.05
 
-# The transition file adds a tag to each level energy (see tagged_level_energies()). The tagged
-# energies of the two files agree to 2e-13 (1000 cm^-1) in the sample.
+# The tagged energies of the two files agree to 2e-13 (1000 cm^-1) in the sample.
 TAG_TOLERANCE_1000PERCM = 1e-9
 
 
@@ -118,8 +118,15 @@ def get_nearest_level_indices(sorted_energies: np.ndarray, energies: np.ndarray)
     idx_right = np.searchsorted(sorted_energies, energies).clip(1, len(sorted_energies) - 1)
     idx_left = idx_right - 1
     leftisnearer = np.abs(energies - sorted_energies[idx_left]) <= np.abs(energies - sorted_energies[idx_right])
+    nearest = np.where(leftisnearer, idx_left, idx_right)
 
-    return np.where(leftisnearer, idx_left, idx_right), np.where(leftisnearer, idx_right, idx_left)
+    # the second closest level is a neighbour of the closest level, and it can be on the same side of the energy
+    below = (nearest - 1).clip(0)
+    above = (nearest + 1).clip(max=len(sorted_energies) - 1)
+    distance_below = np.where(nearest > 0, np.abs(energies - sorted_energies[below]), np.inf)
+    distance_above = np.where(above > nearest, np.abs(energies - sorted_energies[above]), np.inf)
+
+    return nearest, np.where(distance_below <= distance_above, below, above)
 
 
 def tagged_level_energies(energies1000percm: np.ndarray, j_arr: np.ndarray) -> np.ndarray:
