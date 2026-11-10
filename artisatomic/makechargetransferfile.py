@@ -525,9 +525,9 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             # A total below the radiative floor is a reaction that needs energy. A flat value of such a
             # curve holds its 2e4 K rate at all temperatures, which is far too large below 2e4 K. Its
             # table has no floor, so each value above zero is a rate, and the fit takes all of them.
-            # The reverse rate from detailed balance is not a replacement: the forward total of
-            # H+ + Se goes to an excited term of Se+, and ARTIS balances it against the ground level.
-            # That gave Se+ + H 1.8e-13 cm3/s at 2e4 K, where the table gives 1.12e-21.
+            # The reverse rate from detailed balance is not a replacement. The forward total of H+ + Se
+            # goes to an excited term of Se+, and ARTIS balances it against the ground level. The
+            # reverse rate of Se+ + H is then 1.8e-13 cm3/s at 2e4 K, where the table gives 1.12e-21.
             needs_energy = any(
                 k < SS11_FLOOR for temp, k in zip(SS11_TGRID, ks, strict=True) if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX
             )
