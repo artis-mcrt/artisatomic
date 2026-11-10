@@ -5257,6 +5257,12 @@ def test_cmfgen_fit_functions():
     # rows of the step come before this point.
     assert table7[302, 0] == pytest.approx(2.8 * threshold_ryd)
     assert table7[302, 1] == pytest.approx(2.0 * (0.5 + 0.5 / 1.4) * 1.4**-3.0)
+    # an edge above the top of the grid (20.96 times the threshold) gives no step and no value
+    table7_above = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=25.0 * nu_o_1e15hz)
+    assert table7_above.shape == (1000, 2)
+    assert np.all(table7_above[:, 1] == 0.0)
+    # an offset of zero puts the edge on the first grid point, where CMFGEN gives the fit: the type 1 table
+    assert np.array_equal(readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=0.0), table)
 
     # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
     table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
