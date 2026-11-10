@@ -268,6 +268,8 @@ def test_interpret_configuration():
 def test_hydrogenic_phixs():
     """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
     rhd.read_hyd_phixsdata()
+    # a table has more points than the CMFGEN table: this count for each interval of the U grid
+    step = rhd.hyd_points_per_interval
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / ryd_to_ev
     expected_n1 = np.array(
@@ -286,10 +288,10 @@ def test_hydrogenic_phixs():
     )
 
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 1, 0, 0)
-    assert np.allclose(expected_n1, phixstable_nl[:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_nl[::step][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 1)
-    assert np.allclose(expected_n1, phixstable_n[:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_n[::step][:10], rtol=1e-3)
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / (5**2 * ryd_to_ev)
     expected_n5 = np.array(
@@ -307,10 +309,23 @@ def test_hydrogenic_phixs():
         ]
     )
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 5, 0, 4)
-    assert np.allclose(expected_n5, phixstable_nl[:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_nl[::step][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 5)
-    assert np.allclose(expected_n5, phixstable_n[:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_n[::step][:10], rtol=1e-3)
+
+    # Between two table points, CMFGEN interpolates log10(sigma) of each l linearly in log10(U), and
+    # the Gaunt factor of a shell linearly in log10(U). The downsample joins the points of a table
+    # with straight lines. In the middle of an interval a line between two table points is 1.4%
+    # above a cross section near nu^-3, and a line between two points of the refined grid is 1.4e-4
+    # above it.
+    for table in (phixstable_nl, phixstable_n):
+        u = table[:, 0] / table[0, 0]
+        assert np.allclose(u[1:] / u[:-1], 1.1 ** (1 / step), rtol=1e-6)
+        local_exponent = np.log(table[step, 1] / table[0, 1]) / np.log(u[step])
+        assert table[step // 2, 1] == pytest.approx(table[0, 1] * u[step // 2] ** local_exponent, rel=2e-3)
+        midpoint_of_table_line = 0.5 * (table[0, 1] + table[step, 1])
+        assert midpoint_of_table_line / np.interp(0.5 * (u[0] + u[step]), u, table[:, 1]) > 1.005
 
 
 def test_hydrogenic_nl_phixs_offset_type8():
@@ -7192,7 +7207,7 @@ def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
     """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
 
     CMFGEN evaluates the fit with the edge of each level. The reader gave each level the table of
-    the first level of the name. The levels [4] and [5] thus got 4.269 Mb at the threshold in place of 4.877 Mb.
+    the first level of the name. The levels [4] and [5] thus got 4.244 Mb in the first bin in place of 4.848 Mb.
     """
     if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
         pytest.skip("the CMFGEN atomic data is not present")
@@ -7201,9 +7216,9 @@ def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
         _, dflevels, _ = readhillierdata.read_levels_and_transitions(19, 2, flog)
         phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, phixs_args(), flog)
     names = dflevels["levelname"].to_list()
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2692, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8767, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8767, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2443, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8481, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8481, rel=1e-3)
     # fill_missing_phixs_thresholds() gives each threshold from the first target of the level
     assert np.isnan(phixs.thresholds_ev).all()
 

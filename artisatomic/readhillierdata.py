@@ -1966,21 +1966,49 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
 
+# The count of points that a hydrogenic table gets for each interval of its U grid. The points of
+# the CMFGEN tables are 10% apart. The downsample joins the points of a table with straight lines,
+# and a cross section near nu^-3 is 1.4% below such a line in the middle of an interval. CMFGEN
+# interpolates in log10(U) (sub_phot_gen.f). With 10 points the line is 1.4e-4 too high at most.
+hyd_points_per_interval = 10
+
+
+def refined_hyd_positions(npoints: int) -> np.ndarray:
+    """Give the positions of the refined grid of a hydrogenic table, in units of the table index."""
+    return np.linspace(0.0, npoints - 1, (npoints - 1) * hyd_points_per_interval + 1)
+
+
+def refined_hyd_u_grid(u_grid: np.ndarray) -> np.ndarray:
+    """Give the refined U grid of a hydrogenic table. Each interval has points of equal ratio."""
+    positions = refined_hyd_positions(len(u_grid))
+    u_refined = 10 ** np.interp(positions, np.arange(len(u_grid)), np.log10(u_grid))
+    # the table points keep their exact values
+    u_refined[::hyd_points_per_interval] = u_grid
+    return u_refined
+
+
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
 # 2.18 eV threshold cross section is near 4.37072813 Mb, as expected
 @cache
 def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.ndarray:
-    """Sum of (2l + 1) * sigma(n, l) over l_start <= l <= l_end, on the tabulated U grid.
+    """Sum of (2l + 1) * sigma(n, l) over l_start <= l <= l_end, on the refined U grid.
+
+    CMFGEN interpolates log10(sigma(n, l)) of each l linearly in log10(U), and then adds the l
+    values (sub_phot_gen.f). The function does the same for the points between two table points.
 
     Depends only on the quantum numbers, not on the level, so cache it: the callers below run
     once per level per ion.
     """
-    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[n, l_start]))
+    npoints = len(hyd_phixs_energygrid_ryd[n, l_start])
+    positions = refined_hyd_positions(npoints)
+    arr_sigma_summed_over_l = np.zeros(len(positions))
     for l in range(l_start, l_end + 1):
         if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             msg = f"The hydrogenic energy grids of (n, l) = ({n}, {l}) and ({n}, {l_start}) differ"
             raise ValueError(msg)
-        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
+        sigma_l = 10 ** np.interp(positions, np.arange(npoints), np.log10(hyd_phixs[n, l]))
+        sigma_l[::hyd_points_per_interval] = hyd_phixs[n, l]
+        arr_sigma_summed_over_l += (2 * l + 1) * sigma_l
 
     return arr_sigma_summed_over_l
 
@@ -1999,13 +2027,13 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     assert l_start >= 0
     assert l_end <= n - 1
     energygrid = hyd_phixs_energygrid_ryd[n, l_start]
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    # the U values of the hydrogenic tables
-    u_grid = energygrid / energygrid[0]
+    # the U values of the hydrogenic tables, with the points between them (see hyd_points_per_interval)
+    u_grid = refined_hyd_u_grid(energygrid / energygrid[0])
+    phixstable = np.empty((len(u_grid), 2))
 
     arr_sigma_summed_over_l = get_hydrogenic_sigma_summed_over_l(n, l_start, l_end)
 
@@ -2014,7 +2042,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     # the position and the two rows of the step at the offset edge of type 8
     steprows: tuple[int, list[list[float]]] | None = None
     if nu_o is None:
-        # type 2: the output energies coincide with the tabulated U values, so no interpolation
+        # type 2: the output energies are the points of the refined U grid
         # 1 / thresholdenergyryd / n**2 is CMFGEN's (NEF / (n * ZION))**2
         scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
         arr_sigma = arr_sigma_summed_over_l * scale_factor
@@ -2036,7 +2064,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         # the cross section is zero below the offset edge
         arr_sigma[u_offset < 1.0] = 0.0
 
-        # The offset edge falls between two points of the U grid, which are 10% apart. Two rows at the
+        # The offset edge falls between two points of the U grid. Two rows at the
         # edge give the step of CMFGEN (zero below, the value at U = 1 above). Without them the
         # downsample joined the zero point and the full point with a ramp over one step.
         firstopen = int(np.searchsorted(u_offset, 1.0, side="left"))
@@ -2078,13 +2106,14 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
 
     scale_factor = 7.91 / thresholdenergyryd / n
 
-    energydivthreshold = energygrid / energygrid[0]
-
-    crosssection = np.where(
-        energydivthreshold > 0,
-        scale_factor * np.asarray(hyd_gaunt_factor[n]) / energydivthreshold**3,
-        0.0,
+    # CMFGEN interpolates the Gaunt factor linearly in log10(U), and the factor U^-3 is exact
+    # (sub_phot_gen.f). The points between two table points get the same values.
+    energydivthreshold = refined_hyd_u_grid(energygrid / energygrid[0])
+    gauntfactor = np.interp(
+        refined_hyd_positions(len(energygrid)), np.arange(len(energygrid)), np.asarray(hyd_gaunt_factor[n])
     )
+
+    crosssection = scale_factor * gauntfactor / energydivthreshold**3
 
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
@@ -2099,7 +2128,7 @@ def get_kramers_phixstable(lambda_angstrom, n):
     read_hyd_phixsdata()
     energygrid = np.asarray(hyd_gaunt_energygrid_ryd[max_hyd_gaunt_n])
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
-    energydivthreshold = energygrid / energygrid[0]
+    energydivthreshold = refined_hyd_u_grid(energygrid / energygrid[0])
     crosssection = 7.91 / thresholdenergyryd / n / energydivthreshold**3
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
