@@ -7749,14 +7749,14 @@ def test_readtanakajpltdata_reads_a_file_with_only_a_transition_column_header(tm
     assert dftransitions.is_empty()
 
 
-def test_readtanakajpltdata_gives_j_to_the_delta_j_rule(tmp_path, monkeypatch):
-    """The weight column is 2J + 1, so the levels have a J, and the writer applies the delta J rule.
+def test_readtanakajpltdata_writes_each_transition_as_permitted(tmp_path, monkeypatch):
+    """The file lists electric dipole transitions only, so a row that breaks a selection rule stays permitted.
 
-    The file lists electric dipole transitions only. 12 files of the data hold rows between two
-    levels whose J values differ by more than 1. Such a row with A <= 1e5 s^-1 gets the forbidden flag.
+    14 GRASP files give some transitions to a level of almost the same energy as the correct level.
+    The parity or the J of the named level then does not fit, and the reader reports the count.
     """
-    # level 3 gets J = 4, and level 1 has J = 2. The first row is weak (A = 6.2e4 s^-1). The second
-    # row has J = 4 -> J = 1 and A = 1.1e7 s^-1, so its strength says that it is an E1 line.
+    # the weight column is 2J + 1: level 3 gets J = 4, level 1 has J = 2 and level 2 has J = 1.
+    # Each row breaks the delta J rule. The first row is weak (A = 6.2e4 s^-1), and the second is strong.
     lines = [
         line.replace("      3   3.0   odd", "      3   9.0   odd")
         for line in jplt_lines(
@@ -7768,10 +7768,12 @@ def test_readtanakajpltdata_gives_j_to_the_delta_j_rule(tmp_path, monkeypatch):
     ]
     (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
-    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+    flog = io.StringIO()
+    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
     assert dflevels["j"].to_list() == [2.0, 1.0, 4.0]
-    dftransitions = add_level_ids_forbidden(dflevels, dftransitions)
-    assert dftransitions.sort("lowerlevel")["forbidden"].to_list() == [True, False]
+    assert dftransitions["forbidden"].to_list() == [False, False]
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, False]
+    assert "WARNING: 2 of 2 transitions break the parity rule or the delta J rule" in flog.getvalue()
 
 
 def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
