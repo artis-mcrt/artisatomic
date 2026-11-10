@@ -1410,7 +1410,8 @@ class PhotFileReader:
         row, the index search of CMFGEN stops at the first two rows (sub_phot_gen.f, lines 246-271).
         The linear interpolation then continues the line of those rows down to the edge (lines
         380-385). The reader adds a row at the threshold from that line. A cross section cannot be
-        negative, so the row is not below zero.
+        negative. If the line is below zero at the threshold, the table is zero up to the point
+        where the line is zero.
         """
         x = energyryd / self.thresholdenergyryd
 
@@ -1429,20 +1430,32 @@ class PhotFileReader:
                     self.flog,
                     ("phixsdata",),
                     "table that starts above the threshold, with a line below zero",
-                    f"{starttext} The line through the first two rows is below zero at the threshold, so the reader"
-                    " adds a row of zero there. CMFGEN has no such limit.",
+                    f"{starttext} The line through the first two rows is below zero at the threshold. The reader adds"
+                    " rows of zero from the threshold to the point where the line is zero. CMFGEN has no such limit.",
                 )
-            else:
-                log_detail(
-                    self.flog,
-                    ("phixsdata",),
-                    "table that starts above the threshold",
-                    f"{starttext} The reader adds a row at the threshold on the line through the first two rows, as"
-                    " CMFGEN does.",
+                # A row of zero at the threshold alone would give a ramp from there to the first row.
+                # The line is zero at this x, which is between the threshold and the first row. A first
+                # row below zero has no such line, and then the table is zero up to that row.
+                rises = len(x) > 1 and sigma[1] > sigma[0]
+                x_of_zero = (
+                    float(np.clip(x[0] - sigma[0] * (x[1] - x[0]) / (sigma[1] - sigma[0]), 1.0, x[0]))
+                    if rises
+                    else x[0]
                 )
+                return (
+                    np.concatenate(([self.thresholdenergyryd, x_of_zero * self.thresholdenergyryd], energyryd)),
+                    np.concatenate(([0.0, 0.0], sigma)),
+                )
+            log_detail(
+                self.flog,
+                ("phixsdata",),
+                "table that starts above the threshold",
+                f"{starttext} The reader adds a row at the threshold on the line through the first two rows, as"
+                " CMFGEN does.",
+            )
             return (
                 np.concatenate(([self.thresholdenergyryd], energyryd)),
-                np.concatenate(([max(sigma_on_line, 0.0)], sigma)),
+                np.concatenate(([sigma_on_line], sigma)),
             )
         if x[0] >= 1.0 - 1e-12:
             return energyryd, sigma

@@ -7364,13 +7364,19 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     assert cut(*table) is not None
     assert cut(*table)[0] is table[0]
 
-    # a table that starts above the threshold gets a row at the threshold, on the line through its
-    # first two rows (K I starts at x = 1.01)
+    # A table that starts above the threshold gets a row at the threshold, on the line through its
+    # first two rows. K I starts at x = 1.01.
     energyryd, sigma = cut(np.array([1.01, 1.03, 2.0]) * 2.0, np.array([0.34, 0.30, 0.1]))
     assert energyryd.tolist() == pytest.approx([2.0, 2.02, 2.06, 4.0])
     assert sigma.tolist() == pytest.approx([0.36, 0.34, 0.30, 0.1])
-    # the line cannot take the row below zero, and a table of one row keeps its value
-    assert cut(np.array([1.5, 1.6]) * 2.0, np.array([0.1, 0.5]))[1].tolist() == [0.0, 0.1, 0.5]
+    # The line of these rows is zero at x = 1.475 and below zero at the threshold. The table is zero
+    # up to x = 1.475, so the downsample gets no ramp from the threshold to the first row.
+    energyryd, sigma = cut(np.array([1.5, 1.6]) * 2.0, np.array([0.1, 0.5]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.95, 3.0, 3.2])
+    assert sigma.tolist() == [0.0, 0.0, 0.1, 0.5]
+    # a first row below zero with no line that rises gives zero up to that row, and no division by zero
+    assert cut(np.array([3.0]), np.array([-0.7]))[0].tolist() == pytest.approx([2.0, 3.0, 3.0])
+    # a table of one row keeps its value
     assert cut(np.array([3.0]), np.array([0.7]))[1].tolist() == [0.7, 0.7]
     # two first rows at one energy give no line, so the row at the threshold has the first value
     assert cut(np.array([1.2, 1.2, 2.0]) * 2.0, np.array([0.3, 0.5, 0.1]))[1].tolist() == [0.3, 0.3, 0.5, 0.1]
