@@ -1103,6 +1103,16 @@ def write_phixs_data(
             log_and_print(flog, f"ERROR: {msg}")
             raise ValueError(msg)
 
+    # ARTIS cannot read "nan" or "inf"
+    for lowerlevelid in levelids_to_write:
+        if not np.isfinite(photoionization_crosssections[lowerlevelid]).all():
+            msg = (
+                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: a cross section is not a"
+                " finite number"
+            )
+            log_and_print(flog, f"ERROR: {msg}")
+            raise ValueError(msg)
+
     # An ion with no table gets no block. A block must come directly before a table header line.
     if levelids_to_write:
         write_comment_block(fphixs, "phixsdata", titlelines, flog)
@@ -1131,14 +1141,6 @@ def write_phixs_data(
                 f"{upperionlevelid + 1:8d}{targetprobability:12f}\n"
                 for upperionlevelid, targetprobability in targetlist
             )
-
-        if not np.isfinite(photoionization_crosssections[lowerlevelid]).all():
-            msg = (
-                f"Z={atomic_number} ion_stage={ion_stage} level id {lowerlevelid}: a cross section is not a"
-                " finite number"
-            )
-            log_and_print(flog, f"ERROR: {msg}")
-            raise ValueError(msg)
 
         # One write() for each table with a %-format over the points, not a generator for each
         # point. There are nphixspoints lines for each level, 1.5M of them for the cmfgen set.

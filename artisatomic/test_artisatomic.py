@@ -6534,7 +6534,7 @@ def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path
 
 
 def test_cli_keeps_an_ignored_sighup_ignored():
-    """Nohup makes a run ignore SIGHUP, and the run must not stop at that signal."""
+    """A run under nohup ignores SIGHUP, and the run must not stop at that signal."""
     import signal
 
     from artisatomic import cli
@@ -6547,8 +6547,24 @@ def test_cli_keeps_an_ignored_sighup_ignored():
             assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
             assert signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL
             signal.raise_signal(signal.SIGHUP)
+        # the install of the files holds the signals: an ignored signal stays ignored there also
+        with cli.signals_held():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
     finally:
         signal.signal(signal.SIGHUP, previous)
+
+
+def test_cli_leaves_a_handler_that_it_cannot_put_back(monkeypatch):
+    """A handler from code outside Python has no Python object, so the run must not replace it."""
+    import signal
+
+    from artisatomic import cli
+
+    # signal.getsignal() gives None for such a handler, and signal.signal() does not accept None
+    monkeypatch.setattr(signal, "getsignal", lambda signum: None if signum == signal.SIGTERM else signal.SIG_DFL)
+    assert signal.SIGTERM not in cli.signals_to_take_over(("SIGINT", "SIGTERM"))
+    assert signal.SIGINT in cli.signals_to_take_over(("SIGINT", "SIGTERM"))
+    assert cli.signals_to_take_over(("SIGNOSUCH",)) == []
 
 
 def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(tmp_path, capsys):
@@ -7443,10 +7459,20 @@ def test_write_phixs_data_rejects_a_value_that_is_not_a_number():
             args,
             io.StringIO(),
         )
-    with pytest.raises(ValueError, match="not a finite number"):
+    # the bad table is the second table, and the check runs before the first write
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="level id 1: a cross section is not a finite number"):
         write_phixs_data(
-            io.StringIO(), 8, 1, np.array([[1.0, np.nan]]), [[(0, 1.0)]], np.array([13.6]), args, io.StringIO()
+            out,
+            8,
+            1,
+            np.array([[1.0, 0.5], [1.0, np.nan]]),
+            [[(0, 1.0)], [(0, 1.0)]],
+            np.array([13.6, 10.0]),
+            args,
+            io.StringIO(),
         )
+    assert not out.getvalue()
 
 
 def test_match_hydrogenic_phixs_gives_no_table_when_the_ground_level_has_none():

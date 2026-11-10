@@ -216,19 +216,30 @@ def main() -> None:
 workfolder_prefix = ".artisatomic_run_"
 
 
+def signals_to_take_over(names: tuple[str, ...]) -> list[int]:
+    """Give the signals of these names whose handler the run can replace and put back.
+
+    A signal that the process ignores stays ignored: nohup makes a run ignore SIGHUP, so that the
+    run continues after a logout. A handler that code outside Python installed has no Python
+    object (signal.getsignal() gives None), so signal.signal() cannot put it back.
+    """
+    signums = [getattr(signal, name) for name in names if hasattr(signal, name)]
+    return [
+        signum
+        for signum in signums
+        if signal.getsignal(signum) is not signal.SIG_IGN and signal.getsignal(signum) is not None
+    ]
+
+
 @contextmanager
 def stop_signals_as_exit() -> Generator[None]:
     """Turn SIGTERM and SIGHUP into SystemExit, so that the cleanup of a failed run runs for them also.
 
     A batch system sends SIGTERM at the end of the time of a job. Python stops at such a signal with
-    no cleanup, and the work folder stayed in the output folder. A signal that the process ignores
-    stays ignored: nohup makes a run ignore SIGHUP, so that the run continues after a logout.
+    no cleanup, and the work folder stayed in the output folder. signals_to_take_over() gives the
+    signals that the function leaves alone.
     """
-    signums = [
-        getattr(signal, name)
-        for name in ("SIGTERM", "SIGHUP")
-        if hasattr(signal, name) and signal.getsignal(getattr(signal, name)) is not signal.SIG_IGN
-    ]
+    signums = signals_to_take_over(("SIGTERM", "SIGHUP"))
 
     def raise_exit(signum: int, _frame: object) -> None:
         raise SystemExit(128 + signum)
@@ -252,8 +263,9 @@ def signals_held() -> Generator[None]:
 
     A handler records each signal during the block. A signal mask is not enough, because the system
     can give a signal to another thread, and Python then runs the handler in the main thread.
+    signals_to_take_over() gives the signals that the function leaves alone.
     """
-    signums = [getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    signums = signals_to_take_over(("SIGINT", "SIGTERM", "SIGHUP"))
     held: list[int] = []
 
     def hold(signum: int, _frame: object) -> None:

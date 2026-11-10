@@ -991,7 +991,8 @@ def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
 
     The caller names the plain file, as for xopen_check_extension(). polars reads a plain, a
     gzip, or a zstd file itself. It cannot read the xz form, which xopen decompresses into
-    memory instead.
+    memory instead. The scan of those bytes is lazy also, so a file with no line gives its
+    NoDataError at collect() for each form.
     """
     filepath = find_file_check_extension_or_raise(filename)
 
@@ -1009,7 +1010,7 @@ def scan_file_lines(filename: str | Path, skip_lines: int = 0) -> pl.LazyFrame:
         from xopen import xopen
 
         with xopen(filepath, "rb") as fin:
-            return pl.read_csv(io.BytesIO(fin.read()), **csv_options).lazy()
+            return pl.scan_csv(io.BytesIO(fin.read()), **csv_options)
 
     return pl.scan_csv(filepath, **csv_options)
 

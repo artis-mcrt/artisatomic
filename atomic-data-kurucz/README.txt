@@ -15,9 +15,12 @@ http://kurucz.harvard.edu/atoms/3801/. extendedatoms/url.txt gives the address o
 folder. Download gfZZCC.lines, or gfZZCCz.lines if the folder has no gfZZCC.lines.
 
 The zztar files come from one tar file of 88 MB with 265 gfZZCC.all files. url.txt gives its
-address. Download it and extract it into zztar/:
+address. Download the tar file:
 
     curl -o zztar.tar http://kurucz.harvard.edu/linelists/gfall/zztar
+
+Then extract it into zztar/:
+
     mkdir -p zztar && tar -xf zztar.tar -C zztar
 
 Git does not track the downloaded files. .gitignore lists them.

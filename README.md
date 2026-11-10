@@ -43,9 +43,26 @@ The file is a JSON list with one entry for each element. An entry is the atomic 
 ]
 ```
 
-The ion stages of an element must have no gap. The handlers are `adas`, `boyle`, `cmfgen`, `cmfgen_qubphixs`, `dream`, `fac`, `floers25calib`, `floers25calibwithforbidden`, `floers25uncalib`, `gsnist`, `kurucz`, `lisbon`, `mons` and `tanakajplt`. The `handlers` registry in `artisatomic/iondata.py` gives the reader of each handler. The run stops before it writes an output file if the file names an unknown handler. Each set in `tests/` holds an example file.
+The ion stages of an element must have no gap. The handlers are:
 
-Each run writes `artisatomicionhandlers_used.json` into the output folder, in the same format. Copy that record to `artisatomicionhandlers.json` to repeat the run. Remove `artisatomicionhandlers.json` after the run, because the file controls every later run in that directory.
+- `adas`
+- `boyle`
+- `cmfgen`
+- `cmfgen_qubphixs`
+- `dream`
+- `fac`
+- `floers25calib`
+- `floers25calibwithforbidden`
+- `floers25uncalib`
+- `gsnist`
+- `kurucz`
+- `lisbon`
+- `mons`
+- `tanakajplt`
+
+The `handlers` registry in `artisatomic/iondata.py` gives the reader of each handler. The run stops before it writes an output file if the file names an unknown handler. Each set in `tests/` except `chargetransfer` holds an example file.
+
+Each run writes `artisatomicionhandlers_used.json` into the output folder, in the same format. Copy that record to `artisatomicionhandlers.json` to repeat the run. Remove `artisatomicionhandlers.json` after the run. The file controls every later run in that directory.
 
 ### Comments in the output files
 adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. The file comment explains each field of the file. It says that level numbers and ion stages start at 1, and not at 0. It also gives the options of the run that apply to all ions. Two examples are the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
