@@ -4615,6 +4615,13 @@ def test_get_nearest_level_indices():
     assert nearest.tolist() == [0, 0, 0, 0, 1, 2, 3]
     assert secondnearest.tolist() == [1, 1, 1, 1, 0, 1, 2]
 
+    # the second closest level is on the same side as the closest level, and not across the energy
+    nearest, secondnearest = readmonsdata.get_nearest_level_indices(
+        np.array([100.0, 100.01, 105.0]), np.array([100.02, 99.0, 106.0])
+    )
+    assert nearest.tolist() == [1, 0, 2]
+    assert secondnearest.tolist() == [0, 1, 1]
+
     # a table of one level cannot give an index of minus one
     onelevel, onelevel_second = readmonsdata.get_nearest_level_indices(np.array([5.0]), np.array([1.0, 9.0]))
     assert onelevel.tolist() == [0, 0]
@@ -4751,6 +4758,8 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     header and no data row. Such a file must add nothing rather than stop the run. A blank line
     between the third rule and the column names is also permitted.
     """
+    from xopen import xopen
+
     from artisatomic import readfloers25data
 
     header = "Test table\n--\n--\n--\n"
@@ -4763,6 +4772,9 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + transheader)
     # the E2 file has a blank line between the third rule and the column names
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(header + "\n" + transheader)
+    # the M2 file is an xz file with no data row. xopen decompresses the xz form into memory for the scan
+    with xopen(tmp_path / "57LaII_transitions_calib_M2.txt.xz", "wt", encoding="utf-8") as fout:
+        fout.write(header + transheader)
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
     _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
@@ -4940,6 +4952,12 @@ def test_parse_ion_handlers_rejects_unknown_handlers_and_bad_entries():
         parse_ion_handlers([[26, [["2"]]]])
     with pytest.raises(TypeError, match=r"not an \[ion_stage, handler\] pair"):
         parse_ion_handlers([[26, ["2"]]])
+    # a file of another shape must name the file, and not give a bare unpack error
+    for loaded in (None, {"26": [[2, "cmfgen"]]}):
+        with pytest.raises(TypeError, match="does not hold a list"):
+            parse_ion_handlers(loaded)
+    with pytest.raises(TypeError, match=r"has no list of \[ion_stage, handler\] pairs"):
+        parse_ion_handlers([[26, 5]])
 
 
 def test_add_level_ids_forbidden_name_joins():
@@ -5956,8 +5974,6 @@ def test_description_of_ion_names_the_source_of_a_special_ion():
 
 def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
     """Each output file names its creation time, and the time of a checksum run is the same for each run."""
-    import re
-
     from artisatomic import base
     from artisatomic.output import clear_files
 
@@ -6554,6 +6570,70 @@ def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path
     assert not list(outputfolder.glob(".artisatomic_*"))
 
 
+def test_cli_keeps_an_ignored_sighup_ignored():
+    """A run under nohup ignores SIGHUP, and the run must not stop at that signal."""
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGHUP"):
+        pytest.skip("the platform has no SIGHUP")
+    previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        with cli.stop_signals_as_exit():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+            assert signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL
+            signal.raise_signal(signal.SIGHUP)
+        # the install of the files holds the signals: an ignored signal stays ignored there also
+        with cli.signals_held():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+
+
+def test_cli_leaves_a_handler_that_it_cannot_put_back(monkeypatch):
+    """A handler from code outside Python has no Python object, so the run must not replace it."""
+    import signal
+
+    from artisatomic import cli
+
+    # signal.getsignal() gives None for such a handler, and signal.signal() does not accept None
+    monkeypatch.setattr(signal, "getsignal", lambda signum: None if signum == signal.SIGTERM else signal.SIG_DFL)
+    assert signal.SIGTERM not in cli.signals_to_take_over(("SIGINT", "SIGTERM"))
+    assert signal.SIGINT in cli.signals_to_take_over(("SIGINT", "SIGTERM"))
+    assert cli.signals_to_take_over(("SIGNOSUCH",)) == []
+
+    # Python accepts a handler with no hash, for example a callable instance of a class with __eq__
+    class HandlerWithNoHash:
+        __hash__ = None  # type: ignore[assignment]
+
+        def __call__(self, signum: int, frame: object) -> None:
+            pass
+
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: HandlerWithNoHash())
+    assert cli.signals_to_take_over(("SIGTERM",)) == [signal.SIGTERM]
+
+
+def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(tmp_path, capsys):
+    """A folder with no read permission gives a warning and no lock, and the block still runs."""
+    import os
+
+    from artisatomic import cli
+
+    if os.name != "posix" or os.geteuid() == 0:
+        pytest.skip("the test needs a folder that the user cannot read")
+    outputfolder = tmp_path / "noread"
+    outputfolder.mkdir(mode=0o300)
+    ran = False
+    try:
+        with cli.output_folder_lock(outputfolder):
+            ran = True
+    finally:
+        outputfolder.chmod(0o700)
+    assert ran
+    assert "gives no lock" in capsys.readouterr().out
+
+
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
     """A second run must not change the files of the output folder while the first run moves its files."""
     import fcntl
@@ -6645,7 +6725,7 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
 
 
 def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):
-    """A copy such as "fe2.rrc (1).txt" sorts before "fe2.rrc.txt", but the original must win."""
+    """A copy such as "fe2.rrc (1).txt" sorts before each other file, and the function skips it."""
     from artisatomic.makerecombratefile import find_nahar_file
 
     for name in ("fe2.rrc (1).txt", "fe2.rrc.txt", "fe2.rrc.ls.txt", "fe21.rrc.txt"):
@@ -7408,6 +7488,37 @@ def test_write_phixs_data_rejects_a_target_fraction_that_prints_as_zero():
     out = io.StringIO()
     with pytest.raises(ValueError, match="prints as zero"):
         write_phixs_data(out, 8, 1, crosssections, targetfractions, np.array([13.6]), args, io.StringIO())
+    assert not out.getvalue()
+
+
+def test_write_phixs_data_rejects_a_value_that_is_not_a_number():
+    """ARTIS cannot read "nan", so a NaN target fraction or a NaN cross section stops the run."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+
+    with pytest.raises(ValueError, match="sum to nan"):
+        write_phixs_data(
+            io.StringIO(),
+            8,
+            1,
+            np.array([[1.0, 0.5]]),
+            [[(0, 1.0), (1, np.nan)]],
+            np.array([13.6]),
+            args,
+            io.StringIO(),
+        )
+    # the bad table is the second table, and the check runs before the first write
+    out = io.StringIO()
+    with pytest.raises(ValueError, match="level id 1: a cross section is not a finite number"):
+        write_phixs_data(
+            out,
+            8,
+            1,
+            np.array([[1.0, 0.5], [1.0, np.nan]]),
+            [[(0, 1.0)], [(0, 1.0)]],
+            np.array([13.6, 10.0]),
+            args,
+            io.StringIO(),
+        )
     assert not out.getvalue()
 
 
