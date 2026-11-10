@@ -5235,6 +5235,23 @@ def test_readhillierdata_get_level_valence_n():
     # the seniority digit and parity letter of a term are not an orbital
     assert readhillierdata.get_level_valence_n("3d7_a2D2e[5/2]") == 3
     assert readhillierdata.get_level_valence_n("3d5_4s2_2F1e[5/2]") == 4
+    # two orbitals with no separator: the digits of the second start with the count of the first
+    assert readhillierdata.get_level_valence_n("3p63d2De[3/2]") == 3  # Fe VIII, 3p6 3d
+    assert readhillierdata.get_level_valence_n("3p69s2Se[1/2]") == 9
+    assert readhillierdata.get_level_valence_n("3s2_3p510s_3Po") == 10  # Ca III, 3p5 10s
+    assert readhillierdata.get_level_valence_n("3d5(6S)4s24p_y7Po[2]") == 4  # Fe I, 4s2 4p
+    assert readhillierdata.get_level_valence_n("3d104s_2Se") == 4
+    # a name gives no count of 1, so these digits are an n of two digits
+    assert readhillierdata.get_level_valence_n("2s11s3Se") == 11  # C III, 2s 11s
+    assert readhillierdata.get_level_valence_n("4s12s1Se") == 12  # Ca I, 4s 12s
+    assert readhillierdata.get_level_valence_n("2s2_2p_10d_3Fo") == 10
+    # the n that remains must be above the l of the orbital. w is l = 17, so this is 2s 22w and not 2s2 2w
+    assert readhillierdata.get_level_valence_n("2s22w3W") == 22  # C III
+    # the n that remains must not be below the n of the first orbital: 3s 21s, and not 3s2 1s
+    assert readhillierdata.get_level_valence_n("3s21s1Se") == 21
+    # an orbital can follow a term letter, but a seniority digit with the odd parity letter is not an orbital
+    assert readhillierdata.get_level_valence_n("4s5P5s_6Pe[7/2]") == 5  # Co I
+    assert readhillierdata.get_level_valence_n("3d7_a2D2o[5/2]") == 3
     assert readhillierdata.get_level_valence_n("1___") is None
     assert readhillierdata.get_level_valence_n("8SNG") is None
 
