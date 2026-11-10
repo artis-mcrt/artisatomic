@@ -5281,8 +5281,23 @@ def test_cmfgen_fit_functions():
     table7 = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=nu_o_1e15hz)
     assert table7[0, 1] == 0.0
     assert table7[200, 1] == 0.0  # u = 1.8
-    # u = 2.8 is the ratio 1.4 to the moved edge, where the Seaton fit gives its value
-    assert table7[300, 1] == pytest.approx(2.0 * (0.5 + 0.5 / 1.4) * 1.4**-3.0)
+    # a step at the moved edge: a row of zero and a row of sigmat, both at u = 2. CMFGEN evaluates
+    # the fit with a sharp test at the edge (sub_phot_gen.f: IF(RU .LE. 1.0D0)).
+    stepindex = int(np.flatnonzero(table7[:, 0] >= 2.0 * threshold_ryd * (1 - 1e-12))[0])
+    assert table7[stepindex : stepindex + 2, 0] == pytest.approx(2.0 * threshold_ryd)
+    assert table7[stepindex : stepindex + 2, 1].tolist() == [0.0, 2.0]
+    assert np.all(table7[:stepindex, 1] == 0.0)
+    assert np.all(np.diff(table7[:, 0]) >= 0.0)
+    # u = 2.8 is the ratio 1.4 to the moved edge, where the Seaton fit gives its value. The two
+    # rows of the step come before this point.
+    assert table7[302, 0] == pytest.approx(2.8 * threshold_ryd)
+    assert table7[302, 1] == pytest.approx(2.0 * (0.5 + 0.5 / 1.4) * 1.4**-3.0)
+    # an edge above the top of the grid (20.96 times the threshold) gives no step and no value
+    table7_above = readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=25.0 * nu_o_1e15hz)
+    assert table7_above.shape == (1000, 2)
+    assert np.all(table7_above[:, 1] == 0.0)
+    # an offset of zero puts the edge on the first grid point, where CMFGEN gives the fit: the type 1 table
+    assert np.array_equal(readhillierdata.get_seaton_phixstable(lambda_angstrom, 2.0, 0.5, 3.0, nu_o=0.0), table)
 
     # type 5: 10^(a + b x + c x^2 + d x^3) with x = log10(min(u, e)), times (e / u)^2 above e
     table5 = readhillierdata.get_opproject_phixstable(lambda_angstrom, 1.0, 0.5, 0.0, 0.0, 3.0)
