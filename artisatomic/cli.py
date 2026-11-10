@@ -216,14 +216,28 @@ def main() -> None:
 workfolder_prefix = ".artisatomic_run_"
 
 
+def signals_to_take_over(names: tuple[str, ...]) -> list[int]:
+    """Give the signals of these names whose handler the run can replace and put back.
+
+    A signal that the process ignores stays ignored: nohup makes a run ignore SIGHUP, so that the
+    run continues after a logout. A handler that code outside Python installed has no Python
+    object (signal.getsignal() gives None), so signal.signal() cannot put it back.
+    """
+    signums = [getattr(signal, name) for name in names if hasattr(signal, name)]
+    handlers = {signum: signal.getsignal(signum) for signum in signums}
+    # by identity: a handler can be an object with no hash, which a membership test cannot take
+    return [signum for signum, handler in handlers.items() if handler is not signal.SIG_IGN and handler is not None]
+
+
 @contextmanager
 def stop_signals_as_exit() -> Generator[None]:
     """Turn SIGTERM and SIGHUP into SystemExit, so that the cleanup of a failed run runs for them also.
 
     A batch system sends SIGTERM at the end of the time of a job. Python stops at such a signal with
-    no cleanup, and the work folder stayed in the output folder.
+    no cleanup, and the work folder stayed in the output folder. signals_to_take_over() gives the
+    signals that the function leaves alone.
     """
-    signums = [getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    signums = signals_to_take_over(("SIGTERM", "SIGHUP"))
 
     def raise_exit(signum: int, _frame: object) -> None:
         raise SystemExit(128 + signum)
@@ -247,8 +261,9 @@ def signals_held() -> Generator[None]:
 
     A handler records each signal during the block. A signal mask is not enough, because the system
     can give a signal to another thread, and Python then runs the handler in the main thread.
+    signals_to_take_over() gives the signals that the function leaves alone.
     """
-    signums = [getattr(signal, name) for name in ("SIGINT", "SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    signums = signals_to_take_over(("SIGINT", "SIGTERM", "SIGHUP"))
     held: list[int] = []
 
     def hold(signum: int, _frame: object) -> None:
@@ -313,26 +328,29 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
 
     The operating system releases the lock when the process stops, so a run that crashes leaves no
     lock. Windows has no flock(), so there the function gives no lock. Some file systems refuse
-    flock() (Lustre with the option noflock, NFS with no lock daemon). There the function gives a
-    warning and no lock, so a run does not fail after all of its work.
+    flock() (Lustre with the option noflock, NFS with no lock daemon), and a folder with no read
+    permission refuses the open. There the function gives a warning and no lock, so a run does not
+    fail after all of its work.
     """
     try:
         import fcntl
     except ImportError:
         yield
         return
-    folderfd = os.open(outputfolder, os.O_RDONLY)
+    folderfd = None
     try:
         try:
+            folderfd = os.open(outputfolder, os.O_RDONLY)
             fcntl.flock(folderfd, fcntl.LOCK_EX)
         except OSError as error:
             print(
-                f"WARNING: The file system of {outputfolder} gives no lock ({error}). The run continues with no lock."
+                f"WARNING: {outputfolder} gives no lock ({error}). The run continues with no lock."
                 " Two runs that end at one time can mix their files."
             )
         yield
     finally:
-        os.close(folderfd)
+        if folderfd is not None:
+            os.close(folderfd)
 
 
 def discard_run(workfolder: Path, outputfolder: Path) -> None:
