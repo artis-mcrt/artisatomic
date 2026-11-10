@@ -316,9 +316,8 @@ def test_hydrogenic_phixs():
 
     # Between two table points, CMFGEN interpolates log10(sigma) of each l linearly in log10(U), and
     # the Gaunt factor of a shell linearly in log10(U). The downsample joins the points of a table
-    # with straight lines. In the middle of an interval a line between two table points is 1.4%
-    # above a cross section near nu^-3, and a line between two points of the refined grid is 1.4e-4
-    # above it.
+    # with straight lines. In the middle of a table interval, a line between two table points is
+    # 1.4% above a cross section near nu^-3. A line between two points of the refined grid is 1.4e-4 above it.
     for table in (phixstable_nl, phixstable_n):
         u_values = table[:, 0] / table[0, 0]
         assert np.allclose(u_values[1:] / u_values[:-1], 1.1 ** (1 / subintervals), rtol=1e-6)
@@ -7211,8 +7210,8 @@ def test_reduce_phixs_tables_worker_with_an_edge_narrower_than_a_segment():
 def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
     """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
 
-    CMFGEN evaluates the fit with the edge of each level. The reader gave each level the table of
-    the first level of the name. The levels [4] and [5] thus got 4.244 Mb in the first bin in place of 4.848 Mb.
+    CMFGEN evaluates the fit with the edge of each level. The levels [4] and [5] have a different edge from
+    the level [6]. They have 4.848 Mb in the first bin, and the level [6] has 4.244 Mb.
     """
     if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
         pytest.skip("the CMFGEN atomic data is not present")
