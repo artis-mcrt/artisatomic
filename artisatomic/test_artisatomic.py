@@ -7850,6 +7850,33 @@ def test_readtanakajpltdata_reads_a_file_with_only_a_transition_column_header(tm
     assert dftransitions.is_empty()
 
 
+def test_readtanakajpltdata_writes_each_transition_as_permitted(tmp_path, monkeypatch):
+    """The file lists electric dipole transitions only, so a row that breaks a selection rule stays permitted.
+
+    14 GRASP files give some transitions to a level of almost the same energy as the correct level.
+    The parity or the J of the named level then does not fit, and the reader reports the count.
+    """
+    # the weight column is 2J + 1: level 3 gets J = 4, level 1 has J = 2 and level 2 has J = 1.
+    # Each row breaks the delta J rule. The first row is weak (A = 6.2e4 s^-1), and the second is strong.
+    lines = [
+        line.replace("      3   3.0   odd", "      3   9.0   odd")
+        for line in jplt_lines(
+            [
+                "      3       1      3977.982     5.619e+05        -3.037 ",
+                "      3       2     16066.11      1.000e+08        -3.037 ",
+            ]
+        )
+    ]
+    (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = io.StringIO()
+    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, flog)
+    assert dflevels["j"].to_list() == [2.0, 1.0, 4.0]
+    assert dftransitions["forbidden"].to_list() == [False, False]
+    assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, False]
+    assert "WARNING: 2 of 2 transitions break the parity rule or the delta J rule" in flog.getvalue()
+
+
 def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
     """A row that repeats the levels, the wavelength and g_u*A is one line two times, which ARTIS would add."""
     row = "      3       1      3977.982     5.619e+05        -3.037 "
