@@ -2226,11 +2226,15 @@ def get_level_valence_n(levelname: str) -> int | None:
 
     Some names put two orbitals together with no separator. The digits of the second orbital
     then start with the electron count of the first: '3p63d2De[3/2]' of Fe VIII is 3p6 3d, and
-    '3s2_3p510s_3Po' of Ca III is 3p5 10s. The function reads a count only where all of these are
-    true: the count is 2 or more (a name gives no count of 1, so '2s11s3Se' of C III is 2s 11s),
-    the count fits the first orbital, the n that remains is above the l of the second orbital,
-    and that n is not below the n of the first orbital. 100 of the 107469 names of the CMFGEN
-    data need this rule (Ca III, Fe I and Fe VIII).
+    '3s2_3p510s_3Po' of Ca III is 3p5 10s. The function reads a count only where all of these
+    conditions are true:
+
+    - The count is 2 or more. A name gives no count of 1, so '2s11s3Se' of C III is 2s 11s.
+    - The count fits the first orbital.
+    - The n that remains is above the l of the second orbital.
+    - That n is not below the n of the first orbital.
+
+    100 of the 107469 names of the CMFGEN data need this rule (Ca III, Fe I and Fe VIII).
     """
     n: int | None = None
     previous_end = -1
