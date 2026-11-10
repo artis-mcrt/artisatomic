@@ -973,7 +973,7 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     targetlist_3do = targetconfigs[levelnames.index("2s2_2p3(2Do)3s_3Do[3]")]
     assert targetlist_3do is not None
     assert [target for target, _ in targetlist_3do] == ["2s2_2p3_4So/2p^3_4So", "2s2_2p3_2Do"]
-    assert [fraction for _, fraction in targetlist_3do] == pytest.approx([0.9675, 0.0325], abs=5e-5)
+    assert [fraction for _, fraction in targetlist_3do] == pytest.approx([0.96755, 0.03245], abs=5e-5)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -7283,6 +7283,16 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     table = (np.array([2.0, 3.0]), np.array([1.0, 0.5]))
     assert cut(*table) is not None
     assert cut(*table)[0] is table[0]
+
+    # a table that starts above the threshold gets a row at the threshold, on the line through its
+    # first two rows (K I starts at x = 1.01)
+    energyryd, sigma = cut(np.array([1.01, 1.03, 2.0]) * 2.0, np.array([0.34, 0.30, 0.1]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.02, 2.06, 4.0])
+    assert sigma.tolist() == pytest.approx([0.36, 0.34, 0.30, 0.1])
+    # the line cannot take the row below zero, and a table of one row keeps its value
+    assert cut(np.array([1.5, 1.6]) * 2.0, np.array([0.1, 0.5]))[1].tolist() == [0.0, 0.1, 0.5]
+    assert cut(np.array([3.0]), np.array([0.7]))[1].tolist() == [0.7, 0.7]
+    assert "starts at 1 + 0.01 times the threshold. The reader adds a row at the threshold" in flog.getvalue()
 
 
 def test_write_adata_rejects_an_ion_that_artis_cannot_read():

@@ -1409,9 +1409,28 @@ class PhotFileReader:
         each output value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data
         start below x = 1. A table that ends below the threshold continues as nu^-3 from its last
         row, as in CMFGEN.
+
+        181 tables start above x = 1, for example the tables of K I at x = 1.01. The first energy of
+        such a table was its threshold also. Below the first row, the index search of CMFGEN stops at
+        the first two rows, and the linear interpolation continues their line down to the edge
+        (sub_phot_gen.f, lines 246-271 and 380-385). The reader adds a row at the threshold from
+        that line. A cross section cannot be negative, so the row is not below zero.
         """
         x = energyryd / self.thresholdenergyryd
         # a tolerance, because x = 1 of the file comes back from a product and a division
+        if x[0] > 1.0 + 1e-12:
+            slope = (sigma[1] - sigma[0]) / (x[1] - x[0]) if len(x) > 1 and x[1] > x[0] else 0.0
+            log_detail(
+                self.flog,
+                ("phixsdata",),
+                "table that starts above the threshold",
+                f"The table of {self.pending_levelname} starts at 1 + {x[0] - 1.0:.2g} times the threshold. The reader adds a"
+                " row at the threshold on the line through the first two rows, as CMFGEN does.",
+            )
+            return (
+                np.concatenate(([self.thresholdenergyryd], energyryd)),
+                np.concatenate(([max(float(sigma[0] + slope * (1.0 - x[0])), 0.0)], sigma)),
+            )
         if x[0] >= 1.0 - 1e-12:
             return energyryd, sigma
         above = np.flatnonzero(x >= 1.0 - 1e-12)
