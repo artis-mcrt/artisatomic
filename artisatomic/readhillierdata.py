@@ -48,6 +48,7 @@ from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merge_marker_letter
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
+from artisatomic.levelnames import lchars_lower
 from artisatomic.levelnames import subshell_capacity
 
 # Column layout of the level table in the oldest oscillator files, which carry no header line
@@ -2206,10 +2207,8 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-# an orbital of a CMFGEN level name: digits and a lower-case orbital letter. The digits do not
-# follow an upper-case letter, which is the letter of a term.
-valence_orbital_letters = "spdfghiklmnoqrtuvwxyz"
-valence_orbital_regex = re.compile(rf"(?<![A-Z\d])(\d+)([{valence_orbital_letters}])")
+# an orbital of a CMFGEN level name: a full run of digits and a lower-case orbital letter
+valence_orbital_regex = re.compile(rf"(?<!\d)(\d+)([{lchars_lower}])")
 
 
 def get_level_valence_n(levelname: str) -> int | None:
@@ -2221,11 +2220,12 @@ def get_level_valence_n(levelname: str) -> int | None:
     gives the level no estimate and writes a warning to the log file.
 
     An orbital is digits and a lower-case orbital letter. A term is an upper-case letter with an
-    optional seniority digit and parity letter ('2D2e'). The digit run that follows an upper-case
-    letter is therefore not an orbital, and 'e' is not an orbital letter.
+    optional seniority digit and parity letter ('2D2e'). 'e' is not an orbital letter, but 'o' is.
+    A digit and an 'o' that follow an upper-case letter are therefore not an orbital. Each other
+    orbital can follow a term letter: '4s5P5s_6Pe' of Co I has the valence orbital 5s.
 
     Some names put two orbitals together with no separator. The digits of the second orbital
-    then start with the electron count of the first: '3p63d2De[3/2]' of Fe VIII is 3p6 3d, and
+    then start with the electron count of the first. '3p63d2De[3/2]' of Fe VIII is 3p6 3d, and
     '3s2_3p510s_3Po' of Ca III is 3p5 10s. The function reads a count only where all of these
     conditions are true:
 
@@ -2240,9 +2240,12 @@ def get_level_valence_n(levelname: str) -> int | None:
     previous_end = -1
     previous_n = 0
     previous_l = -1
-    for orbital in valence_orbital_regex.finditer(levelname.split("[", maxsplit=1)[0]):
+    configuration = levelname.split("[", maxsplit=1)[0]
+    for orbital in valence_orbital_regex.finditer(configuration):
+        if orbital[2] == "o" and configuration[: orbital.start()][-1:].isupper():
+            continue
         digits = orbital[1]
-        l = valence_orbital_letters.index(orbital[2])
+        l = lchars_lower.index(orbital[2])
         follows_an_orbital = orbital.start() == previous_end
         n = int(digits)
         if follows_an_orbital:
