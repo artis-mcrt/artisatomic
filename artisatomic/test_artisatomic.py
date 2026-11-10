@@ -268,6 +268,8 @@ def test_interpret_configuration():
 def test_hydrogenic_phixs():
     """Hydrogenic cross sections match reference values for the n=1 and n=5 shells."""
     rhd.read_hyd_phixsdata()
+    # each interval of the U grid of a CMFGEN table becomes this count of intervals in the output table
+    subintervals = rhd.hydrogenic_subintervals_per_interval
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / ryd_to_ev
     expected_n1 = np.array(
@@ -286,10 +288,10 @@ def test_hydrogenic_phixs():
     )
 
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 1, 0, 0)
-    assert np.allclose(expected_n1, phixstable_nl[:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_nl[::subintervals][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 1)
-    assert np.allclose(expected_n1, phixstable_n[:10], rtol=1e-3)
+    assert np.allclose(expected_n1, phixstable_n[::subintervals][:10], rtol=1e-3)
 
     oneryd_lambda_angstrom = hc_in_ev_angstrom / (5**2 * ryd_to_ev)
     expected_n5 = np.array(
@@ -307,10 +309,45 @@ def test_hydrogenic_phixs():
         ]
     )
     phixstable_nl = rhd.get_hydrogenic_nl_phixstable(oneryd_lambda_angstrom, 5, 0, 4)
-    assert np.allclose(expected_n5, phixstable_nl[:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_nl[::subintervals][:10], rtol=1e-3)
 
     phixstable_n = rhd.get_hydrogenic_n_phixstable(oneryd_lambda_angstrom, 5)
-    assert np.allclose(expected_n5, phixstable_n[:10], rtol=1e-3)
+    assert np.allclose(expected_n5, phixstable_n[::subintervals][:10], rtol=1e-3)
+
+    # Between two table points, CMFGEN interpolates log10(sigma) of each l linearly in log10(U), and
+    # the Gaunt factor of a shell linearly in log10(U). The downsample joins the points of a table
+    # with straight lines. In the middle of a table interval, a line between two table points is
+    # 1.4% above a cross section near nu^-3. A line between two points of the refined grid is 1.4e-4 above it.
+    for table in (phixstable_nl, phixstable_n):
+        u_values = table[:, 0] / table[0, 0]
+        assert np.allclose(u_values[1:] / u_values[:-1], 1.1 ** (1 / subintervals), rtol=1e-6)
+        local_exponent = np.log(table[subintervals, 1] / table[0, 1]) / np.log(u_values[subintervals])
+        assert table[subintervals // 2, 1] == pytest.approx(
+            table[0, 1] * u_values[subintervals // 2] ** local_exponent, rel=2e-3
+        )
+        midpoint_of_table_line = 0.5 * (table[0, 1] + table[subintervals, 1])
+        assert (
+            midpoint_of_table_line / np.interp(0.5 * (u_values[0] + u_values[subintervals]), u_values, table[:, 1])
+            > 1.005
+        )
+
+
+def test_interpolate_on_refined_grid_has_a_log_mode_and_a_linear_mode():
+    """The cross sections and the U grid use the log mode, and the Gaunt factor uses the linear mode."""
+    subintervals = rhd.hydrogenic_subintervals_per_interval
+    table_values = np.array([1.0, 100.0, 1.0])
+    fraction = (subintervals // 2) / subintervals
+
+    log_mode = rhd.interpolate_on_refined_grid(table_values, log_values=True)
+    assert len(log_mode) == 2 * subintervals + 1
+    assert log_mode[::subintervals].tolist() == [1.0, 100.0, 1.0]
+    assert log_mode[subintervals // 2] == pytest.approx(100.0**fraction, rel=1e-12)
+
+    linear_mode = rhd.interpolate_on_refined_grid(table_values, log_values=False)
+    assert linear_mode[::subintervals].tolist() == [1.0, 100.0, 1.0]
+    assert linear_mode[subintervals // 2] == pytest.approx(1.0 + 99.0 * fraction, rel=1e-12)
+
+    assert np.array_equal(rhd.refined_u_grid(table_values), log_mode)
 
 
 def test_hydrogenic_nl_phixs_offset_type8():
@@ -7303,8 +7340,8 @@ def test_reduce_phixs_tables_worker_with_an_edge_narrower_than_a_segment():
 def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
     """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
 
-    CMFGEN evaluates the fit with the edge of each level. The reader gave each level the table of
-    the first level of the name. The levels [4] and [5] thus got 4.269 Mb at the threshold in place of 4.877 Mb.
+    CMFGEN evaluates the fit with the edge of each level. The levels [4] and [5] have a different edge from
+    the level [6]. They have 4.848 Mb in the first bin, and the level [6] has 4.244 Mb.
     """
     if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
         pytest.skip("the CMFGEN atomic data is not present")
@@ -7313,9 +7350,9 @@ def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
         _, dflevels, _ = readhillierdata.read_levels_and_transitions(19, 2, flog)
         phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, phixs_args(), flog)
     names = dflevels["levelname"].to_list()
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2692, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8767, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8767, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2443, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8481, rel=1e-3)
+    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8481, rel=1e-3)
     # fill_missing_phixs_thresholds() gives each threshold from the first target of the level
     assert np.isnan(phixs.thresholds_ev).all()
 

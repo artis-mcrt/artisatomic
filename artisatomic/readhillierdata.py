@@ -10,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from collections.abc import Iterable
 from functools import cache
+from functools import reduce
 from pathlib import Path
 from string import ascii_uppercase
 
@@ -2029,23 +2030,61 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     return np.column_stack([energy_div_threshold * thresholdenergyryd, crosssection])
 
 
+# Each interval of the U grid of a CMFGEN hydrogenic table becomes this count of intervals of equal
+# ratio. The points of the CMFGEN tables are 10% apart. The downsample joins the points of a table
+# with straight lines, and CMFGEN interpolates in log10(U) (sub_phot_gen.f). In the middle of a
+# table interval, such a line is 1.4% above a cross section near nu^-3. With 10 intervals for each
+# table interval, the line is 1.4e-4 above it. A steeper table has a larger difference. The
+# largest is 1.2%, far above the threshold of (n, l) = (30, 29), where the table falls as nu^-32.
+hydrogenic_subintervals_per_interval = 10
+
+
+def interpolate_on_refined_grid(table_values: np.ndarray, *, log_values: bool) -> np.ndarray:
+    """Give the values of a hydrogenic table on the refined grid.
+
+    Between two table points the result is linear in the table index, and thus in log10(U). With
+    log_values, the function interpolates log10 of the values, and the table points keep their exact values.
+    """
+    table_point_count = len(table_values)
+    # the table index of each point of the refined grid. A point between two table points has a fraction
+    table_indices = np.linspace(
+        0.0, table_point_count - 1, (table_point_count - 1) * hydrogenic_subintervals_per_interval + 1
+    )
+    if not log_values:
+        return np.interp(table_indices, np.arange(table_point_count), table_values)
+    refined_values = 10 ** np.interp(table_indices, np.arange(table_point_count), np.log10(table_values))
+    refined_values[::hydrogenic_subintervals_per_interval] = table_values
+    return refined_values
+
+
+def refined_u_grid(table_u_grid: np.ndarray) -> np.ndarray:
+    """Give the refined U grid of a hydrogenic table. The points of each table interval have an equal ratio."""
+    return interpolate_on_refined_grid(table_u_grid, log_values=True)
+
+
 # test: for n = 5, l_start = 4, l_end = 4 (2s2_5g_2Ge level of C II)
 # 2.18 eV threshold cross section is near 4.37072813 Mb, as expected
 @cache
 def get_hydrogenic_sigma_summed_over_l(n: int, l_start: int, l_end: int) -> np.ndarray:
-    """Sum of (2l + 1) * sigma(n, l) over l_start <= l <= l_end, on the tabulated U grid.
+    """Sum of (2l + 1) * sigma(n, l) over l_start <= l <= l_end, on the refined U grid.
+
+    CMFGEN interpolates log10(sigma(n, l)) of each l linearly in log10(U), and then adds the l
+    values (sub_phot_gen.f). The function does the same for the points between two table points.
 
     Depends only on the quantum numbers, not on the level, so cache it: the callers below run
     once per level per ion.
     """
-    arr_sigma_summed_over_l = np.zeros(len(hyd_phixs_energygrid_ryd[n, l_start]))
+    sigma_of_each_l = []
     for l in range(l_start, l_end + 1):
         if not np.array_equal(hyd_phixs_energygrid_ryd[n, l], hyd_phixs_energygrid_ryd[n, l_start]):
             msg = f"The hydrogenic energy grids of (n, l) = ({n}, {l}) and ({n}, {l_start}) differ"
             raise ValueError(msg)
-        arr_sigma_summed_over_l += (2 * l + 1) * hyd_phixs[n, l]
+        sigma_of_each_l.append((2 * l + 1) * interpolate_on_refined_grid(hyd_phixs[n, l], log_values=True))
 
-    return arr_sigma_summed_over_l
+    if not sigma_of_each_l:
+        msg = f"The range of l from {l_start} to {l_end} of n = {n} is empty"
+        raise ValueError(msg)
+    return reduce(np.add, sigma_of_each_l)
 
 
 def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, zion=None):
@@ -2062,13 +2101,13 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     assert l_start >= 0
     assert l_end <= n - 1
     energygrid = hyd_phixs_energygrid_ryd[n, l_start]
-    phixstable = np.empty((len(energygrid), 2))
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
     thresholdenergyryd = thresholdenergyev / ryd_to_ev
 
-    # the U values of the hydrogenic tables
-    u_grid = energygrid / energygrid[0]
+    # the U values of the hydrogenic tables, with the points between them (see hydrogenic_subintervals_per_interval)
+    u_refined = refined_u_grid(energygrid / energygrid[0])
+    phixstable = np.empty((len(u_refined), 2))
 
     arr_sigma_summed_over_l = get_hydrogenic_sigma_summed_over_l(n, l_start, l_end)
 
@@ -2077,7 +2116,7 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
     # the position and the two rows of the step at the offset edge of type 8
     steprows: tuple[int, list[list[float]]] | None = None
     if nu_o is None:
-        # type 2: the output energies coincide with the tabulated U values, so no interpolation
+        # type 2: the output energies are the points of the refined U grid
         # 1 / thresholdenergyryd / n**2 is CMFGEN's (NEF / (n * ZION))**2
         scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
         arr_sigma = arr_sigma_summed_over_l * scale_factor
@@ -2087,27 +2126,28 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         scale_factor = 1 / (zion**2) / l_degeneracy
         e_o_ev = nu_o * 1e15 * h_in_ev_seconds
         # energy / (E_o + E_threshold), i.e. U measured from the offset edge and not from the true edge
-        u_offset = thresholdenergyev * u_grid / (e_o_ev + thresholdenergyev)
+        u_offset = thresholdenergyev * u_refined / (e_o_ev + thresholdenergyev)
 
-        # CMFGEN interpolates log10(cross section) linearly in log10(U) on a geometric U grid.
-        # This reproduces its RJ = LOG10(U) / L_DEL_U indexing. u_offset <= u_grid for
-        # e_o_ev >= 0, so the interpolation never extrapolates past the table end.
+        # CMFGEN interpolates log10(cross section) of each l linearly in log10(U), and then adds the
+        # l values. The points of the refined grid hold those sums. Between two such points, the code
+        # interpolates log10 of the sum, which differs from the CMFGEN value by less than 1e-5.
+        # u_offset <= u_refined for e_o_ev >= 0, so the interpolation never extrapolates past the table end.
         with np.errstate(divide="ignore"):
             log_sigma = np.log10(arr_sigma_summed_over_l)
-        arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_grid), log_sigma) * scale_factor
+        arr_sigma = 10 ** np.interp(np.log10(u_offset), np.log10(u_refined), log_sigma) * scale_factor
 
         # the cross section is zero below the offset edge
         arr_sigma[u_offset < 1.0] = 0.0
 
-        # The offset edge falls between two points of the U grid, which are 10% apart. Two rows at the
-        # edge give the step of CMFGEN (zero below, the value at U = 1 above). Without them the
-        # downsample joined the zero point and the full point with a ramp over one step.
+        # The offset edge falls between two points of the U grid. Two rows at the edge give the step
+        # of CMFGEN (zero below, the value at U = 1 above). Without them the downsample joins the
+        # zero point and the full point with a ramp over one step.
         firstopen = int(np.searchsorted(u_offset, 1.0, side="left"))
         if 0 < firstopen < len(u_offset):
             edge_ryd = (e_o_ev + thresholdenergyev) / ryd_to_ev
             steprows = (firstopen, [[edge_ryd, 0.0], [edge_ryd, 10 ** log_sigma[0] * scale_factor]])
 
-    phixstable[:, 0] = u_grid * thresholdenergyryd
+    phixstable[:, 0] = u_refined * thresholdenergyryd
     phixstable[:, 1] = arr_sigma
 
     return phixstable if steprows is None else np.insert(phixstable, steprows[0], steprows[1], axis=0)
@@ -2141,13 +2181,12 @@ def get_hydrogenic_n_phixstable(lambda_angstrom, n):
 
     scale_factor = 7.91 / thresholdenergyryd / n
 
-    energydivthreshold = energygrid / energygrid[0]
+    # CMFGEN interpolates the Gaunt factor linearly in log10(U), and the factor U^-3 is exact
+    # (sub_phot_gen.f). The points between two table points get the same values.
+    energydivthreshold = refined_u_grid(energygrid / energygrid[0])
+    gauntfactor = interpolate_on_refined_grid(np.asarray(hyd_gaunt_factor[n]), log_values=False)
 
-    crosssection = np.where(
-        energydivthreshold > 0,
-        scale_factor * np.asarray(hyd_gaunt_factor[n]) / energydivthreshold**3,
-        0.0,
-    )
+    crosssection = scale_factor * gauntfactor / energydivthreshold**3
 
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
@@ -2162,7 +2201,7 @@ def get_kramers_phixstable(lambda_angstrom, n):
     read_hyd_phixsdata()
     energygrid = np.asarray(hyd_gaunt_energygrid_ryd[max_hyd_gaunt_n])
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
-    energydivthreshold = energygrid / energygrid[0]
+    energydivthreshold = refined_u_grid(energygrid / energygrid[0])
     crosssection = 7.91 / thresholdenergyryd / n / energydivthreshold**3
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
