@@ -77,7 +77,6 @@ class HillierTransition(t.NamedTuple):
     nameto: str
     f: float
     A: float
-    lambdaangstrom: float
     i: int
     j: int
     hilliertransitionid: int
@@ -453,8 +452,6 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path, flog) -> pl.Da
             nameto=part(1),
             f=pl.col("f"),
             A=pl.col("A"),
-            # the wavelength column holds a dash where the transition has no measured wavelength
-            lambdaangstrom=as_float(4).fill_null(-1.0),
             i=part(5).str.strip_chars_end("-").cast(pl.Int64),
             j=part(6).cast(pl.Int64),
             # the when() masks the id column before the cast, not after. The other layout can hold

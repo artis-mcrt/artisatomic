@@ -4578,6 +4578,13 @@ def test_get_nearest_level_indices():
     assert nearest.tolist() == [0, 0, 0, 0, 1, 2, 3]
     assert secondnearest.tolist() == [1, 1, 1, 1, 0, 1, 2]
 
+    # the second closest level is on the same side as the closest level, and not across the energy
+    nearest, secondnearest = readmonsdata.get_nearest_level_indices(
+        np.array([100.0, 100.01, 105.0]), np.array([100.02, 99.0, 106.0])
+    )
+    assert nearest.tolist() == [1, 0, 2]
+    assert secondnearest.tolist() == [0, 1, 1]
+
     # a table of one level cannot give an index of minus one
     onelevel, onelevel_second = readmonsdata.get_nearest_level_indices(np.array([5.0]), np.array([1.0, 9.0]))
     assert onelevel.tolist() == [0, 0]
@@ -5919,8 +5926,6 @@ def test_description_of_ion_names_the_source_of_a_special_ion():
 
 def test_file_comment_gives_the_creation_time_in_utc(tmp_path, monkeypatch):
     """Each output file names its creation time, and the time of a checksum run is the same for each run."""
-    import re
-
     from artisatomic import base
     from artisatomic.output import clear_files
 
@@ -6608,7 +6613,7 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
 
 
 def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):
-    """A copy such as "fe2.rrc (1).txt" sorts before "fe2.rrc.txt", but the original must win."""
+    """A copy such as "fe2.rrc (1).txt" sorts before each other file, and the function skips it."""
     from artisatomic.makerecombratefile import find_nahar_file
 
     for name in ("fe2.rrc (1).txt", "fe2.rrc.txt", "fe2.rrc.ls.txt", "fe21.rrc.txt"):

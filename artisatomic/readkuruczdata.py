@@ -47,7 +47,7 @@ def parse_gfall(fname: str) -> pl.LazyFrame:
     Each gfall row is a transition that carries both of its levels inline, in a fixed-width
     Fortran format. This function orders the two levels into lower/upper by energy, because the
     file lists them in an arbitrary order. A negative energy in the file means a predicted (not
-    measured) level. The parser records that in a "theoretical" flag and keeps the magnitude.
+    measured) level. The parser records that in a "predicted" column and keeps the magnitude.
     """
     # Code derived from the GFALL reader of carsus
     # https://github.com/tardis-sn/carsus/blob/master/carsus/io/kurucz/gfall.py
@@ -677,7 +677,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         "energyabovegsinpercm_{0}": "energyabovegsinpercm",
         "j_{0}": "j",
         "label_{0}": "label",
-        "energyabovegsinpercm_{0}_predicted": "theoretical",
     }
 
     transition_columns = [
@@ -750,7 +749,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
     e_upper_levels = gfall.rename({key.format("upper"): value for key, value in column_renames.items()})
 
-    selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "theoretical"]
+    selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
         # maintain_order makes the label that survives for a duplicated (energy, j) reproducible.
