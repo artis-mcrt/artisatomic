@@ -221,9 +221,14 @@ def stop_signals_as_exit() -> Generator[None]:
     """Turn SIGTERM and SIGHUP into SystemExit, so that the cleanup of a failed run runs for them also.
 
     A batch system sends SIGTERM at the end of the time of a job. Python stops at such a signal with
-    no cleanup, and the work folder stayed in the output folder.
+    no cleanup, and the work folder stayed in the output folder. A signal that the process ignores
+    stays ignored: nohup makes a run ignore SIGHUP, so that the run continues after a logout.
     """
-    signums = [getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)]
+    signums = [
+        getattr(signal, name)
+        for name in ("SIGTERM", "SIGHUP")
+        if hasattr(signal, name) and signal.getsignal(getattr(signal, name)) is not signal.SIG_IGN
+    ]
 
     def raise_exit(signum: int, _frame: object) -> None:
         raise SystemExit(128 + signum)
@@ -313,17 +318,19 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
 
     The operating system releases the lock when the process stops, so a run that crashes leaves no
     lock. Windows has no flock(), so there the function gives no lock. Some file systems refuse
-    flock() (Lustre with the option noflock, NFS with no lock daemon). There the function gives a
-    warning and no lock, so a run does not fail after all of its work.
+    flock() (Lustre with the option noflock, NFS with no lock daemon), and a folder with no read
+    permission refuses the open. There the function gives a warning and no lock, so a run does not
+    fail after all of its work.
     """
     try:
         import fcntl
     except ImportError:
         yield
         return
-    folderfd = os.open(outputfolder, os.O_RDONLY)
+    folderfd = None
     try:
         try:
+            folderfd = os.open(outputfolder, os.O_RDONLY)
             fcntl.flock(folderfd, fcntl.LOCK_EX)
         except OSError as error:
             print(
@@ -332,7 +339,8 @@ def output_folder_lock(outputfolder: Path) -> Generator[None]:
             )
         yield
     finally:
-        os.close(folderfd)
+        if folderfd is not None:
+            os.close(folderfd)
 
 
 def discard_run(workfolder: Path, outputfolder: Path) -> None:

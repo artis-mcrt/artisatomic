@@ -2435,7 +2435,8 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
                 elif row_two_to_end.startswith("!Number of T values OMEGA tabulated at"):
                     num_expected_t_values = int(row[0])
                 elif (
-                    row_two_to_end.startswith("!Scaling factor for OMEGA (non-file values)")
+                    # the files write "non-FILE", "non-file" and "non-FILe"
+                    row_two_to_end.lower().startswith("!scaling factor for omega (non-file values)")
                     and fortran_float(row[0]) != 1.0
                 ):
                     msg = f"scaling factor for OMEGA is {row[0]}, not 1. The reader does not apply a scaling factor."

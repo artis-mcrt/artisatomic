@@ -326,8 +326,9 @@ def reduce_phixs_tables_worker(
     arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
 
     # The grid holds each table sample, so no peak of the table falls between two points. Each bin
-    # also gets 51 points from one edge to the other. They give the nu^-3 tail past the end of the
-    # table, which exists only at these points. A resample at the 51 points alone loses a narrow
+    # also gets 51 points from one edge to the other. They put the bin edges on the grid, so each
+    # segment belongs to one bin. They also give the nu^-3 tail past the end of the table, which
+    # exists only at these points. A resample at the 51 points alone loses a narrow
     # peak between two points, and spreads a peak at one point over a whole step. The high edge of
     # a bin is the first point of the next bin.
     lin_energyryd = np.append(np.linspace(arr_enlow, arr_enhigh, num=50, endpoint=False, axis=-1), arr_enhigh[-1])

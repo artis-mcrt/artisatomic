@@ -177,18 +177,18 @@ def read_dashed_table(filepath: Path, usecols: list[str]) -> pl.DataFrame:
     # the name is not a column name of the data, so it cannot hide a column that the caller asked
     # for. A leading space keeps it different from every name that split() can give.
     countcol = " tokencount"
-    lftable = (
-        scan_file_lines(filepath, skip_lines=skip_lines)
-        .select(parts=pl.col("line").str.extract_all(r"\S+"))
-        # a blank line inside the table gives a null in every column, which the callers reject
-        .filter(pl.col("parts").list.len() > 0)
-        .select(
-            pl.col("parts").list.len().alias(countcol),
-            *[pl.col("parts").list.get(columns.index(name), null_on_oob=True).alias(name) for name in usecols],
-        )
-    )
-
     try:
+        # the read of an xz file is eager, so it can stop in scan_file_lines() for a table with no data row
+        lftable = (
+            scan_file_lines(filepath, skip_lines=skip_lines)
+            .select(parts=pl.col("line").str.extract_all(r"\S+"))
+            # a blank line inside the table gives a null in every column, which the callers reject
+            .filter(pl.col("parts").list.len() > 0)
+            .select(
+                pl.col("parts").list.len().alias(countcol),
+                *[pl.col("parts").list.get(columns.index(name), null_on_oob=True).alias(name) for name in usecols],
+            )
+        )
         # the streaming engine halves the peak memory of a multi-gigabyte file. The explicit engine
         # also applies when a user sets the engine affinity of polars to "in-memory".
         dftable = lftable.collect(engine="streaming")
@@ -332,7 +332,8 @@ def read_levels_and_transitions(
     pertype_name_regex = re.compile(rf"{ionstr}_transitions_{calibstr}_(?:{transition_type_regex.pattern})+\.txt")
     pertype_file_of_name: dict[str, Path] = {}
     for ext in compression_extensions:
-        for filepath in basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}"):
+        # sorted: the order of a glob depends on the file system, and the warnings go to the output files
+        for filepath in sorted(basepath.glob(f"{ionstr}_transitions_{calibstr}_*.txt{ext}")):
             name = filepath.name.removesuffix(ext)
             if pertype_name_regex.fullmatch(name) is None:
                 log_comment(

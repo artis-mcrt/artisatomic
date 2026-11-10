@@ -4721,6 +4721,8 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     header and no data row. Such a file must add nothing rather than stop the run. A blank line
     between the third rule and the column names is also permitted.
     """
+    from xopen import xopen
+
     from artisatomic import readfloers25data
 
     header = "Test table\n--\n--\n--\n"
@@ -4733,6 +4735,9 @@ def test_readfloers25data_degenerate_tables(monkeypatch, tmp_path):
     (tmp_path / "57LaII_transitions_calib_M1.txt").write_text(header + transheader)
     # the E2 file has a blank line between the third rule and the column names
     (tmp_path / "57LaII_transitions_calib_E2.txt").write_text(header + "\n" + transheader)
+    # the M2 file is an xz file with no data row. polars cannot scan the xz form, so that read is eager
+    with xopen(tmp_path / "57LaII_transitions_calib_M2.txt.xz", "wt", encoding="utf-8") as fout:
+        fout.write(header + transheader)
 
     monkeypatch.setattr(readfloers25data, "get_basepath", lambda **_kwargs: tmp_path)
     _, dflevels, dftransitions = readfloers25data.read_levels_and_transitions(
@@ -4910,6 +4915,12 @@ def test_parse_ion_handlers_rejects_unknown_handlers_and_bad_entries():
         parse_ion_handlers([[26, [["2"]]]])
     with pytest.raises(TypeError, match=r"not an \[ion_stage, handler\] pair"):
         parse_ion_handlers([[26, ["2"]]])
+    # a file of another shape must name the file, and not give a bare unpack error
+    for loaded in (None, {"26": [[2, "cmfgen"]]}):
+        with pytest.raises(TypeError, match="does not hold a list"):
+            parse_ion_handlers(loaded)
+    with pytest.raises(TypeError, match=r"has no list of \[ion_stage, handler\] pairs"):
+        parse_ion_handlers([[26, 5]])
 
 
 def test_add_level_ids_forbidden_name_joins():
@@ -6522,6 +6533,44 @@ def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path
     assert not list(outputfolder.glob(".artisatomic_*"))
 
 
+def test_cli_keeps_an_ignored_sighup_ignored():
+    """Nohup makes a run ignore SIGHUP, and the run must not stop at that signal."""
+    import signal
+
+    from artisatomic import cli
+
+    if not hasattr(signal, "SIGHUP"):
+        pytest.skip("the platform has no SIGHUP")
+    previous = signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    try:
+        with cli.stop_signals_as_exit():
+            assert signal.getsignal(signal.SIGHUP) is signal.SIG_IGN
+            assert signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL
+            signal.raise_signal(signal.SIGHUP)
+    finally:
+        signal.signal(signal.SIGHUP, previous)
+
+
+def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(tmp_path, capsys):
+    """A folder with no read permission gives a warning and no lock, and the block still runs."""
+    import os
+
+    from artisatomic import cli
+
+    if os.name != "posix" or os.geteuid() == 0:
+        pytest.skip("the test needs a folder that the user cannot read")
+    outputfolder = tmp_path / "noread"
+    outputfolder.mkdir(mode=0o300)
+    ran = False
+    try:
+        with cli.output_folder_lock(outputfolder):
+            ran = True
+    finally:
+        outputfolder.chmod(0o700)
+    assert ran
+    assert "gives no lock" in capsys.readouterr().out
+
+
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
     """A second run must not change the files of the output folder while the first run moves its files."""
     import fcntl
@@ -7377,6 +7426,27 @@ def test_write_phixs_data_rejects_a_target_fraction_that_prints_as_zero():
     with pytest.raises(ValueError, match="prints as zero"):
         write_phixs_data(out, 8, 1, crosssections, targetfractions, np.array([13.6]), args, io.StringIO())
     assert not out.getvalue()
+
+
+def test_write_phixs_data_rejects_a_value_that_is_not_a_number():
+    """ARTIS cannot read "nan", so a NaN target fraction or a NaN cross section stops the run."""
+    args = phixs_args(nphixspoints=2, phixsnuincrement=0.1)
+
+    with pytest.raises(ValueError, match="sum to nan"):
+        write_phixs_data(
+            io.StringIO(),
+            8,
+            1,
+            np.array([[1.0, 0.5]]),
+            [[(0, 1.0), (1, np.nan)]],
+            np.array([13.6]),
+            args,
+            io.StringIO(),
+        )
+    with pytest.raises(ValueError, match="not a finite number"):
+        write_phixs_data(
+            io.StringIO(), 8, 1, np.array([[1.0, np.nan]]), [[(0, 1.0)]], np.array([13.6]), args, io.StringIO()
+        )
 
 
 def test_match_hydrogenic_phixs_gives_no_table_when_the_ground_level_has_none():
