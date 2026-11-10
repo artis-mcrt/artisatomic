@@ -224,7 +224,9 @@ def signals_to_take_over(names: tuple[str, ...]) -> list[int]:
     object (signal.getsignal() gives None), so signal.signal() cannot put it back.
     """
     signums = [getattr(signal, name) for name in names if hasattr(signal, name)]
-    return [signum for signum in signums if signal.getsignal(signum) not in {signal.SIG_IGN, None}]
+    handlers = {signum: signal.getsignal(signum) for signum in signums}
+    # by identity: a handler can be an object with no hash, which a membership test cannot take
+    return [signum for signum, handler in handlers.items() if handler is not signal.SIG_IGN and handler is not None]
 
 
 @contextmanager

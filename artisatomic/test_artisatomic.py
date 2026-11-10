@@ -6566,6 +6566,16 @@ def test_cli_leaves_a_handler_that_it_cannot_put_back(monkeypatch):
     assert signal.SIGINT in cli.signals_to_take_over(("SIGINT", "SIGTERM"))
     assert cli.signals_to_take_over(("SIGNOSUCH",)) == []
 
+    # Python accepts a handler with no hash, for example a callable instance of a class with __eq__
+    class HandlerWithNoHash:
+        __hash__ = None  # type: ignore[assignment]
+
+        def __call__(self, signum: int, frame: object) -> None:
+            pass
+
+    monkeypatch.setattr(signal, "getsignal", lambda _signum: HandlerWithNoHash())
+    assert cli.signals_to_take_over(("SIGTERM",)) == [signal.SIGTERM]
+
 
 def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(tmp_path, capsys):
     """A folder with no read permission gives a warning and no lock, and the block still runs."""
