@@ -49,7 +49,8 @@ from artisatomic.levelnames import get_config_parity
 from artisatomic.levelnames import has_merge_marker_letter
 from artisatomic.levelnames import has_merged_orbital
 from artisatomic.levelnames import lchars
-from artisatomic.levelnames import parse_orbital_n
+from artisatomic.levelnames import lchars_lower
+from artisatomic.levelnames import subshell_capacity
 
 # Column layout of the level table in the oldest oscillator files, which carry no header line
 # (no "!Format date"). Its fourth column is a threshold FREQUENCY, not an energy.
@@ -1390,26 +1391,74 @@ class PhotFileReader:
                 f"WARNING: {self.pending_levelname} declares {self.pending_numpoints:d} cross section rows but"
                 f" the block ends after {len(energyryd):d}",
             )
-        energyryd, sigma = self.cut_below_threshold(energyryd, sigma)
+        energyryd, sigma = self.start_at_threshold(energyryd, sigma)
         # the rows the file gave, and no zero rows up to the declared count. The downsample
         # takes the energy column as sorted, and a zero energy after the last row would break that.
         self.phixstables[self.filenum][self.pending_levelname] = np.column_stack((energyryd, sigma))
         self.shared_edge_ryd[self.filenum][self.pending_levelname] = self.thresholdenergyryd
 
-    def cut_below_threshold(
+    def start_at_threshold(
         self, energyryd: npt.NDArray[np.float64], sigma: npt.NDArray[np.float64]
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
-        """Remove the rows of a tabulated table below the threshold, and start the table at the threshold.
+        """Give a tabulated table that starts at the threshold: with no row below it, and with a row at it.
 
-        CMFGEN uses a table only at frequencies at or above the edge (sub_phot_gen.f). It reads the
-        value at the edge by linear interpolation between the rows. reduce_phixs_tables_worker()
-        takes the first energy of a table as its threshold. A row below the edge therefore moved
-        each output value to a lower energy. 13759 of the 31647 tabulated tables of the CMFGEN data
-        start below x = 1. A table that ends below the threshold continues as nu^-3 from its last
-        row, as in CMFGEN.
+        reduce_phixs_tables_worker() takes the first energy of a table as its threshold, so that
+        energy must be the threshold. CMFGEN uses a table only at frequencies at or above the edge
+        (sub_phot_gen.f). It reads the value at the edge by linear interpolation between the rows.
+        13759 of the 31647 tabulated tables of the CMFGEN data start below x = 1. A table that ends
+        below the threshold continues as nu^-3 from its last row, as in CMFGEN.
+
+        181 tables start above x = 1, for example the tables of K I at x = 1.01. Below the first
+        row, the index search of CMFGEN stops at the first two rows (sub_phot_gen.f, lines 246-271).
+        The linear interpolation then continues the line of those rows down to the edge (lines
+        380-385). The reader adds a row at the threshold from that line. A cross section cannot be
+        negative. If the line is below zero at the threshold, the table is zero up to the point
+        where the line is zero.
         """
         x = energyryd / self.thresholdenergyryd
+
+        def sigma_at_threshold(index: int) -> float:
+            """Give the value at x = 1 of the line through the rows index and index + 1."""
+            fraction = (1.0 - x[index]) / (x[index + 1] - x[index])
+            return float(sigma[index] + fraction * (sigma[index + 1] - sigma[index]))
+
         # a tolerance, because x = 1 of the file comes back from a product and a division
+        if x[0] > 1.0 + 1e-12:
+            starttext = f"The table of {self.pending_levelname} starts at 1 + {x[0] - 1.0:.2g} times the threshold."
+            # two first rows at one energy give no line, and a table of one row has none
+            sigma_on_line = sigma_at_threshold(0) if len(x) > 1 and x[1] > x[0] else float(sigma[0])
+            if sigma_on_line < 0.0:
+                log_detail(
+                    self.flog,
+                    ("phixsdata",),
+                    "table that starts above the threshold, with a line below zero",
+                    f"{starttext} The line through the first two rows is below zero at the threshold. The reader adds"
+                    " rows of zero from the threshold to the point where the line is zero. CMFGEN has no such limit.",
+                )
+                # A row of zero at the threshold alone would give a ramp from there to the first row.
+                # The line is zero at this x, which is between the threshold and the first row. A first
+                # row below zero has no such line, and then the table is zero up to that row.
+                rises = len(x) > 1 and sigma[1] > sigma[0]
+                x_of_zero = (
+                    float(np.clip(x[0] - sigma[0] * (x[1] - x[0]) / (sigma[1] - sigma[0]), 1.0, x[0]))
+                    if rises
+                    else x[0]
+                )
+                return (
+                    np.concatenate(([self.thresholdenergyryd, x_of_zero * self.thresholdenergyryd], energyryd)),
+                    np.concatenate(([0.0, 0.0], sigma)),
+                )
+            log_detail(
+                self.flog,
+                ("phixsdata",),
+                "table that starts above the threshold",
+                f"{starttext} The reader adds a row at the threshold on the line through the first two rows, as"
+                " CMFGEN does.",
+            )
+            return (
+                np.concatenate(([self.thresholdenergyryd], energyryd)),
+                np.concatenate(([sigma_on_line], sigma)),
+            )
         if x[0] >= 1.0 - 1e-12:
             return energyryd, sigma
         above = np.flatnonzero(x >= 1.0 - 1e-12)
@@ -1440,11 +1489,9 @@ class PhotFileReader:
             f"{starttext} The reader drops the rows below the threshold and adds a row at the threshold by linear"
             " interpolation, as CMFGEN does.",
         )
-        fraction = (1.0 - x[first - 1]) / (x[first] - x[first - 1])
-        sigma_at_edge = sigma[first - 1] + fraction * (sigma[first] - sigma[first - 1])
         return (
             np.concatenate(([self.thresholdenergyryd], energyryd[first:])),
-            np.concatenate(([sigma_at_edge], sigma[first:])),
+            np.concatenate(([sigma_at_threshold(first - 1)], sigma[first:])),
         )
 
     def take_data_rows(self, start: int, end: int) -> None:
@@ -2261,6 +2308,9 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
+valence_orbital_regex = re.compile(rf"(?<!\d)(\d+)([{lchars_lower}])")
+
+
 def get_level_valence_n(levelname: str) -> int | None:
     """Principal quantum number of the valence electron, read from a CMFGEN level name.
 
@@ -2270,11 +2320,49 @@ def get_level_valence_n(levelname: str) -> int | None:
     gives the level no estimate and writes a warning to the log file.
 
     An orbital is digits and a lower-case orbital letter. A term is an upper-case letter with an
-    optional seniority digit and parity letter ('2D2e'). The digit run that follows an upper-case
-    letter is therefore not an orbital, and 'e' is not an orbital letter.
+    optional seniority digit and parity letter ('2D2e'). 'e' is not an orbital letter, but 'o' is.
+    A digit and an 'o' that follow an upper-case letter are therefore not an orbital. Each other
+    orbital can follow a term letter: '4s5P5s_6Pe' of Co I has the valence orbital 5s.
+
+    Some names put two orbitals together with no separator. The digits of the second orbital
+    then start with the electron count of the first. '3p63d2De[3/2]' of Fe VIII is 3p6 3d, and
+    '3s2_3p510s_3Po' of Ca III is 3p5 10s. The function reads a count only where all of these
+    conditions are true:
+
+    - The count is 2 or more. A name gives no count of 1, so '2s11s3Se' of C III is 2s 11s.
+    - The count fits the first orbital.
+    - The n that remains is above the l of the second orbital.
+    - That n is not below the n of the first orbital.
+
+    100 of the 107469 names of the CMFGEN data need this rule (Ca III, Fe I and Fe VIII).
     """
-    orbitals = re.findall(r"(?<![A-Z])\d+[spdfghiklmnoqrtuvwxyz]", levelname.split("[", maxsplit=1)[0])
-    return parse_orbital_n(orbitals[-1]) if orbitals else None
+    n: int | None = None
+    previous_end = -1
+    previous_n = 0
+    previous_l = -1
+    configuration = levelname.split("[", maxsplit=1)[0]
+    for orbital in valence_orbital_regex.finditer(configuration):
+        if orbital[2] == "o" and configuration[: orbital.start()][-1:].isupper():
+            continue
+        digits = orbital[1]
+        l = lchars_lower.index(orbital[2])
+        follows_an_orbital = orbital.start() == previous_end
+        n = int(digits)
+        if follows_an_orbital:
+            # a count of two digits first: '3d104s' is 3d10 4s
+            for countlength in (2, 1):
+                count, n_text = digits[:countlength], digits[countlength:]
+                if (
+                    n_text
+                    and n_text[0] != "0"
+                    and 2 <= int(count) <= subshell_capacity(previous_l)
+                    and l < int(n_text)
+                    and int(n_text) >= previous_n
+                ):
+                    n = int(n_text)
+                    break
+        previous_end, previous_n, previous_l = orbital.end(), n, l
+    return n
 
 
 # The collision data files whose temperature header gives log10(T/K), and not T/1e4 K. CMFGEN reads

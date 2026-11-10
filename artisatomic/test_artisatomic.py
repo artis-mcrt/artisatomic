@@ -1010,7 +1010,7 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     targetlist_3do = targetconfigs[levelnames.index("2s2_2p3(2Do)3s_3Do[3]")]
     assert targetlist_3do is not None
     assert [target for target, _ in targetlist_3do] == ["2s2_2p3_4So/2p^3_4So", "2s2_2p3_2Do"]
-    assert [fraction for _, fraction in targetlist_3do] == pytest.approx([0.9675, 0.0325], abs=5e-5)
+    assert [fraction for _, fraction in targetlist_3do] == pytest.approx([0.96755, 0.03245], abs=5e-5)
 
 
 def test_read_coldata_term_to_j_redistribution():
@@ -5272,6 +5272,23 @@ def test_readhillierdata_get_level_valence_n():
     # the seniority digit and parity letter of a term are not an orbital
     assert readhillierdata.get_level_valence_n("3d7_a2D2e[5/2]") == 3
     assert readhillierdata.get_level_valence_n("3d5_4s2_2F1e[5/2]") == 4
+    # two orbitals with no separator: the digits of the second start with the count of the first
+    assert readhillierdata.get_level_valence_n("3p63d2De[3/2]") == 3  # Fe VIII, 3p6 3d
+    assert readhillierdata.get_level_valence_n("3p69s2Se[1/2]") == 9
+    assert readhillierdata.get_level_valence_n("3s2_3p510s_3Po") == 10  # Ca III, 3p5 10s
+    assert readhillierdata.get_level_valence_n("3d5(6S)4s24p_y7Po[2]") == 4  # Fe I, 4s2 4p
+    assert readhillierdata.get_level_valence_n("3d104s_2Se") == 4
+    # a name gives no count of 1, so these digits are an n of two digits
+    assert readhillierdata.get_level_valence_n("2s11s3Se") == 11  # C III, 2s 11s
+    assert readhillierdata.get_level_valence_n("4s12s1Se") == 12  # Ca I, 4s 12s
+    assert readhillierdata.get_level_valence_n("2s2_2p_10d_3Fo") == 10
+    # the n that remains must be above the l of the orbital. w is l = 17, so this is 2s 22w and not 2s2 2w
+    assert readhillierdata.get_level_valence_n("2s22w3W") == 22  # C III
+    # the n that remains must not be below the n of the first orbital: 3s 21s, and not 3s2 1s
+    assert readhillierdata.get_level_valence_n("3s21s1Se") == 21
+    # an orbital can follow a term letter, but a seniority digit with the odd parity letter is not an orbital
+    assert readhillierdata.get_level_valence_n("4s5P5s_6Pe[7/2]") == 5  # Co I
+    assert readhillierdata.get_level_valence_n("3d7_a2D2o[5/2]") == 3
     assert readhillierdata.get_level_valence_n("1___") is None
     assert readhillierdata.get_level_valence_n("8SNG") is None
 
@@ -7393,7 +7410,7 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     reader = readhillierdata.PhotFileReader(7, 7, 1, [455.5], {"5g_2Ge": 0}, {"5g_2Ge": 0}, flog)
     reader.thresholdenergyryd = 2.0
     reader.pending_levelname = "5g_2Ge"
-    cut = reader.cut_below_threshold
+    cut = reader.start_at_threshold
 
     x = np.array([0.75, 0.9, 1.1, 2.0])
     energyryd, sigma = cut(x * 2.0, np.array([1.0, 0.5, 0.3, 0.1]))
@@ -7415,6 +7432,26 @@ def test_tabulated_cross_section_starts_at_the_threshold():
     table = (np.array([2.0, 3.0]), np.array([1.0, 0.5]))
     assert cut(*table) is not None
     assert cut(*table)[0] is table[0]
+
+    # A table that starts above the threshold gets a row at the threshold, on the line through its
+    # first two rows. K I starts at x = 1.01.
+    energyryd, sigma = cut(np.array([1.01, 1.03, 2.0]) * 2.0, np.array([0.34, 0.30, 0.1]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.02, 2.06, 4.0])
+    assert sigma.tolist() == pytest.approx([0.36, 0.34, 0.30, 0.1])
+    # The line of these rows is zero at x = 1.475 and below zero at the threshold. The table is zero
+    # up to x = 1.475, so the downsample gets no ramp from the threshold to the first row.
+    energyryd, sigma = cut(np.array([1.5, 1.6]) * 2.0, np.array([0.1, 0.5]))
+    assert energyryd.tolist() == pytest.approx([2.0, 2.95, 3.0, 3.2])
+    assert sigma.tolist() == [0.0, 0.0, 0.1, 0.5]
+    # a first row below zero with no line that rises gives zero up to that row, and no division by zero
+    assert cut(np.array([3.0]), np.array([-0.7]))[0].tolist() == pytest.approx([2.0, 3.0, 3.0])
+    # a table of one row keeps its value
+    assert cut(np.array([3.0]), np.array([0.7]))[1].tolist() == [0.7, 0.7]
+    # two first rows at one energy give no line, so the row at the threshold has the first value
+    assert cut(np.array([1.2, 1.2, 2.0]) * 2.0, np.array([0.3, 0.5, 0.1]))[1].tolist() == [0.3, 0.3, 0.5, 0.1]
+    assert "starts at 1 + 0.01 times the threshold. The reader adds a row at the threshold" in flog.getvalue()
+    # CMFGEN has no limit of zero, so the log does not name CMFGEN as the source of that row
+    assert "starts at 1 + 0.5 times the threshold. The line through the first two rows is below zero" in flog.getvalue()
 
 
 def test_write_adata_rejects_an_ion_that_artis_cannot_read():
