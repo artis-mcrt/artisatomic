@@ -7749,6 +7749,31 @@ def test_readtanakajpltdata_reads_a_file_with_only_a_transition_column_header(tm
     assert dftransitions.is_empty()
 
 
+def test_readtanakajpltdata_gives_j_to_the_delta_j_rule(tmp_path, monkeypatch):
+    """The weight column is 2J + 1, so the levels have a J, and the writer applies the delta J rule.
+
+    The file lists electric dipole transitions only. 12 files of the data hold rows between two
+    levels whose J values differ by more than 1. Such a row with A <= 1e5 s^-1 gets the forbidden flag.
+    """
+    # level 3 gets J = 4, and level 1 has J = 2. The first row is weak (A = 6.2e4 s^-1). The second
+    # row has J = 4 -> J = 1 and A = 1.1e7 s^-1, so its strength says that it is an E1 line.
+    lines = [
+        line.replace("      3   3.0   odd", "      3   9.0   odd")
+        for line in jplt_lines(
+            [
+                "      3       1      3977.982     5.619e+05        -3.037 ",
+                "      3       2     16066.11      1.000e+08        -3.037 ",
+            ]
+        )
+    ]
+    (tmp_path / "34_1.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(34, 1, io.StringIO())
+    assert dflevels["j"].to_list() == [2.0, 1.0, 4.0]
+    dftransitions = add_level_ids_forbidden(dflevels, dftransitions)
+    assert dftransitions.sort("lowerlevel")["forbidden"].to_list() == [True, False]
+
+
 def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):
     """A row that repeats the levels, the wavelength and g_u*A is one line two times, which ARTIS would add."""
     row = "      3       1      3977.982     5.619e+05        -3.037 "

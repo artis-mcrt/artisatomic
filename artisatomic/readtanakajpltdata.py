@@ -165,6 +165,9 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             # a silent 0 would give the Laporte rule a parity the file did not state
             parity=pl.when(pl.col("parity") == "odd").then(1).when(pl.col("parity") == "even").then(0),
             g=pl.col("g").cast(pl.Float64),
+            # the weight column of the file is 2J + 1. With J, the writer applies the delta J rule
+            # of an electric dipole transition to the forbidden flag.
+            j=(pl.col("g").cast(pl.Float64) - 1) / 2,
             # Every expression in one select() reads the INPUT frame. So both columns below hold
             # the file's own values, not the values that the same select() computes. The name
             # gets the file's 1-based number rather than the zero-based levelid, and the
