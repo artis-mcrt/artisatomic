@@ -250,6 +250,18 @@ def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
         A=pl.col("A").cast(pl.Float64),
         forbidden=pl.col("Type") != "E1",
     )
+
+    # read_levels_and_transitions() adds the A values of the rows that share a level pair, so a
+    # negative value can hide in a positive sum. Not an assert: input validation must survive python -O.
+    invalidrows = dftransitions.select(pl.arg_where(~pl.col("A").is_finite() | (pl.col("A") < 0))).to_series()
+    if not invalidrows.is_empty():
+        row = invalidrows[0]
+        msg = (
+            f"{invalidrows.len()} A values in {filepath} are negative or not finite."
+            f" The first is {dftransitions['A'][row]} in data row {row + 1}."
+        )
+        raise ValueError(msg)
+
     return dftransitions, transitiontypes
 
 
