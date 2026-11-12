@@ -33,7 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Produce an ARTIS atomic database from published atomic data sets.",
     )
     parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
-    parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points to save in output")
+    parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points; at least two")
     parser.add_argument(
         "-phixsnuincrement",
         type=float,
@@ -150,6 +150,10 @@ def main() -> None:
         if not (math.isfinite(value) and value > 0):
             msg = f"-{name} must be a finite number more than 0, got {value}"
             raise ValueError(msg)
+
+    if args.nphixspoints < 2:
+        msg = "-nphixspoints must be 2 or more. ARTIS needs two points for a recombination integral."
+        raise ValueError(msg)
 
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
     readadasdata.rename_old_adas_directory()
