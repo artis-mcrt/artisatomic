@@ -3,6 +3,7 @@
 """Command-line entry point: build an ARTIS atomic database from the configured ions and handlers."""
 
 import argparse
+import importlib
 import json
 import math
 import os
@@ -16,6 +17,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import argcomplete
+
+from artisatomic.install import install_files
+from artisatomic.install import journal_name
+from artisatomic.install import recover_install
 
 # The functions import the modules of the package only when they need them. The package imports
 # polars and numpy, which took 0.3 s, so "--help" and the tab completion waited for them.
@@ -173,7 +178,9 @@ def main() -> None:
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)
-    remove_stale_work_folders(outputfolder)
+    with stop_signals_as_exit(), signals_held(), output_folder_lock(outputfolder):
+        recover_install(outputfolder)
+        remove_stale_work_folders(outputfolder)
 
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
     # that fails then leaves the output of the earlier run. The level ids of one file refer to the
@@ -188,6 +195,7 @@ def main() -> None:
             write_files(ion_handlers, argparse.Namespace(**{**vars(args), "output_folder": str(workfolder)}))
         except BaseException:
             with signals_held(), output_folder_lock(outputfolder):
+                recover_install(outputfolder)
                 discard_run(workfolder, outputfolder)
             raise
 
@@ -197,16 +205,17 @@ def main() -> None:
         # last move and the cleanup, no handler could tell a full install from a part install.
         with signals_held(), output_folder_lock(outputfolder):
             try:
-                earlierfolder = install_files(workfolder, outputfolder)
+                recover_install(outputfolder)
+                install_files(workfolder, outputfolder)
             except BaseException:
-                discard_run(workfolder, outputfolder)
+                if not (outputfolder / journal_name).exists() and workfolder.exists():
+                    discard_run(workfolder, outputfolder)
                 raise
 
             # The output folder holds the full new output now. A failure of the cleanup must not make
             # the run fail, because the files of the earlier run are gone from the output folder.
             try:
-                shutil.rmtree(earlierfolder)
-                workfolder.rmdir()
+                recover_install(outputfolder)
                 (outputfolder / failedlogname).unlink(missing_ok=True)
                 remove_old_log_folder(outputfolder)
             except OSError as error:
@@ -324,33 +333,40 @@ def process_exists(pid: int) -> bool:
 
 @contextmanager
 def output_folder_lock(outputfolder: Path) -> Generator[None]:
-    """Hold an exclusive lock on the output folder. A second run waits until the first run releases it.
-
-    The operating system releases the lock when the process stops, so a run that crashes leaves no
-    lock. Windows has no flock(), so there the function gives no lock. Some file systems refuse
-    flock() (Lustre with the option noflock, NFS with no lock daemon), and a folder with no read
-    permission refuses the open. There the function gives a warning and no lock, so a run does not
-    fail after all of its work.
-    """
+    """Hold an exclusive lock on the output folder. Stop if the file system refuses the lock."""
     try:
         import fcntl
-    except ImportError:
-        yield
+    except ImportError as error:
+        if sys.platform != "win32":
+            msg = "This platform has no output lock. The run stops to keep the output files consistent."
+            raise RuntimeError(msg) from error
+        msvcrt = importlib.import_module("msvcrt")
+        lockpath = outputfolder / ".artisatomic.lock"
+        if lockpath.is_symlink():
+            msg = f"The lock file {lockpath} is a symbolic link."
+            raise RuntimeError(msg) from None
+        # Keep this file after release. Its removal would let two processes lock different files.
+        with lockpath.open("a+b") as stream:
+            if stream.tell() == 0:
+                stream.write(b"0")
+                stream.flush()
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
+            if not os.path.samestat(os.fstat(stream.fileno()), lockpath.stat()):
+                msg = f"The lock file {lockpath} changed while the run waited for its lock."
+                raise RuntimeError(msg) from None
+            yield
         return
-    folderfd = None
+    folderfd = os.open(outputfolder, os.O_RDONLY)
     try:
         try:
-            folderfd = os.open(outputfolder, os.O_RDONLY)
             fcntl.flock(folderfd, fcntl.LOCK_EX)
         except OSError as error:
-            print(
-                f"WARNING: {outputfolder} gives no lock ({error}). The run continues with no lock."
-                " Two runs that end at one time can mix their files."
-            )
+            msg = f"The file system cannot lock {outputfolder}. The run stops before it changes output files."
+            raise OSError(error.errno, msg) from error
         yield
     finally:
-        if folderfd is not None:
-            os.close(folderfd)
+        os.close(folderfd)
 
 
 def discard_run(workfolder: Path, outputfolder: Path) -> None:
@@ -361,34 +377,6 @@ def discard_run(workfolder: Path, outputfolder: Path) -> None:
         log_path(workfolder).replace(outputfolder / failedlogname)
     shutil.rmtree(workfolder)
     print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
-
-
-def install_files(workfolder: Path, outputfolder: Path) -> Path:
-    """Move the files of the run from workfolder into outputfolder. Give the folder that holds the earlier files.
-
-    The files of the earlier run go to a new folder first. If a move fails, the function moves the
-    new files back to workfolder, restores the earlier files, and raises the error again.
-    phixsdata_v2.txt goes to the new folder also, because --nophixs writes no new one. Its level
-    ids belong to the adata.txt of the earlier run.
-    """
-    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
-    newnames = sorted(newfile.name for newfile in workfolder.iterdir())
-    installednames: list[str] = []
-    try:
-        for name in sorted({*newnames, "phixsdata_v2.txt"}):
-            if (outputfolder / name).exists():
-                (outputfolder / name).replace(earlierfolder / name)
-        for name in newnames:
-            (workfolder / name).replace(outputfolder / name)
-            installednames.append(name)
-    except BaseException:
-        for name in installednames:
-            (outputfolder / name).replace(workfolder / name)
-        for earlierfile in earlierfolder.iterdir():
-            earlierfile.replace(outputfolder / earlierfile.name)
-        earlierfolder.rmdir()
-        raise
-    return earlierfolder
 
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

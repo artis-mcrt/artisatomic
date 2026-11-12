@@ -64,6 +64,8 @@ The `handlers` registry in `artisatomic/iondata.py` gives the reader of each han
 
 Each run writes `artisatomicionhandlers_used.json` into the output folder, in the same format. Copy that record to `artisatomicionhandlers.json` to repeat the run. Remove `artisatomicionhandlers.json` after the run. The file controls every later run in that directory.
 
+The command records an output installation in `.artisatomic_transaction.json`. After an unexpected process stop, the next run recovers that installation under an exclusive output lock. It restores an incomplete installation or keeps a complete installation. If a recovery file changed, the command stops and preserves all recovery files. Keep the record and its work folders until recovery succeeds. A file system that refuses the lock stops the command before installation.
+
 ### Comments in the output files
 adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. The file comment explains each field of the file. It says that level numbers and ion stages start at 1, and not at 0. It also gives the options of the run that apply to all ions. Two examples are the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
 

@@ -6589,7 +6589,8 @@ def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path
 
     @contextmanager
     def lock_after_a_signal(outputfolder: Path):
-        os.kill(os.getpid(), signal.SIGTERM)
+        if list(outputfolder.glob(".artisatomic_run_*")):
+            os.kill(os.getpid(), signal.SIGTERM)
         with original_lock(outputfolder):
             yield
 
@@ -6646,8 +6647,8 @@ def test_cli_leaves_a_handler_that_it_cannot_put_back(monkeypatch):
     assert cli.signals_to_take_over(("SIGTERM",)) == [signal.SIGTERM]
 
 
-def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(tmp_path, capsys):
-    """A folder with no read permission gives a warning and no lock, and the block still runs."""
+def test_cli_output_folder_lock_stops_for_a_folder_that_it_cannot_open(tmp_path):
+    """A lock failure stops the run before it can change an output file."""
     import os
 
     from artisatomic import cli
@@ -6658,12 +6659,11 @@ def test_cli_output_folder_lock_gives_no_lock_for_a_folder_that_it_cannot_open(t
     outputfolder.mkdir(mode=0o300)
     ran = False
     try:
-        with cli.output_folder_lock(outputfolder):
+        with pytest.raises(PermissionError), cli.output_folder_lock(outputfolder):
             ran = True
     finally:
         outputfolder.chmod(0o700)
-    assert ran
-    assert "gives no lock" in capsys.readouterr().out
+    assert not ran
 
 
 def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkeypatch):
@@ -6692,8 +6692,8 @@ def test_cli_holds_a_lock_on_the_output_folder_during_the_moves(tmp_path, monkey
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
 
 
-def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
-    """Windows has no fcntl. The command must still start, and a run must still write its files."""
+def test_cli_requires_a_lock_without_fcntl_on_posix(tmp_path, monkeypatch):
+    """A POSIX run without its lock implementation must keep the earlier files."""
     import builtins
 
     original_import = builtins.__import__
@@ -6708,8 +6708,9 @@ def test_cli_starts_without_fcntl(tmp_path, monkeypatch):
     from artisatomic import cli
 
     importlib.reload(cli)
-    outputfolder = cli_run_with_stub_writer(tmp_path, monkeypatch)
-    assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of the new run\n"
+    with pytest.raises(RuntimeError, match="no output lock"):
+        cli_run_with_stub_writer(tmp_path, monkeypatch)
+    assert (tmp_path / "artis_files" / "adata.txt").read_text() == "the output of an earlier run\n"
 
 
 def test_cli_replaces_the_earlier_output_when_the_run_succeeds(tmp_path, monkeypatch):
@@ -8150,8 +8151,8 @@ def test_rename_old_data_directory_gives_a_warning_when_the_move_fails(tmp_path,
     assert "WARNING: could not move the files of" in capsys.readouterr().out
 
 
-def test_output_folder_lock_continues_when_the_file_system_gives_no_lock(tmp_path, monkeypatch, capsys):
-    """Lustre with noflock and NFS with no lock daemon refuse flock(), and the run must not fail after its work."""
+def test_output_folder_lock_stops_when_the_file_system_gives_no_lock(tmp_path, monkeypatch):
+    """An unsupported file lock must stop installation before two runs can mix their output files."""
     import errno
 
     fcntl = pytest.importorskip("fcntl")
@@ -8161,9 +8162,8 @@ def test_output_folder_lock_continues_when_the_file_system_gives_no_lock(tmp_pat
         raise OSError(errno.ENOSYS, "Function not implemented")
 
     monkeypatch.setattr(fcntl, "flock", refuse)
-    with cli.output_folder_lock(tmp_path):
-        pass
-    assert "gives no lock" in capsys.readouterr().out
+    with pytest.raises(OSError, match="cannot lock"), cli.output_folder_lock(tmp_path):
+        pytest.fail("The run entered an output folder without its lock.")
 
 
 def test_stop_signals_raise_system_exit():
@@ -8266,3 +8266,170 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         texts.append(ftransitiondata.getvalue())
     assert texts[0] == texts[1]
     assert texts[0].count("\n") > nrows
+
+
+@pytest.mark.parametrize("stop_after", [1, 2, 3, 4, "complete"])
+def test_cli_recovers_an_install_after_sigkill(tmp_path, stop_after):
+    """A later run restores the earlier set, or keeps a set whose install record is complete."""
+    import os
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]
+    import sys
+
+    from artisatomic import cli
+
+    if os.name != "posix":
+        pytest.skip("the test stops a child process with SIGKILL")
+    outputfolder = tmp_path / "output"
+    outputfolder.mkdir()
+    for name in ("adata.txt", "phixsdata_v2.txt"):
+        (outputfolder / name).write_text("old")
+    script = r"""
+import json, os, signal, socket, sys, tempfile
+from pathlib import Path
+from artisatomic import cli
+output = Path(sys.argv[1])
+stop_after = json.loads(sys.argv[2])
+work = Path(tempfile.mkdtemp(prefix=f".artisatomic_run_{os.getpid()}@{socket.gethostname()}@", dir=output))
+for name in ("adata.txt", "transitiondata.txt"):
+    (work / name).write_text("new")
+original = Path.replace
+moves = 0
+def replace(path, target):
+    global moves
+    complete = path.name.startswith(cli.journal_name) and json.loads(path.read_text())["complete"]
+    result = original(path, target)
+    if path.name in {"adata.txt", "phixsdata_v2.txt", "transitiondata.txt"}:
+        moves += 1
+        if moves == stop_after:
+            os.kill(os.getpid(), signal.SIGKILL)
+    if complete and stop_after == "complete":
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+Path.replace = replace
+with cli.output_folder_lock(output):
+    cli.install_files(work, output)
+"""
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [sys.executable, "-c", script, str(outputfolder), json.dumps(stop_after)], check=False
+    )
+    assert result.returncode == -9
+    assert (outputfolder / cli.journal_name).is_file()
+    with cli.output_folder_lock(outputfolder):
+        cli.recover_install(outputfolder)
+        cli.remove_stale_work_folders(outputfolder)
+    if stop_after == "complete":
+        assert {path.name: path.read_text() for path in outputfolder.iterdir()} == {
+            "adata.txt": "new",
+            "transitiondata.txt": "new",
+        }
+    else:
+        assert {path.name: path.read_text() for path in outputfolder.iterdir()} == {
+            "adata.txt": "old",
+            "phixsdata_v2.txt": "old",
+        }
+
+
+def test_cli_keeps_recovery_files_when_an_output_file_changes(tmp_path, monkeypatch):
+    """Recovery must preserve an unknown output file and the only copies of the earlier files."""
+    from artisatomic import cli
+    from artisatomic import install
+
+    work = tmp_path / ".artisatomic_run_test"
+    work.mkdir()
+    (work / "adata.txt").write_text("new")
+    (tmp_path / "adata.txt").write_text("old")
+    original_replace = Path.replace
+
+    def replace(path, target):
+        if path.parent == work:
+            (tmp_path / "adata.txt").write_text("external")
+            msg = "The install stopped."
+            raise OSError(msg)
+        return original_replace(path, target)
+
+    monkeypatch.setattr(Path, "replace", replace)
+    with pytest.raises(RuntimeError, match="keeps all recovery files"):
+        cli.install_files(work, tmp_path)
+    assert (tmp_path / "adata.txt").read_text() == "external"
+    assert (work / "adata.txt").read_text() == "new"
+    record = install.read_record(tmp_path)
+    assert (tmp_path / record["earlier"] / "adata.txt").read_text() == "old"
+
+
+def test_cli_recovery_refuses_a_changed_backup(tmp_path, monkeypatch):
+    """A changed backup must stop recovery before it changes any output file."""
+    from artisatomic import cli
+    from artisatomic import install
+
+    work = tmp_path / ".artisatomic_run_test"
+    work.mkdir()
+    (work / "adata.txt").write_text("new")
+    (tmp_path / "adata.txt").write_text("old")
+    original_write_record = install.write_record
+
+    def stop_after_record(outputfolder, record):
+        original_write_record(outputfolder, record)
+        msg = "The record is complete."
+        raise OSError(msg)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(install, "write_record", stop_after_record)
+        patch.setattr(install, "recover_install", lambda _folder: None)
+        with pytest.raises(OSError, match="record is complete"):
+            cli.install_files(work, tmp_path)
+    record = install.read_record(tmp_path)
+    earlier = tmp_path / record["earlier"]
+    (tmp_path / "adata.txt").replace(earlier / "adata.txt")
+    (earlier / "adata.txt").write_text("changed")
+    with pytest.raises(RuntimeError, match=r"recovery file.*changed"):
+        cli.recover_install(tmp_path)
+    assert (earlier / "adata.txt").read_text() == "changed"
+    assert (work / "adata.txt").read_text() == "new"
+    assert not (tmp_path / "adata.txt").exists()
+    assert (tmp_path / cli.journal_name).exists()
+
+
+def test_cli_recovers_after_sigkill_during_rollback_cleanup(tmp_path):
+    """A missing empty backup folder must not prevent recovery after all earlier files return."""
+    import os
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]
+    import sys
+
+    from artisatomic import cli
+
+    if os.name != "posix":
+        pytest.skip("the test stops a child process with SIGKILL")
+    outputfolder = tmp_path / "output"
+    outputfolder.mkdir()
+    (outputfolder / "adata.txt").write_text("old")
+    script = r"""
+import os, signal, socket, sys, tempfile
+from pathlib import Path
+from artisatomic import cli
+output = Path(sys.argv[1])
+work = Path(tempfile.mkdtemp(prefix=f".artisatomic_run_{os.getpid()}@{socket.gethostname()}@", dir=output))
+(work / "adata.txt").write_text("new")
+replace_original, rmdir_original = Path.replace, Path.rmdir
+def replace(path, target):
+    if path.parent == work:
+        raise OSError("The install stopped.")
+    return replace_original(path, target)
+def rmdir(path):
+    result = rmdir_original(path)
+    if path.name.startswith(".artisatomic_earlier_"):
+        os.kill(os.getpid(), signal.SIGKILL)
+    return result
+Path.replace, Path.rmdir = replace, rmdir
+with cli.output_folder_lock(output):
+    cli.install_files(work, output)
+"""
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [sys.executable, "-c", script, str(outputfolder)], check=False
+    )
+    assert result.returncode == -9
+    assert (outputfolder / "adata.txt").read_text() == "old"
+    assert (outputfolder / cli.journal_name).is_file()
+    with cli.output_folder_lock(outputfolder):
+        cli.recover_install(outputfolder)
+        cli.remove_stale_work_folders(outputfolder)
+    assert {path.name: path.read_text() for path in outputfolder.iterdir()} == {"adata.txt": "old"}
