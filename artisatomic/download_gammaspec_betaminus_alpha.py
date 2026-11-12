@@ -181,8 +181,21 @@ def main():
                         (pl.col("Radiation") == "G")
                         # fill_null: an empty cell reads as null, and is_in() on a null drops the row
                         & pl.col("radsubtype").fill_null("").is_in(["", "Annihil."])
-                        & (pl.col("intensity") > 0.0)
                     )
+
+                    invalid = dfgammadecays.filter(
+                        ~(pl.col("intensity").is_finite() & (pl.col("intensity") >= 0.0)).fill_null(False)
+                        | (
+                            (pl.col("intensity") > 0.0)
+                            & ~(
+                                pl.col("radiationenergy_kev").is_finite() & (pl.col("radiationenergy_kev") > 0.0)
+                            ).fill_null(False)
+                        )
+                    )
+                    if not invalid.is_empty():
+                        msg = f"The gamma table of {strnuclide} has an invalid energy or intensity."
+                        raise ValueError(msg)
+                    dfgammadecays = dfgammadecays.filter(pl.col("intensity") > 0.0)
 
                     maybedfbetaminusrow = dfbetaminus.filter(pl.col("Z") == z).filter(pl.col("A") == a)
                     maybedfalpharow = dfalpha.filter(pl.col("Z") == z).filter(pl.col("A") == a).limit(1)
@@ -228,20 +241,12 @@ def main():
                             "intensity": dfgammadecays["intensity"] / 100.0,
                         }
                     ).sort("energy_mev")
-                    # the file gives each intensity with 4 decimal places, so a weaker line would print as
-                    # 0.0000 and carry no energy. A nuclide with only such lines then gets no file.
-                    nweak = dfout.filter(pl.col("intensity") < 5e-5).height
-                    if nweak:
-                        print(
-                            f"  {nweak} gamma lines have an intensity below 5e-5 per decay, so the file leaves them out"
-                        )
-                        dfout = dfout.filter(pl.col("intensity") >= 5e-5)
                     if len(dfout) > 0:
                         # a run that stops part way through leaves the previous file complete
                         with open_for_atomic_write(nucoutfilepath) as fout:
                             fout.write(f"{len(dfout)}\n")
                             for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
-                                fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
+                                fout.write(f"{energy_mev:.17g}  {intensity:.17g}\n")
                         print(f"Saved {nucoutfilepath.name}")
                     # a file of an earlier run would still give the lines that this run leaves out
                     elif nucoutfilepath.exists():
