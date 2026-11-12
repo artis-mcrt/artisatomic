@@ -250,6 +250,20 @@ def read_transitions_file(filepath: Path) -> tuple[pl.DataFrame, list[str]]:
         A=pl.col("A").cast(pl.Float64),
         forbidden=pl.col("Type") != "E1",
     )
+    invalid = (
+        dftransitions.lazy()
+        .with_row_index("source_row", offset=1)
+        .filter(~pl.col("A").is_finite() | (pl.col("A") < 0.0))
+        .head(1)
+        .collect()
+    )
+    if not invalid.is_empty():
+        row = invalid.row(0, named=True)
+        msg = (
+            f"The A value {row['A']} in data row {row['source_row']} of {filepath} is invalid."
+            " Each A value must be finite and non-negative."
+        )
+        raise ValueError(msg)
     return dftransitions, transitiontypes
 
 
