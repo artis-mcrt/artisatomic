@@ -5,7 +5,9 @@ doi:10.1051/0004-6361/202347723. Data: https://doi.org/10.5281/zenodo.10635803 (
 atomic-data-mons/readme.txt for the file formats).
 """
 
+import io
 import zipfile
+from collections.abc import Iterator
 
 import numpy as np
 import polars as pl
@@ -63,17 +65,42 @@ def read_csv_columns(archivename: str, membername: str, columncount: int) -> lis
     The files pad the fields with spaces, which polars cannot convert to a float directly. The
     reader takes each column as text, removes the spaces, and then converts it.
     """
-    columnnames = [f"column{i}" for i in range(columncount)]
     with zipfile.ZipFile(datafilepath / archivename) as ziparchive, ziparchive.open(membername) as datafile:
-        dfcolumns = pl.read_csv(
+        return parse_csv_columns(datafile, archivename, membername, columncount)
+
+
+# A batch ends at a complete row. The source files contain numeric fields without embedded newlines.
+TRANSITION_BATCH_BYTES = 8 * 1024 * 1024
+
+
+def iter_csv_columns(archivename: str, membername: str, columncount: int) -> Iterator[list[np.ndarray]]:
+    """Read one archive member in batches of complete rows."""
+    with zipfile.ZipFile(datafilepath / archivename) as ziparchive, ziparchive.open(membername) as datafile:
+        remainder = b""
+        while chunk := datafile.read(TRANSITION_BATCH_BYTES):
+            complete, separator, remainder = (remainder + chunk).rpartition(b"\n")
+            if separator:
+                yield parse_csv_columns(io.BytesIO(complete + separator), archivename, membername, columncount)
+        if remainder:
+            yield parse_csv_columns(io.BytesIO(remainder), archivename, membername, columncount)
+
+
+def parse_csv_columns(datafile, archivename: str, membername: str, columncount: int) -> list[np.ndarray]:
+    """Read finite numeric columns from a complete table or a batch of rows."""
+    columnnames = [f"column{i}" for i in range(columncount)]
+    dfcolumns = (
+        pl.read_csv(
             datafile,
             has_header=False,
             new_columns=columnnames,
             separator=",",
             schema_overrides=dict.fromkeys(columnnames, pl.String),
-        ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
+        )
+        .lazy()
+        .select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
+        .collect()
+    )
 
-    # polars casts the text "NaN" or "inf" to a float with no error, and a NaN energy passes the tolerance test
     if dfcolumns.select(pl.all().is_finite().fill_null(value=False).all()).row(0) != (True,) * columncount:
         msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
         raise ValueError(msg)
@@ -210,11 +237,60 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         ("transitiondata",),
         f"The transitions come from {transitionspath}/{transitions_member(atomic_number, ion_stage)}.",
     )
-    transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
-        transitions_archive, transitions_member(atomic_number, ion_stage), 3
-    )
-    log_and_print(flog, f"The reader got {len(energy_levels_lower_1000percm)} transitions.")
+    batches: list[pl.DataFrame] = []
+    maxmismatch_percm = 0.0
+    untaggedcount = 0
+    ambiguouscount = 0
+    for columns in iter_csv_columns(transitions_archive, transitions_member(atomic_number, ion_stage), 3):
+        batch, mismatch, untagged, ambiguous = match_transition_batch(
+            columns, tagged_levels1000percm, energiesabovegsinpercm, g_arr
+        )
+        batches.append(batch)
+        maxmismatch_percm = max(maxmismatch_percm, mismatch)
+        untaggedcount += untagged
+        ambiguouscount += ambiguous
+    dftransitions = pl.concat(batches, rechunk=False) if batches else pl.DataFrame(schema=empty_transitions_schema)
+    log_and_print(flog, f"The reader got {dftransitions.height} transitions.")
 
+    log_comment(
+        flog,
+        ("transitiondata",),
+        "The reader finds the levels of a transition by the tagged energy E + J * 1e-6 + n * 1e-8 (1000 cm^-1) of the"
+        " transition file. n is the position of the level in its block of one J in the level file, from 1. The"
+        f" largest difference between the energies of the two files is {maxmismatch_percm:.3g} cm^-1.",
+    )
+    if untaggedcount > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {untaggedcount} of {2 * dftransitions.height} level matches found no tagged energy. They take the"
+            " closest level energy.",
+        )
+    if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
+        msg = (
+            f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
+            f" from its closest level. The tolerance is {MATCH_TOLERANCE_PERCM} cm^-1."
+            " The level file and the transition file do not match."
+        )
+        raise ValueError(msg)
+
+    if ambiguouscount > 0:
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
+        )
+
+    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
+
+    return ionization_energy_in_ev, dflevels, dftransitions
+
+
+def match_transition_batch(
+    columns: list[np.ndarray], tagged_levels1000percm: np.ndarray, energiesabovegsinpercm: np.ndarray, g_arr: np.ndarray
+) -> tuple[pl.DataFrame, float, int, int]:
+    """Match one batch and give its transitions and summary values."""
+    transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = columns
     energy_levels_upper_1000percm = energy_levels_lower_1000percm + 1e5 / transition_wavelength_A
     energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
     energy_levels_upper_percm = energy_levels_upper_1000percm * 1000
@@ -229,31 +305,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         np.abs(energiesabovegsinpercm[lowerlevels] - energy_levels_lower_percm).max(),
         np.abs(energiesabovegsinpercm[upperlevels] - energy_levels_upper_percm).max(),
     )
-    log_comment(
-        flog,
-        ("transitiondata",),
-        "The reader finds the levels of a transition by the tagged energy E + J * 1e-6 + n * 1e-8 (1000 cm^-1) of the"
-        " transition file. n is the position of the level in its block of one J in the level file, from 1. The"
-        f" largest difference between the energies of the two files is {maxmismatch_percm:.3g} cm^-1.",
-    )
-    untaggedcount = len(lower_untagged) + len(upper_untagged)
-    if untaggedcount > 0:
-        log_comment(
-            flog,
-            ("transitiondata",),
-            f"WARNING: {untaggedcount} of {2 * len(lowerlevels)} level matches found no tagged energy. They take the"
-            " closest level energy.",
-        )
-    if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
-        msg = (
-            f"A MONS transition of Z={atomic_number} ion stage {ion_stage} is {maxmismatch_percm:.3g} cm^-1"
-            f" from its closest level. The tolerance is {MATCH_TOLERANCE_PERCM} cm^-1."
-            " The level file and the transition file do not match."
-        )
-        raise ValueError(msg)
-
-    # A match without a tag is a guess where a second level is inside the match tolerance. The reader
-    # keeps the closest level, and the count says how much of the ion depends on that choice.
     ambiguouscount = int(
         (
             np.abs(energy_levels_lower_percm[lower_untagged] - energiesabovegsinpercm[lowerlevels_second])
@@ -264,22 +315,9 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
             <= MATCH_TOLERANCE_PERCM
         ).sum()
     )
-    if ambiguouscount > 0:
-        log_comment(
-            flog,
-            ("transitiondata",),
-            f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
-        )
-
-    ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
-
-    # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
-    # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
-    # not.
+    untaggedcount = len(lower_untagged) + len(upper_untagged)
     A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
-
     dftransitions = pl.DataFrame(
         {"lowerlevel": lowerlevels, "upperlevel": upperlevels, "A": A_ul}, schema=empty_transitions_schema
     )
-
-    return ionization_energy_in_ev, dflevels, dftransitions
+    return dftransitions, float(maxmismatch_percm), untaggedcount, ambiguouscount

@@ -8266,3 +8266,35 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         texts.append(ftransitiondata.getvalue())
     assert texts[0] == texts[1]
     assert texts[0].count("\n") > nrows
+
+
+def test_mons_batches_preserve_the_values_and_comments(monkeypatch):
+    """A batch boundary must not change a transition or a summary comment."""
+    monkeypatch.setattr(readmonsdata, "datafilepath", PYDIR / ".." / "atomic-data-mons" / "test_sample")
+    wholelog = io.StringIO()
+    _, wholelevels, wholetransitions = readmonsdata.read_levels_and_transitions(58, 5, wholelog)
+    monkeypatch.setattr(readmonsdata, "TRANSITION_BATCH_BYTES", 4096)
+    batchlog = io.StringIO()
+    _, batchlevels, batchtransitions = readmonsdata.read_levels_and_transitions(58, 5, batchlog)
+    assert wholelevels.equals(batchlevels)
+    assert wholetransitions.equals(batchtransitions)
+    assert wholelog.getvalue() == batchlog.getvalue()
+
+
+def test_mons_batches_keep_a_row_across_several_chunks(tmp_path, monkeypatch):
+    """The reader joins a split row and accepts a final row without a newline."""
+    with zipfile.ZipFile(tmp_path / "data.zip", "w") as archive:
+        archive.writestr("member", " 1.25, 2.50, 3.75\n 4.25, 5.50, 6.75")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    monkeypatch.setattr(readmonsdata, "TRANSITION_BATCH_BYTES", 7)
+    batches = list(readmonsdata.iter_csv_columns("data.zip", "member", 3))
+    assert len(batches) == 2
+    assert [np.concatenate([batch[column] for batch in batches]).tolist() for column in range(3)] == [
+        [1.25, 4.25],
+        [2.5, 5.5],
+        [3.75, 6.75],
+    ]
+    with zipfile.ZipFile(tmp_path / "data.zip", "w") as archive:
+        archive.writestr("member", " 1.25, 2.50, 3.75\n 4.25, NaN, 6.75")
+    with pytest.raises(ValueError, match="not a finite number"):
+        list(readmonsdata.iter_csv_columns("data.zip", "member", 3))
