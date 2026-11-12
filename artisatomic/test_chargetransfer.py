@@ -239,7 +239,7 @@ def test_committed_source_files_build_the_expected_entries():
     sourcedir = Path(makechargetransferfile.__file__).parent.parent / "atomic-data-chargetransfer"
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
-    ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
+    ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir, allow_large_fit_error=True)
     assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
     entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
@@ -262,7 +262,9 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
     after a deliberate change of the output. tests/README.md gives the commands.
     """
-    monkeypatch.setattr(sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path)])
+    monkeypatch.setattr(
+        sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path), "--allow-large-fit-error"]
+    )
     makechargetransferfile.main()
 
     checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"
@@ -270,3 +272,64 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     assert set(expected) == {"chargetransfer.txt"}
     for name, digest in expected.items():
         assert hashlib.md5((tmp_path / name).read_bytes(), usedforsecurity=False).hexdigest() == digest, name
+
+
+@pytest.mark.parametrize("limit", [-1.0, float("nan"), float("inf")])
+def test_charge_transfer_rejects_a_bad_fit_limit(tmp_path, monkeypatch, limit):
+    """A bad limit fails before the command reads a source or changes an earlier output file."""
+    output = tmp_path / "chargetransfer.txt"
+    output.write_text("earlier output", encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path), f"-maxfiterror={limit}"]
+    )
+    with pytest.raises(ValueError, match="finite number of zero or more"):
+        makechargetransferfile.main()
+    assert output.read_text(encoding="utf-8") == "earlier output"
+
+
+def test_charge_transfer_rejects_the_large_errors_of_the_current_data(tmp_path, monkeypatch):
+    """The default policy rejects the current large errors and keeps an earlier output file."""
+    output = tmp_path / "chargetransfer.txt"
+    output.write_text("earlier output", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path)])
+    with pytest.raises(ValueError, match=r"SS11 fit errors exceed.*(?s:.*)rec Se q=1.*(?s:.*)--allow-large-fit-error"):
+        makechargetransferfile.main()
+    assert output.read_text(encoding="utf-8") == "earlier output"
+
+
+def test_charge_transfer_fit_limit_includes_a_flat_approximation(patch_sources, tmp_path):
+    """A flat approximation obeys the same limit as a fitted curve."""
+    rates = [
+        2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.0e-14)
+        for temp in makechargetransferfile.SS11_TGRID
+    ]
+    patch_sources({"ss11_table4.dat": _ss11_cds_line("Ge", 1, "test", rates), "ss11_table5.dat": ""})
+    with pytest.raises(ValueError, match=r"maximum relative error 0\.8"):
+        makechargetransferfile.get_ss11_entries(tmp_path)
+    allowed, _ = makechargetransferfile.get_ss11_entries(tmp_path, max_fit_error=0.8)
+    overridden, report = makechargetransferfile.get_ss11_entries(tmp_path, allow_large_fit_error=True)
+    assert allowed == overridden
+    assert len(allowed) == 1
+    assert "80%" in report[0]
+    assert "exceeds the selected limit" in report[0]
+
+
+def test_charge_transfer_override_records_the_policy(tmp_path, monkeypatch):
+    """An explicit override keeps the numerical coefficients and records the acceptance policy."""
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "makeartischargetransferfile",
+            "-output_folder",
+            str(tmp_path),
+            "-maxfiterror",
+            "0.5",
+            "--allow-large-fit-error",
+        ],
+    )
+    makechargetransferfile.main()
+    output = (tmp_path / "chargetransfer.txt").read_text(encoding="utf-8")
+    assert "Maximum relative error of an SS11 fit: 0.5" in output
+    assert "Larger fit errors explicitly permitted: yes" in output
+    assert "max fit error 437%" in output

@@ -192,7 +192,7 @@ SS11_TGRID = [
     10000, 20000, 40000, 60000, 80000, 100000, 200000, 400000, 600000, 800000,
 ]  # fmt: skip
 
-MAXERR_WARN = 0.25  # a fit error above this fraction gets a warning in the report
+MAX_FIT_ERROR = 0.25  # The default acceptance limit uses the earlier warning limit.
 
 # The fit window of the SS11 curves [K]. Charge transfer competes with the other processes only
 # in the nebular low-temperature regime.
@@ -214,7 +214,7 @@ def comment_block(lines: list[str]) -> str:
     return "".join(comment_lines(lines))
 
 
-def format_header(source_counts: Counter[str]) -> str:
+def format_header(source_counts: Counter[str], max_fit_error: float, allow_large_fit_error: bool) -> str:
     """Build the comment block of the output file: the format, the sources, and the parameters."""
     lines = [
         "Fits of the rate coefficients for charge transfer, for the chargetransfer.cc module of ARTIS.",
@@ -253,6 +253,12 @@ def format_header(source_counts: Counter[str]) -> str:
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
         "",
         "PARAMETERS",
+        f"Maximum relative error of an SS11 fit: {max_fit_error:g} (option -maxfiterror).",
+        (
+            f"Larger fit errors explicitly permitted: {'yes' if allow_large_fit_error else 'no'}"
+            " (option --allow-large-fit-error)."
+        ),
+        "This limit controls acceptance of the fit. It does not measure the accuracy of the source data.",
         "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
         f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total of",
         f"  a reaction that releases energy at {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that",
@@ -511,8 +517,23 @@ def fit_ss11_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11
     return SS11Fit(a, b, eexp, maxerr, len(pts), pts[0][0], pts[-1][0])
 
 
-def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
-    """Build the n-capture element entries from fits to the SS11 CDS rate tables."""
+def check_fit_error_limit(max_fit_error: float) -> None:
+    """Reject a fit error limit that is negative or not finite."""
+    if not math.isfinite(max_fit_error) or max_fit_error < 0:
+        msg = f"-maxfiterror must be a finite number of zero or more, got {max_fit_error}"
+        raise ValueError(msg)
+
+
+def get_ss11_entries(
+    sourcedir: Path, *, max_fit_error: float = MAX_FIT_ERROR, allow_large_fit_error: bool = False
+) -> tuple[list[CTEntry], list[str]]:
+    """Build the SS11 entries and enforce the selected maximum relative fit error.
+
+    The error includes a flat approximation when the source gives too few usable points for a fit.
+    An explicit override permits a larger finite error. The report still records each error.
+    """
+    check_fit_error_limit(max_fit_error)
+    rejected = []
     rec_totals = read_cds_totals(read_source("ss11_table4.dat", sourcedir))
     ion_totals = read_cds_totals(read_source("ss11_table5.dat", sourcedir))
     entries = []
@@ -540,7 +561,12 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                     f" {SS11_MIN_POINTS} values above zero."
                 )
                 continue
-            warning = "  WARNING: the fit error is large" if fit.maxerr > MAXERR_WARN else ""
+            if not math.isfinite(fit.maxerr):
+                msg = f"{direction} {elsymbol} q={q}: the fit error is not finite."
+                raise ValueError(msg)
+            if fit.maxerr > max_fit_error:
+                rejected.append(f"{direction} {elsymbol} q={q}: maximum relative error {fit.maxerr:.6g}")
+            warning = "  WARNING: the fit error exceeds the selected limit" if fit.maxerr > max_fit_error else ""
             report.append(
                 f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f} eexp={fit.eexp:.0f}"
                 f" maxerr={fit.maxerr * 100:.0f}% npts={fit.npts}{warning}"
@@ -563,6 +589,14 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
             comment = f"SS11; {source}"
             reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
             entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, 0.0, 0.0, fit.eexp, fit.tmin, fit.tmax, comment))
+    if rejected and not allow_large_fit_error:
+        msg = (
+            f"SS11 fit errors exceed -maxfiterror {max_fit_error:g}:\n  "
+            + "\n  ".join(rejected)
+            + "\nThe run wrote no output. Review these errors before you increase -maxfiterror"
+            " or give --allow-large-fit-error."
+        )
+        raise ValueError(msg)
     return entries, report
 
 
@@ -592,13 +626,15 @@ def set_autoreverse_flags(entries: list[CTEntry]) -> list[CTEntry]:
     ]
 
 
-def write_chargetransfer_file(entries: list[CTEntry], outdir: Path) -> None:
+def write_chargetransfer_file(
+    entries: list[CTEntry], outdir: Path, *, max_fit_error: float, allow_large_fit_error: bool
+) -> None:
     """Write the assembled entries in the format that chargetransfer.cc of ARTIS reads."""
     # each comment starts with the tag of its source, so the header counts come from the entries
     source_counts = Counter(e.comment.split(";", 1)[0] for e in entries)
     outpath = outdir / "chargetransfer.txt"
     with open_for_atomic_write(outpath) as fout:
-        fout.write(format_header(source_counts))
+        fout.write(format_header(source_counts, max_fit_error, allow_large_fit_error))
         fout.write(f"{len(entries)}\n")
         fout.write(f"#{COLUMN_NAMES}\n")
         for e in entries:
@@ -623,14 +659,28 @@ def main() -> None:
         type=Path,
         help="folder of the source files; setup_chargetransfer_data.sh in that folder downloads them",
     )
+    parser.add_argument(
+        "-maxfiterror",
+        type=float,
+        default=MAX_FIT_ERROR,
+        help="Maximum relative error of an SS11 fit at its usable source points (default: 0.25)",
+    )
+    parser.add_argument(
+        "--allow-large-fit-error",
+        action="store_true",
+        help="Permit fit errors above -maxfiterror. The output records this choice",
+    )
     args = parser.parse_args()
+    check_fit_error_limit(args.maxfiterror)
 
     print("Reactions with hydrogen (Cloudy, with KF96 plus updates):")
     kf96_entries, kf96_report = get_kf96_h_entries(args.sourcedir)
     print("Recombination with neutral helium (AR85):")
     he_entries = get_he_entries(args.sourcedir)
     print("n-capture elements with hydrogen (SS11):")
-    ss11_entries, ss11_report = get_ss11_entries(args.sourcedir)
+    ss11_entries, ss11_report = get_ss11_entries(
+        args.sourcedir, max_fit_error=args.maxfiterror, allow_large_fit_error=args.allow_large_fit_error
+    )
 
     print("\nCloudy rows that differ from the KF96 paper tables:")
     for line in kf96_report:
@@ -642,7 +692,12 @@ def main() -> None:
 
     args.output_folder.mkdir(parents=True, exist_ok=True)
     entries = set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
-    write_chargetransfer_file(entries, args.output_folder)
+    write_chargetransfer_file(
+        entries,
+        args.output_folder,
+        max_fit_error=args.maxfiterror,
+        allow_large_fit_error=args.allow_large_fit_error,
+    )
 
 
 if __name__ == "__main__":

@@ -66,6 +66,10 @@ nothing. The test `test_chargetransfer_output_matches_the_checksum` checks the s
 pytest. Regenerate the checksum with:
 
 ```bash
-PYTHONPATH="$PWD" uv run makeartischargetransferfile -output_folder tests/chargetransfer/output
+PYTHONPATH="$PWD" uv run makeartischargetransferfile -output_folder tests/chargetransfer/output --allow-large-fit-error
 (cd tests/chargetransfer/output && md5sum *.txt > ../checksums.txt)
 ```
+
+The charge transfer checksum run explicitly permits the large fit errors of the current source data.
+This tests the existing numerical coefficients and the output format. It does not approve the fit accuracy for a model.
+A separate test checks that the default command rejects these errors and keeps the earlier output.

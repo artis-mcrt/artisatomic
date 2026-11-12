@@ -312,7 +312,7 @@ jobs:
 
             # the source files are tracked in atomic-data-chargetransfer, so this job downloads nothing
             - name: Generate the charge transfer file
-              run: uv run coverage run -p -m artisatomic.makechargetransferfile -output_folder tests/chargetransfer/output
+              run: uv run coverage run -p -m artisatomic.makechargetransferfile -output_folder tests/chargetransfer/output --allow-large-fit-error
 
             - name: Checksum the output file
               working-directory: tests/chargetransfer/output
