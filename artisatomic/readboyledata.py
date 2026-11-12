@@ -1,7 +1,7 @@
 """Read helium levels and transitions from the Boyle AOIFE data set.
 
 The data set belongs to the helium work of Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W.
-(2017), A&A, 599, A46, doi:10.1051/0004-6361/201629712.
+(2017), Helium in double-detonation models of type Ia supernovae, A&A, 599, A46, doi:10.1051/0004-6361/201629712.
 """
 
 from functools import cache
@@ -25,8 +25,8 @@ datafolder = hdf5path.with_suffix("")
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
-    "the AOIFE helium data set. Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W. (2017), A&A, 599, A46,"
-    " doi:10.1051/0004-6361/201629712"
+    "the AOIFE helium data set. Boyle, A., Sim, S. A., Hachinger, S., Kerzendorf, W. (2017),"
+    " Helium in double-detonation models of type Ia supernovae, A&A, 599, A46, doi:10.1051/0004-6361/201629712"
 )
 
 

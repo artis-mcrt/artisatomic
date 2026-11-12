@@ -1,7 +1,7 @@
 """Read levels and transitions from the Kurucz gfall line lists (http://kurucz.harvard.edu/linelists/gfall/).
 
-The reference for the line lists is Kurucz, R. L. (2017), Can. J. Phys., 95, 825-827,
-doi:10.1139/cjp-2016-0794.
+The reference for the line lists is Kurucz, R. L. (2017), Including all the lines: data releases for
+spectra and opacities, Can. J. Phys., 95, 825-827, doi:10.1139/cjp-2016-0794.
 """
 
 import itertools
@@ -36,8 +36,8 @@ if TESTMODE:
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
-    "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/. Kurucz, R. L. (2017), Can. J. Phys., 95,"
-    " 825-827, doi:10.1139/cjp-2016-0794"
+    "the Kurucz gfall line lists, http://kurucz.harvard.edu/linelists/gfall/. Kurucz, R. L. (2017),"
+    " Including all the lines: data releases for spectra and opacities, Can. J. Phys., 95, 825-827, doi:10.1139/cjp-2016-0794"
 )
 
 

@@ -1,7 +1,8 @@
 """Read levels and transitions from the University of Mons lanthanide V-VII data set.
 
-Paper: Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., Quinet, P. (2024), A&A, 685, A91,
-doi:10.1051/0004-6361/202347723. Data: https://doi.org/10.5281/zenodo.10635803 (see
+Paper: Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., Quinet, P. (2024), Overview of the
+contributions from all lanthanide elements to kilonova opacity in the temperature range from 25 000 to
+40 000 K, A&A, 685, A91, doi:10.1051/0004-6361/202347723. Data: https://doi.org/10.5281/zenodo.10635803 (see
 atomic-data-mons/readme.txt for the file formats).
 """
 
@@ -34,7 +35,8 @@ transitions_archive = "outggf_Ln_V--VII.zip"
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
     "the University of Mons data set of the lanthanides V-VII. Carvajal Gallego, H., Deprince, J., Maison, L.,"
-    " Palmeri, P., Quinet, P. (2024), A&A, 685, A91, doi:10.1051/0004-6361/202347723. Data set:"
+    " Palmeri, P., Quinet, P. (2024), Overview of the contributions from all lanthanide elements to kilonova opacity"
+    " in the temperature range from 25 000 to 40 000 K, A&A, 685, A91, doi:10.1051/0004-6361/202347723. Data set:"
     " doi:10.5281/zenodo.10635803"
 )
 
@@ -268,7 +270,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
+            f"WARNING: For {ambiguouscount} level matches, a second level is within the match tolerance"
+            f" of {MATCH_TOLERANCE_PERCM} cm^-1.",
         )
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)

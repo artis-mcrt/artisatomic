@@ -258,8 +258,8 @@ hillier_datadir = hillier_folder.resolve()
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
-    "the CMFGEN atomic data compilation of Hillier. Hillier, D. J., Miller, D. L. (1998), ApJ, 496, 407-427,"
-    " doi:10.1086/305350"
+    "the CMFGEN atomic data compilation of Hillier. Hillier, D. J., Miller, D. L. (1998),"
+    " The Treatment of Non-LTE Line Blanketing in Spherically Expanding Outflows, ApJ, 496, 407-427, doi:10.1086/305350"
 )
 
 # H II has no oscillator file. read_levels_and_transitions() gives it one level from constants in the code.

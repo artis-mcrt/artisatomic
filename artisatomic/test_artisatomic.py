@@ -4661,6 +4661,21 @@ def test_mons_tagged_energy_names_the_level():
     assert closest.tolist() == [2]
 
 
+def test_mons_warns_for_unequal_distances_within_the_match_tolerance(tmp_path, monkeypatch):
+    """Two levels can be within the match tolerance at different distances from the transition energy."""
+    with zipfile.ZipFile(tmp_path / readmonsdata.levels_archive, "w") as archive:
+        archive.writestr(readmonsdata.levels_member(58, 5), "0.0,0\n0.00004,1\n0.1,0\n")
+    with zipfile.ZipFile(tmp_path / readmonsdata.transitions_archive, "w") as archive:
+        archive.writestr(readmonsdata.transitions_member(58, 5), "1000000,0.00001,1\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    flog = io.StringIO()
+
+    _, _, transitions = readmonsdata.read_levels_and_transitions(58, 5, flog)
+
+    assert transitions.select("lowerlevel", "upperlevel").row(0) == (0, 2)
+    assert "For 1 level matches, a second level is within the match tolerance of 0.05 cm^-1." in flog.getvalue()
+
+
 def test_readfloers25data_pertype_merge_swap_and_forbidden(monkeypatch, tmp_path):
     """The per-type Floers+25 files merge duplicate level pairs and set the forbidden flag.
 
