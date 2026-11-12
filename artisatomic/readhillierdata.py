@@ -1834,6 +1834,14 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
             names_with_leveltables.add(lowerlevelname)
 
+    if not reader.j_splitting_on:
+        # The weights depend on absolute frequency, even when the fit depends only on the frequency ratio.
+        names_with_leveltables.update(
+            name
+            for name in routes_of_levelname
+            if len({lambdaangstroms[levelid] for levelid in reader.levelindices_of_levelnamenoJ[name]}) > 1
+        )
+
     # A name with a table for each of its levels gives each level its own routes. These are the
     # routes of the level, and the routes of the name in the other files. The downsample weights
     # each bin with the absolute frequency. The table of the name therefore moves to the edge of
