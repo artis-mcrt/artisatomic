@@ -955,6 +955,7 @@ def _fill_co2_phixs(
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
+            interpolation=getattr(args, "phixsinterpolation", "linear"),
             label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
         )
         combined = combine_phixs_routes(
@@ -1105,9 +1106,8 @@ def _fill_co3_phixs(
     # energy of the photon, and not on its ratio to the threshold. The threshold of the ground
     # quartet is the ionisation energy of Co III (33.50 eV in the NIST table). The levels of the
     # quartet lie within 0.23 eV of each other (1866.8 cm^-1), so the one table covers each of them.
-    # The downsample runs also for the grid of the table itself. Every table of the output file is
-    # the average over the frequency bin of each point, as the file comment says. The point values
-    # of the table are not those averages.
+    # The downsample runs also for the grid of the source table. It weights each output value with
+    # the basis function of the selected interpolation mode. The source values are not those averages.
     threshold_ryd = get_nist_ionization_energies_ev()[atomic_number, ion_stage] / ryd_to_ev
     dict_phixstable = {
         "gs": np.array(list(zip(np.arange(1.0, 10.95, 0.1) * threshold_ryd, phixsvalues_const, strict=True)))
@@ -1117,6 +1117,7 @@ def _fill_co3_phixs(
         args.optimaltemperature,
         args.nphixspoints,
         args.phixsnuincrement,
+        interpolation=getattr(args, "phixsinterpolation", "linear"),
         label=f"{ion_label(atomic_number, ion_stage)} QUB constant table",
     )["gs"]
 

@@ -138,6 +138,7 @@ def match_hydrogenic_phixs(
         args.optimaltemperature,
         args.nphixspoints,
         args.phixsnuincrement,
+        interpolation=getattr(args, "phixsinterpolation", "linear"),
         label=f"Z={atomic_number} {elsymbols[atomic_number]} hydrogenic estimate",
     )
     for levelindex, reduced_phixs_table in reduced_phixs_dict.items():
@@ -236,6 +237,7 @@ def reduce_phixs_tables[KeyType](
     nphixspoints: int,
     phixsnuincrement: float,
     label: str | None = None,
+    interpolation: str = "linear",
 ) -> dict[KeyType, npt.NDArray[np.float64]]:
     """Downsample each 2D table of (energy, cross section) points into a 1D array.
 
@@ -256,7 +258,9 @@ def reduce_phixs_tables[KeyType](
         zip(
             dicttables.keys(),
             parallel_map(
-                partial(reduce_phixs_tables_worker, optimaltemperature, xgrid, label=label),
+                partial(
+                    reduce_phixs_tables_worker, optimaltemperature, xgrid, label=label, interpolation=interpolation
+                ),
                 dicttables.values(),
                 dicttables.keys(),
             ),
@@ -268,158 +272,131 @@ def reduce_phixs_tables[KeyType](
 gauss_legendre_3 = ((-np.sqrt(0.6), 5.0 / 9.0), (0.0, 8.0 / 9.0), (np.sqrt(0.6), 5.0 / 9.0))
 
 
+def weighted_segment_moments(energy, sigma, temperature: float):
+    """Integrate the source and its first moment over each linear segment.
+
+    The weight is E^2 exp(-a s), where s starts at the low end of each segment.
+    Each result has the zeroth and first moment, first without sigma and then with sigma.
+    """
+    start = energy[:-1]
+    width = np.diff(energy)
+    sigma_start = sigma[:-1]
+    slope = np.divide(np.diff(sigma), width, out=np.zeros_like(width), where=width > 0.0)
+    a = h_over_kb_in_K_sec * ryd_to_hz / temperature
+    weight0, weight1, source0, source1 = (np.zeros_like(width) for _ in range(4))
+    for node, nodeweight in gauss_legendre_3:
+        offset = 0.5 * (node + 1.0) * width
+        weight = 0.5 * nodeweight * width * (start + offset) ** 2 * np.exp(-a * offset)
+        source = weight * (sigma_start + slope * offset)
+        weight0 += weight
+        weight1 += weight * offset
+        source0 += source
+        source1 += source * offset
+
+    # The exact expression loses digits for a narrow segment. Three quadrature points miss a wide exponential.
+    wide = a * width > 0.25
+    if not np.any(wide):
+        return weight0, weight1, source0, source1
+    twidth = a * width[wide]
+    exp_minus_t = np.exp(-twidth)
+    moments = []
+    partialsum = np.zeros_like(twidth)
+    term = np.ones_like(twidth)
+    for k in range(5):
+        if k > 0:
+            term = term * twidth / k
+        partialsum += term
+        moments.append(math.factorial(k) / a ** (k + 1) * (1.0 - exp_minus_t * partialsum))
+    energy0 = start[wide]
+    weighted = [energy0**2 * moments[k] + 2 * energy0 * moments[k + 1] + moments[k + 2] for k in range(3)]
+    weight0[wide], weight1[wide] = weighted[:2]
+    source0[wide] = sigma_start[wide] * weighted[0] + slope[wide] * weighted[1]
+    source1[wide] = sigma_start[wide] * weighted[1] + slope[wide] * weighted[2]
+    return weight0, weight1, source0, source1
+
+
 def reduce_phixs_tables_worker(
     optimaltemperature: float,
     xgrid: npt.NDArray[np.float64],
     tablein: np.ndarray,
     key: object = None,
     label: str | None = None,
+    interpolation: str = "linear",
 ) -> np.ndarray:
-    """Downsample one cross section table onto the output's nu/nu_edge grid.
+    """Reduce a source table with the cross section representation that ARTIS uses.
 
-    Each output point is the average of the input over that point's frequency bin, with the
-    weight nu^2 exp(-h (nu - nu_ref) / k T). The weight preserves the recombination rate at
-    optimaltemperature, and not the cross section itself.
+    Linear mode averages the source against each linear basis function of the output grid.
+    The basis functions sum to one. Their weighted averages therefore preserve the recombination integral.
+    Classic mode averages each interval from one stored point to the next.
+    Both modes integrate from the threshold to the last stored point, as ARTIS does.
 
-    nu_ref is the lowest sample frequency of the bin. The constant factor exp(h nu_ref / k T)
-    cancels in the ratio of the two integrals, so the subtraction leaves the average unchanged. It
-    also keeps the largest exponential of each bin at 1.0. The absolute weight underflows to zero
-    for h nu / k T > 745, which is every bin above about 64 eV at -optimaltemperature 1000.
-
-    xgrid is the nu/nu_edge grid of the output, which reduce_phixs_tables() builds once for the
-    whole batch. It holds one point more than the output, to close the last bin.
-
-    key is the key of the table in the dict that reduce_phixs_tables() received, for example a
-    level name. label names the source of the batch. The messages below name both.
-    parallel_map() maps a batch of tables, so the caller cannot catch an error for one table and
-    add the key itself.
+    Each basis function uses its own reference energy in the exponential weight.
+    This keeps a high threshold or a low temperature from causing numerical underflow.
+    The final value in classic mode sets only the tail beyond the integration range.
+    The extra point of xgrid closes no part of the ARTIS recombination integral.
     """
-    minus_h_over_kb_t = -h_over_kb_in_K_sec / optimaltemperature
+    if interpolation not in {"linear", "classic"}:
+        msg = f"Unknown photoionisation interpolation mode: {interpolation}"
+        raise ValueError(msg)
+    npoints = len(xgrid) - 1
+    if npoints < 2:
+        msg = "A photoionisation table needs at least two points for the ARTIS recombination integral."
+        raise ValueError(msg)
     labeltext = "" if label is None else f" The tables come from {label}."
     keytext = "" if key is None else f" The key of the table is {key!r}."
-    nphixspoints = len(xgrid) - 1
-
-    # An empty table has no threshold to scale the grid, and a zero threshold would divide by
-    # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
     if len(tablein) == 0 or tablein[0][0] == 0.0:
-        return np.zeros(nphixspoints)
-
-    threshold_old_ryd = tablein[0][0]
-    # tablein is an array of pairs (energy, phixs cross section). Split it once, because numpy
-    # re-slices a strided view of a 2D array every time.
-    tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
-    tablein_sigma = np.ascontiguousarray(tablein[:, 1])
-    # not an assert: np.searchsorted() and np.interp() below both give a wrong result for a
-    # table that decreases in energy. This function also reads the first energy as the threshold.
-    if np.any(np.diff(tablein_energyryd) < 0.0):
-        msg = (
-            f"The energy column of a photoionisation table decreases. The table shape is {tablein.shape}"
-            f" and the first energy is {threshold_old_ryd:.6e} Ryd.{labeltext}{keytext}"
-        )
+        return np.zeros(npoints)
+    threshold = tablein[0, 0]
+    energies = np.ascontiguousarray(tablein[:, 0])
+    sigmas = np.ascontiguousarray(tablein[:, 1])
+    if np.any(np.diff(energies) < 0.0):
+        msg = f"The energy column of a photoionisation table decreases.{labeltext}{keytext}"
         raise ValueError(msg)
-
-    table_energy_last = tablein_energyryd[-1]
-    table_sigma_last = tablein_sigma[-1]
-
-    # x is nu/nu_edge. The bins touch, so the high edge of a bin is the low edge of the next bin.
-    arr_enlow = 0.5 * (xgrid[np.maximum(np.arange(nphixspoints) - 1, 0)] + xgrid[:-1]) * threshold_old_ryd
-    arr_enhigh = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_old_ryd
-
-    # The grid holds each table sample, so no peak of the table falls between two points. Each bin
-    # also gets 51 points from one edge to the other. They put the bin edges on the grid, so each
-    # segment belongs to one bin. They also give the nu^-3 tail past the end of the table, which
-    # exists only at these points. A resample at the 51 points alone loses a narrow
-    # peak between two points, and spreads a peak at one point over a whole step. The high edge of
-    # a bin is the first point of the next bin.
-    lin_energyryd = np.append(np.linspace(arr_enlow, arr_enhigh, num=50, endpoint=False, axis=-1), arr_enhigh[-1])
-    # np.interp holds the last cross section constant past the table's end, so apply the power-law
-    # decay there instead
-    lin_sigma = np.interp(lin_energyryd, tablein_energyryd, tablein_sigma)
-    beyond = lin_energyryd > table_energy_last
-    lin_sigma[beyond] = phixs_nu_cubed_tail(table_sigma_last, table_energy_last, lin_energyryd[beyond])
-    # The table is in energy order, so the samples in the range of the grid come first
-    ntable_in_range = np.searchsorted(tablein_energyryd, arr_enhigh[-1], side="right")
-    table_energyryd_in_range = tablein_energyryd[:ntable_in_range]
-    # A table can give two cross sections at one energy (a step). The table samples keep their
-    # order, and a point of the uniform grid at the energy of a sample would split the step.
-    keep_lin = ~np.isin(lin_energyryd, table_energyryd_in_range)
-    grid_energyryd = np.concatenate((table_energyryd_in_range, lin_energyryd[keep_lin]))
-    grid_sigma = np.concatenate((tablein_sigma[:ntable_in_range], lin_sigma[keep_lin]))
-    order = np.argsort(grid_energyryd, kind="stable")
-    grid_energyryd = grid_energyryd[order]
-    grid_sigma = grid_sigma[order]
-
-    # Each segment between two neighbouring grid points belongs to the bin of its low end.
-    # a step at the last edge gives a segment of zero width that starts there
-    arr_bin = np.minimum(np.searchsorted(arr_enhigh, grid_energyryd[:-1], side="right"), nphixspoints - 1)
-    # The cross section is linear on a segment, and the weight is not. The trapezoid rule of the two
-    # ends gave errors of 4% in a bin at 6000 K and 150 eV. The integrals below use two rules:
-    # - a segment narrower than 0.25 kT takes a Gauss-Legendre rule of three points, with an error
-    #   below 2e-10;
-    # - a wider segment takes the exact integral of a polynomial times exp(-a s).
-    # Each rule fails where the other works. The exact form loses digits in a narrow segment.
-    # Three points miss the weight at the low end of a segment that is many kT wide.
-    a_hz = -minus_h_over_kb_t
-    nu_start = grid_energyryd[:-1] * ryd_to_hz
-    width_hz = np.diff(grid_energyryd) * ryd_to_hz
-    sigma_start = grid_sigma[:-1]
-    sigma_slope = np.divide(grid_sigma[1:] - sigma_start, width_hz, out=np.zeros_like(width_hz), where=width_hz > 0.0)
-    # nu_ref of a bin is the start of its first segment with a width above zero. Each exponent of the bin
-    # is then 0 or less.
-    arr_nu_ref = np.full(nphixspoints, np.inf)
-    np.minimum.at(arr_nu_ref, arr_bin, np.where(width_hz > 0.0, nu_start, np.inf))
-    arr_nu_ref[np.isinf(arr_nu_ref)] = 0.0
-    arr_nu_ref = arr_nu_ref[arr_bin]
-    # The weight is positive, so a negative average comes only from a negative cross section, and the
-    # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
-    # average is then NaN or infinite, and ARTIS would fail only when it reads the table. The check
-    # below stops the run for these cases, so numpy gives no warning about them.
+    edges = xgrid[:-1] * threshold
+    # Extra points describe the power-law tail after the last source point.
+    uniform = np.append(np.linspace(edges[:-1], edges[1:], num=50, endpoint=False, axis=-1), edges[-1])
+    uniform_sigma = np.interp(uniform, energies, sigmas)
+    beyond = uniform > energies[-1]
+    uniform_sigma[beyond] = phixs_nu_cubed_tail(sigmas[-1], energies[-1], uniform[beyond])
+    nsource = np.searchsorted(energies, edges[-1], side="right")
+    # Repeated source energies describe a step. Keep both limits in their source order.
+    keep_uniform = ~np.isin(uniform, energies[:nsource])
+    grid = np.concatenate((energies[:nsource], uniform[keep_uniform]))
+    sigma = np.concatenate((sigmas[:nsource], uniform_sigma[keep_uniform]))
+    order = np.argsort(grid, kind="stable")
+    grid, sigma = grid[order], sigma[order]
+    interval = np.minimum(np.searchsorted(edges, grid[:-1], side="right") - 1, npoints - 2)
+    a = h_over_kb_in_K_sec * ryd_to_hz / optimaltemperature
     with np.errstate(over="ignore", divide="ignore", invalid="ignore", under="ignore"):
-        segment_nosigma = np.zeros(len(width_hz))
-        segment_withsigma = np.zeros(len(width_hz))
-        for node, nodeweight in gauss_legendre_3:
-            offset = 0.5 * (node + 1.0) * width_hz
-            weight = (
-                0.5
-                * nodeweight
-                * width_hz
-                * (nu_start + offset) ** 2
-                * np.exp(-a_hz * (nu_start + offset - arr_nu_ref))
+        weight0, weight1, source0, source1 = weighted_segment_moments(grid, sigma, optimaltemperature)
+        if interpolation == "classic":
+            scale = np.exp(-a * (grid[:-1] - edges[interval]))
+            denominator = np.bincount(interval, weights=weight0 * scale, minlength=npoints - 1)
+            numerator = np.bincount(interval, weights=source0 * scale, minlength=npoints - 1)
+            last = np.interp(edges[-1], energies, sigmas)
+            if edges[-1] > energies[-1]:
+                last = phixs_nu_cubed_tail(sigmas[-1], energies[-1], edges[-1])
+            result = np.append(numerator / denominator, last)
+        else:
+            width = edges[interval + 1] - edges[interval]
+            right_start = (grid[:-1] - edges[interval]) / width
+            left_scale = np.exp(-a * (grid[:-1] - edges[np.maximum(interval - 1, 0)]))
+            right_scale = np.exp(-a * (grid[:-1] - edges[interval]))
+            denominator = np.bincount(
+                interval, weights=((1 - right_start) * weight0 - weight1 / width) * left_scale, minlength=npoints
+            ) + np.bincount(
+                interval + 1, weights=(right_start * weight0 + weight1 / width) * right_scale, minlength=npoints
             )
-            segment_nosigma += weight
-            segment_withsigma += weight * (sigma_start + sigma_slope * offset)
-
-        # s is the distance from the start of the segment. moments[k] is the integral of s^k exp(-a s)
-        # from 0 to the width: k! / a^(k+1) (1 - exp(-t) (1 + t + ... + t^k / k!)), with t = a * width.
-        wide = a_hz * width_hz > 0.25
-        twidth = a_hz * width_hz[wide]
-        exp_minus_t = np.exp(-twidth)
-        moments = []
-        partialsum = np.zeros_like(twidth)
-        term = np.ones_like(twidth)
-        for k in range(4):
-            if k > 0:
-                term = term * twidth / k
-            partialsum += term
-            moments.append(math.factorial(k) / a_hz ** (k + 1) * (1.0 - exp_minus_t * partialsum))
-        scale = np.exp(-a_hz * (nu_start[wide] - arr_nu_ref[wide]))
-        nu0 = nu_start[wide]
-        # nu^2 = nu0^2 + 2 nu0 s + s^2, and sigma = sigma_start + sigma_slope s
-        nu2_moment0 = nu0**2 * moments[0] + 2.0 * nu0 * moments[1] + moments[2]
-        nu2_moment1 = nu0**2 * moments[1] + 2.0 * nu0 * moments[2] + moments[3]
-        segment_nosigma[wide] = scale * nu2_moment0
-        segment_withsigma[wide] = scale * (sigma_start[wide] * nu2_moment0 + sigma_slope[wide] * nu2_moment1)
-
-        integralnosigma = np.bincount(arr_bin, weights=segment_nosigma, minlength=nphixspoints)
-        integralwithsigma = np.bincount(arr_bin, weights=segment_withsigma, minlength=nphixspoints)
-        averages = integralwithsigma / integralnosigma
-    if not (np.all(integralnosigma > 0.0) and np.all(np.isfinite(averages)) and np.all(averages >= 0.0)):
+            numerator = np.bincount(
+                interval, weights=((1 - right_start) * source0 - source1 / width) * left_scale, minlength=npoints
+            ) + np.bincount(
+                interval + 1, weights=(right_start * source0 + source1 / width) * right_scale, minlength=npoints
+            )
+            result = numerator / denominator
+    if not (np.all(denominator > 0.0) and np.all(np.isfinite(result)) and np.all(result >= 0.0)):
         msg = (
-            f"A photoionisation bin average is not a finite number of 0 or more. The table shape is"
-            f" {tablein.shape}, the threshold energy is {threshold_old_ryd:.6e} Ryd, the smallest weighted"
-            f" integral is {integralwithsigma.min():.6e} and the smallest weight integral is"
-            f" {integralnosigma.min():.6e}. Check the cross sections, -phixsnuincrement and"
-            f" -optimaltemperature.{labeltext}{keytext}"
+            "A photoionisation bin average is not a finite number of 0 or more."
+            f" Check the cross sections, -phixsnuincrement and -optimaltemperature.{labeltext}{keytext}"
         )
         raise ValueError(msg)
-    return averages
+    return result
