@@ -23,8 +23,10 @@ The command `python -m artisatomic` starts the same program.
 
 ## makeartisgammaspecfiles
 
-`makeartisgammaspecfiles` has no options. It downloads the NuDat3 decay tables and writes a gamma
-spectrum for each nuclide that has gamma lines.
+`makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
+
+```{program-output} makeartisgammaspecfiles --help
+```
 
 ## hdf5_to_parquet.py
 
