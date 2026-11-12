@@ -177,8 +177,8 @@ class PhixsData(t.NamedTuple):
 def output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:
     """Build the nu/nu_edge grid of a cross section table after the downsample.
 
-    The grid holds nphixspoints + 1 points. The last point closes the bin of the last output
-    point, so the output keeps only the first nphixspoints values.
+    The grid holds nphixspoints + 1 points. The output keeps the first nphixspoints values.
+    The ARTIS recombination integral ends at the last stored point, before the extra point.
     """
     return np.linspace(1.0, 1.0 + phixsnuincrement * (nphixspoints + 1), num=nphixspoints + 1, endpoint=False)
 
