@@ -8266,3 +8266,59 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         texts.append(ftransitiondata.getvalue())
     assert texts[0] == texts[1]
     assert texts[0].count("\n") > nrows
+
+
+def test_hdf5_to_parquet_preserves_an_unrelated_parquet_file(tmp_path):
+    """The converter must reject an output folder with a Parquet file of unknown ownership."""
+    outputfolder = tmp_path / "data"
+    outputfolder.mkdir()
+    unrelated = outputfolder / "measurements.parquet"
+    pl.DataFrame({"value": [42.0]}).write_parquet(unrelated)
+    earlier_bytes = unrelated.read_bytes()
+    with pytest.raises(FileExistsError, match="cannot verify ownership"):
+        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    assert unrelated.read_bytes() == earlier_bytes
+    assert list(outputfolder.iterdir()) == [unrelated]
+    assert not list(tmp_path.glob("data.partial-*"))
+
+
+def test_hdf5_to_parquet_accepts_legacy_metadata_after_a_source_change(tmp_path):
+    """The source name identifies legacy output; an earlier source hash must not prevent regeneration."""
+    h5py = pytest.importorskip("h5py")
+    path = tmp_path / "data.h5"
+    outputfolder = tmp_path / "data"
+    outputfolder.mkdir()
+    pl.DataFrame({"value": [1.0]}).write_parquet(
+        outputfolder / "a.parquet", metadata={"hdf5_file": path.name, "hdf5_file_sha256": "a" * 64}
+    )
+    with h5py.File(path, "w") as h5file:
+        h5file.create_dataset("a", data=np.array([2.0]))
+    hdf5_to_parquet.convert_file(path)
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
+    metadata = pl.read_parquet_metadata(outputfolder / "a.parquet")
+    assert metadata[hdf5_to_parquet.CONVERTER_METADATA_KEY] == hdf5_to_parquet.CONVERTER_METADATA_VALUE
+    assert metadata["hdf5_file_sha256"] != "a" * 64
+
+
+def test_hdf5_to_parquet_rejects_output_from_another_source(tmp_path):
+    """A converter marker must not permit replacement of a table from a different source."""
+    outputfolder = tmp_path / "data"
+    table = pl.DataFrame({"value": [1.0]})
+    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", table, {"hdf5_file": "other.h5"})])
+    earlier_bytes = (outputfolder / "a.parquet").read_bytes()
+    with pytest.raises(FileExistsError, match="cannot verify ownership"):
+        hdf5_to_parquet.write_tables(outputfolder, [], source_name="data.h5")
+    assert (outputfolder / "a.parquet").read_bytes() == earlier_bytes
+
+
+def test_hdf5_to_parquet_repeats_a_conversion_with_a_parquet_group_name(tmp_path):
+    """An HDF5 group can end in .parquet, but only its table files need ownership metadata."""
+    h5py = pytest.importorskip("h5py")
+    source = tmp_path / "data.h5"
+    with h5py.File(source, "w") as h5file:
+        h5file.create_dataset("group.parquet/table", data=np.array([1.0]))
+    hdf5_to_parquet.convert_file(source)
+    with h5py.File(source, "w") as h5file:
+        h5file.create_dataset("group.parquet/table", data=np.array([2.0]))
+    hdf5_to_parquet.convert_file(source)
+    assert pl.read_parquet(tmp_path / "data" / "group.parquet" / "table.parquet")["value"].to_list() == [2.0]
