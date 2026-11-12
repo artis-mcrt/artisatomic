@@ -161,12 +161,12 @@ def main() -> None:
         minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
     )
 
-    if not ion_handlers:
+    if not any(ions for _, ions in ion_handlers):
         # Not an assert: an empty selection writes an empty database and does not fail. The function
         # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
         msg = (
-            "No ions selected. The ion limits exclude every ion, artisatomicionhandlers.json is"
-            " empty, or no reader found any data."
+            "No ions selected. The ion limits exclude every ion, artisatomicionhandlers.json names"
+            " no ion, or no reader found any data."
         )
         raise ValueError(msg)
 

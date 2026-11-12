@@ -43,6 +43,8 @@ The file is a JSON list with one entry for each element. An entry is the atomic 
 ]
 ```
 
+The selection must contain at least one ion. An element can have an empty ion list if another element contains an ion.
+
 The ion stages of an element must have no gap. The handlers are:
 
 - `adas`
