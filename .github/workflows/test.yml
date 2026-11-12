@@ -3,9 +3,10 @@ name: Test
 permissions:
     contents: read
 on:
-    # branches only: a push of a tag ran every job on old code
+    # Pull requests test each proposed change. A push tests the result on main.
     push:
-        branches: ['**']
+        branches: [main]
+    pull_request:
     merge_group:
     schedule:
         - cron: 0 13 * * 1
