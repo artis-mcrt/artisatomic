@@ -138,16 +138,22 @@ threshold_energy  energy [eV] from this level to the first level of its target l
                   positive. ARTIS does not use it. It takes the threshold of each target from the
                   level energies.
 cross section     [Mb] for the frequency nu_threshold * (1 + i * step). The first line of a table is
-                  i = 0, and the last line is i = npoints - 1. Each value is an average over the
-                  frequency bin around its frequency. The bin of i = 0 starts at the threshold.
+                  i = 0, and the last line is i = npoints - 1. Each value is a weighted average of
+                  the data source near its frequency, and not the cross section at that frequency
+                  (see OPTIONS OF THIS RUN).
 
 NUMBERS START AT 1
 lower_ion_stage, upper_ion_stage, lower_level and upper_level start at 1, and not at 0. An upper_level
 of -1 is not a level number. Only the point number i of a table starts at 0.
 
 OPTIONS OF THIS RUN
-artisatomic downsamples each table of its data source to the grid of this file. It keeps the
-recombination rate constant at T={optimaltemperature} K (option -optimaltemperature).
+artisatomic downsamples each table of its data source to the grid of this file. The tables are for
+the {interpolation} cross section mode of ARTIS (option -phixsinterpolation). ARTIS must have
+PHIXS_CLASSIC_NO_INTERPOLATION = false for linear mode and true for classic mode. In linear mode,
+ARTIS joins the values of a table with straight lines. In classic mode, ARTIS holds each value
+constant up to the next frequency. The values keep the recombination rate of that mode constant at
+T={optimaltemperature} K (option -optimaltemperature). The integral of that rate goes from the
+threshold to the last frequency of the table, as in ARTIS.
 {hydrogenicrule}
 A target with less than {targetcut:.0%} of the cross section of a level is not in the target list of that level. A
 target is a final state of the data source, which can be a term. The share of a term goes to its levels in
@@ -221,6 +227,7 @@ def clear_files(args: argparse.Namespace) -> None:
                 phixsdata_file_comment.format(
                     creationtime=creationtime,
                     optimaltemperature=args.optimaltemperature,
+                    interpolation=args.phixsinterpolation,
                     hydrogenicrule=hydrogenicrule,
                     targetcut=PHIXS_TARGET_FRACTION_CUT,
                     commentrule="No comment can come before line 1 or line 2, because ARTIS reads those two"
