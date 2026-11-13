@@ -938,18 +938,29 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         io.StringIO(),
         levelnames=levelnames,
     )
+    wavelengths = dflevels["lambdaangstrom"].to_list()
     reduced_of_filenum = []
     for filenum, photfilename in enumerate(ionfiles.photfilenames):
         photpath = Path(rhd.hillier_ion_folder(8, 1), ionfiles.folder, photfilename)
         with contextlib.redirect_stdout(io.StringIO()):
             reader.read_file(filenum, photpath, photfilename)
+        tables = {}
+        for levelid, name in enumerate(levelnames):
+            matchname = name if reader.j_splitting_on else name.split("[")[0]
+            if matchname not in reader.phixstables[filenum]:
+                continue
+            table = reader.phixstables[filenum][matchname].copy()
+            firstid = firstindex_of_name[name] if reader.j_splitting_on else firstindex_of_namenoj[matchname]
+            edge_shift = (
+                hc_in_ev_angstrom / wavelengths[levelid] - hc_in_ev_angstrom / wavelengths[firstid]
+            ) / ryd_to_ev
+            table[:, 0] *= (table[0, 0] + edge_shift) / table[0, 0]
+            tables[levelid] = table
         reduced_of_filenum.append(
-            reduce_phixs_tables(
-                reader.phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
-            )
+            reduce_phixs_tables(tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)
         )
 
-    def expected_routes(matchname: str) -> list[tuple[str, float, np.ndarray]]:
+    def expected_routes(levelid: int) -> list[tuple[str, float, np.ndarray]]:
         """Give the target, the factor and the reduced table of each open route of a level.
 
         The factor is the sum of the reduced table. A route with no reduced table or with an
@@ -957,22 +968,21 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         """
         factors = []
         for filenum, reduced in enumerate(reduced_of_filenum):
-            reducedtable = reduced.get(matchname)
+            reducedtable = reduced.get(levelid)
             if reducedtable is None or not np.any(reducedtable):
                 continue
             factors.append((reader.phixstargets[filenum], float(reducedtable.sum()), reducedtable))
         return factors
 
-    matchname_of_levelid = [name if reader.j_splitting_on else name.split("[")[0] for name in levelnames]
     levelids_in_both = [
         levelid
-        for levelid, matchname in enumerate(matchname_of_levelid)
-        if all(np.any(reduced.get(matchname, np.zeros(1))) for reduced in reduced_of_filenum)
+        for levelid in range(len(levelnames))
+        if all(np.any(reduced.get(levelid, np.zeros(1))) for reduced in reduced_of_filenum)
     ]
     assert levelids_in_both, "expected O I levels with a cross section table in both phot files"
 
     for levelid in levelids_in_both:
-        factors = expected_routes(matchname_of_levelid[levelid])
+        factors = expected_routes(levelid)
         assert len(factors) > 1, f"level {levelid}: expected a route in each of the two files"
         # the targets below the 2% cut drop out, and the rest normalise to one. The strongest
         # route always stays.
@@ -7380,6 +7390,47 @@ def test_shared_table_moves_to_the_edge_of_each_level():
     assert moved[:, 0].tolist() == pytest.approx([edge1_ryd, 2.0 * edge1_ryd])
     assert moved[:, 1].tolist() == [1.0, 0.125]
     assert reader.shared_table_at_level_edge(0, "2p_3Po", 2) is None
+
+
+@pytest.mark.parametrize("j_splitting", [False, True])
+def test_read_phixs_tables_uses_each_j_level_threshold(tmp_path, monkeypatch, j_splitting):
+    """A shared table uses each level's threshold. A table with an explicit J keeps its own cross sections."""
+    names = ["2p_3Po[0]", "2p_3Po[1]", "2p_3Po[2]"]
+    wavelengths = [911.0, 1000.0, 0.0]
+    x = np.array([1.0, 1.015, 1.03, 1.5, 4.0])
+    sigma = np.array([1.0, 3.0, 0.5, 0.1, 0.01])
+    blocks = []
+    for levelid, name in enumerate(names if j_splitting else ["2p_3Po"]):
+        amplitude = levelid + 1
+        blocks.append(
+            f"{name} !Configuration name\n20 !Type of cross-section\n5 !Number of cross-section points\n"
+            + "".join(f"{ratio} {amplitude * value}\n" for ratio, value in zip(x, sigma, strict=True))
+            + "\n"
+        )
+    (tmp_path / "phot_data_A").write_text(
+        f"target !Final state in ion\nMegabarns !Cross-section unit\n{j_splitting} !Split J levels\n" + "".join(blocks),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (8, 1),
+        readhillierdata.ions_data[8, 1]._replace(folder="", photfilenames=("phot_data_A",)),
+    )
+    monkeypatch.setattr(readhillierdata, "hillier_ion_folder", lambda *_args: str(tmp_path))
+    monkeypatch.setattr(readhillierdata, "read_hyd_phixsdata", lambda: None)
+    levels = pl.DataFrame({"levelname": names, "lambdaangstrom": wavelengths})
+    args = phixs_args()
+    result = readhillierdata.read_phixs_tables(8, 1, levels, args, io.StringIO())
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)
+    for levelid in (0, 1):
+        amplitude = levelid + 1 if j_splitting else 1
+        table = np.column_stack((x * (hc_in_ev_angstrom / wavelengths[levelid] / ryd_to_ev), amplitude * sigma))
+        expected = reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table)
+        assert result.crosssections[levelid] == pytest.approx(expected, rel=1e-12)
+    assert not np.array_equal(result.crosssections[0], result.crosssections[1])
+    assert np.all(result.crosssections[2] == 0.0)
+    assert result.targetconfigs is not None
+    assert result.targetconfigs[2] is None
 
 
 def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level():
