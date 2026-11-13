@@ -1,6 +1,7 @@
 """Read levels and transitions from the Floers+25 data set, calibrated or uncalibrated.
 
 Paper: Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026),
+Calibrated lanthanide atomic data for kilonova radiative transfer: Atomic structure and opacities,
 Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. Data set: doi:10.5281/zenodo.15835360.
 """
 
@@ -30,8 +31,9 @@ from artisatomic.levelnames import parse_orbital_n
 
 # the FAC reader gives the same paper
 reference = (
-    "Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026), Phys. Rev. D, 113,"
-    " 063041, doi:10.1103/jxqw-7ynk"
+    "Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G. (2026),"
+    " Calibrated lanthanide atomic data for kilonova radiative transfer: Atomic structure and opacities,"
+    " Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk"
 )
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = f"the Floers+25 data set, {{variant}}. {reference}. Data set: doi:10.5281/zenodo.15835360"

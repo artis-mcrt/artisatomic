@@ -6,6 +6,7 @@ from OPEN-ADAS (https://open.adas.ac.uk). The reader had the name readqubdata be
 handlers had the names "qub" and "qub_cobalt" (see ionhandlers.renamed_handlers).
 
 The Sr I file comes from Dougan, D. J., McElroy, N. E., Ballance, C. P., Ramsbottom, C. A. (2025),
+Strontium I, III, IV, and V: electron impact excitation data for Kilonovae and white dwarf diagnostic applications,
 MNRAS, 541, 367-383, doi:10.1093/mnras/staf1013. The Co data in co_tyndall comes from a private
 communication (see atomic-data-adas/README.txt).
 """
@@ -150,7 +151,8 @@ ion_origins: dict[tuple[int, int | None], str] = {
     (26, None): qub_origin.format("Fe"),
     (38, 1): (
         "Authors at Queen's University Belfast (QUB) made the Sr I file: Dougan, D. J., McElroy, N. E.,"
-        " Ballance, C. P., Ramsbottom, C. A. (2025), MNRAS, 541, 367-383, doi:10.1093/mnras/staf1013"
+        " Ballance, C. P., Ramsbottom, C. A. (2025), Strontium I, III, IV, and V: electron impact excitation data"
+        " for Kilonovae and white dwarf diagnostic applications, MNRAS, 541, 367-383, doi:10.1093/mnras/staf1013"
     ),
     (
         20,

@@ -118,7 +118,8 @@ def match_hydrogenic_phixs(
         lambda_angstrom = hc_in_ev_angstrom / threshold_ev
         # get_hydrogenic_n_phixstable() already scales by the effective charge, since its
         # scale factor 7.91 / (E_threshold / Ryd) / n is the Kramers result 7.91 * n / Z_eff^2
-        # (Kramers 1923, Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244)
+        # (Kramers, H. A. (1923), XCIII. On the theory of X-ray absorption and of the continuous X-ray spectrum,
+        # Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244)
         phixstables[levelindex] = readhillierdata.get_hydrogenic_n_phixstable(lambda_angstrom=lambda_angstrom, n=n)
         photoionization_targetfractions[levelindex] = [(0, 1.0)]  # the upper ion's ground state
 
@@ -151,6 +152,7 @@ def match_hydrogenic_phixs(
             ("phixsdata",),
             "the cross sections",
             "the hydrogenic estimate of artisatomic. It is the cross section of Kramers, H. A. (1923),"
+            " XCIII. On the theory of X-ray absorption and of the continuous X-ray spectrum,"
             " Phil. Mag., 46, 836-871, doi:10.1080/14786442308565244, with the Gaunt factors of CMFGEN in"
             f" {gauntpath}",
         )

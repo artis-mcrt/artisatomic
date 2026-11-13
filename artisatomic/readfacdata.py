@@ -1,8 +1,9 @@
 """Read levels and transitions from FAC and cFAC output, an early version of the Floers+25 data.
 
 The Floers+25 paper is Flörs, A., da Silva, R. F., Marques, J. P., Sampaio, J. M., Martínez-Pinedo, G.
-(2026), Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. FAC is the Flexible Atomic Code of Gu, M. F.
-(2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197. cFAC is its fork at
+(2026), Calibrated lanthanide atomic data for kilonova radiative transfer: Atomic structure and opacities,
+Phys. Rev. D, 113, 063041, doi:10.1103/jxqw-7ynk. FAC is the Flexible Atomic Code of Gu, M. F.
+(2008), The flexible atomic code, Can. J. Phys., 86, 675-689, doi:10.1139/p07-197. cFAC is its fork at
 https://github.com/fnevgeny/cfac.
 """
 
@@ -40,7 +41,7 @@ from artisatomic.readfloers25data import reference as floers25_reference
 USE_CALIBRATED = True
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
-fac_reference = "FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
+fac_reference = "FAC: Gu, M. F. (2008), The flexible atomic code, Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
 description = (
     f"FAC and cFAC output, an early version of the calibrated Floers+25 data. {floers25_reference}. {fac_reference}"
 )

@@ -1,7 +1,7 @@
 """Read levels and transitions from the DREAM database of lanthanides and actinides.
 
-DREAM is the Database on Rare Earths At Mons university: Quinet, P., Palmeri, P. (2020), Atoms, 8,
-18, doi:10.3390/atoms8020018.
+DREAM is the Database on Rare Earths At Mons university: Quinet, P., Palmeri, P. (2020), Current status and
+developments of the atomic database on rare-earths at Mons University (DREAM), Atoms, 8, 18, doi:10.3390/atoms8020018.
 """
 
 from functools import cache
@@ -28,6 +28,7 @@ dreamdatapath = dreamhdf5path.with_suffix("") / "atomic_data.parquet"
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 description = (
     "the DREAM database (Database on Rare Earths At Mons university) of Z >= 57. Quinet, P., Palmeri, P. (2020),"
+    " Current status and developments of the atomic database on rare-earths at Mons University (DREAM),"
     " Atoms, 8, 18, doi:10.3390/atoms8020018"
 )
 

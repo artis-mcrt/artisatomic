@@ -50,8 +50,9 @@ def main():
     The script reads the two files from the artistools data directory. It skips a beta-minus row
     with Q <= 0 or with no positive lifetime, and an alpha row with no positive half-life. It
     writes the gamma lines of the ground-level decay of each nuclide to
-    artis_files/data/gamma_<nuclide>.txt under the repository root. A nuclide with no gamma line
-    gets no new file. The script does not delete a file from an earlier run.
+    artis_files/data/gamma_<nuclide>.txt under the repository root.
+    For valid ground-level data, the script deletes an old file if no gamma line meets the output intensity limit.
+    It keeps an old file if NuDat returns no table or no ground-level data.
     """
     outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
@@ -94,10 +95,6 @@ def main():
         .filter(pl.col("halflife_s") > 0.0)
         .unique(("Z", "A"), keep="last", maintain_order=True)
     )
-    if dfalpha.height != dfalpha.unique(("Z", "A")).height:
-        msg = "The alpha table holds a nuclide more than one time."
-        raise ValueError(msg)
-
     # a set: the script downloads a nuclide in both lists once
     nuclist = sorted(
         set(dfbetaminus.select(["Z", "A"]).iter_rows())
