@@ -2290,8 +2290,21 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
 
     energydivthreshold = fit_energy_div_threshold
     energy_ev = energydivthreshold * thresholdenergyev
+    energy_ryd = energydivthreshold * thresholdenergyryd
+    shell_edges = np.array(
+        sorted({params.E_th_eV for params in fitcoefficients[1:] if energy_ev[0] < params.E_th_eV <= energy_ev[-1]})
+    )
+    left_limit = np.zeros(len(energy_ev), dtype=bool)
+    if shell_edges.size:
+        # Two rows preserve each shell's step during linear interpolation. Equal shell edges share the same two rows.
+        keep = ~np.isin(energy_ev, shell_edges)
+        energy_ev = np.concatenate((energy_ev[keep], np.repeat(shell_edges, 2)))
+        energy_ryd = np.concatenate((energy_ryd[keep], np.repeat(shell_edges / ryd_to_ev, 2)))
+        left_limit = np.concatenate((left_limit[keep], np.tile([True, False], len(shell_edges))))
+        order = np.argsort(energy_ev, kind="stable")
+        energy_ev, energy_ryd, left_limit = energy_ev[order], energy_ryd[order], left_limit[order]
 
-    crosssection = np.zeros(len(energydivthreshold))
+    crosssection = np.zeros(len(energy_ev))
     for shellnum, params in enumerate(fitcoefficients):
         y = energy_ev / params.E_0
         P = params.P
@@ -2302,10 +2315,11 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
         # the first shell starts at the level's own ionisation edge, later (inner) shells
         # only contribute above their own threshold
         if shellnum > 0:
-            shellcrosssection = np.where(energy_ev < params.E_th_eV, 0.0, shellcrosssection)
+            below_edge = (energy_ev < params.E_th_eV) | ((energy_ev == params.E_th_eV) & left_limit)
+            shellcrosssection = np.where(below_edge, 0.0, shellcrosssection)
         crosssection += shellcrosssection
 
-    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
+    return np.column_stack([energy_ryd, crosssection])
 
 
 valence_orbital_regex = re.compile(rf"(?<!\d)(\d+)([{lchars_lower}])")

@@ -5375,6 +5375,58 @@ def test_cmfgen_fit_functions():
     assert table9[0, 1] == pytest.approx(6.3, rel=0.02)
 
 
+@pytest.mark.parametrize("edge_ratio", [1.0, 1.12345, readhillierdata.fit_energy_div_threshold[300], 25.0])
+@pytest.mark.parametrize("shell_count", [1, 2])
+def test_type9_preserves_inner_shell_steps(edge_ratio, shell_count):
+    """An inner shell contributes only above its threshold. Equal thresholds share two rows."""
+    threshold_ev = 10.0
+    edge_ev = float(edge_ratio * threshold_ev)
+    first = readhillierdata.VY95PhixsFitRow(1, 0, threshold_ev, 1.0, 0.0, 1.0, 0.0, 1.0)
+    inner = readhillierdata.VY95PhixsFitRow(2, 0, edge_ev, 1.0, 1.0, 1.0, 0.0, 1.0)
+    table = readhillierdata.get_vy95_phixstable(hc_in_ev_angstrom / threshold_ev, [first, *[inner] * shell_count])
+    edge_ryd = edge_ev / ryd_to_ev
+    assert np.all(np.diff(table[:, 0]) >= 0.0)
+    assert np.all(table[table[:, 0] < edge_ryd, 1] == 0.0)
+    at_edge = table[table[:, 0] == edge_ryd, 1]
+    expected = shell_count * ((edge_ev - 1.0) ** 2 + 1.0) * edge_ev**-5.5
+    if edge_ratio == 1.0:
+        assert at_edge == pytest.approx([expected])
+    elif edge_ratio > readhillierdata.fit_energy_div_threshold[-1]:
+        assert at_edge.size == 0
+        assert np.all(table[:, 1] == 0.0)
+    else:
+        assert at_edge == pytest.approx([0.0, expected])
+        previous = table[table[:, 0] < edge_ryd, 0][-1]
+        assert np.interp((previous + edge_ryd) / 2.0, table[:, 0], table[:, 1]) == 0.0
+
+
+def test_type9_downsample_matches_integrals_at_a_shell_step():
+    """The bin that contains an inner-shell threshold agrees with separate integrals on each side of the step."""
+    threshold_ev = 10.0
+    edge_ev = 28.12345
+    fits = [
+        readhillierdata.VY95PhixsFitRow(1, 0, threshold_ev, 1.0, 0.0, 1.0, 0.0, 1.0),
+        readhillierdata.VY95PhixsFitRow(2, 0, edge_ev, 1.0, 1.0, 1.0, 0.0, 1.0),
+    ]
+    table = readhillierdata.get_vy95_phixstable(hc_in_ev_angstrom / threshold_ev, fits)
+    xgrid = output_xgrid(100, 0.03)
+    actual = reduce_phixs_tables_worker(6000.0, xgrid, table)
+    binid = 60
+    low = 0.5 * (xgrid[binid - 1] + xgrid[binid]) * threshold_ev
+    high = 0.5 * (xgrid[binid] + xgrid[binid + 1]) * threshold_ev
+    nodes, weights = np.polynomial.legendre.leggauss(64)
+    kt_ev = 6000.0 * h_in_ev_seconds / h_over_kb_in_K_sec
+
+    def integral(start: float, end: float, with_sigma: bool) -> float:
+        energy = start + 0.5 * (nodes + 1.0) * (end - start)
+        weight = energy**2 * np.exp(-(energy - low) / kt_ev)
+        sigma = ((energy - 1.0) ** 2 + 1.0) * energy**-5.5 if with_sigma else 1.0
+        return float(0.5 * (end - start) * np.sum(weights * weight * sigma))
+
+    expected = integral(edge_ev, high, True) / integral(low, high, False)
+    assert actual[binid] == pytest.approx(expected, rel=2e-4)
+
+
 def test_read_adf04_selects_the_nearest_temperature():
     """The collision strengths come from the tabulated temperature nearest to -electrontemperature.
 
