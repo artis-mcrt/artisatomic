@@ -3961,17 +3961,8 @@ def test_match_hydrogenic_phixs_skips_unreadable_and_out_of_range_n():
     assert "level name 'N(1S)2H 1,enpercm=2000.0,j=4.5' has no principal quantum number" in logtext
 
 
-def test_readkuruczdata_drops_repeated_lines_but_not_merged_ones(monkeypatch):
-    """Gfall repeats some lines, and separately lists distinct lines that share a level pair.
-
-    A repeat has the same labels at both ends. It is one line given twice, once at its observed
-    wavelength and once at the Ritz one. ARTIS adds the A values of two rows that share a level
-    pair (input.cc), so both rows together would double the line.
-
-    Rows that share a level pair with DIFFERENT labels are separate transitions whose levels the
-    (energy, J) key merged into one. Sr I has 785 of those, two of them strong, and a drop would
-    delete real lines. The reader leaves them for ARTIS to combine.
-    """
+def test_readkuruczdata_drops_repeated_lines_but_keeps_distinct_strengths(monkeypatch):
+    """A repeated line appears once. Lines with distinct strengths stay separate, even when their level pair is equal."""
     from artisatomic import readkuruczdata
 
     # use the committed sample, so the answer does not depend on the unpacked corpus
@@ -6921,6 +6912,71 @@ def read_gfall_lines(
         atomic_number, 1, io.StringIO() if flog is None else flog
     )
     return dflevels, dftransitions
+
+
+def test_readkuruczdata_keeps_distinct_terms_with_equal_energy_and_j(tmp_path, monkeypatch):
+    """The Sr I singlet and triplet at 43756.589 cm^-1 keep separate levels, weights and transitions."""
+    # These five rows come from extendedatoms/gf3800z.lines.
+    lines = [
+        (
+            "   154.7590 -2.475 38.00       0.000  0.0 5s2 1S      -64616.601  1.0 z(2P)1P 89  7.75 -5.71 -7.70K12  0 0  "
+            "0 0.000  0 0.000                        0 1129     0"
+        ),
+        (
+            " 12336.4026  0.493 38.00  -43756.589  6.0 5s7i 1I     -42946.201  5.0 h(2S)1H 35  6.40 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1011 1006     0"
+        ),
+        (
+            " 12336.4050  1.276 38.00  -43756.589  6.0 5s7i 3I     -42946.201  5.0 h(2S)1H 35  6.40 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1013 1006     0"
+        ),
+        (
+            "   630.8078 -5.691 38.00  -43756.589  6.0 5s7i 1I     -59604.896  5.0 w(2D)3I 70  5.94 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1011  882     0"
+        ),
+        (
+            "   630.7896 -5.001 38.00  -43756.589  6.0 5s7i 3I     -59605.354  5.0 w(2D)3H 71  5.94 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1013 1018     0"
+        ),
+    ]
+    levels, transitions = read_gfall_lines(tmp_path, monkeypatch, lines, atomic_number=38)
+    pair = levels.lazy().filter((pl.col("energyabovegsinpercm") == 43756.589) & (pl.col("j") == 6.0)).collect()
+    assert pair.height == 2
+    assert pair["g"].sum() == 26.0
+    ids = {name.split(",")[0]: levelid for name, levelid in levels.select("levelname", "levelid").iter_rows()}
+    assert ids["5s7i 1I"] != ids["5s7i 3I"]
+    assert transitions.height == len(lines)
+    for term, uppername, upperenergy, loggf_in, loggf_out in (
+        ("5s7i 1I", "w(2D)3I 70", 59604.896, 0.493, -5.691),
+        ("5s7i 3I", "w(2D)3H 71", 59605.354, 1.276, -5.001),
+    ):
+        incoming = (
+            transitions.lazy()
+            .filter((pl.col("lowerlevel") == ids["h(2S)1H 35"]) & (pl.col("upperlevel") == ids[term]))
+            .collect()
+        )
+        outgoing = (
+            transitions.lazy()
+            .filter((pl.col("lowerlevel") == ids[term]) & (pl.col("upperlevel") == ids[uppername]))
+            .collect()
+        )
+        assert incoming["A"].item() == pytest.approx(
+            10**loggf_in / (gf_to_a_coefficient * 13 * (1e8 / (43756.589 - 42946.201)) ** 2)
+        )
+        assert outgoing["A"].item() == pytest.approx(
+            10**loggf_out / (gf_to_a_coefficient * 11 * (1e8 / (upperenergy - 43756.589)) ** 2)
+        )
+
+
+@pytest.mark.parametrize("ion", [(38, 1), (39, 1), (39, 2)])
+def test_readkuruczdata_preserves_known_level_aliases(monkeypatch, ion: tuple[int, int]):
+    """Known labels for one level keep one level id and one statistical weight."""
+    monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
+    _, levels, _ = readkuruczdata.read_levels_and_transitions(*ion, io.StringIO())
+    for energy, j, _label in readkuruczdata.level_label_aliases[ion]:
+        selected = levels.lazy().filter((pl.col("energyabovegsinpercm") == energy) & (pl.col("j") == j)).collect()
+        assert selected.height == 1
+        assert selected["g"].item() == 2 * j + 1
 
 
 def test_readkuruczdata_component_levels(tmp_path, monkeypatch):
