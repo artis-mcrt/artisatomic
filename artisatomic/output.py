@@ -305,26 +305,34 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     if dftransitions_ion.is_empty():
         return dftransitions_ion
 
-    # the name-keyed joins keep the reader's row order (maintain_order) and fail on a height
-    # change, as the id-keyed joins below do. An inner join drops a transition whose name matches
-    # no level, and gives no message. A level name that two levels share multiplies its rows. Both
-    # mean the reader's level list and transition list disagree. Not an assert: this guards
-    # written output.
+    # A missing name and a duplicate name can leave the total row count unchanged.
     for idcolumn, namecolumn in (("upperlevel", "nameto"), ("lowerlevel", "namefrom")):
         if idcolumn in dftransitions_ion.columns:
             continue
-        height_before = dftransitions_ion.height
+        lookup = dfenergylevels_ion.select(pl.col("levelid").alias(idcolumn), pl.col("levelname").alias(namecolumn))
+        invalid = (
+            dftransitions_ion.lazy()
+            .select(namecolumn)
+            .unique()
+            .join(lookup.lazy(), on=namecolumn, how="left")
+            .group_by(namecolumn)
+            .agg(pl.col(idcolumn).count().alias("matches"))
+            .filter(pl.col("matches") != 1)
+            .sort(namecolumn)
+            .head(1)
+            .collect()
+        )
+        if not invalid.is_empty():
+            name, matches = invalid.row(0)
+            condition = "no level" if matches == 0 else "more than one level"
+            msg = f"The {namecolumn} value {name!r} matches {condition}. Each transition name must match one level."
+            raise ValueError(msg)
         dftransitions_ion = dftransitions_ion.join(
-            dfenergylevels_ion.select(pl.col("levelid").alias(idcolumn), pl.col("levelname").alias(namecolumn)),
+            lookup,
             on=namecolumn,
+            how="left",
             maintain_order="left",
         )
-        if dftransitions_ion.height != height_before:
-            msg = (
-                f"the {namecolumn} join changed the transition count from {height_before:d} to"
-                f" {dftransitions_ion.height:d}: a level name in the transitions matches no level, or more than one"
-            )
-            raise ValueError(msg)
 
     if "forbidden" not in dftransitions_ion.columns:
         # The cast gives null for a text value, so a string column cannot raise in a comparison
