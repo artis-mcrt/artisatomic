@@ -30,6 +30,8 @@ The key-value metadata of each Parquet file holds these items:
 - the name of the HDF5 file (hdf5_file) and the SHA-256 hash of its content (hdf5_file_sha256).
 
 The readers compare hdf5_file_sha256 with the HDF5 file, and they stop if the HDF5 file changed.
+The converter records its own metadata in each table. Before replacement, it checks that every earlier table belongs to this conversion.
+Legacy tables need the same source name and a source hash. An earlier hash remains valid for regeneration.
 """
 
 import argparse
@@ -537,11 +539,44 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
         raise ValueError(msg)
 
 
-def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[str, str]]]) -> None:
+CONVERTER_METADATA_KEY = "artisatomic_hdf5_converter"
+CONVERTER_METADATA_VALUE = "1"
+
+
+def check_output_ownership(outputfolder: Path, source_name: str | None) -> None:
+    """Reject an earlier Parquet file without converter metadata or compatible legacy source metadata."""
+    for filepath in outputfolder.rglob("*.parquet"):
+        if filepath.is_dir():
+            continue
+        try:
+            metadata = pl.read_parquet_metadata(filepath)
+        except (OSError, pl.exceptions.PolarsError) as error:
+            msg = f"The converter cannot verify ownership of {filepath}. The folder stays unchanged."
+            raise FileExistsError(msg) from error
+        marker = metadata.get(CONVERTER_METADATA_KEY)
+        same_source = source_name is None or metadata.get("hdf5_file") == source_name
+        source_hash = metadata.get("hdf5_file_sha256", "")
+        legacy = (
+            marker is None
+            and source_name is not None
+            and same_source
+            and len(source_hash) == 64
+            and all(character in string.hexdigits for character in source_hash)
+        )
+        if not same_source or (marker != CONVERTER_METADATA_VALUE and not legacy):
+            msg = f"The converter cannot verify ownership of {filepath}. The folder stays unchanged."
+            raise FileExistsError(msg)
+
+
+def write_tables(
+    outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[str, str]]], *, source_name: str | None = None
+) -> None:
     """Write the tables into a new folder, and then put the new folder in the place of outputfolder.
 
     An error leaves the earlier output folder as it was. The script makes the output folder, so it
-    replaces the folder as a whole. A table that the HDF5 file no longer holds goes away too. The
+    replaces the folder as a whole. Each earlier table must have converter metadata for the same source file.
+    The check permits an earlier source hash, because a source change requires another conversion.
+    A table that the HDF5 file no longer holds goes away too. The
     function stops if the earlier folder holds a file that is not a Parquet file. The script did
     not write such a file. The function permits only .DS_Store, which the Finder of macOS writes.
     """
@@ -560,6 +595,7 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
         if otherfiles:
             msg = f"{outputfolder} holds files that the script did not write, for example {otherfiles[0]}."
             raise FileExistsError(msg)
+        check_output_ownership(outputfolder, source_name)
 
     # a new folder with a unique name, so the function deletes no folder that it did not make. The
     # earlier output folder stays in it as a backup until the new tables have their place
@@ -573,7 +609,10 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
         for relativepath, table, metadata in tables:
             outputpath = newfolder / relativepath
             outputpath.parent.mkdir(parents=True, exist_ok=True)
-            table.write_parquet(outputpath, metadata=metadata)
+            table.write_parquet(
+                outputpath,
+                metadata=merge_metadata(relativepath, metadata, {CONVERTER_METADATA_KEY: CONVERTER_METADATA_VALUE}),
+            )
         # both renames are inside the try: an interrupt after the first one must put the earlier tables back
         try:
             if outputfolder.exists():
@@ -637,7 +676,7 @@ def convert_file(path: Path) -> list[Path]:
             for name, table, metadata in tables_of(h5file)
         ]
     check_output_paths(path, [relativepath for relativepath, _, _ in tables])
-    write_tables(outputfolder, tables)
+    write_tables(outputfolder, tables, source_name=path.name)
     for relativepath, table, _ in tables:
         print(f"{path} -> {outputfolder / relativepath} ({table.height} rows, {table.width} columns)")
     return [outputfolder / relativepath for relativepath, _, _ in tables]
