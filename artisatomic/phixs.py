@@ -299,9 +299,7 @@ def reduce_phixs_tables_worker(
     keytext = "" if key is None else f" The key of the table is {key!r}."
     nphixspoints = len(xgrid) - 1
 
-    # An empty table has no threshold to scale the grid, and a zero threshold would divide by
-    # zero. Both therefore mean "no cross section", and neither raises an index error on tablein[0].
-    if len(tablein) == 0 or tablein[0][0] == 0.0:
+    if len(tablein) == 0:
         return np.zeros(nphixspoints)
 
     threshold_old_ryd = tablein[0][0]
@@ -309,6 +307,17 @@ def reduce_phixs_tables_worker(
     # re-slices a strided view of a 2D array every time.
     tablein_energyryd = np.ascontiguousarray(tablein[:, 0])
     tablein_sigma = np.ascontiguousarray(tablein[:, 1])
+    invalid = np.flatnonzero(~np.isfinite(tablein_sigma) | (tablein_sigma < 0.0))
+    if invalid.size:
+        row = int(invalid[0])
+        msg = (
+            f"A source cross section is not finite and non-negative at row {row + 1}: {tablein_sigma[row]}."
+            f"{labeltext}{keytext}"
+        )
+        raise ValueError(msg)
+    # A zero threshold means that the level has no cross section.
+    if threshold_old_ryd == 0.0:
+        return np.zeros(nphixspoints)
     # not an assert: np.searchsorted() and np.interp() below both give a wrong result for a
     # table that decreases in energy. This function also reads the first energy as the threshold.
     if np.any(np.diff(tablein_energyryd) < 0.0):
@@ -370,10 +379,7 @@ def reduce_phixs_tables_worker(
     np.minimum.at(arr_nu_ref, arr_bin, np.where(width_hz > 0.0, nu_start, np.inf))
     arr_nu_ref[np.isinf(arr_nu_ref)] = 0.0
     arr_nu_ref = arr_nu_ref[arr_bin]
-    # The weight is positive, so a negative average comes only from a negative cross section, and the
-    # input must not contain one. A very large -phixsnuincrement makes the weights overflow. An
-    # average is then NaN or infinite, and ARTIS would fail only when it reads the table. The check
-    # below stops the run for these cases, so numpy gives no warning about them.
+    # Large grid steps can overflow the weights even when every source value is finite.
     with np.errstate(over="ignore", divide="ignore", invalid="ignore", under="ignore"):
         segment_nosigma = np.zeros(len(width_hz))
         segment_withsigma = np.zeros(len(width_hz))
