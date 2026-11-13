@@ -3,8 +3,10 @@
 
 import argparse
 import importlib
+import math
 import re
 import typing as t
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -60,6 +62,13 @@ def read_nahar_rrcfile(filename) -> list[RecombRow]:
         msg = f"{filename} has a header row and no data rows"
         raise ValueError(msg)
 
+    for row in records:
+        if not all(math.isfinite(value) for value in row) or row.RRC_low_n < 0.0 or row.RRC_total < 0.0:
+            msg = f"{filename} has a non-finite temperature or a negative or non-finite rate."
+            raise ValueError(msg)
+    if any(right.logT <= left.logT for left, right in pairwise(records)):
+        msg = f"The temperatures in {filename} must increase without a duplicate."
+        raise ValueError(msg)
     return records
 
 
@@ -104,6 +113,39 @@ def import_chianti_core(firstion: str) -> t.Any:
             " uv sync --frozen --extra chianti"
         )
         raise ModuleNotFoundError(msg) from err
+
+
+def checked_rate_array(values, count: int, source: str) -> np.ndarray:
+    """Require one finite, non-negative rate for each requested temperature."""
+    rates = np.asarray(values, dtype=float)
+    if rates.shape != (count,) or not np.isfinite(rates).all() or (rates < 0.0).any():
+        msg = f"{source} must give {count} finite, non-negative rates."
+        raise ValueError(msg)
+    return rates
+
+
+def chianti_recombination_rates(ch, atomic_number: int, upperionstage: int, temperatures: np.ndarray) -> np.ndarray:
+    """Read both Chianti rates and require their source parameters before use."""
+    ionname = f"{elsymbols[atomic_number].lower()}_{upperionstage}"
+    ion = ch.ion(ionname, temperature=temperatures)
+    ion.rrRate()
+    if not getattr(ion, "RrParams", None):
+        msg = f"Chianti has no radiative recombination parameters for {ionname}. Supply a Nahar rate file."
+        raise ValueError(msg)
+    rr = checked_rate_array(ion.RrRate["rate"], len(temperatures), f"Chianti radiative recombination of {ionname}")
+    ion.drRate()
+    # A bare nucleus has no bound electron to excite during dielectronic recombination.
+    if upperionstage != atomic_number + 1 and not getattr(ion, "DrParams", None):
+        msg = f"Chianti has no dielectronic recombination parameters for {ionname}. Supply a Nahar rate file."
+        raise ValueError(msg)
+    dr = checked_rate_array(ion.DrRate["rate"], len(temperatures), f"Chianti dielectronic recombination of {ionname}")
+    try:
+        with np.errstate(over="raise"):
+            total = rr + dr
+    except FloatingPointError as error:
+        msg = f"The total recombination rate of {ionname} exceeds the finite range."
+        raise ValueError(msg) from error
+    return checked_rate_array(total, len(temperatures), f"Chianti total recombination of {ionname}")
 
 
 # the largest atomic number of the CHIANTI database
@@ -179,17 +221,11 @@ def main():
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
                 arr_temperature = 10**arr_logT_e
-                ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
-                ion.rrRate()
-                arr_rrc = ion.RrRate["rate"]
-                ion.drRate()
-                arr_drc = ion.DrRate["rate"]
+                arr_total = chianti_recombination_rates(ch, atomic_number, upperionstage, arr_temperature)
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 # the third column is the total recombination rate, the same as RRC(total) of
                 # the Nahar files above, so the sum must include dielectronic recombination
-                frecombrates.writelines(
-                    f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
-                )
+                frecombrates.writelines(f"{logT_e:.1f} {-1.0} {arr_total[i]}\n" for i, logT_e in enumerate(arr_logT_e))
 
 
 if __name__ == "__main__":
