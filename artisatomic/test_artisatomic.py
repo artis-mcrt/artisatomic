@@ -2679,7 +2679,7 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
 
     energyryd = np.linspace(1.0, 20.0, 500)
     tablein = np.column_stack([energyryd, np.full_like(energyryd, -1.0)])
-    with pytest.raises(ValueError, match=r"bin average is not a finite number of 0 or more.*'Fe I 3d7 a4F'"):
+    with pytest.raises(ValueError, match=r"source cross section.*'Fe I 3d7 a4F'"):
         reduce_phixs_tables({"Fe I 3d7 a4F": tablein}, 6000.0, 100, 0.03)
 
     # a key alone does not say which ion or which file the table came from, so a caller can
@@ -2692,7 +2692,7 @@ def test_reduce_phixs_tables_names_the_key_of_a_bad_table():
     goodtable = np.column_stack([energyryd, np.full_like(energyryd, 1.0)])
     tables = {f"level {i}": goodtable for i in range(40)}
     tables["bad level"] = tablein
-    with pytest.raises(ValueError, match=r"bin average is not a finite number of 0 or more.*'bad level'"):
+    with pytest.raises(ValueError, match=r"source cross section.*'bad level'"):
         reduce_phixs_tables(tables, 6000.0, 100, 0.03)
 
 
@@ -7048,7 +7048,7 @@ def test_reduce_phixs_tables_rejects_a_table_that_is_not_finite():
     from artisatomic.phixs import reduce_phixs_tables
 
     tablein = np.array([[0.5, 1.0], [1.0, 0.5], [2.0, 0.1]])
-    with pytest.raises(ValueError, match=r"bin average is not a finite number.*Z=26 Fe I test"):
+    with pytest.raises(ValueError, match=r"photoionisation bin average.*Z=26 Fe I test"):
         reduce_phixs_tables({"level": tablein}, 6000.0, 100, 1e150, label="Z=26 Fe I test")
 
 
