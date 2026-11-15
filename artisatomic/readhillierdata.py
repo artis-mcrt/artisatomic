@@ -1803,8 +1803,8 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
 
     # The downsample weights each bin with the absolute frequency, so a reduced table applies only at the edge
     # of its downsample. Without J splitting, one name covers the J levels of a term. Such a name gives each
-    # of its levels its own routes if a file has a table for each level (see PhotFileReader.store_fit()), or
-    # if its levels have different edges.
+    # of its levels its own routes in two cases. In the first case, a file has a table for each level (see
+    # PhotFileReader.store_fit()). In the second case, the levels have different edges.
     names_by_level = {name for leveltables in reader.leveltables for name, _ in leveltables}
     if not reader.j_splitting_on:
         names_by_level.update(
