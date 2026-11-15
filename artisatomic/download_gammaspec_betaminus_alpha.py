@@ -50,9 +50,12 @@ def main():
     It also fetches the table of each nuclide in nuclides_with_artis_hardcoded_decay_data.
     The script reads the two files from the artistools data directory. It skips a beta-minus row
     with Q <= 0 or with no positive lifetime, and an alpha row with no positive half-life. It
+    stops if the beta-minus file then gives a nuclide more than one time. If the alpha file gives
+    a nuclide more than one time, the script uses the last row of that nuclide. It
     writes the gamma lines of the ground-level decay of each nuclide to
-    artis_files/data/gamma_<nuclide>.txt under the repository root. A nuclide with no gamma line
-    gets no new file. The script does not delete a file from an earlier run.
+    artis_files/data/gamma_<nuclide>.txt under the repository root. If the ground level gives no
+    gamma line for the file, the script writes no file and deletes the file of an earlier run. The
+    file of an earlier run stays if NuDat gives no table or no ground level for the nuclide.
     """
     argparse.ArgumentParser(description=__doc__).parse_args()
     outfolder = PYDIR.parent / "artis_files" / "data"
@@ -96,9 +99,6 @@ def main():
         .filter(pl.col("halflife_s") > 0.0)
         .unique(("Z", "A"), keep="last", maintain_order=True)
     )
-    if dfalpha.height != dfalpha.unique(("Z", "A")).height:
-        msg = "The alpha table holds a nuclide more than one time."
-        raise ValueError(msg)
 
     # a set: the script downloads a nuclide in both lists once
     nuclist = sorted(
