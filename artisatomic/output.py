@@ -153,7 +153,8 @@ PHIXS_CLASSIC_NO_INTERPOLATION = false for linear mode and true for classic mode
 ARTIS joins the values of a table with straight lines. In classic mode, ARTIS holds each value
 constant up to the next frequency. The values keep the recombination rate of that mode constant at
 T={optimaltemperature} K (option -optimaltemperature). The integral of that rate goes from the
-threshold to the last frequency of the table, as in ARTIS.
+threshold to the last frequency of the table, as in ARTIS. In classic mode, the last value of a
+table is the average over one step above the last frequency, where ARTIS uses that value.
 {hydrogenicrule}
 A target with less than {targetcut:.0%} of the cross section of a level is not in the target list of that level. A
 target is a final state of the data source, which can be a term. The share of a term goes to its levels in
