@@ -66,6 +66,10 @@ nothing. The test `test_chargetransfer_output_matches_the_checksum` checks the s
 pytest. Regenerate the checksum with:
 
 ```bash
-PYTHONPATH="$PWD" uv run makeartischargetransferfile -output_folder tests/chargetransfer/output
+PYTHONPATH="$PWD" uv run makeartischargetransferfile -output_folder tests/chargetransfer/output -maxfiterror inf
 (cd tests/chargetransfer/output && md5sum *.txt > ../checksums.txt)
 ```
+
+Some fits of the tracked source files have an error above the default of `-maxfiterror`, so the job, the test
+and this recipe give `-maxfiterror inf`. The checksum tests the coefficients and the format of the file. It
+does not approve the errors of the fits.

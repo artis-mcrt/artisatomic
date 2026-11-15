@@ -7,6 +7,7 @@ committed files in atomic-data-chargetransfer, so a change of their format fails
 import hashlib
 import math
 import sys
+from collections import Counter
 from collections.abc import Callable
 from pathlib import Path
 
@@ -239,7 +240,7 @@ def test_committed_source_files_build_the_expected_entries():
     sourcedir = Path(makechargetransferfile.__file__).parent.parent / "atomic-data-chargetransfer"
     kf96_entries, _ = makechargetransferfile.get_kf96_h_entries(sourcedir)
     he_entries = makechargetransferfile.get_he_entries(sourcedir)
-    ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir)
+    ss11_entries, _ = makechargetransferfile.get_ss11_entries(sourcedir, math.inf)
     assert (len(kf96_entries), len(he_entries), len(ss11_entries)) == (100, 21, 36)
     entries = makechargetransferfile.set_autoreverse_flags(kf96_entries + he_entries + ss11_entries)
     assert all(e.comment.split(";", 1)[0] in {"Cloudy", "AR85", "SS11"} for e in entries)
@@ -262,7 +263,8 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     The CI job 'test chargetransfer' checks the same file with md5sum. Regenerate the checksum
     after a deliberate change of the output. tests/README.md gives the commands.
     """
-    monkeypatch.setattr(sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path)])
+    argv = ["makeartischargetransferfile", "-output_folder", str(tmp_path), "-maxfiterror", "inf"]
+    monkeypatch.setattr(sys, "argv", argv)
     makechargetransferfile.main()
 
     checksumfile = Path(makechargetransferfile.__file__).parent.parent / "tests" / "chargetransfer" / "checksums.txt"
@@ -270,3 +272,40 @@ def test_chargetransfer_output_matches_the_checksum(tmp_path, monkeypatch):
     assert set(expected) == {"chargetransfer.txt"}
     for name, digest in expected.items():
         assert hashlib.md5((tmp_path / name).read_bytes(), usedforsecurity=False).hexdigest() == digest, name
+
+
+def test_makechargetransferfile_stops_for_the_fit_errors_of_the_committed_files(tmp_path, monkeypatch):
+    """The default limit refuses the fits of the committed SS11 tables. An earlier output file stays."""
+    output = tmp_path / "chargetransfer.txt"
+    output.write_text("earlier output", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["makeartischargetransferfile", "-output_folder", str(tmp_path)])
+    with pytest.raises(ValueError, match=r"above -maxfiterror 0\.25: ") as excinfo:
+        makechargetransferfile.main()
+    assert str(excinfo.value).partition(": ")[2].partition(". ")[0].split(", ") == [
+        "rec Ge q=3: 94%",
+        "rec Se q=1: 437%",
+        "rec Kr q=1: 30%",
+        "rec Rb q=1: 110%",
+        "rec Xe q=1: 52%",
+        "ion Se q=0: 82%",
+        "ion Br q=0: 60%",
+    ]
+    assert output.read_text(encoding="utf-8") == "earlier output"
+
+
+def test_makechargetransferfile_fit_error_limit(patch_sources, tmp_path):
+    """The limit also applies to a flat value. It accepts an equal error, and a NaN accepts no error."""
+    rates = [
+        2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.0e-14)
+        for temp in makechargetransferfile.SS11_TGRID
+    ]
+    patch_sources({"ss11_table4.dat": _ss11_cds_line("Ge", 1, "test", rates), "ss11_table5.dat": ""})
+    accepted, report = makechargetransferfile.get_ss11_entries(tmp_path, math.inf)
+    assert "flat value" in accepted[0].comment
+    assert "maxerr=80%" in report[0]
+    maxerr = makechargetransferfile.fit_ss11_curve(rates).maxerr
+    assert makechargetransferfile.get_ss11_entries(tmp_path, maxerr) == (accepted, report)
+    for limit in (makechargetransferfile.MAX_FIT_ERROR, math.nextafter(maxerr, 0.0), -1.0, math.nan):
+        with pytest.raises(ValueError, match=r"rec Ge q=1: 80%\. Examine"):
+            makechargetransferfile.get_ss11_entries(tmp_path, limit)
+    assert "This run had -maxfiterror 0.8." in makechargetransferfile.format_header(Counter(), 0.8)

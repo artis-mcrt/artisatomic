@@ -91,5 +91,5 @@ artistools needs a version that skips the comment blocks.
 The package installs three more commands:
 
 - `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
-- `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file.
+- `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file. It stops if the largest relative error of a fit is above `-maxfiterror` (default 0.25). Some fits of the tracked source files have a larger error, and `-maxfiterror inf` accepts each error.
 - `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
