@@ -4887,9 +4887,7 @@ def test_iondata_handlers_registry():
 def test_console_script_entry_points_resolve():
     """Each console script must name a module and a function that exist.
 
-    The lint job of CI starts three of the four console scripts with --help. makeartisgammaspecfiles
-    has no argument parser, so CI does not start it. A wrong module path for that script fails
-    only when a user runs the installed command.
+    The lint job starts all four console scripts with --help. This test checks their declared entry points also.
     """
     from importlib.metadata import entry_points
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Download the NuDat3 decay tables of the NNDC and write the gamma spectra that ARTIS uses."""
 
+import argparse
 import io
 import math
 
@@ -53,6 +54,7 @@ def main():
     artis_files/data/gamma_<nuclide>.txt under the repository root. A nuclide with no gamma line
     gets no new file. The script does not delete a file from an earlier run.
     """
+    argparse.ArgumentParser(description=__doc__).parse_args()
     outfolder = PYDIR.parent / "artis_files" / "data"
     outfolder.mkdir(parents=True, exist_ok=True)
 
