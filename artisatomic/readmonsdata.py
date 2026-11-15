@@ -268,7 +268,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: For {ambiguouscount} level matches, a second level is equally close in energy.",
+            f"WARNING: For {ambiguouscount} level matches with no tagged energy, a second level is also within"
+            f" {MATCH_TOLERANCE_PERCM} cm^-1 of the energy in the transition file.",
         )
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
