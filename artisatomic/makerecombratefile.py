@@ -60,6 +60,14 @@ def read_nahar_rrcfile(filename) -> list[RecombRow]:
         msg = f"{filename} has a header row and no data rows"
         raise ValueError(msg)
 
+    table = np.array(records)
+    if not np.isfinite(table).all():
+        msg = f"{filename} has a value that is not finite"
+        raise ValueError(msg)
+    if (np.diff(table[:, 0]) <= 0.0).any():
+        msg = f"{filename} does not give its temperatures in increasing order"
+        raise ValueError(msg)
+
     return records
 
 
@@ -104,6 +112,36 @@ def import_chianti_core(firstion: str) -> t.Any:
             " uv sync --frozen --extra chianti"
         )
         raise ModuleNotFoundError(msg) from err
+
+
+def chianti_total_rates(ch: t.Any, atomic_number: int, upperionstage: int, temperatures: np.ndarray) -> np.ndarray:
+    """Give the total recombination rate of Chianti at each temperature: the radiative rate plus the dielectronic rate.
+
+    ChiantiPy gives a rate of zero for an ion with no parameter file, and it sets RrParams or DrParams only when
+    it finds that file. ARTIS reads a total of zero as a rate, so the function stops when the parameters are
+    absent. A bare nucleus has no electron to excite, so it needs no dielectronic parameters.
+    """
+    ionname = f"{elsymbols[atomic_number].lower()}_{upperionstage}"
+    ion = ch.ion(ionname, temperature=temperatures)
+    ion.rrRate()
+    ion.drRate()
+    absent = [
+        process
+        for process, attribute in (("radiative", "RrParams"), ("dielectronic", "DrParams"))
+        if not hasattr(ion, attribute) and (process == "radiative" or upperionstage <= atomic_number)
+    ]
+    if absent:
+        msg = (
+            f"Chianti has no {' and no '.join(absent)} recombination parameters for {ionname}, so it gives no rate."
+            " Supply a Nahar file for this ion, or repair the Chianti database."
+        )
+        raise ValueError(msg)
+
+    rates = [np.asarray(ion.RrRate["rate"], dtype=float), np.asarray(ion.DrRate["rate"], dtype=float)]
+    if any(rate.shape != temperatures.shape or not np.isfinite(rate).all() for rate in rates):
+        msg = f"Chianti does not give one finite rate for each of the {len(temperatures)} temperatures of {ionname}."
+        raise ValueError(msg)
+    return rates[0] + rates[1]
 
 
 # the largest atomic number of the CHIANTI database
@@ -178,17 +216,12 @@ def main():
                 assert ch is not None
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                arr_temperature = 10**arr_logT_e
-                ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
-                ion.rrRate()
-                arr_rrc = ion.RrRate["rate"]
-                ion.drRate()
-                arr_drc = ion.DrRate["rate"]
+                arr_total = chianti_total_rates(ch, atomic_number, upperionstage, 10**arr_logT_e)
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 # the third column is the total recombination rate, the same as RRC(total) of
                 # the Nahar files above, so the sum must include dielectronic recombination
                 frecombrates.writelines(
-                    f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
+                    f"{logT_e:.1f} {-1.0} {total}\n" for logT_e, total in zip(arr_logT_e, arr_total, strict=True)
                 )
 
 
