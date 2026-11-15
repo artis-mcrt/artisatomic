@@ -230,20 +230,14 @@ def main():
                             "intensity": dfgammadecays["intensity"] / 100.0,
                         }
                     ).sort("energy_mev")
-                    # the file gives each intensity with 4 decimal places, so a weaker line would print as
-                    # 0.0000 and carry no energy. A nuclide with only such lines then gets no file.
-                    nweak = dfout.filter(pl.col("intensity") < 5e-5).height
-                    if nweak:
-                        print(
-                            f"  {nweak} gamma lines have an intensity below 5e-5 per decay, so the file leaves them out"
-                        )
-                        dfout = dfout.filter(pl.col("intensity") >= 5e-5)
                     if len(dfout) > 0:
                         # a run that stops part way through leaves the previous file complete
                         with open_for_atomic_write(nucoutfilepath) as fout:
                             fout.write(f"{len(dfout)}\n")
                             for energy_mev, intensity in dfout[["energy_mev", "intensity"]].iter_rows():
-                                fout.write(f"{energy_mev:5.3f}  {intensity:6.4f}\n")
+                                # the shortest text that reads back as the same number, so the file
+                                # keeps the energy of each line
+                                fout.write(f"{energy_mev}  {intensity}\n")
                         print(f"Saved {nucoutfilepath.name}")
                     # a file of an earlier run would still give the lines that this run leaves out
                     elif nucoutfilepath.exists():
