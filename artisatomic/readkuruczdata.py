@@ -282,8 +282,8 @@ def lines_text(count: int) -> str:
 def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
     """Give a level its J where a gfall row gives J = 0.0 and the level cannot have J = 0.
 
-    Such a J means that the row gives no J for the level. The reader keys the levels on the
-    energy and J, so the row would make an extra level with g = 1. A J that is not 0.0 does not
+    Such a J means that the row gives no J for the level. The key of a level holds its energy
+    and J, so the row would make an extra level with g = 1. A J that is not 0.0 does not
     change, because a wrong label can also cause it.
 
     The function changes a row only if all of these conditions are true:
@@ -438,8 +438,8 @@ def drop_lines_of_a_second_ground_j(dfgfall: pl.DataFrame, flog) -> pl.DataFrame
     """Keep one J for the levels at 0 cm^-1, and drop the lines that give another J there.
 
     A gfall row can give the ground level a wrong J. S I gives one line from "3p4 3P" at 0.000 cm^-1
-    with J = 0 (3P0 is at 573.64 cm^-1), and Mg IV and Dy I have one such line each. The reader keys
-    a level on its energy and J, so such a row makes a second level at 0 cm^-1, and the sort can make
+    with J = 0 (3P0 is at 573.64 cm^-1), and Mg IV and Dy I have one such line each. The key of a
+    level holds its energy and J, so such a row makes a second level at 0 cm^-1, and the sort can make
     it the first level of the ion. The J that most lines give at 0 cm^-1 stays.
     """
     groundj = pl.concat(
@@ -657,12 +657,14 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
 def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
     """Add a label key for each level. Two rows give the same level if the energy, J and label key are equal.
 
-    Two labels at one energy and J are two levels only if they have lines to the same level. Such a
-    label is its own key. gfall also gives one level with two spellings of its label, and each line
-    then has only one of the spellings. A label of that type gets the key of the first label with
-    its own key at that energy and J. It gets an empty key if no label there has its own key.
+    Two labels at one energy and J are two levels only if they have lines of different loggf to the
+    same level. Such a label is its own key. gfall also gives one level with two spellings of its
+    label. Each line then has only one of the spellings, or gfall gives the line two times with
+    equal loggf. A label of that type gets the key of the first label with its own key at that
+    energy and J. It gets an empty key if no label there has its own key.
     """
     level = ["energy", "j"]
+    partner = [*level, "partner_energy", "partner_j"]
     ends = pl.concat(
         [
             dfgfall.lazy().select(
@@ -671,12 +673,15 @@ def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
                 label=pl.col(f"label_{side}"),
                 partner_energy=pl.col(f"energyabovegsinpercm_{other}"),
                 partner_j=pl.col(f"j_{other}"),
+                loggf=pl.col("loggf"),
             )
             for side, other in (("lower", "upper"), ("upper", "lower"))
         ]
     )
     keys = (
-        ends.with_columns(shared=pl.col("label").n_unique().over(*level, "partner_energy", "partner_j") > 1)
+        ends.with_columns(
+            shared=(pl.col("label").n_unique().over(partner) > 1) & (pl.col("loggf").n_unique().over(partner) > 1)
+        )
         .group_by(*level, "label", maintain_order=True)
         .agg(ownkey=pl.col("shared").any())
         .select(
@@ -691,8 +696,11 @@ def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
     gfall = dfgfall.lazy()
     for side in ("lower", "upper"):
         gfall = gfall.join(
-            keys.rename({"energy": f"energyabovegsinpercm_{side}", "j": f"j_{side}", "label": f"label_{side}"}).rename(
-                {"labelkey": f"labelkey_{side}"}
+            keys.select(
+                pl.col("energy").alias(f"energyabovegsinpercm_{side}"),
+                pl.col("j").alias(f"j_{side}"),
+                pl.col("label").alias(f"label_{side}"),
+                pl.col("labelkey").alias(f"labelkey_{side}"),
             ),
             on=[f"energyabovegsinpercm_{side}", f"j_{side}", f"label_{side}"],
             how="left",
@@ -800,7 +808,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "labelkey"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
-        # Equal energy and J do not identify one level. A level with two spellings keeps the first label.
+        # Equal energy and J do not identify one level. maintain_order makes two results the same in each run:
+        # the label that stays for a level with two spellings, and the order of two levels at one energy and J.
         .unique(["energyabovegsinpercm", "j", "labelkey"], keep="first", maintain_order=True)
         .sort("energyabovegsinpercm", "j", maintain_order=True)
         .select(
@@ -808,7 +817,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             pl.col("j"),
             pl.col("labelkey"),
             levelname=(
-                pl.col("label")
+                pl.when(pl.col("labelkey").str.len_bytes() > 0).then(pl.col("labelkey")).otherwise(pl.col("label"))
                 + ",enpercm="
                 + pl.col("energyabovegsinpercm").cast(pl.Utf8)
                 + ",j="
@@ -834,6 +843,18 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         )
         raise ValueError(msg)
     log_and_print(flog, f"The reader got {len(dflevels):d} levels.")
+    for names in (
+        dflevels.group_by("energyabovegsinpercm", "j", maintain_order=True)
+        .agg("levelname")
+        .filter(pl.col("levelname").list.len() > 1)["levelname"]
+    ):
+        log_detail(
+            flog,
+            ("adata",),
+            "separate levels at one energy and J",
+            f"The levels {' and '.join(repr(name) for name in names)} have equal energy and J. They have lines of"
+            " different loggf to the same level, so the reader keeps them as separate levels.",
+        )
 
     transitions = (
         gfall.select(*transition_columns, "labelkey_lower", "labelkey_upper")
