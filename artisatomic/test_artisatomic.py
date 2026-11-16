@@ -4986,11 +4986,11 @@ def test_add_level_ids_forbidden_name_joins():
     assert result["upperlevel"].to_list() == [2, 2]
     assert result["forbidden"].to_list() == [False, True]
 
-    with pytest.raises(ValueError, match="nameto join changed the transition count from 1 to 0"):
+    with pytest.raises(ValueError, match=r"1 transitions have a nameto that matches no level\. The first is 'x'"):
         add_level_ids_forbidden(dflevels, pl.DataFrame({"namefrom": ["a"], "nameto": ["x"], "A": [1.0]}))
 
     dflevels_duplicate = pl.DataFrame({"levelid": [0, 1, 2], "levelname": ["a", "b", "a"], "parity": [0, 1, 0]})
-    with pytest.raises(ValueError, match="namefrom join changed the transition count from 1 to 2"):
+    with pytest.raises(ValueError, match="More than one level has the name 'a', which is the namefrom of a transition"):
         add_level_ids_forbidden(dflevels_duplicate, pl.DataFrame({"namefrom": ["a"], "nameto": ["b"], "A": [1.0]}))
 
 
