@@ -282,8 +282,8 @@ def lines_text(count: int) -> str:
 def assign_missing_j(dfgfall: pl.DataFrame, nelectrons: int, flog) -> pl.DataFrame:
     """Give a level its J where a gfall row gives J = 0.0 and the level cannot have J = 0.
 
-    Such a J means that the row gives no J for the level. The reader keys the levels on the
-    energy and J, so the row would make an extra level with g = 1. A J that is not 0.0 does not
+    Such a J means that the row gives no J for the level. The key of a level holds its energy
+    and J, so the row would make an extra level with g = 1. A J that is not 0.0 does not
     change, because a wrong label can also cause it.
 
     The function changes a row only if all of these conditions are true:
@@ -438,8 +438,8 @@ def drop_lines_of_a_second_ground_j(dfgfall: pl.DataFrame, flog) -> pl.DataFrame
     """Keep one J for the levels at 0 cm^-1, and drop the lines that give another J there.
 
     A gfall row can give the ground level a wrong J. S I gives one line from "3p4 3P" at 0.000 cm^-1
-    with J = 0 (3P0 is at 573.64 cm^-1), and Mg IV and Dy I have one such line each. The reader keys
-    a level on its energy and J, so such a row makes a second level at 0 cm^-1, and the sort can make
+    with J = 0 (3P0 is at 573.64 cm^-1), and Mg IV and Dy I have one such line each. The key of a
+    level holds its energy and J, so such a row makes a second level at 0 cm^-1, and the sort can make
     it the first level of the ion. The J that most lines give at 0 cm^-1 stays.
     """
     groundj = pl.concat(
@@ -654,6 +654,61 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     return pl.concat([wholelines, combined], how="diagonal_relaxed").select(wholelines.columns)
 
 
+def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
+    """Add a label key for each level. Two rows give the same level if the energy, J and label key are equal.
+
+    Two labels at one energy and J are two levels only if they have lines of different loggf to the
+    same level. Such a label is its own key. gfall also gives one level with two spellings of its
+    label. Each line then has only one of the spellings, or gfall gives the line two times with
+    equal loggf. A label of that type gets the key of the first label with its own key at that
+    energy and J. It gets an empty key if no label there has its own key.
+    """
+    level = ["energy", "j"]
+    partner = [*level, "partner_energy", "partner_j"]
+    ends = pl.concat(
+        [
+            dfgfall.lazy().select(
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+                j=pl.col(f"j_{side}"),
+                label=pl.col(f"label_{side}"),
+                partner_energy=pl.col(f"energyabovegsinpercm_{other}"),
+                partner_j=pl.col(f"j_{other}"),
+                loggf=pl.col("loggf"),
+            )
+            for side, other in (("lower", "upper"), ("upper", "lower"))
+        ]
+    )
+    keys = (
+        ends.with_columns(
+            shared=(pl.col("label").n_unique().over(partner) > 1) & (pl.col("loggf").n_unique().over(partner) > 1)
+        )
+        .group_by(*level, "label", maintain_order=True)
+        .agg(ownkey=pl.col("shared").any())
+        .select(
+            *level,
+            "label",
+            labelkey=pl.when(pl.col("ownkey"))
+            .then(pl.col("label"))
+            .otherwise(pl.col("label").filter(pl.col("ownkey")).first().over(level))
+            .fill_null(""),
+        )
+    )
+    gfall = dfgfall.lazy()
+    for side in ("lower", "upper"):
+        gfall = gfall.join(
+            keys.select(
+                pl.col("energy").alias(f"energyabovegsinpercm_{side}"),
+                pl.col("j").alias(f"j_{side}"),
+                pl.col("label").alias(f"label_{side}"),
+                pl.col("labelkey").alias(f"labelkey_{side}"),
+            ),
+            on=[f"energyabovegsinpercm_{side}", f"j_{side}", f"label_{side}"],
+            how="left",
+            maintain_order="left",
+        )
+    return gfall.collect()
+
+
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
@@ -677,6 +732,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         "energyabovegsinpercm_{0}": "energyabovegsinpercm",
         "j_{0}": "j",
         "label_{0}": "label",
+        "labelkey_{0}": "labelkey",
     }
 
     transition_columns = [
@@ -744,23 +800,24 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     dfgfall = combine_line_components(dfgfall, flog)
     dfgfall = drop_lines_of_a_second_ground_j(dfgfall, flog)
     warn_impossible_j(dfgfall, atomic_number - ion_charge, flog)
-    gfall = dfgfall.lazy()
+    gfall = with_level_label_keys(dfgfall).lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
     e_upper_levels = gfall.rename({key.format("upper"): value for key, value in column_renames.items()})
 
-    selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label"]
+    selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "labelkey"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
-        # maintain_order makes the label that survives for a duplicated (energy, j) reproducible.
-        # Without it the level names in adata.txt can differ from run to run.
-        .unique(["energyabovegsinpercm", "j"], keep="first", maintain_order=True)
-        .sort("energyabovegsinpercm", "j")
+        # Equal energy and J do not identify one level. maintain_order makes two results the same in each run:
+        # the label that stays for a level with two spellings, and the order of two levels at one energy and J.
+        .unique(["energyabovegsinpercm", "j", "labelkey"], keep="first", maintain_order=True)
+        .sort("energyabovegsinpercm", "j", maintain_order=True)
         .select(
             pl.col("energyabovegsinpercm"),
             pl.col("j"),
+            pl.col("labelkey"),
             levelname=(
-                pl.col("label")
+                pl.when(pl.col("labelkey").str.len_bytes() > 0).then(pl.col("labelkey")).otherwise(pl.col("label"))
                 + ",enpercm="
                 + pl.col("energyabovegsinpercm").cast(pl.Utf8)
                 + ",j="
@@ -786,29 +843,35 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         )
         raise ValueError(msg)
     log_and_print(flog, f"The reader got {len(dflevels):d} levels.")
+    for names in (
+        dflevels.group_by("energyabovegsinpercm", "j", maintain_order=True)
+        .agg("levelname")
+        .filter(pl.col("levelname").list.len() > 1)["levelname"]
+    ):
+        log_detail(
+            flog,
+            ("adata",),
+            "separate levels at one energy and J",
+            f"The levels {' and '.join(repr(name) for name in names)} have equal energy and J. They have lines of"
+            " different loggf to the same level, so the reader keeps them as separate levels.",
+        )
 
     transitions = (
-        gfall.select(transition_columns)
+        gfall.select(*transition_columns, "labelkey_lower", "labelkey_upper")
         # gfall lists some lines twice, once at the observed wavelength and once at the Ritz one.
         # Y II has one such pair at 241.7267 and 241.7308 nm, both with loggf = 0. ARTIS adds
         # the A values of two rows that share a level pair, so a repeat would double the line.
         #
-        # A row only counts as a repeat if the levels, the labels AND the strength all match.
-        # Each on its own keeps rows that are separate lines:
-        #  - Sr I has 785 rows that share a level pair but have different labels. Their strengths
-        #    follow the spin rule, so they are lines whose levels the (energy, J) key above merged.
-        #  - Sr III has 46 rows that share a level pair and both labels but differ in loggf, by
-        #    as much as -1.911 against -5.742. Sr II in the zztar layout has five more.
-        # A drop of either kind would delete a real transition, and in Sr III it would keep the
-        # weaker of the two.
+        # A repeated row has the same level identities and strength. Sr III has distinct strengths for one level pair.
         .with_columns(gf=10 ** pl.col("loggf"))
         .join(
             dflevels.lazy().select(
                 energyabovegsinpercm_lower=pl.col("energyabovegsinpercm"),
                 j_lower=pl.col("j"),
+                labelkey_lower=pl.col("labelkey"),
                 levelid_lower=pl.col("levelid"),
             ),
-            on=["energyabovegsinpercm_lower", "j_lower"],
+            on=["energyabovegsinpercm_lower", "j_lower", "labelkey_lower"],
             how="left",
             # polars gives a join no defined row order without this. The unique() below keeps the
             # first of two duplicates, and the writer keeps tied rows in this order.
@@ -818,9 +881,10 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             dflevels.lazy().select(
                 energyabovegsinpercm_upper=pl.col("energyabovegsinpercm"),
                 j_upper=pl.col("j"),
+                labelkey_upper=pl.col("labelkey"),
                 levelid_upper=pl.col("levelid"),
             ),
-            on=["energyabovegsinpercm_upper", "j_upper"],
+            on=["energyabovegsinpercm_upper", "j_upper", "labelkey_upper"],
             how="left",
             maintain_order="left",
         )
@@ -845,8 +909,8 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
             "j_lower",
             "energyabovegsinpercm_upper",
             "j_upper",
-            "label_lower",
-            "label_upper",
+            "labelkey_lower",
+            "labelkey_upper",
             "loggf",
         ],
         keep="first",
@@ -871,7 +935,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 
-    return ionization_energy_in_ev, dflevels, transitions
+    return ionization_energy_in_ev, dflevels.drop("labelkey"), transitions
 
 
 def get_level_valence_n(levelname: str, nelectrons: int | None = None) -> int | None:
