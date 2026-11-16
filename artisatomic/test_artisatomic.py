@@ -6988,12 +6988,57 @@ def test_readkuruczdata_keeps_distinct_terms_with_equal_energy_and_j(tmp_path, m
         )
 
 
+def test_readkuruczdata_joins_a_second_spelling_to_the_level_that_has_lines_in_common(tmp_path, monkeypatch):
+    """A third label with no line in common with the two terms gives no third level."""
+    lines = [
+        (
+            "   154.7590 -2.475 38.00       0.000  0.0 5s2 1S      -64616.601  1.0 z(2P)1P 89  7.75 -5.71 -7.70K12  0 0  "
+            "0 0.000  0 0.000                        0 1129     0"
+        ),
+        (
+            " 12336.4026  0.493 38.00  -43756.589  6.0 5s7i 1I     -42946.201  5.0 h(2S)1H 35  6.40 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1011 1006     0"
+        ),
+        (
+            " 12336.4050  1.276 38.00  -43756.589  6.0 5s7i 3I     -42946.201  5.0 h(2S)1H 35  6.40 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1013 1006     0"
+        ),
+        (
+            "   630.8078 -5.691 38.00  -43756.589  6.0 5s7I 1I     -59604.896  5.0 w(2D)3I 70  5.94 -2.30 -6.96K12  0 0  "
+            "0 0.000  0 0.000                     1011  882     0"
+        ),
+    ]
+    levels, transitions = read_gfall_lines(tmp_path, monkeypatch, lines, atomic_number=38)
+    pair = levels.lazy().filter((pl.col("energyabovegsinpercm") == 43756.589) & (pl.col("j") == 6.0)).collect()
+    # The level keeps the label of its first row in the file, which is the second spelling here.
+    assert sorted(name.split(",")[0] for name in pair["levelname"]) == ["5s7I 1I", "5s7i 3I"]
+    ids = {name.split(",")[0]: levelid for name, levelid in levels.select("levelname", "levelid").iter_rows()}
+    incoming = transitions.lazy().filter(pl.col("lowerlevel") == ids["h(2S)1H 35"]).collect()
+    assert sorted(incoming["upperlevel"].to_list()) == sorted([ids["5s7I 1I"], ids["5s7i 3I"]])
+    outgoing = transitions.lazy().filter(pl.col("upperlevel") == ids["w(2D)3I 70"]).collect()
+    assert outgoing["lowerlevel"].to_list() == [ids["5s7I 1I"]]
+
+
+# Each level has two spellings of its label in the zztar file, and no line in common between the two.
+levels_with_two_spellings = [
+    ((38, 1), 21698.482, 1.0),
+    ((38, 1), 37424.713, 1.0),
+    ((39, 1), 14948.994, 1.5),
+    ((39, 1), 15245.803, 2.5),
+    ((39, 1), 15328.865, 1.5),
+    ((39, 1), 15712.522, 3.5),
+    ((39, 2), 58263.229, 1.0),
+    ((39, 2), 60535.944, 2.0),
+    ((39, 2), 65276.02, 3.0),
+]
+
+
 @pytest.mark.parametrize("ion", [(38, 1), (39, 1), (39, 2)])
-def test_readkuruczdata_preserves_known_level_aliases(monkeypatch, ion: tuple[int, int]):
-    """Known labels for one level keep one level id and one statistical weight."""
+def test_readkuruczdata_keeps_one_level_for_two_spellings_of_a_label(monkeypatch, ion: tuple[int, int]):
+    """Two spellings of one label keep one level id and one statistical weight."""
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", PYDIR / ".." / "atomic-data-kurucz" / "test_sample")
     _, levels, _ = readkuruczdata.read_levels_and_transitions(*ion, io.StringIO())
-    for energy, j, _label in readkuruczdata.level_label_aliases[ion]:
+    for _ion, energy, j in filter(lambda case: case[0] == ion, levels_with_two_spellings):
         selected = levels.lazy().filter((pl.col("energyabovegsinpercm") == energy) & (pl.col("j") == j)).collect()
         assert selected.height == 1
         assert selected["g"].item() == 2 * j + 1

@@ -654,39 +654,51 @@ def combine_line_components(dfgfall: pl.DataFrame, flog) -> pl.DataFrame:
     return pl.concat([wholelines, combined], how="diagonal_relaxed").select(wholelines.columns)
 
 
-# Each alias applies to one ion, energy and J. Other levels can use the same label.
-# The extendedatoms files confirm the Y terms and configurations at the corresponding energies.
-level_label_aliases: dict[tuple[int, int], dict[tuple[float, float, str], str]] = {
-    (38, 1): {
-        (21698.482, 1.0, "s5P 1P"): "s5p 1P",
-        (37424.713, 1.0, "7s 3S"): "s7s 3S",
-    },
-    (39, 1): {
-        (14948.994, 1.5, "s5p z4F"): "ds5p z4F",
-        (15245.803, 2.5, "s5p z4F"): "ds5p z4F",
-        (15328.865, 1.5, "d25s a4F"): "d25s a4P",
-        (15712.522, 3.5, "s5p z4F"): "ds5p z4F",
-    },
-    (39, 2): {
-        (58263.229, 1.0, "s5s e3S"): "s6s e3S",
-        (60535.944, 2.0, "d5d 1D"): "d5d f1D",
-        (65276.02, 3.0, "d5d g3D"): "s5d g3D",
-    },
-}
+def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
+    """Add a label key for each level. Two rows give the same level if the energy, J and label key are equal.
 
-
-def with_level_label_keys(dfgfall: pl.DataFrame, atomic_number: int, ion_stage: int) -> pl.DataFrame:
-    """Add a label key for each level. Known aliases share a key, and the source labels stay unchanged."""
-    aliases = level_label_aliases.get((atomic_number, ion_stage), {})
-    keys = []
+    Two labels at one energy and J are two levels only if they have lines to the same level. Such a
+    label is its own key. gfall also gives one level with two spellings of its label, and each line
+    then has only one of the spellings. A label of that type gets the key of the first label with
+    its own key at that energy and J. It gets an empty key if no label there has its own key.
+    """
+    level = ["energy", "j"]
+    ends = pl.concat(
+        [
+            dfgfall.lazy().select(
+                energy=pl.col(f"energyabovegsinpercm_{side}"),
+                j=pl.col(f"j_{side}"),
+                label=pl.col(f"label_{side}"),
+                partner_energy=pl.col(f"energyabovegsinpercm_{other}"),
+                partner_j=pl.col(f"j_{other}"),
+            )
+            for side, other in (("lower", "upper"), ("upper", "lower"))
+        ]
+    )
+    keys = (
+        ends.with_columns(shared=pl.col("label").n_unique().over(*level, "partner_energy", "partner_j") > 1)
+        .group_by(*level, "label", maintain_order=True)
+        .agg(ownkey=pl.col("shared").any())
+        .select(
+            *level,
+            "label",
+            labelkey=pl.when(pl.col("ownkey"))
+            .then(pl.col("label"))
+            .otherwise(pl.col("label").filter(pl.col("ownkey")).first().over(level))
+            .fill_null(""),
+        )
+    )
+    gfall = dfgfall.lazy()
     for side in ("lower", "upper"):
-        label = pl.col(f"label_{side}")
-        key = label
-        for (energy, j, alias), name in aliases.items():
-            matches = (pl.col(f"energyabovegsinpercm_{side}") == energy) & (pl.col(f"j_{side}") == j) & (label == alias)
-            key = pl.when(matches).then(pl.lit(name)).otherwise(key)
-        keys.append(key.alias(f"labelkey_{side}"))
-    return dfgfall.lazy().with_columns(keys).collect()
+        gfall = gfall.join(
+            keys.rename({"energy": f"energyabovegsinpercm_{side}", "j": f"j_{side}", "label": f"label_{side}"}).rename(
+                {"labelkey": f"labelkey_{side}"}
+            ),
+            on=[f"energyabovegsinpercm_{side}", f"j_{side}", f"label_{side}"],
+            how="left",
+            maintain_order="left",
+        )
+    return gfall.collect()
 
 
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
@@ -780,7 +792,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     dfgfall = combine_line_components(dfgfall, flog)
     dfgfall = drop_lines_of_a_second_ground_j(dfgfall, flog)
     warn_impossible_j(dfgfall, atomic_number - ion_charge, flog)
-    gfall = with_level_label_keys(dfgfall, atomic_number, ion_stage).lazy()
+    gfall = with_level_label_keys(dfgfall).lazy()
 
     e_lower_levels = gfall.rename({key.format("lower"): value for key, value in column_renames.items()})
     e_upper_levels = gfall.rename({key.format("upper"): value for key, value in column_renames.items()})
@@ -788,7 +800,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     selected_columns = ["atomic_number", "ion_charge", "energyabovegsinpercm", "j", "label", "labelkey"]
     dflevels = (
         pl.concat([e_lower_levels.select(selected_columns), e_upper_levels.select(selected_columns)])
-        # Equal energy and J do not identify one level. Known aliases keep the first source label.
+        # Equal energy and J do not identify one level. A level with two spellings keeps the first label.
         .unique(["energyabovegsinpercm", "j", "labelkey"], keep="first", maintain_order=True)
         .sort("energyabovegsinpercm", "j", maintain_order=True)
         .select(
