@@ -49,9 +49,9 @@ coverage = ["coverage>=7.15.3"]
 dev = [
     { include-group = "coverage" },
     "prek>=0.4.14",
-    "pyrefly>=1.2.0",
+    "pyrefly>=1.5.0",
     "pytest>=9.1.0",
-    "ruff>=0.16.4",
+    "ruff>=0.17.5",
     "ty>=0.0.74",
     "types-requests>=2.32.0.20241016",
 ]
@@ -115,7 +115,7 @@ ignore = [
     # value read from a data file, or a test for a cross section that is zero everywhere
     "float-equality-comparison",
     "missing-type-function-argument",
-    "missing-return-type-undocumented-public-function",
+    "missing-return-type-public-function",
     "missing-return-type-private-function",
     "any-type",
     "strip-with-multi-characters",

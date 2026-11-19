@@ -6648,7 +6648,7 @@ def test_cli_leaves_a_handler_that_it_cannot_put_back(monkeypatch):
 
     # Python accepts a handler with no hash, for example a callable instance of a class with __eq__
     class HandlerWithNoHash:
-        __hash__ = None  # type: ignore[assignment]
+        __hash__: None = None
 
         def __call__(self, signum: int, frame: object) -> None:
             pass

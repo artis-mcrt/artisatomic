@@ -26,7 +26,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
               with:
                   activate-environment: true
 
@@ -66,7 +66,7 @@ jobs:
               run: uv run -- ty check
 
             - name: Run prek pre-commit checks
-              uses: j178/prek-action@v3.1.0
+              uses: j178/prek-action@v3.1.1
 
     docs:
         name: Build the documentation
@@ -78,7 +78,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
 
             # readthedocs.org builds with the same options and the same Python version from .readthedocs.yaml,
             # so the two builds give the same warnings. Both stop on a warning.
@@ -94,7 +94,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
               with:
                   activate-environment: true
 
@@ -157,7 +157,7 @@ jobs:
               uses: actions/checkout@v7
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
               with:
                   activate-environment: true
 
@@ -213,7 +213,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
               with:
                   activate-environment: true
 
@@ -301,7 +301,7 @@ jobs:
                   fetch-depth: 0
 
             - name: Setup uv
-              uses: astral-sh/setup-uv@v7
+              uses: astral-sh/setup-uv@v10.3.3
               with:
                   activate-environment: true
 
