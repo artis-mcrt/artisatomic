@@ -2288,13 +2288,16 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     eV divided by E_0. Each shell after the first contributes only where
     FREQ >= EV_TO_HZ * E_th_eV.
     """
-    thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
-    thresholdenergyryd = thresholdenergyev / ryd_to_ev
+    energy_ev = fit_energy_div_threshold * (hc_in_ev_angstrom / lambda_angstrom)
+    # The threshold of an inner shell falls between two points of the grid. Two rows at the threshold give the
+    # step of CMFGEN: the first row is without the shell, and the second row is with it. Without them the
+    # downsample joins the two grid points with a ramp. The grid has each energy one time, so only the first
+    # row of a step has the energy of the next row.
+    shell_edges_ev = np.unique([p.E_th_eV for p in fitcoefficients[1:] if energy_ev[0] < p.E_th_eV <= energy_ev[-1]])
+    energy_ev = np.sort(np.concatenate((np.union1d(energy_ev, shell_edges_ev), shell_edges_ev)))
+    below_step = np.append(energy_ev[:-1] == energy_ev[1:], False)
 
-    energydivthreshold = fit_energy_div_threshold
-    energy_ev = energydivthreshold * thresholdenergyev
-
-    crosssection = np.zeros(len(energydivthreshold))
+    crosssection = np.zeros(len(energy_ev))
     for shellnum, params in enumerate(fitcoefficients):
         y = energy_ev / params.E_0
         P = params.P
@@ -2305,10 +2308,11 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
         # the first shell starts at the level's own ionisation edge, later (inner) shells
         # only contribute above their own threshold
         if shellnum > 0:
-            shellcrosssection = np.where(energy_ev < params.E_th_eV, 0.0, shellcrosssection)
+            closed = (energy_ev < params.E_th_eV) | ((energy_ev == params.E_th_eV) & below_step)
+            shellcrosssection = np.where(closed, 0.0, shellcrosssection)
         crosssection += shellcrosssection
 
-    return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
+    return np.column_stack([energy_ev / ryd_to_ev, crosssection])
 
 
 valence_orbital_regex = re.compile(rf"(?<!\d)(\d+)([{lchars_lower}])")

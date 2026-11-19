@@ -313,25 +313,28 @@ def add_level_ids_forbidden(dfenergylevels_ion: pl.DataFrame, dftransitions_ion:
     if dftransitions_ion.is_empty():
         return dftransitions_ion
 
-    # the name-keyed joins keep the reader's row order (maintain_order) and fail on a height
-    # change, as the id-keyed joins below do. An inner join drops a transition whose name matches
-    # no level, and gives no message. A level name that two levels share multiplies its rows. Both
-    # mean the reader's level list and transition list disagree. Not an assert: this guards
+    # The name-keyed joins keep the row order of the reader (maintain_order). A left join keeps a
+    # transition whose name matches no level, and gives it a null id. The row count can then only
+    # increase, so a missing name and a shared name cannot cancel. Not an assert: this guards
     # written output.
     for idcolumn, namecolumn in (("upperlevel", "nameto"), ("lowerlevel", "namefrom")):
         if idcolumn in dftransitions_ion.columns:
             continue
+        lookup = dfenergylevels_ion.select(pl.col("levelid").alias(idcolumn), pl.col("levelname").alias(namecolumn))
         height_before = dftransitions_ion.height
-        dftransitions_ion = dftransitions_ion.join(
-            dfenergylevels_ion.select(pl.col("levelid").alias(idcolumn), pl.col("levelname").alias(namecolumn)),
-            on=namecolumn,
-            maintain_order="left",
-        )
-        if dftransitions_ion.height != height_before:
+        dftransitions_ion = dftransitions_ion.join(lookup, on=namecolumn, how="left", maintain_order="left")
+        unmatched = dftransitions_ion.filter(pl.col(idcolumn).is_null())[namecolumn]
+        if not unmatched.is_empty():
             msg = (
-                f"the {namecolumn} join changed the transition count from {height_before:d} to"
-                f" {dftransitions_ion.height:d}: a level name in the transitions matches no level, or more than one"
+                f"{unmatched.len():d} transitions have a {namecolumn} that matches no level."
+                f" The first is {unmatched[0]!r}."
             )
+            raise ValueError(msg)
+        if dftransitions_ion.height != height_before:
+            shared = lookup.filter(pl.col(namecolumn).is_duplicated()).join(
+                dftransitions_ion, on=namecolumn, how="semi"
+            )
+            msg = f"More than one level has the name {shared[namecolumn][0]!r}, which is the {namecolumn} of a transition."
             raise ValueError(msg)
 
     if "forbidden" not in dftransitions_ion.columns:
