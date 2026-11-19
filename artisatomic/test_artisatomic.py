@@ -5386,6 +5386,84 @@ def test_cmfgen_fit_functions():
     assert table9[0, 1] == pytest.approx(6.3, rel=0.02)
 
 
+type9_lambda_angstrom = 1000.0
+# the grid of get_vy95_phixstable() for that threshold, from the same product
+type9_grid_ev = readhillierdata.fit_energy_div_threshold * (hc_in_ev_angstrom / type9_lambda_angstrom)
+
+
+def type9_table_of_inner_shells(edge_ev: float, shell_count: int) -> np.ndarray:
+    """Give the type 9 table of a level with inner shells at edge_ev. The first shell has a cross section of zero."""
+    first = readhillierdata.VY95PhixsFitRow(1, 0, float(type9_grid_ev[0]), 1.0, 0.0, 1.0, 0.0, 1.0)
+    inner = readhillierdata.VY95PhixsFitRow(2, 0, edge_ev, 1.0, 1.0, 1.0, 0.0, 1.0)
+    return readhillierdata.get_vy95_phixstable(type9_lambda_angstrom, [first, *[inner] * shell_count])
+
+
+def type9_inner_shell_sigma(energy_ev: np.ndarray) -> np.ndarray:
+    """Give the cross section of one inner shell of type9_table_of_inner_shells() at or above its threshold."""
+    return ((energy_ev - 1.0) ** 2 + 1.0) * energy_ev**-5.5
+
+
+@pytest.mark.parametrize(
+    ("edge_ev", "extra_rows"),
+    [
+        pytest.param(1.12345 * float(type9_grid_ev[0]), 2, id="between two samples"),
+        pytest.param(float(type9_grid_ev[300]), 1, id="on a sample"),
+        pytest.param(float(np.nextafter(type9_grid_ev[300], 0.0)), 2, id="next float below a sample"),
+        pytest.param(float(np.nextafter(type9_grid_ev[300], np.inf)), 2, id="next float above a sample"),
+    ],
+)
+@pytest.mark.parametrize("shell_count", [1, 2])
+def test_type9_table_has_a_step_at_an_inner_shell_threshold(edge_ev, extra_rows, shell_count):
+    """The table has two rows at the threshold of an inner shell: one without the shell and one with it.
+
+    Shells with one threshold share the two rows. The downsample needs an energy column that does not decrease.
+    """
+    table = type9_table_of_inner_shells(edge_ev, shell_count)
+    edge_ryd = edge_ev / ryd_to_ev
+    assert len(table) == len(type9_grid_ev) + extra_rows
+    assert np.all(np.diff(table[:, 0]) >= 0.0)
+    first_open = int(np.argmax(table[:, 1] > 0.0))
+    assert np.all(table[first_open:, 1] > 0.0)
+    assert table[first_open - 1, 0] == table[first_open, 0] == edge_ryd
+    assert table[first_open, 1] == pytest.approx(shell_count * float(type9_inner_shell_sigma(np.array(edge_ev))))
+
+
+def test_type9_table_has_no_step_for_a_threshold_outside_the_grid():
+    """A shell with its threshold at the threshold of the level is open in each row. One above the grid is closed."""
+    table = type9_table_of_inner_shells(float(type9_grid_ev[0]), 1)
+    assert len(table) == len(type9_grid_ev)
+    assert table[0, 1] == pytest.approx(float(type9_inner_shell_sigma(type9_grid_ev[0])))
+    assert np.all(table[:, 1] > 0.0)
+
+    table = type9_table_of_inner_shells(1.5 * float(type9_grid_ev[-1]), 1)
+    assert len(table) == len(type9_grid_ev)
+    assert np.all(table[:, 1] == 0.0)
+
+
+def test_type9_downsample_matches_integrals_at_a_shell_step():
+    """The bin with an inner-shell threshold agrees with the integral of the shell from the threshold to the bin end."""
+    threshold_ev = float(type9_grid_ev[0])
+    edge_ev = 2.812345 * threshold_ev
+    xgrid = output_xgrid(100, 0.03)
+    actual = reduce_phixs_tables_worker(6000.0, xgrid, type9_table_of_inner_shells(edge_ev, 1))
+    binid = 60
+    low = 0.5 * (xgrid[binid - 1] + xgrid[binid]) * threshold_ev
+    high = 0.5 * (xgrid[binid] + xgrid[binid + 1]) * threshold_ev
+    assert low < edge_ev < high
+    nodes, weights = np.polynomial.legendre.leggauss(64)
+    kt_ev = 6000.0 * h_in_ev_seconds / h_over_kb_in_K_sec
+
+    def integral(start: float, end: float, with_sigma: bool) -> float:
+        energy = start + 0.5 * (nodes + 1.0) * (end - start)
+        weight = energy**2 * np.exp(-(energy - low) / kt_ev)
+        sigma = type9_inner_shell_sigma(energy) if with_sigma else 1.0
+        return float(0.5 * (end - start) * np.sum(weights * weight * sigma))
+
+    expected = integral(edge_ev, high, True) / integral(low, high, False)
+    assert actual[binid] == pytest.approx(expected, rel=2e-4)
+    assert np.all(actual[:binid] == 0.0)
+
+
 def test_read_adf04_selects_the_nearest_temperature():
     """The collision strengths come from the tabulated temperature nearest to -electrontemperature.
 
