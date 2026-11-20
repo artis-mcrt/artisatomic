@@ -20,9 +20,23 @@ from artisatomic.base import sort_ion_handlers
 from artisatomic.base import TESTMODE
 from artisatomic.iondata import known_handlers
 
-# The file that holds a full ion selection, in the working directory. main() rejects an ion limit
-# that comes with this file, so both modules name it here.
+# The file that holds a full ion selection, in the working directory. The option -ionhandlersfile
+# names a different file. main() rejects an ion limit that comes with such a file.
 inputhandlersfile = Path("artisatomicionhandlers.json")
+
+
+def find_handlers_file(handlersfile: Path | None) -> Path | None:
+    """Give the ion handlers file of the run, or None if the run uses the built-in selection.
+
+    handlersfile is the value of the option -ionhandlersfile. That file must exist. With None, the
+    file is inputhandlersfile in the working directory, if it exists.
+    """
+    if handlersfile is not None:
+        if not handlersfile.is_file():
+            msg = f"The ion handlers file {handlersfile} does not exist."
+            raise FileNotFoundError(msg)
+        return handlersfile
+    return inputhandlersfile if inputhandlersfile.exists() else None
 
 
 def keep_ions_within_limits(
@@ -48,22 +62,26 @@ def keep_ions_within_limits(
 
 
 def get_ion_handlers(
-    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+    minionstage: int | None,
+    maxionstage: int | None,
+    maxatomicnumber: int | None,
+    handlersfile: Path | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Get the ions to process and the handler to read each one with.
 
-    The function reads artisatomicionhandlers.json when that file exists, so the user can repeat
-    a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
+    The function reads the ion handlers file when find_handlers_file() gives one, so the user can
+    repeat a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
     applies to it. Otherwise the function builds the built-in selection: the ions below plus every
     ion for which the readers' extend_ion_list() functions find data.
 
     minionstage, maxionstage and maxatomicnumber limit that built-in selection. A value of None
     applies no limit. The caller states all three, because build_parser() holds their default values.
     """
-    if inputhandlersfile.exists():
-        print(f"Reading {inputhandlersfile}")
-        with inputhandlersfile.open(encoding="utf-8") as f:
-            return sort_ion_handlers(parse_ion_handlers(json.load(f)))
+    handlersfile = find_handlers_file(handlersfile)
+    if handlersfile is not None:
+        print(f"Reading {handlersfile}")
+        with handlersfile.open(encoding="utf-8") as f:
+            return sort_ion_handlers(parse_ion_handlers(json.load(f), handlersfile))
 
     # Include every ion that has data.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
@@ -119,7 +137,9 @@ renamed_handlers: dict[str, dict[int | None, str]] = {
 }
 
 
-def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]:
+def parse_ion_handlers(
+    loaded: t.Any, filename: str | Path = inputhandlersfile
+) -> list[tuple[int, list[tuple[int, str]]]]:
     """Convert the JSON form of an ion_handlers list into tuples, and reject a malformed entry.
 
     json.load() gives nested lists. A hand-written file can carry a bare ion stage, a misspelt
@@ -127,20 +147,20 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
     optional. This function rejects all three before the run writes any output file. The function
     read_ion_data() would reject the name only after the run wrote compositiondata.txt and the
     earlier elements. An unpacking error several frames later would name neither the element nor
-    the file.
+    the file. filename is the name of the file in each message.
     """
     if not isinstance(loaded, list):
-        msg = "artisatomicionhandlers.json does not hold a list of [atomic_number, [ions]] pairs."
+        msg = f"{filename} does not hold a list of [atomic_number, [ions]] pairs."
         raise TypeError(msg)
     ion_handlers: list[tuple[int, list[tuple[int, str]]]] = []
     for element in loaded:
         try:
             atomic_number, listions = element
         except (TypeError, ValueError):
-            msg = f"The entry {element!r} in artisatomicionhandlers.json is not an [atomic_number, [ions]] pair."
+            msg = f"The entry {element!r} in {filename} is not an [atomic_number, [ions]] pair."
             raise TypeError(msg) from None
         if not isinstance(listions, list):
-            msg = f"The entry {element!r} in artisatomicionhandlers.json has no list of [ion_stage, handler] pairs."
+            msg = f"The entry {element!r} in {filename} has no list of [ion_stage, handler] pairs."
             raise TypeError(msg)
         # a JSON true is a Python bool, which is an int, and int() cuts 26.9 to 26
         if (
@@ -148,27 +168,24 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
             or isinstance(atomic_number, bool)
             or not 1 <= atomic_number < len(elsymbols)
         ):
-            msg = f"The atomic number {atomic_number!r} in artisatomicionhandlers.json is not a whole number from 1 to {len(elsymbols) - 1}."
+            msg = f"The atomic number {atomic_number!r} in {filename} is not a whole number from 1 to {len(elsymbols) - 1}."
             raise ValueError(msg)
         ions: list[tuple[int, str]] = []
         for entry in listions:
             if isinstance(entry, int):
                 msg = (
-                    f"Z={atomic_number} ion stage {entry} in artisatomicionhandlers.json names no handler."
+                    f"Z={atomic_number} ion stage {entry} in {filename} names no handler."
                     " Write every ion as [ion_stage, handler]."
                 )
                 raise TypeError(msg)
             try:
                 ion_stage, handler = entry
             except (TypeError, ValueError):
-                msg = (
-                    f"Z={atomic_number} entry {entry!r} in artisatomicionhandlers.json is not an"
-                    " [ion_stage, handler] pair."
-                )
+                msg = f"Z={atomic_number} entry {entry!r} in {filename} is not an [ion_stage, handler] pair."
                 raise TypeError(msg) from None
             if not isinstance(ion_stage, int) or isinstance(ion_stage, bool) or not 1 <= ion_stage <= atomic_number + 1:
                 msg = (
-                    f"Z={atomic_number} ion stage {ion_stage!r} in artisatomicionhandlers.json is not a whole number"
+                    f"Z={atomic_number} ion stage {ion_stage!r} in {filename} is not a whole number"
                     f" from 1 to {atomic_number + 1}."
                 )
                 raise ValueError(msg)
@@ -176,7 +193,7 @@ def parse_ion_handlers(loaded: t.Any) -> list[tuple[int, list[tuple[int, str]]]]
             handlername = newnames.get(ion_stage, newnames[None])
             if handlername not in known_handlers:
                 msg = (
-                    f"Z={atomic_number} ion stage {ion_stage} in artisatomicionhandlers.json names the unknown"
+                    f"Z={atomic_number} ion stage {ion_stage} in {filename} names the unknown"
                     f" handler {handlername!r}. The handlers are: {', '.join(sorted(known_handlers))}."
                 )
                 raise ValueError(msg)

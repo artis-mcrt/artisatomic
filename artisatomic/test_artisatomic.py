@@ -2348,7 +2348,7 @@ def test_read_csv_columns_stops_for_an_empty_field(tmp_path, monkeypatch):
         readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
 
 
-def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
+def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch, capsys):
     """An ion handlers file selects the ions, so a limit with that file is an error and not a filter."""
     from artisatomic.cli import main
     from artisatomic.ionhandlers import get_ion_handlers
@@ -2362,13 +2362,17 @@ def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
     assert get_ion_handlers(1, 5, 8) == [(8, [(ion_stage, "cmfgen") for ion_stage in range(1, 7)])]
 
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "3", "-maxatomicnumber", "30"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage, -maxatomicnumber\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage, -maxatomicnumber." in capsys.readouterr().err
 
     # a limit that holds the value of its default is still a limit that the command line gave
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "5"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage." in capsys.readouterr().err
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
@@ -6539,7 +6543,7 @@ def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_pat
         ("-phixsnuincrement", "inf"),
     ],
 )
-def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, option, value):
+def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, capsys, option, value):
     """A bad value must stop the run before the run empties the output files of an earlier run."""
     from artisatomic.cli import main
 
@@ -6548,8 +6552,11 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     outputfolder.mkdir()
     (outputfolder / "adata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), option, value])
-    with pytest.raises(ValueError, match=f"{option} must be a finite number more than 0"):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    # the message is the last line, with no traceback
+    assert f"error: {option} must be a finite number more than 0" in capsys.readouterr().err.splitlines()[-1]
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 
@@ -6587,6 +6594,8 @@ def cli_run_with_stub_writer(
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    # the stub writer reads no CMFGEN file, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr(cli, "write_files", write_files)
     outputfolder = tmp_path / "artis_files"
     outputfolder.mkdir(exist_ok=True)

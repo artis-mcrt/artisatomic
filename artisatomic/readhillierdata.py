@@ -274,6 +274,17 @@ def description_of_ion(atomic_number: int, ion_stage: int) -> str:
     return bare_proton_description if (atomic_number, ion_stage) == (1, 2) else description
 
 
+def check_data_folder() -> None:
+    """Stop the run if the CMFGEN data set is absent, with a message that names the download script."""
+    datafolder = hillier_datadir / "atomic_21jun23"
+    if not datafolder.is_dir():
+        msg = (
+            f"The CMFGEN data folder {datafolder} does not exist. Go to {hillier_datadir} and run"
+            " '. ./setup_cmfgen_data.sh' to download the data set."
+        )
+        raise FileNotFoundError(msg)
+
+
 def hillier_ion_folder(atomic_number, ion_stage):
     """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
@@ -2928,6 +2939,9 @@ def read_hyd_phixsdata() -> None:
     global max_hyd_l_n, max_hyd_gaunt_n
     if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1:
         return
+
+    # the hydrogenic estimate of an ion of a different handler reads these tables also
+    check_data_folder()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         _hillier_ionization_energy_ev, dfhillier_energy_levels, _transitions = read_levels_and_transitions(

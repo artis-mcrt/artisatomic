@@ -3,6 +3,7 @@
 """Command-line entry point: build an ARTIS atomic database from the configured ions and handlers."""
 
 import argparse
+import contextlib
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import signal
 import socket
 import sys
 import tempfile
+import typing as t
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -20,28 +22,75 @@ import argcomplete
 # The functions import the modules of the package only when they need them. The package imports
 # polars and numpy, which took 0.3 s, so "--help" and the tab completion waited for them.
 
+# The name of the ion handlers file that a run reads from the working directory.
+# ionhandlers.inputhandlersfile holds the same name, and a test compares the two. The parser needs
+# the name for its help text, and an import of ionhandlers there would import polars.
+defaulthandlersfilename = "artisatomicionhandlers.json"
 # the record of the ions and the handlers of a run, in the output folder
 handlersrecordname = "artisatomicionhandlers_used.json"
 # the log of a run that failed, in the output folder. The log of the earlier run stays beside its output.
 failedlogname = "artisatomiclog_failed.txt"
 
 
+class VersionAction(argparse.Action):
+    """Print the version of the package and stop. The import of importlib.metadata waits until the user gives the option."""
+
+    def __init__(self, option_strings: list[str], dest: str, **kwargs: t.Any) -> None:
+        """Make an option that takes no value and puts no attribute into the namespace."""
+        super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+
+    def __call__(self, parser: argparse.ArgumentParser, *_args: object, **_kwargs: object) -> None:
+        """Print the version and stop the program with status 0."""
+        from importlib.metadata import PackageNotFoundError
+        from importlib.metadata import version
+
+        try:
+            packageversion = version("artisatomic")
+        except PackageNotFoundError:
+            packageversion = "(the package is not installed, so it has no version)"
+        print(f"artisatomic {packageversion}")
+        parser.exit()
+
+
 def build_parser() -> argparse.ArgumentParser:
-    """Build the command-line parser. Every option has a default, so parse_args([]) gives a full namespace."""
+    """Build the command-line parser. Every option has a default, so parse_args([]) gives a full namespace.
+
+    Each option has a form with one dash and a form with two dashes. The job scripts of the users
+    give the form with one dash.
+    """
     parser = argparse.ArgumentParser(
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        description="Produce an ARTIS atomic database from published atomic data sets.",
+        description=(
+            "Produce an ARTIS atomic database from published atomic data sets. The program writes adata.txt,"
+            " compositiondata.txt, transitiondata.txt and phixsdata_v2.txt into the output folder."
+        ),
+        epilog=(
+            "The built-in ion selection needs the data sets of its handlers. --listions shows the selection, and"
+            " --listhandlers shows the data source of each handler. The documentation is at"
+            " https://artisatomic.readthedocs.io"
+        ),
     )
-    parser.add_argument("-output_folder", action="store", default="artis_files", help="Folder for output files")
-    parser.add_argument("-nphixspoints", type=int, default=100, help="Number of cross section points; at least two")
+    parser.add_argument("--version", "-version", action=VersionAction, help="Show the version of artisatomic and stop")
+    parser.add_argument(
+        "-output_folder", "--output-folder", action="store", default="artis_files", help="Folder for output files"
+    )
+    parser.add_argument(
+        "-nphixspoints",
+        "--nphixspoints",
+        type=int,
+        default=100,
+        help="Number of cross section points; at least two",
+    )
     parser.add_argument(
         "-phixsnuincrement",
+        "--phixsnuincrement",
         type=float,
         default=0.03,
         help="Step between two cross section points, as a fraction of nu_edge",
     )
     parser.add_argument(
         "-optimaltemperature",
+        "--optimaltemperature",
         type=int,
         default=6000,
         help=(
@@ -51,24 +100,78 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "-electrontemperature",
+        "--electrontemperature",
         type=int,
         default=6000,
         help="Temperature in K at which artisatomic selects the effective collision strengths",
     )
     parser.add_argument(
-        "--nophixs", action="store_true", help="Do not generate cross sections. Do not write phixsdata_v2.txt."
+        "--nophixs",
+        "-nophixs",
+        action="store_true",
+        help="Do not generate cross sections. Do not write phixsdata_v2.txt.",
     )
 
     parser.add_argument(
-        "-minionstage", type=int, default=1, help="Do not include an ion below this ion stage. 1 is the neutral atom"
+        "-ionhandlersfile",
+        "--ionhandlersfile",
+        type=Path,
+        default=None,
+        help=(
+            "JSON file that selects the ions and the handler of each ion. With no such option, the program reads"
+            f" {defaulthandlersfilename} in the working directory if that file exists. With no file, the program"
+            " uses the built-in ion selection."
+        ),
     )
-    parser.add_argument("-maxionstage", type=int, default=5, help="Do not include an ion above this ion stage")
     parser.add_argument(
-        "-maxatomicnumber", type=int, default=None, help="Do not include an element above this atomic number"
+        "-minionstage",
+        "--minionstage",
+        type=int,
+        default=1,
+        help=(
+            "Do not include an ion of the built-in selection below this ion stage. 1 is the neutral atom."
+            " Not permitted with an ion handlers file."
+        ),
+    )
+    parser.add_argument(
+        "-maxionstage",
+        "--maxionstage",
+        type=int,
+        default=5,
+        help=(
+            "Do not include an ion of the built-in selection above this ion stage."
+            " Not permitted with an ion handlers file."
+        ),
+    )
+    parser.add_argument(
+        "-maxatomicnumber",
+        "--maxatomicnumber",
+        type=int,
+        default=None,
+        help=(
+            "Do not include an element of the built-in selection above this atomic number. None applies no limit."
+            " Not permitted with an ion handlers file."
+        ),
+    )
+    parser.add_argument(
+        "--listions",
+        "-listions",
+        action="store_true",
+        help=(
+            "Print the ion selection in the format of an ion handlers file, and stop. The program reads no ion"
+            " and writes no output file."
+        ),
+    )
+    parser.add_argument(
+        "--listhandlers",
+        "-listhandlers",
+        action="store_true",
+        help="Print each handler with its data source, and stop.",
     )
 
     parser.add_argument(
         "-nlevels_hydrogenic_for_unknown_phixs",
+        "--nlevels-hydrogenic-for-unknown-phixs",
         type=int,
         default=100,
         help=(
@@ -85,44 +188,47 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def get_ion_handlers(
-    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+    minionstage: int | None,
+    maxionstage: int | None,
+    maxatomicnumber: int | None,
+    handlersfile: Path | None = None,
 ) -> list[tuple[int, list[tuple[int, str]]]]:
     """Give the ion selection of ionhandlers.get_ion_handlers(), with the import only at the call."""
     from artisatomic import ionhandlers
 
     return ionhandlers.get_ion_handlers(
-        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
+        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber, handlersfile=handlersfile
     )
 
 
-def main() -> None:
-    """Write an ARTIS atomic database from the configured ions and handlers."""
-    parser = build_parser()
-    argcomplete.autocomplete(parser)
+def format_ion_handlers(ion_handlers: list[tuple[int, list[tuple[int, str]]]]) -> str:
+    """Give the ion selection as the text of an ion handlers file, with one line for each element."""
+    lines = [f"    {json.dumps([atomic_number, listions])}" for atomic_number, listions in ion_handlers]
+    return "[\n" + ",\n".join(lines) + "\n]\n"
 
-    # argparse applies no default to an attribute that the namespace holds already, so an ion
-    # limit that the command line omits stays None. main() finds the given limits from that, and
-    # then applies the default value of each other limit.
-    ionlimits = ("minionstage", "maxionstage", "maxatomicnumber")
-    args = parser.parse_args(namespace=argparse.Namespace(**dict.fromkeys(ionlimits)))
-    ionlimits_given = [name for name in ionlimits if getattr(args, name) is not None]
-    for name in ionlimits:
-        if getattr(args, name) is None:
-            setattr(args, name, parser.get_default(name))
 
-    from artisatomic import readadasdata
-    from artisatomic.base import check_ion_stages_contiguous
-    from artisatomic.ionhandlers import inputhandlersfile
+def format_handlers() -> str:
+    """Give one paragraph for each handler: the name, then the data source of its levels and transitions."""
+    from artisatomic.iondata import handlers
 
-    # artisatomicionhandlers.json holds the ion stages and the atomic numbers already, so that
-    # file selects the ions itself. Not an assert: this validates the command line and must
-    # survive python -O.
-    if ionlimits_given and inputhandlersfile.exists():
+    return "\n".join(f"{name}\n    {handler.summary}\n" for name, handler in sorted(handlers.items()))
+
+
+def check_arguments(args: argparse.Namespace, ionlimits: tuple[str, ...], ionlimits_given: list[str]) -> None:
+    """Raise ValueError for an option value, or for a set of options, that the run cannot use."""
+    from artisatomic.ionhandlers import find_handlers_file
+
+    # An ion handlers file holds the ion stages and the atomic numbers already, so that file selects
+    # the ions itself. Not an assert: this validates the command line and must survive python -O.
+    handlersfile = find_handlers_file(args.ionhandlersfile)
+    if ionlimits_given and handlersfile is not None:
         options = ", ".join(f"-{name}" for name in ionlimits_given)
-        msg = (
-            f"{inputhandlersfile.resolve()} exists, so that file selects the ions."
-            f" Remove the file. As an alternative, remove {options}."
+        remedy = (
+            f"Remove {options}."
+            if args.ionhandlersfile is not None
+            else f"Remove the file. As an alternative, remove {options}."
         )
+        msg = f"{handlersfile.resolve()} exists, so that file selects the ions. {remedy}"
         raise ValueError(msg)
 
     # Ion stage 1 is the neutral atom, and hydrogen is atomic number 1. A smaller limit selects no
@@ -155,17 +261,52 @@ def main() -> None:
         msg = "-nphixspoints must be 2 or more. ARTIS needs two points for a recombination integral."
         raise ValueError(msg)
 
+
+def main() -> None:
+    """Write an ARTIS atomic database from the configured ions and handlers."""
+    parser = build_parser()
+    argcomplete.autocomplete(parser)
+
+    # argparse applies no default to an attribute that the namespace holds already, so an ion
+    # limit that the command line omits stays None. main() finds the given limits from that, and
+    # then applies the default value of each other limit.
+    ionlimits = ("minionstage", "maxionstage", "maxatomicnumber")
+    args = parser.parse_args(namespace=argparse.Namespace(**dict.fromkeys(ionlimits)))
+    ionlimits_given = [name for name in ionlimits if getattr(args, name) is not None]
+    for name in ionlimits:
+        if getattr(args, name) is None:
+            setattr(args, name, parser.get_default(name))
+
+    if args.listhandlers:
+        print(format_handlers(), end="")
+        return
+
+    # parser.error() prints the usage and one line, and stops with status 2. A traceback would hide
+    # the line that names the option.
+    try:
+        check_arguments(args, ionlimits, ionlimits_given)
+    except (ValueError, FileNotFoundError) as error:
+        parser.error(str(error))
+
+    from artisatomic import readadasdata
+    from artisatomic.base import check_ion_stages_contiguous
+
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
-    readadasdata.rename_old_adas_directory()
-    ion_handlers = get_ion_handlers(
-        minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
-    )
+    # With --listions, the standard output holds the selection only, so a user can write it to a file.
+    with contextlib.redirect_stdout(sys.stderr if args.listions else sys.stdout):
+        readadasdata.rename_old_adas_directory()
+        ion_handlers = get_ion_handlers(
+            minionstage=args.minionstage,
+            maxionstage=args.maxionstage,
+            maxatomicnumber=args.maxatomicnumber,
+            handlersfile=args.ionhandlersfile,
+        )
 
     if not any(ions for _, ions in ion_handlers):
         # Not an assert: an empty selection writes an empty database and does not fail. The function
         # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
         msg = (
-            "No ions selected. The ion limits exclude every ion, artisatomicionhandlers.json names"
+            "No ions selected. The ion limits exclude every ion, the ion handlers file names"
             " no ion, or no reader found any data."
         )
         raise ValueError(msg)
@@ -174,6 +315,17 @@ def main() -> None:
     # Sr I-IV and Sr VI, because no data source here holds Sr V. write_compositionfile() rejects
     # such a gap. This check runs first, because the read of the ions can take hours.
     check_ion_stages_contiguous(ion_handlers)
+
+    if args.listions:
+        print(format_ion_handlers(ion_handlers), end="")
+        return
+
+    # The run reads the CMFGEN files only after it wrote compositiondata.txt, and the error there
+    # names a file and no download step.
+    if any(handler in {"cmfgen", "cmfgen_qubphixs"} for _, ions in ion_handlers for _, handler in ions):
+        from artisatomic import readhillierdata
+
+        readhillierdata.check_data_folder()
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)

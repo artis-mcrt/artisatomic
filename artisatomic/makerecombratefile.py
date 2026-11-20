@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 """Write recombrates.txt from the Nahar total recombination rate files."""
 
 import argparse
@@ -7,6 +8,7 @@ import re
 import typing as t
 from pathlib import Path
 
+import argcomplete
 import numpy as np
 from artistools.atomic import get_composition_data
 
@@ -112,12 +114,25 @@ max_chianti_atomic_number = 30
 
 def main():
     """Write recombrates.txt from the Nahar recombination rate files."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description=__doc__,
+        epilog=(
+            "The program reads compositiondata.txt in the output folder, so run makeartisatomicfiles first."
+            " An ion with no Nahar file takes the ChiantiPy rates, which need the chianti extra"
+            " (uv sync --frozen --extra chianti)."
+        ),
+    )
     # the same default as makeartisatomicfiles, relative to the working directory, so the two
     # scripts read and write one folder
     parser.add_argument(
-        "-output_folder", default="artis_files", type=Path, help="folder of compositiondata.txt and the output file"
+        "-output_folder",
+        "--output-folder",
+        default="artis_files",
+        type=Path,
+        help="Folder of compositiondata.txt and the output file",
     )
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     artis_files_path = Path(args.output_folder)
 

@@ -2,7 +2,7 @@
 
 Paper: Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., Quinet, P. (2024), A&A, 685, A91,
 doi:10.1051/0004-6361/202347723. Data: https://doi.org/10.5281/zenodo.10635803 (see
-atomic-data-mons/readme.txt for the file formats).
+atomic-data-mons/README.txt for the file formats).
 """
 
 import zipfile
