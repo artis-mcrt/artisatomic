@@ -108,17 +108,31 @@ def get_ion_handlers(
     """
     handlersfile = find_handlers_file(handlersfile)
     if handlersfile is not None:
-        print(f"Reading {handlersfile}")
-        # json.loads() finds the encoding of the bytes: UTF-8, also with a byte order mark, or UTF-16 and
-        # UTF-32 with a byte order mark. Windows PowerShell 5.1 writes the output of ">" in UTF-16.
-        try:
-            loaded = json.loads(handlersfile.read_bytes())
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
-            # the message holds the decode error, so a second traceback gives no information
-            msg = f"The ion handlers file {handlersfile} does not hold valid JSON: {error}"
-            raise ValueError(msg) from None
-        return sort_ion_handlers(parse_ion_handlers(loaded, handlersfile))
+        return read_handlers_file(handlersfile)
+    return get_builtin_ion_handlers(minionstage, maxionstage, maxatomicnumber)
 
+
+def read_handlers_file(handlersfile: Path) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Read the ion selection of an ion handlers file, which find_handlers_file() gave.
+
+    The function raises ValueError or TypeError for a file that does not hold a valid selection.
+    """
+    print(f"Reading {handlersfile}")
+    # json.loads() finds the encoding of the bytes: UTF-8, also with a byte order mark, or UTF-16 and
+    # UTF-32 with a byte order mark. Windows PowerShell 5.1 writes the output of ">" in UTF-16.
+    try:
+        loaded = json.loads(handlersfile.read_bytes())
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        # the message holds the decode error, so a second traceback gives no information
+        msg = f"The ion handlers file {handlersfile} does not hold valid JSON: {error}"
+        raise ValueError(msg) from None
+    return sort_ion_handlers(parse_ion_handlers(loaded, handlersfile))
+
+
+def get_builtin_ion_handlers(
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
+) -> list[tuple[int, list[tuple[int, str]]]]:
+    """Build the built-in ion selection, with the limits of get_ion_handlers()."""
     # Include every ion that has data.
     # The first call that adds an ion sets its handler, so the order of these calls matters.
     # readdreamdata, readfacdata, readmonsdata and groundstatesonlynist also offer extend_ion_list(). Add them to

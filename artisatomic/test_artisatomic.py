@@ -6038,7 +6038,7 @@ def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handle
     from artisatomic import cli
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
     run_main_with_no_ion_read(monkeypatch, ".")
 
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
@@ -6598,7 +6598,7 @@ def cli_run_with_stub_writer(
     monkeypatch.setattr(Path, "replace", replace)
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
     # the stub writer reads no CMFGEN file, so the test needs no CMFGEN data set
     monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr(cli, "write_files", write_files)

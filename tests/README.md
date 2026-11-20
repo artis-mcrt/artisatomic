@@ -26,7 +26,7 @@ Name the four files. The output folder holds the log file `artisatomiclog.txt` a
 `OutputFiles_withforbidden` directory out of the test runs.
 
 Do not copy the file of a set to the repository root. With no `-ionhandlersfile` option,
-`get_ion_handlers()` reads `artisatomicionhandlers.json` in the working directory if that file exists.
+`find_handlers_file()` finds `artisatomicionhandlers.json` in the working directory if that file exists.
 Thus a copy left in the repository root silently overrides the built-in ion selection of every later
 local run. A later run that gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an
 error instead.

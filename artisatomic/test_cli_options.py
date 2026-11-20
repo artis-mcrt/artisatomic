@@ -340,3 +340,56 @@ def test_run_keeps_its_handlers_file_in_the_old_log_folder(tmp_path, monkeypatch
     run_main(monkeypatch, "-ionhandlersfile", str(oldcopy), "--nophixs")
     assert oldcopy.is_file()
     assert not (oldfolder / "Z34.txt").exists()
+
+
+def test_rename_of_the_old_adas_folder_does_not_change_the_handlers_file(tmp_path, monkeypatch, capsys):
+    """The run reads the file that the checks found, also if the rename of the old ADAS folder moves it."""
+    monkeypatch.chdir(tmp_path)
+    oldfolder = tmp_path / "atomic-data-qub"
+    oldfolder.mkdir()
+    handlersfile = oldfolder / "ions.json"
+    handlersfile.write_text(json.dumps(selection), encoding="utf-8")
+
+    def move_old_folder() -> None:
+        oldfolder.rename(tmp_path / "atomic-data-adas")
+
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "--listions", "-ionhandlersfile", str(handlersfile)])
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", move_old_folder)
+    cli.main()
+    assert json.loads(capsys.readouterr().out) == selection
+
+
+def test_rename_that_moves_a_handlers_file_here_keeps_the_built_in_ion_selection(tmp_path, monkeypatch, capsys):
+    """A file that the rename moves into the working directory does not replace the built-in ion selection."""
+    monkeypatch.chdir(tmp_path)
+    builtin = [(34, [(5, "gsnist")])]
+
+    def move_a_file_here() -> None:
+        (tmp_path / inputhandlersfile).write_text(json.dumps(selection), encoding="utf-8")
+
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "--listions"])
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", move_a_file_here)
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_limits: builtin)
+    cli.main()
+    assert json.loads(capsys.readouterr().out) == [[34, [[5, "gsnist"]]]]
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ("[[26, [[1, ", "does not hold valid JSON"),
+        ('[[26, [[1, "no_such_handler"]]]]', "names the unknown handler 'no_such_handler'"),
+        ("[[26, 1]]", "has no list of [ion_stage, handler] pairs"),
+    ],
+)
+def test_bad_handlers_file_gives_a_usage_error(tmp_path, monkeypatch, capsys, content, message):
+    """A bad file gives one line and the status 2, as a bad option does, and no traceback."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "my_ions.json").write_text(content, encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "-ionhandlersfile", "my_ions.json")
+    assert exit_info.value.code == 2
+    error = capsys.readouterr().err
+    assert message in error.splitlines()[-1]
+    assert "Traceback" not in error
+    assert not (tmp_path / "artis_files").exists()

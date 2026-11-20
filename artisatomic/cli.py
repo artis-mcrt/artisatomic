@@ -203,17 +203,14 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def get_ion_handlers(
-    minionstage: int | None,
-    maxionstage: int | None,
-    maxatomicnumber: int | None,
-    handlersfile: Path | None = None,
+def get_builtin_ion_handlers(
+    minionstage: int | None, maxionstage: int | None, maxatomicnumber: int | None
 ) -> list[tuple[int, list[tuple[int, str]]]]:
-    """Give the ion selection of ionhandlers.get_ion_handlers(), with the import only at the call."""
+    """Give the built-in ion selection of ionhandlers.get_builtin_ion_handlers(), with the import only at the call."""
     from artisatomic import ionhandlers
 
-    return ionhandlers.get_ion_handlers(
-        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber, handlersfile=handlersfile
+    return ionhandlers.get_builtin_ion_handlers(
+        minionstage=minionstage, maxionstage=maxionstage, maxatomicnumber=maxatomicnumber
     )
 
 
@@ -339,6 +336,7 @@ def main() -> None:
     # The import loads numpy and polars. It comes before the try block, so an error of the
     # environment gives its traceback and not a usage error.
     from artisatomic.ionhandlers import find_handlers_file
+    from artisatomic.ionhandlers import read_handlers_file
 
     # parser.error() prints the usage and one line, and stops with status 2. A traceback would hide
     # the line that names the option.
@@ -351,22 +349,26 @@ def main() -> None:
     from artisatomic import readadasdata
     from artisatomic.base import check_ion_stages_contiguous
 
-    # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
     # With --listions, the standard output holds the selection only, so a user can write it to a file.
-    # get_ion_handlers() gets the file that the checks above found. The rename can move a file, and a
-    # second search would then give the built-in ion selection with no message.
     with contextlib.redirect_stdout(sys.stderr if args.listions else sys.stdout):
+        # The rename of the old ADAS folder can move the ion handlers file that the checks found, so
+        # the read comes before the rename. The run does not search for the file again.
+        ion_handlers = None
+        if handlersfile is not None:
+            try:
+                ion_handlers = read_handlers_file(handlersfile)
+            except (ValueError, TypeError) as error:
+                parser.error(str(error))
+        # get_builtin_ion_handlers() finds the ADAS ions in the new folder, so the rename comes first
         readadasdata.rename_old_adas_directory()
-        ion_handlers = get_ion_handlers(
-            minionstage=args.minionstage,
-            maxionstage=args.maxionstage,
-            maxatomicnumber=args.maxatomicnumber,
-            handlersfile=handlersfile,
-        )
+        if ion_handlers is None:
+            ion_handlers = get_builtin_ion_handlers(
+                minionstage=args.minionstage, maxionstage=args.maxionstage, maxatomicnumber=args.maxatomicnumber
+            )
 
     if not any(ions for _, ions in ion_handlers):
-        # Not an assert: an empty selection writes an empty database and does not fail. The function
-        # get_ion_handlers() reads a file, so this check validates input and must survive python -O.
+        # Not an assert: an empty selection writes an empty database and does not fail. An ion
+        # handlers file can give it, so this check validates input and must survive python -O.
         msg = (
             "No ions selected. The ion limits exclude every ion, the ion handlers file names"
             " no ion, or no reader found any data."
@@ -619,7 +621,7 @@ def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: arg
     log_path(args.output_folder).write_text("", encoding="utf-8")
 
     # A record of what this run used, beside the output files. Its name is not the name of the
-    # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working
+    # file that find_handlers_file() finds (./artisatomicionhandlers.json). A run into the working
     # directory, or a later run from inside an output folder, must not take the record of an
     # earlier run as its ion selection. Give the record to -ionhandlersfile to repeat a run exactly.
     # It holds the ions that the limits kept, so the repeat run must not give a limit again.
