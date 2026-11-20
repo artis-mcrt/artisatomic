@@ -1,6 +1,7 @@
 """Check the options of makeartisatomicfiles that give information or select the ion handlers file."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ from artisatomic import cli
 from artisatomic import readadasdata
 from artisatomic import readhillierdata
 from artisatomic.iondata import handlers
+from artisatomic.ionhandlers import find_handlers_file
 from artisatomic.ionhandlers import get_ion_handlers
 from artisatomic.ionhandlers import inputhandlersfile
 
@@ -110,8 +112,19 @@ def test_listhandlers_prints_each_handler_with_its_source(tmp_path, monkeypatch,
     lines = capsys.readouterr().out.splitlines()
     assert [line for line in lines if line and not line.startswith(" ")] == sorted(handlers)
     assert lines[lines.index("cmfgen") + 1] == f"    {readhillierdata.description}"
+    # the QUB cross sections of Co II are the only difference between the two CMFGEN handlers
+    assert lines[lines.index("cmfgen_qubphixs") + 1] != lines[lines.index("cmfgen") + 1]
     assert all(handler.summary for handler in handlers.values())
     assert not (tmp_path / "artis_files").exists()
+
+
+def test_listhandlers_prints_ascii_only(tmp_path, monkeypatch, capsys):
+    """A standard output with the encoding cp1252 cannot take each character of the references."""
+    monkeypatch.chdir(tmp_path)
+    run_main(monkeypatch, "--listhandlers")
+    output = capsys.readouterr().out
+    assert output.isascii()
+    assert "Flors" in output
 
 
 def test_version_option_prints_the_version(monkeypatch, capsys):
@@ -159,3 +172,85 @@ def test_hydrogenic_tables_with_no_data_folder_name_the_setup_script(tmp_path, m
     monkeypatch.setattr(readhillierdata, "max_hyd_gaunt_n", -1)
     with pytest.raises(FileNotFoundError, match=r"setup_cmfgen_data\.sh"):
         readhillierdata.read_hyd_phixsdata()
+
+
+def test_bare_proton_needs_no_cmfgen_data_folder(tmp_path, monkeypatch):
+    """The reader builds H II from constants, and H II is the top ion, so the run reads no CMFGEN file."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(readhillierdata, "hillier_datadir", tmp_path / "atomic-data-hillier")
+    handlersfile = tmp_path / "hii.json"
+    handlersfile.write_text(json.dumps([[1, [[2, "cmfgen"]]]]), encoding="utf-8")
+    run_main(monkeypatch, "-ionhandlersfile", str(handlersfile))
+    rows = (tmp_path / "artis_files" / "compositiondata.txt").read_text(encoding="utf-8").splitlines()
+    assert rows[3].split()[:4] == ["1", "1", "2", "2"]
+
+
+@pytest.mark.parametrize(
+    ("ion_handlers", "options", "needed"),
+    [
+        ([(1, [(2, "cmfgen")])], [], False),
+        ([(1, [(2, "cmfgen_qubphixs")])], [], False),
+        ([(8, [(1, "cmfgen"), (2, "cmfgen")])], ["--nophixs"], True),
+        ([(38, [(1, "kurucz"), (2, "kurucz")])], [], True),
+        ([(38, [(1, "kurucz"), (2, "kurucz")])], ["--nophixs"], False),
+        ([(38, [(1, "kurucz"), (2, "kurucz")])], ["-nlevels_hydrogenic_for_unknown_phixs", "0"], False),
+        # the top ion gets no cross sections
+        ([(38, [(1, "kurucz")])], [], False),
+        # only its data shows if an adas ion needs the estimate, and the kurucz ion is the top ion
+        ([(38, [(1, "adas"), (2, "kurucz")])], [], False),
+        # a handler with no parser for its level names makes no estimate
+        ([(58, [(5, "mons"), (6, "mons")])], [], False),
+        ([(34, [(4, "gsnist"), (5, "gsnist")])], [], False),
+    ],
+)
+def test_cmfgen_data_needed(ion_handlers, options, needed):
+    """The check before the run asks for the CMFGEN data set only if the run reads it for certain."""
+    args = cli.build_parser().parse_args(options)
+    assert cli.cmfgen_data_needed(ion_handlers, args) is needed
+
+
+def test_kurucz_selection_with_no_data_folder_stops_before_the_output_folder(tmp_path, monkeypatch):
+    """The hydrogenic estimate of Sr I reads the CMFGEN hydrogen tables, so the check comes before the read."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(readhillierdata, "hillier_datadir", tmp_path / "atomic-data-hillier")
+    handlersfile = tmp_path / "sr.json"
+    handlersfile.write_text(json.dumps([[38, [[1, "kurucz"], [2, "kurucz"]]]]), encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match=r"setup_cmfgen_data\.sh"):
+        run_main(monkeypatch, "-ionhandlersfile", str(handlersfile))
+    assert not (tmp_path / "artis_files").exists()
+
+
+def test_empty_handlers_file_stops_the_run(tmp_path, monkeypatch, capsys):
+    """A shell redirect of --listions to the default name empties that file before the program reads it."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / inputhandlersfile).write_text("", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "--listions")
+    assert exit_info.value.code == 2
+    assert f"The ion handlers file {inputhandlersfile} is empty." in capsys.readouterr().err
+
+
+def test_ionhandlersfile_that_is_a_folder_stops_the_run(tmp_path, monkeypatch, capsys):
+    """The message says that the path is a folder, and not that it does not exist."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "setdir").mkdir()
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "-ionhandlersfile", "setdir")
+    assert exit_info.value.code == 2
+    assert "The ion handlers file setdir is a folder." in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="the system has no named pipes")
+def test_ionhandlersfile_can_be_a_pipe(tmp_path):
+    """The program reads the file one time only, so a pipe such as /dev/stdin can give the selection."""
+    pipe = tmp_path / "selection.json"
+    os.mkfifo(pipe)
+    assert find_handlers_file(pipe) == pipe
+
+
+def test_handlers_file_that_is_not_json_names_the_file(tmp_path):
+    """The message names the file, and not only the position of the JSON error."""
+    handlersfile = tmp_path / "my_ions.json"
+    handlersfile.write_text("[[26, [[1, ", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"my_ions\.json does not hold valid JSON"):
+        get_ion_handlers(1, 5, None, handlersfile=handlersfile)

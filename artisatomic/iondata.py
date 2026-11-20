@@ -155,7 +155,11 @@ handlers: dict[str, Handler] = {
         readfloers25data.description_uncalibrated,
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
-        source_summary=readfloers25data.description.format(variant="uncalibrated"),
+        source_summary=(
+            f"{readfloers25data.description.format(variant='uncalibrated')}. If the folder"
+            f" OutputFiles_withforbidden exists, the handler reads it first: "
+            f"{readfloers25data.description_uncalibrated_withforbidden}"
+        ),
     ),
     "fac": Handler(
         readfacdata.description_of_ion,
@@ -205,6 +209,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
+        source_summary=f"{readhillierdata.description}. Co II has {readadasdata.qub_cobalt_phixs_description}",
     ),
 }
 

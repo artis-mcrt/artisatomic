@@ -279,8 +279,8 @@ def check_data_folder() -> None:
     datafolder = hillier_datadir / "atomic_21jun23"
     if not datafolder.is_dir():
         msg = (
-            f"The CMFGEN data folder {datafolder} does not exist. Go to {hillier_datadir} and run"
-            " '. ./setup_cmfgen_data.sh' to download the data set."
+            f"The CMFGEN data folder {datafolder} does not exist. To download the data set, run"
+            f" '. ./setup_cmfgen_data.sh' in {hillier_datadir}."
         )
         raise FileNotFoundError(msg)
 

@@ -1,8 +1,13 @@
 Source files of the charge transfer rates for makeartischargetransferfile. Git tracks all of them.
 
-setup_chargetransfer_data.sh downloads the files again. Run it in this folder:
+setup_chargetransfer_data.sh downloads the files from their sources. It skips each file that exists.
+To download a file again, delete the file. Then run the script in this folder:
 
     ./setup_chargetransfer_data.sh
+
+The script starts with "#!/usr/bin/env zsh". On a computer with no zsh, run it with bash:
+
+    bash setup_chargetransfer_data.sh
 
 The files and their references:
 

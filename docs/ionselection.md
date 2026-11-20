@@ -24,18 +24,18 @@ These rules apply:
 - The selection must contain at least one ion.
 - An element can have an empty ion list if another element contains an ion.
 - The ion stages of an element must have no gap.
-- Each handler name must be one of the names on the page [Data sources](datasources.md).
+- Each handler name must be one of the names on the page [Data sources](datasources.md). The program also accepts the old names `qub`, `qub_data` and `qub_cobalt`, and changes each one to a name of that page.
 
 The run stops before it writes an output file if the file breaks a rule. The run also stops if the command gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` with an ion handlers file, because the file selects the ions itself.
 
-Each set in `tests/` except `chargetransfer` holds an example file. For example:
+Each set in `tests/` except `chargetransfer` holds an example file. Most sets need the test mode, because they read the samples in the repository. The `cmfgen_lowz` set needs only the CMFGEN data set:
 
 ```sh
-makeartisatomicfiles -ionhandlersfile tests/kurucz/artisatomicionhandlers.json
+makeartisatomicfiles -ionhandlersfile tests/cmfgen_lowz/artisatomicionhandlers.json
 ```
 
 ```{warning}
-A file with the name `artisatomicionhandlers.json` in the working directory controls every run in that directory that has no `-ionhandlersfile` option. Use `-ionhandlersfile` with a different file name, or remove the file after the run.
+A file with the name `artisatomicionhandlers.json` in the working directory controls every run in that directory that has no `-ionhandlersfile` option. Use `-ionhandlersfile` with a different file name. As an alternative, remove the file after the run.
 ```
 
 ## The built-in ion selection
@@ -52,11 +52,13 @@ The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatom
 
 The built-in selection needs these data sets. The page [Data sources](datasources.md) says how to get each one.
 
-- The CMFGEN data set. The run stops with the name of the setup script if the folder does not exist.
+- The CMFGEN data set. If the folder does not exist, the run stops with the name of the download script.
 - The Floers+25 data set. The run stops if neither the public folder nor the private folder exists. This rule applies for each value of `-maxatomicnumber`.
 - The Kurucz line lists of the selected ions of Sr, Y and Zr. The run stops before it reads an ion if a file does not exist. `-maxatomicnumber 37` or less removes these ions.
 
-No data source of the built-in selection holds Sr V. Thus `-maxionstage 6` or more stops at the check of the ion stages, unless `-maxatomicnumber` is 37 or less.
+The selection also takes the JPLT ions if the folder `atomic-data-tanaka-jplt/data_v2.1` exists. With no such folder, the selection has no JPLT ion, and the program gives no warning. The ADAS ions also come only from the files that exist.
+
+No data source of the built-in selection holds Sr V. Thus the check of the ion stages stops a selection that holds Sr IV and Sr VI. An example is `-maxionstage 6` with the default values of the other two limits.
 
 ## Show the selection
 
@@ -67,12 +69,14 @@ makeartisatomicfiles --listions -maxatomicnumber 30 > my_ions.json
 makeartisatomicfiles -ionhandlersfile my_ions.json
 ```
 
+Do not write the output to `artisatomicionhandlers.json` in the working directory. The shell empties that file before the program reads it, and the program then stops.
+
 ## Repeat a run
 
-Each run writes `artisatomicionhandlers_used.json` into the output folder, in the format of an ion handlers file. Give that record to a later run to select the same ions and handlers:
+A run that ends with no error writes `artisatomicionhandlers_used.json` into the output folder, in the format of an ion handlers file. Give that record to a later run to select the same ions and handlers:
 
 ```sh
 makeartisatomicfiles -ionhandlersfile artis_files/artisatomicionhandlers_used.json -output_folder artis_files_repeat
 ```
 
-The record holds the ions that the limits kept, so the later run must give no ion limit.
+Do not give an ion limit to the later run. The record holds only the ions that the limits kept.

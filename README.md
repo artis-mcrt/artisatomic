@@ -13,7 +13,7 @@ The documentation is at <https://artisatomic.readthedocs.io>. It has these pages
 - [Development](https://artisatomic.readthedocs.io/en/latest/development.html): the tests, the checks and the code layout.
 
 ## Installation
-The package needs Python 3.13 or later. The data folders are in the repository, so clone the repository:
+The package needs Python 3.13 or later. The data folders are in the repository. Clone the repository:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
 cd artisatomic
@@ -31,7 +31,7 @@ python3 -m pip install -e .
 ```
 
 ## Quick start
-The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MB, and the data set uses 1.8 GB.
+The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB.
 
 ```sh
 (cd atomic-data-hillier && . ./setup_cmfgen_data.sh)
@@ -44,10 +44,10 @@ The file `tests/cmfgen_lowz/artisatomicionhandlers.json` selects some ions of H,
 - `artisatomiclog.txt`, the log of the run;
 - `artisatomicionhandlers_used.json`, the record of the ions and the handlers of the run.
 
-Copy the four data files to the folder of an ARTIS model.
+Copy the four output files to the folder of an ARTIS model.
 
 ## Usage
-`makeartisatomicfiles` writes the four data files. An ion handlers file selects the ions and the handler that reads each ion. This example selects Ca III and Co II–IV:
+`makeartisatomicfiles` writes the four output files. An ion handlers file selects the ions and the handler that reads each ion. This example selects Ca III and Co II–IV:
 
 ```json
 [
@@ -56,7 +56,7 @@ Copy the four data files to the folder of an ARTIS model.
 ]
 ```
 
-Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in selection needs the CMFGEN data set and the Floers+25 data set. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
+Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in selection needs the CMFGEN data set, the Floers+25 data set and the Kurucz line lists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
 
 These commands give information and write no output file:
 
@@ -72,21 +72,27 @@ Each option has a form with one dash and a form with two dashes, for example `-m
 ### Other commands
 The package installs three more commands:
 
-- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder, so run `makeartisatomicfiles` first. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
 - `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file.
 - `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
 
 ### Tab completion
-The commands with options use [argcomplete](https://kislyuk.github.io/argcomplete/). To complete the options of a command in bash or zsh, run this line, or add it to the startup file of the shell:
+The commands with options use [argcomplete](https://kislyuk.github.io/argcomplete/). To complete the options of a command in bash or zsh, run this line:
 
 ```sh
 eval "$(register-python-argcomplete makeartisatomicfiles)"
 ```
 
+To use the completion in each new shell, add the line to the startup file of the shell.
+
 ## Development
-Install the development tools, then install the pre-commit hooks once:
+Install the development tools:
 ```sh
 uv sync --frozen
+```
+
+Then install the pre-commit hooks one time:
+```sh
 prek install
 ```
 

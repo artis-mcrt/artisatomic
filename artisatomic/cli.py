@@ -47,7 +47,7 @@ class VersionAction(argparse.Action):
         try:
             packageversion = version("artisatomic")
         except PackageNotFoundError:
-            packageversion = "(the package is not installed, so it has no version)"
+            packageversion = "has no version, because the environment holds no metadata of the package"
         print(f"artisatomic {packageversion}")
         parser.exit()
 
@@ -130,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help=(
             "Do not include an ion of the built-in selection below this ion stage. 1 is the neutral atom."
-            " Not permitted with an ion handlers file."
+            " The program rejects this option with an ion handlers file."
         ),
     )
     parser.add_argument(
@@ -140,7 +140,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=5,
         help=(
             "Do not include an ion of the built-in selection above this ion stage."
-            " Not permitted with an ion handlers file."
+            " The program rejects this option with an ion handlers file."
         ),
     )
     parser.add_argument(
@@ -149,8 +149,9 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Do not include an element of the built-in selection above this atomic number. None applies no limit."
-            " Not permitted with an ion handlers file."
+            "Do not include an element of the built-in selection above this atomic number. With no such option,"
+            " the program applies no limit to the atomic number. The program rejects this option with an ion"
+            " handlers file."
         ),
     )
     parser.add_argument(
@@ -208,19 +209,51 @@ def format_ion_handlers(ion_handlers: list[tuple[int, list[tuple[int, str]]]]) -
 
 
 def format_handlers() -> str:
-    """Give one paragraph for each handler: the name, then the data source of its levels and transitions."""
+    """Give one paragraph for each handler: the name, then the data source of the handler.
+
+    The text is ASCII, as in the comment blocks of the output files. A standard output with an
+    encoding such as cp1252 cannot take each character of the references.
+    """
+    from artisatomic.base import to_ascii
     from artisatomic.iondata import handlers
 
-    return "\n".join(f"{name}\n    {handler.summary}\n" for name, handler in sorted(handlers.items()))
+    return "\n".join(f"{name}\n    {to_ascii(handler.summary)}\n" for name, handler in sorted(handlers.items()))
 
 
-def check_arguments(args: argparse.Namespace, ionlimits: tuple[str, ...], ionlimits_given: list[str]) -> None:
-    """Raise ValueError for an option value, or for a set of options, that the run cannot use."""
-    from artisatomic.ionhandlers import find_handlers_file
+def cmfgen_data_needed(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> bool:
+    """Whether the run reads the CMFGEN data set for certain.
 
+    Each ion of the cmfgen and cmfgen_qubphixs handlers reads its files, except H II. The reader
+    builds H II from constants, and H II is the top ion of H, so it needs no cross section.
+
+    The hydrogenic estimate of an ion below the top ion reads the hydrogen tables of the data set.
+    A handler with a parser for its level names and no cross sections of its own always makes the
+    estimate, unless the options switch it off. Only the data of a handler with cross sections,
+    for example adas, shows if an ion needs the estimate. read_hyd_phixsdata() checks the folder then.
+    """
+    from artisatomic.iondata import handlers
+
+    estimate = not args.nophixs and args.nlevels_hydrogenic_for_unknown_phixs > 0
+    for atomic_number, listions in ion_handlers:
+        for index, (ion_stage, handlername) in enumerate(listions):
+            if handlername in {"cmfgen", "cmfgen_qubphixs"} and (atomic_number, ion_stage) != (1, 2):
+                return True
+            handler = handlers[handlername]
+            is_top_ion = index == len(listions) - 1
+            if estimate and not is_top_ion and handler.get_level_valence_n is not None and handler.read_phixs is None:
+                return True
+    return False
+
+
+def check_arguments(
+    args: argparse.Namespace, handlersfile: Path | None, ionlimits: tuple[str, ...], ionlimits_given: list[str]
+) -> None:
+    """Raise ValueError for an option value, or for a set of options, that the run cannot use.
+
+    handlersfile is the ion handlers file that find_handlers_file() gives.
+    """
     # An ion handlers file holds the ion stages and the atomic numbers already, so that file selects
     # the ions itself. Not an assert: this validates the command line and must survive python -O.
-    handlersfile = find_handlers_file(args.ionhandlersfile)
     if ionlimits_given and handlersfile is not None:
         options = ", ".join(f"-{name}" for name in ionlimits_given)
         remedy = (
@@ -281,10 +314,15 @@ def main() -> None:
         print(format_handlers(), end="")
         return
 
+    # The import loads numpy and polars. It comes before the try block, so an error of the
+    # environment gives its traceback and not a usage error.
+    from artisatomic.ionhandlers import find_handlers_file
+
     # parser.error() prints the usage and one line, and stops with status 2. A traceback would hide
     # the line that names the option.
     try:
-        check_arguments(args, ionlimits, ionlimits_given)
+        handlersfile = find_handlers_file(args.ionhandlersfile)
+        check_arguments(args, handlersfile, ionlimits, ionlimits_given)
     except (ValueError, FileNotFoundError) as error:
         parser.error(str(error))
 
@@ -320,9 +358,9 @@ def main() -> None:
         print(format_ion_handlers(ion_handlers), end="")
         return
 
-    # The run reads the CMFGEN files only after it wrote compositiondata.txt, and the error there
-    # names a file and no download step.
-    if any(handler in {"cmfgen", "cmfgen_qubphixs"} for _, ions in ion_handlers for _, handler in ions):
+    # The run reads the CMFGEN files only after it wrote compositiondata.txt, and after it read the
+    # ions of each lower element.
+    if cmfgen_data_needed(ion_handlers, args):
         from artisatomic import readhillierdata
 
         readhillierdata.check_data_folder()
@@ -559,9 +597,8 @@ def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: arg
     # A record of what this run used, beside the output files. Its name is not the name of the
     # file that get_ion_handlers() reads (./artisatomicionhandlers.json). A run into the working
     # directory, or a later run from inside an output folder, must not take the record of an
-    # earlier run as its ion selection. Copy the record to ./artisatomicionhandlers.json to repeat
-    # a run exactly. It holds the ions that the limits kept, so the repeat run must not give a
-    # limit again.
+    # earlier run as its ion selection. Give the record to -ionhandlersfile to repeat a run exactly.
+    # It holds the ions that the limits kept, so the repeat run must not give a limit again.
     with Path(args.output_folder, handlersrecordname).open("w", encoding="utf-8") as f:
         json.dump(obj=ion_handlers, fp=f)
     write_compositionfile(ion_handlers, args)

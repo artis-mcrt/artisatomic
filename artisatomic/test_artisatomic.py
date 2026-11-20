@@ -6004,6 +6004,8 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
     monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
     # main() moves the files of atomic-data-qub of the repository, which a test must not do
     monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+    # the run reads no ion, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     cli.main()
 
@@ -6555,8 +6557,11 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     with pytest.raises(SystemExit) as exit_info:
         main()
     assert exit_info.value.code == 2
-    # the message is the last line, with no traceback
-    assert f"error: {option} must be a finite number more than 0" in capsys.readouterr().err.splitlines()[-1]
+    # The message is the last line, with no traceback. With colour output, argparse puts colour
+    # codes between "error:" and the message.
+    error = capsys.readouterr().err
+    assert f"{option} must be a finite number more than 0" in error.splitlines()[-1]
+    assert "Traceback" not in error
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 

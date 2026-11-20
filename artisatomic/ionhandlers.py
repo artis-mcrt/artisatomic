@@ -29,14 +29,31 @@ def find_handlers_file(handlersfile: Path | None) -> Path | None:
     """Give the ion handlers file of the run, or None if the run uses the built-in selection.
 
     handlersfile is the value of the option -ionhandlersfile. That file must exist. With None, the
-    file is inputhandlersfile in the working directory, if it exists.
+    file is inputhandlersfile in the working directory, if it exists. The file can be a pipe, for
+    example /dev/stdin, because get_ion_handlers() reads it one time only.
+
+    An empty regular file is an error. A shell redirect to the file, for example the output of
+    --listions, empties the file before the program starts.
     """
     if handlersfile is not None:
-        if not handlersfile.is_file():
+        if not handlersfile.exists():
             msg = f"The ion handlers file {handlersfile} does not exist."
             raise FileNotFoundError(msg)
-        return handlersfile
-    return inputhandlersfile if inputhandlersfile.exists() else None
+        if handlersfile.is_dir():
+            msg = f"The ion handlers file {handlersfile} is a folder. Give the path of the JSON file in the folder."
+            raise ValueError(msg)
+    elif inputhandlersfile.exists():
+        handlersfile = inputhandlersfile
+    else:
+        return None
+
+    if handlersfile.is_file() and handlersfile.stat().st_size == 0:
+        msg = (
+            f"The ion handlers file {handlersfile} is empty. A shell redirect to a file empties the file before"
+            " the program starts. Remove the file, or write the output of --listions to a different file."
+        )
+        raise ValueError(msg)
+    return handlersfile
 
 
 def keep_ions_within_limits(
@@ -81,7 +98,12 @@ def get_ion_handlers(
     if handlersfile is not None:
         print(f"Reading {handlersfile}")
         with handlersfile.open(encoding="utf-8") as f:
-            return sort_ion_handlers(parse_ion_handlers(json.load(f), handlersfile))
+            try:
+                loaded = json.load(f)
+            except json.JSONDecodeError as error:
+                msg = f"The ion handlers file {handlersfile} does not hold valid JSON: {error}"
+                raise ValueError(msg) from error
+        return sort_ion_handlers(parse_ion_handlers(loaded, handlersfile))
 
     # Include every ion that has data.
     # The first call that adds an ion sets its handler, so the order of these calls matters.

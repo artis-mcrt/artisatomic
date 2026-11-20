@@ -118,8 +118,8 @@ def main():
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description=__doc__,
         epilog=(
-            "The program reads compositiondata.txt in the output folder, so run makeartisatomicfiles first."
-            " An ion with no Nahar file takes the ChiantiPy rates, which need the chianti extra"
+            "The program reads compositiondata.txt in the output folder. Run makeartisatomicfiles before this"
+            " program. An ion with no Nahar file takes the ChiantiPy rates, which need the chianti extra"
             " (uv sync --frozen --extra chianti)."
         ),
     )
@@ -171,7 +171,7 @@ def main():
 
     firstchiantiion = next(
         (
-            f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {lowerionstage}"
+            f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {lowerionstage + 1}"
             for atomic_number, lowerionstage, naharfilename in ionsources
             if naharfilename is None
         ),
