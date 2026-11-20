@@ -191,7 +191,10 @@ def main():
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
                 frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
             else:
-                assert ch is not None
+                if ch is None:
+                    # import_chianti_core() ran for the first ion with no Nahar file, so this cannot occur
+                    msg = "ChiantiPy is not imported, but an ion needs its rates"
+                    raise RuntimeError(msg)
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
                 arr_temperature = 10**arr_logT_e

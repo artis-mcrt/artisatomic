@@ -537,8 +537,8 @@ def read_adf04(
                 " not a J value. The levels have no J value. The rules of LS coupling apply in place of the delta J rule.",
             )
 
-        for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
-            config = _standardise_config(config, eissner_order=eissner_order)
+        for adas_id, fileconfig, multiplicity, l_hex, j, energy_percm in levelrows:
+            config = _standardise_config(fileconfig, eissner_order=eissner_order)
             xj = float(j)
             # a null J turns off the delta J rule of add_level_ids_forbidden() for the level
             energylevel = ADASEnergyLevel(
@@ -1221,7 +1221,8 @@ def get_level_valence_n(levelname: str) -> int | None:
     # of the previous orbital, then n. For example, the '24' in '3d24s' is two electrons and
     # n=4. The same rule as readkuruczdata applies, and it also reads '5s111s1' (5s1 11s1) as
     # n = 11. A space in front of the run separates two shells, so the run holds n alone
-    if nmatch[1] and nmatch[1] in lchars_lower:
-        return split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
-
-    return int(nmatch[2])
+    return (
+        split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
+        if nmatch[1] and nmatch[1] in lchars_lower
+        else int(nmatch[2])
+    )

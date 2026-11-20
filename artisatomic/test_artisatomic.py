@@ -919,7 +919,11 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     assert "has a cross section table in 2 photoionisation files" in log
 
     # every level that the reader read has a table, not only the ones from the first file
-    assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
+    assert all(
+        np.any(crosssections[levelid])
+        for levelid, targets in enumerate(targetconfigs)
+        if targets is not None and len(targets) > 0
+    )
 
     # the routes of every level, read the way read_phixs_tables() reads them
     levelnames = dflevels["levelname"].to_list()
@@ -2297,7 +2301,8 @@ def test_add_handlers_if_not_set():
     assert ion_handlers == unchanged
 
     # the caller can give the ion stages as tuples or as lists (e.g. directly from json.load())
-    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # json.load() gives the type Any, so the lists reach the function with no type error
+    ion_handlers_json: t.Any = [(26, [[1, "cmfgen"]])]
     result = add_handlers_if_not_set(ion_handlers_json, [(26, 1)], "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 

@@ -39,6 +39,7 @@ class VersionAction(argparse.Action):
         """Make an option that takes no value and puts no attribute into the namespace."""
         super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
 
+    @t.override
     def __call__(self, parser: argparse.ArgumentParser, *_args: object, **_kwargs: object) -> None:
         """Print the version and stop the program with status 0."""
         from importlib.metadata import PackageNotFoundError
