@@ -119,8 +119,9 @@ def main():
         description=__doc__,
         epilog=(
             "The program reads compositiondata.txt in the output folder. Run makeartisatomicfiles before this"
-            " program. An ion with no Nahar file takes the ChiantiPy rates, which need the chianti extra"
-            " (uv sync --frozen --extra chianti)."
+            " program. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less."
+            " The ChiantiPy rates need the chianti extra (uv sync --frozen --extra chianti). recombrates.txt has"
+            " no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion."
         ),
     )
     # the same default as makeartisatomicfiles, relative to the working directory, so the two

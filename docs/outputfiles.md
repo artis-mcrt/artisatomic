@@ -29,9 +29,11 @@ adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before t
 
 A comment block does not repeat a number of the header line of the ion, for example the count of levels or the ionisation energy.
 
-In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines for all ions. A kind of detail line that occurs for many levels or transitions of one ion gives one line in the comment block: the first such line, with the count. The log file has each of those lines. The log file is in the output folder, beside `artisatomicionhandlers_used.json`, which records the ions and the handlers of the run. Give that record to `-ionhandlersfile` to repeat the run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
+In phixsdata_v2.txt, an ion with no cross section table has no comment block. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
 
-ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them from all three files for such a release. `grep -v` only prints the lines. Write the result to a new file, then replace the old file:
+The log file `artisatomiclog.txt` holds the same lines for all ions. Some kinds of detail line occur for many levels or transitions of one ion. For such a kind, the comment block gives only the first line, with the count. The log file has each of those lines. The log file is in the output folder, beside `artisatomicionhandlers_used.json`, which records the ions and the handlers of the run. Give that record to `-ionhandlersfile` to repeat the run.
+
+ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them from all three files for such a release. `grep -v` only prints the lines. Write the result to a new file. Then replace the old file with the new file:
 
 ```sh
 for f in adata.txt transitiondata.txt phixsdata_v2.txt; do grep -v '^#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done

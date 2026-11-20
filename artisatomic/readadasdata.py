@@ -762,7 +762,7 @@ def adas_transitions_frame(levelcount: int, dfpairs: pl.DataFrame, filepath) -> 
 
 def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
     """Read the cross sections of an ion of the "adas" handler. Only Co III, with its QUB levels, has data."""
-    fill_arrays = _fill_co3_phixs if (atomic_number, ion_stage) == (27, 3) else None
+    fill_arrays = phixs_fillers.get((atomic_number, ion_stage))
     return _read_qub_phixs(fill_arrays, atomic_number, ion_stage, dfenergylevels.height, args, flog)
 
 
@@ -1133,6 +1133,11 @@ def _fill_co3_phixs(
         photoionization_targetfractions[levelid] = [(0, 1.0)]  # the upper ion's ground state
         if levelid < 4:
             photoionization_crosssections[levelid] = phixsvalues
+
+
+# The function that fills the cross sections of each ion of the "adas" handler that has data. The
+# check before a run reads the keys: each other ion below the top ion gets the hydrogenic estimate.
+phixs_fillers = {(27, 3): _fill_co3_phixs}
 
 
 def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:

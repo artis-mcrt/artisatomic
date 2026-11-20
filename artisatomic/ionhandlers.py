@@ -26,31 +26,43 @@ inputhandlersfile = Path("artisatomicionhandlers.json")
 
 
 def find_handlers_file(handlersfile: Path | None) -> Path | None:
-    """Give the ion handlers file of the run, or None if the run uses the built-in selection.
+    """Give the ion handlers file of the run, or None if the run uses the built-in ion selection.
 
     handlersfile is the value of the option -ionhandlersfile. That file must exist. With None, the
     file is inputhandlersfile in the working directory, if it exists. The file can be a pipe, for
     example /dev/stdin, because get_ion_handlers() reads it one time only.
 
     An empty regular file is an error. A shell redirect to the file, for example the output of
-    --listions, empties the file before the program starts.
+    --listions, empties the file before the program starts. A folder and a link to no file at the
+    name inputhandlersfile are errors also, and do not give the built-in ion selection.
     """
-    if handlersfile is not None:
-        if not handlersfile.exists():
-            msg = f"The ion handlers file {handlersfile} does not exist."
-            raise FileNotFoundError(msg)
-        if handlersfile.is_dir():
-            msg = f"The ion handlers file {handlersfile} is a folder. Give the path of the JSON file in the folder."
-            raise ValueError(msg)
-    elif inputhandlersfile.exists():
+    isdefault = handlersfile is None
+    if handlersfile is None:
+        if not inputhandlersfile.exists() and not inputhandlersfile.is_symlink():
+            return None
         handlersfile = inputhandlersfile
-    else:
-        return None
 
+    if not handlersfile.exists():
+        msg = (
+            f"The ion handlers file {handlersfile} is a link to a file that does not exist."
+            if handlersfile.is_symlink()
+            else f"The ion handlers file {handlersfile} does not exist."
+        )
+        raise FileNotFoundError(msg)
+    if handlersfile.is_dir():
+        msg = f"The ion handlers file {handlersfile} is a folder. Give the path of the JSON file in the folder."
+        raise ValueError(msg)
     if handlersfile.is_file() and handlersfile.stat().st_size == 0:
+        # The file in the working directory controls each run with no option, so the remedy there is
+        # to remove it. A user who named the file needs a different file.
+        remedy = (
+            "Remove the file. As an alternative, write the output of --listions to a different file."
+            if isdefault
+            else "Give a file that holds an ion selection."
+        )
         msg = (
             f"The ion handlers file {handlersfile} is empty. A shell redirect to a file empties the file before"
-            " the program starts. Remove the file, or write the output of --listions to a different file."
+            f" the program starts. {remedy}"
         )
         raise ValueError(msg)
     return handlersfile
@@ -88,21 +100,23 @@ def get_ion_handlers(
 
     The function reads the ion handlers file when find_handlers_file() gives one, so the user can
     repeat a run exactly. That file holds the ion stages and the atomic numbers already, so no limit
-    applies to it. Otherwise the function builds the built-in selection: the ions below plus every
+    applies to it. Otherwise the function builds the built-in ion selection: the ions below plus every
     ion for which the readers' extend_ion_list() functions find data.
 
-    minionstage, maxionstage and maxatomicnumber limit that built-in selection. A value of None
+    minionstage, maxionstage and maxatomicnumber limit that built-in ion selection. A value of None
     applies no limit. The caller states all three, because build_parser() holds their default values.
     """
     handlersfile = find_handlers_file(handlersfile)
     if handlersfile is not None:
         print(f"Reading {handlersfile}")
-        with handlersfile.open(encoding="utf-8") as f:
-            try:
-                loaded = json.load(f)
-            except json.JSONDecodeError as error:
-                msg = f"The ion handlers file {handlersfile} does not hold valid JSON: {error}"
-                raise ValueError(msg) from error
+        # json.loads() finds the encoding of the bytes: UTF-8, also with a byte order mark, or UTF-16 and
+        # UTF-32 with a byte order mark. Windows PowerShell 5.1 writes the output of ">" in UTF-16.
+        try:
+            loaded = json.loads(handlersfile.read_bytes())
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            # the message holds the decode error, so a second traceback gives no information
+            msg = f"The ion handlers file {handlersfile} does not hold valid JSON: {error}"
+            raise ValueError(msg) from None
         return sort_ion_handlers(parse_ion_handlers(loaded, handlersfile))
 
     # Include every ion that has data.
@@ -138,9 +152,10 @@ def get_ion_handlers(
                     readkuruczdata.find_gfall(atomic_number, ion_stage - 1)
                 except FileNotFoundError as exc:
                     msg = (
-                        f"The built-in selection takes Z={atomic_number} ion_stage={ion_stage} from the Kurucz line"
-                        " lists, but the file is missing. Download the Kurucz files (atomic-data-kurucz/url.txt), or"
-                        f" give an ion handlers file.\n{exc}"
+                        f"The built-in ion selection takes Z={atomic_number} ion_stage={ion_stage} from the Kurucz"
+                        " line lists, but the file is missing. Download the Kurucz files as"
+                        " atomic-data-kurucz/README.txt says. As an alternative, give an ion handlers file."
+                        f"\n{exc}"
                     )
                     raise FileNotFoundError(msg) from exc
 

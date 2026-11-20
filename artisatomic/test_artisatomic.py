@@ -6641,7 +6641,7 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     """A failed cleanup after the moves must not stop the run, because the new output is complete."""
     from artisatomic import cli
 
-    def remove_old_log_folder(_outputfolder):
+    def remove_old_log_folder(_outputfolder, **_kwargs: object):
         msg = "the cleanup failed"
         raise OSError(msg)
 

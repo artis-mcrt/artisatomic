@@ -52,6 +52,21 @@ class VersionAction(argparse.Action):
         parser.exit()
 
 
+class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    """Add the default value to the help of each option, except for a default of None.
+
+    None is no value that a user can give. The help of such an option says what the program does
+    with no such option.
+    """
+
+    @t.override
+    def _get_help_string(self, action: argparse.Action) -> str | None:
+        """Give the help of the option, with the default value if it is not None."""
+        if action.default is None:
+            return action.help
+        return super()._get_help_string(action)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line parser. Every option has a default, so parse_args([]) gives a full namespace.
 
@@ -59,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     give the form with one dash.
     """
     parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        formatter_class=HelpFormatter,
         description=(
             "Produce an ARTIS atomic database from published atomic data sets. The program writes adata.txt,"
             " compositiondata.txt, transitiondata.txt and phixsdata_v2.txt into the output folder."
@@ -129,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help=(
-            "Do not include an ion of the built-in selection below this ion stage. 1 is the neutral atom."
+            "Do not include an ion of the built-in ion selection below this ion stage. 1 is the neutral atom."
             " The program rejects this option with an ion handlers file."
         ),
     )
@@ -139,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=5,
         help=(
-            "Do not include an ion of the built-in selection above this ion stage."
+            "Do not include an ion of the built-in ion selection above this ion stage."
             " The program rejects this option with an ion handlers file."
         ),
     )
@@ -149,7 +164,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help=(
-            "Do not include an element of the built-in selection above this atomic number. With no such option,"
+            "Do not include an element of the built-in ion selection above this atomic number. With no such option,"
             " the program applies no limit to the atomic number. The program rejects this option with an ion"
             " handlers file."
         ),
@@ -227,9 +242,11 @@ def cmfgen_data_needed(ion_handlers: list[tuple[int, list[tuple[int, str]]]], ar
     builds H II from constants, and H II is the top ion of H, so it needs no cross section.
 
     The hydrogenic estimate of an ion below the top ion reads the hydrogen tables of the data set.
-    A handler with a parser for its level names and no cross sections of its own always makes the
-    estimate, unless the options switch it off. Only the data of a handler with cross sections,
-    for example adas, shows if an ion needs the estimate. read_hyd_phixsdata() checks the folder then.
+    An ion gets the estimate if its handler has a parser for its level names and no cross sections
+    for the ion. --nophixs and -nlevels_hydrogenic_for_unknown_phixs 0 switch the estimate off.
+    Handler.phixs_ions names the ions with cross sections of a handler such as adas. For a
+    different handler with cross sections, only the data shows if an ion gets the estimate.
+    read_hyd_phixsdata() checks the folder then.
     """
     from artisatomic.iondata import handlers
 
@@ -240,7 +257,10 @@ def cmfgen_data_needed(ion_handlers: list[tuple[int, list[tuple[int, str]]]], ar
                 return True
             handler = handlers[handlername]
             is_top_ion = index == len(listions) - 1
-            if estimate and not is_top_ion and handler.get_level_valence_n is not None and handler.read_phixs is None:
+            gives_phixs = handler.read_phixs is not None and (
+                handler.phixs_ions is None or (atomic_number, ion_stage) in handler.phixs_ions
+            )
+            if estimate and not is_top_ion and handler.get_level_valence_n is not None and not gives_phixs:
                 return True
     return False
 
@@ -261,7 +281,9 @@ def check_arguments(
             if args.ionhandlersfile is not None
             else f"Remove the file. As an alternative, remove {options}."
         )
-        msg = f"{handlersfile.resolve()} exists, so that file selects the ions. {remedy}"
+        # absolute() and not resolve(): the message names the path that the user gave, and not the
+        # target of a link, which "Remove the file" would then delete
+        msg = f"{handlersfile.absolute()} exists, so that file selects the ions. {remedy}"
         raise ValueError(msg)
 
     # Ion stage 1 is the neutral atom, and hydrogen is atomic number 1. A smaller limit selects no
@@ -331,13 +353,15 @@ def main() -> None:
 
     # get_ion_handlers() finds the ADAS ions in this directory, so the rename comes first
     # With --listions, the standard output holds the selection only, so a user can write it to a file.
+    # get_ion_handlers() gets the file that the checks above found. The rename can move a file, and a
+    # second search would then give the built-in ion selection with no message.
     with contextlib.redirect_stdout(sys.stderr if args.listions else sys.stdout):
         readadasdata.rename_old_adas_directory()
         ion_handlers = get_ion_handlers(
             minionstage=args.minionstage,
             maxionstage=args.maxionstage,
             maxatomicnumber=args.maxatomicnumber,
-            handlersfile=args.ionhandlersfile,
+            handlersfile=handlersfile,
         )
 
     if not any(ions for _, ions in ion_handlers):
@@ -402,7 +426,7 @@ def main() -> None:
                 shutil.rmtree(earlierfolder)
                 workfolder.rmdir()
                 (outputfolder / failedlogname).unlink(missing_ok=True)
-                remove_old_log_folder(outputfolder)
+                remove_old_log_folder(outputfolder, keep=handlersfile)
             except OSError as error:
                 print(f"WARNING: The run wrote all output files, but the cleanup of the output folder failed: {error}")
 
@@ -606,19 +630,32 @@ def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: arg
     process_files(ion_handlers, args)
 
 
-def remove_old_log_folder(output_folder: Path) -> None:
+def is_same_file(path: Path, other: Path | None) -> bool:
+    """Whether the two paths name one file. A path that does not exist names no file."""
+    if other is None:
+        return False
+    try:
+        return path.samefile(other)
+    except OSError:
+        return False
+
+
+def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None:
     """Remove the log files that an earlier release wrote to the folder atomic_data_logs.
 
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
     A user could take such a file for a record of the new run. The function removes each .txt
     file of the folder and the copy of the ion handlers. That release did the same at the start
     of each run. The function then removes the folder if the folder is empty.
+
+    keep is the ion handlers file of the run. The function keeps that file, also if it is the copy
+    of the ion handlers in this folder.
     """
     old_log_folder = output_folder / "atomic_data_logs"
     if not old_log_folder.is_dir():
         return
     for oldfile in sorted([*old_log_folder.glob("*.txt"), old_log_folder / "artisatomicionhandlers.json"]):
-        if oldfile.is_file():
+        if oldfile.is_file() and not is_same_file(oldfile, keep):
             print("deleting", oldfile)
             oldfile.unlink()
     # rmdir() fails on a symbolic link to a folder, so such a link stays

@@ -57,7 +57,7 @@ def test_ionhandlersfile_option_comes_before_the_file_in_the_working_directory(t
 
 
 def test_ionhandlersfile_that_does_not_exist_stops_the_run(tmp_path, monkeypatch, capsys):
-    """A wrong path must not give the built-in selection, which can run for hours."""
+    """A wrong path must not give the built-in ion selection, which can run for hours."""
     monkeypatch.chdir(tmp_path)
     with pytest.raises(SystemExit) as exit_info:
         run_main(monkeypatch, "-ionhandlersfile", "no_such_file.json")
@@ -111,9 +111,12 @@ def test_listhandlers_prints_each_handler_with_its_source(tmp_path, monkeypatch,
     run_main(monkeypatch, "--listhandlers")
     lines = capsys.readouterr().out.splitlines()
     assert [line for line in lines if line and not line.startswith(" ")] == sorted(handlers)
-    assert lines[lines.index("cmfgen") + 1] == f"    {readhillierdata.description}"
-    # the QUB cross sections of Co II are the only difference between the two CMFGEN handlers
+    assert lines[lines.index("cmfgen") + 1].startswith(f"    {readhillierdata.description}. H II: ")
+    # the QUB cross sections of Co II are the difference between the two CMFGEN handlers
     assert lines[lines.index("cmfgen_qubphixs") + 1] != lines[lines.index("cmfgen") + 1]
+    # U II and U III of the fac handler come from a different folder
+    assert "Paper_Nd_U" in lines[lines.index("fac") + 1]
+    assert "Co III has" in lines[lines.index("adas") + 1]
     assert all(handler.summary for handler in handlers.values())
     assert not (tmp_path / "artis_files").exists()
 
@@ -196,8 +199,11 @@ def test_bare_proton_needs_no_cmfgen_data_folder(tmp_path, monkeypatch):
         ([(38, [(1, "kurucz"), (2, "kurucz")])], ["-nlevels_hydrogenic_for_unknown_phixs", "0"], False),
         # the top ion gets no cross sections
         ([(38, [(1, "kurucz")])], [], False),
-        # only its data shows if an adas ion needs the estimate, and the kurucz ion is the top ion
-        ([(38, [(1, "adas"), (2, "kurucz")])], [], False),
+        # the adas handler has cross sections only for Co III, so Sr I gets the estimate
+        ([(38, [(1, "adas"), (2, "kurucz")])], [], True),
+        ([(27, [(3, "adas"), (4, "adas")])], [], False),
+        # the kurucz ion is the top ion
+        ([(38, [(1, "adas"), (2, "kurucz")])], ["--nophixs"], False),
         # a handler with no parser for its level names makes no estimate
         ([(58, [(5, "mons"), (6, "mons")])], [], False),
         ([(34, [(4, "gsnist"), (5, "gsnist")])], [], False),
@@ -241,11 +247,28 @@ def test_ionhandlersfile_that_is_a_folder_stops_the_run(tmp_path, monkeypatch, c
 
 
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="the system has no named pipes")
-def test_ionhandlersfile_can_be_a_pipe(tmp_path):
-    """The program reads the file one time only, so a pipe such as /dev/stdin can give the selection."""
+def test_ionhandlersfile_can_be_a_named_pipe(tmp_path):
+    """The checks of the file do not open a named pipe, because an open waits for a writer."""
     pipe = tmp_path / "selection.json"
     os.mkfifo(pipe)
     assert find_handlers_file(pipe) == pipe
+
+
+@pytest.mark.skipif(not Path("/dev/fd").is_dir(), reason="the system has no /dev/fd")
+def test_ionhandlersfile_can_be_a_pipe(tmp_path, monkeypatch, capsys):
+    """The program reads the file one time only, so a pipe such as /dev/stdin can give the selection.
+
+    The pipe holds the selection one time. A second read of the pipe finds no data, and the run stops.
+    """
+    monkeypatch.chdir(tmp_path)
+    readend, writeend = os.pipe()
+    os.write(writeend, json.dumps(selection).encode())
+    os.close(writeend)
+    try:
+        run_main(monkeypatch, "--listions", "-ionhandlersfile", f"/dev/fd/{readend}")
+    finally:
+        os.close(readend)
+    assert json.loads(capsys.readouterr().out) == selection
 
 
 def test_handlers_file_that_is_not_json_names_the_file(tmp_path):
@@ -254,3 +277,66 @@ def test_handlers_file_that_is_not_json_names_the_file(tmp_path):
     handlersfile.write_text("[[26, [[1, ", encoding="utf-8")
     with pytest.raises(ValueError, match=r"my_ions\.json does not hold valid JSON"):
         get_ion_handlers(1, 5, None, handlersfile=handlersfile)
+    # a byte that is not UTF-8, for example from a file in the encoding cp1252
+    handlersfile.write_bytes(b'[[26, [[1, "gsn\xefst"]]]]')
+    with pytest.raises(ValueError, match=r"my_ions\.json does not hold valid JSON"):
+        get_ion_handlers(1, 5, None, handlersfile=handlersfile)
+
+
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-16-be", "utf-32"])
+def test_handlers_file_can_have_a_byte_order_mark(tmp_path, encoding):
+    """Windows PowerShell 5.1 writes the output of a shell redirect in UTF-16 with a byte order mark."""
+    handlersfile = tmp_path / "my_ions.json"
+    # Python writes the byte order mark for utf-8-sig, utf-16 and utf-32, but not for utf-16-be
+    bom = "﻿" if encoding == "utf-16-be" else ""
+    handlersfile.write_bytes((bom + json.dumps(selection)).encode(encoding))
+    assert get_ion_handlers(1, 5, None, handlersfile=handlersfile) == [
+        (26, [(1, "gsnist"), (2, "gsnist")]),
+        (34, [(5, "gsnist")]),
+    ]
+
+
+def test_folder_with_the_default_name_stops_the_run(tmp_path, monkeypatch, capsys):
+    """A folder in the working directory gives the message of a folder, and not a traceback."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / inputhandlersfile).mkdir()
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "--listions")
+    assert exit_info.value.code == 2
+    assert f"The ion handlers file {inputhandlersfile} is a folder." in capsys.readouterr().err
+
+
+@pytest.mark.skipif(not hasattr(os, "symlink"), reason="the system has no symbolic links")
+def test_broken_link_with_the_default_name_stops_the_run(tmp_path, monkeypatch, capsys):
+    """A link to no file must not give the built-in ion selection, which can run for hours."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / inputhandlersfile).symlink_to(tmp_path / "removed.json")
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "--listions")
+    assert exit_info.value.code == 2
+    assert "is a link to a file that does not exist." in capsys.readouterr().err
+
+
+def test_empty_file_of_the_option_needs_no_removal(tmp_path, monkeypatch, capsys):
+    """The message tells the user to give a different file, and not to remove the file of the option."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "my_ions.json").write_text("", encoding="utf-8")
+    with pytest.raises(SystemExit) as exit_info:
+        run_main(monkeypatch, "-ionhandlersfile", "my_ions.json")
+    assert exit_info.value.code == 2
+    error = capsys.readouterr().err
+    assert "Give a file that holds an ion selection." in error
+    assert "Remove the file" not in error
+
+
+def test_run_keeps_its_handlers_file_in_the_old_log_folder(tmp_path, monkeypatch):
+    """An earlier release wrote a copy of the ion handlers into atomic_data_logs. A run can read that copy."""
+    monkeypatch.chdir(tmp_path)
+    oldfolder = tmp_path / "artis_files" / "atomic_data_logs"
+    oldfolder.mkdir(parents=True)
+    oldcopy = oldfolder / "artisatomicionhandlers.json"
+    oldcopy.write_text(json.dumps([[34, [[5, "gsnist"]]]]), encoding="utf-8")
+    (oldfolder / "Z34.txt").write_text("the log of an earlier release\n", encoding="utf-8")
+    run_main(monkeypatch, "-ionhandlersfile", str(oldcopy), "--nophixs")
+    assert oldcopy.is_file()
+    assert not (oldfolder / "Z34.txt").exists()

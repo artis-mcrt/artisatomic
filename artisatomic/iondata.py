@@ -89,7 +89,10 @@ class Handler:
     wins.
 
     read_phixs, when set, takes the same arguments and returns the PhixsData of the ion. Without
-    it, the hydrogenic estimate is the only source of cross sections.
+    it, the hydrogenic estimate is the only source of cross sections. phixs_ions, when set, names
+    the only ions for which read_phixs gives cross sections. Each other ion gets the estimate, and
+    the check before a run uses that fact. With read_phixs and no phixs_ions, only the data shows
+    which ions get the estimate.
 
     description is the name of the data source of the levels and the transitions, with its
     reference where the repository holds one. read_ion_data() records it as the "source:" line of
@@ -111,6 +114,7 @@ class Handler:
     reader_takes_args: bool = False
     read_coldata: Callable[..., pl.DataFrame] | None = None
     read_phixs: Callable[..., PhixsData] | None = None
+    phixs_ions: frozenset[tuple[int, int]] | None = None
     source_summary: str | None = None
 
     @property
@@ -165,7 +169,7 @@ handlers: dict[str, Handler] = {
         readfacdata.description_of_ion,
         readfacdata.read_levels_and_transitions,
         readfacdata.get_level_valence_n,
-        source_summary=readfacdata.description,
+        source_summary=f"{readfacdata.description}. U II and U III: {readfacdata.description_uranium}",
     ),
     "mons": Handler(
         readmonsdata.description,
@@ -190,7 +194,11 @@ handlers: dict[str, Handler] = {
         returns_upsilons=True,
         reader_takes_args=True,
         read_phixs=readadasdata.read_photoionizations,
-        source_summary=readadasdata.description,
+        phixs_ions=frozenset(readadasdata.phixs_fillers),
+        source_summary=(
+            f"{readadasdata.description}. Co III has {readadasdata.qub_cobalt_phixs_description}."
+            f" Co IV: {readadasdata.description_co4}"
+        ),
     ),
     # levels, collision strengths and cross sections
     "cmfgen": Handler(
@@ -199,7 +207,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
-        source_summary=readhillierdata.description,
+        source_summary=f"{readhillierdata.description}. H II: {readhillierdata.bare_proton_description}",
     ),
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.

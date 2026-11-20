@@ -1,7 +1,7 @@
 # Output checksum test sets
 
 Each directory here is one entry of the `tests` matrix in
-[../.github/workflows/test.yml](../.github/workflows/test.yml). The job gives the
+[.github/workflows/test.yml](https://github.com/artis-mcrt/artisatomic/blob/main/.github/workflows/test.yml). The job gives the
 `artisatomicionhandlers.json` of the set to `-ionhandlersfile`. It runs `python -m artisatomic` under
 coverage, and checks the four output files against `checksums.txt`. `coverage run` can name the
 module only in the `-m` form. That is the same `main()` the `makeartisatomicfiles` console script calls, so the

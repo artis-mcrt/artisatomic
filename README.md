@@ -56,7 +56,7 @@ Copy the four output files to the folder of an ARTIS model.
 ]
 ```
 
-Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in selection needs the CMFGEN data set, the Floers+25 data set and the Kurucz line lists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
+Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in ion selection needs the CMFGEN data set, the Floers+25 data set and the Kurucz line lists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in ion selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
 
 These commands give information and write no output file:
 
@@ -67,12 +67,12 @@ These commands give information and write no output file:
 | `makeartisatomicfiles --listions` | the ion selection, in the format of an ion handlers file |
 | `makeartisatomicfiles --version` | the version of the package |
 
-Each option has a form with one dash and a form with two dashes, for example `-maxionstage` and `--maxionstage`.
+Each option has a form with one dash and a form with two dashes, for example `-maxionstage` and `--maxionstage`. In the form with two dashes, `-output_folder` and `-nlevels_hydrogenic_for_unknown_phixs` use hyphens: `--output-folder` and `--nlevels-hydrogenic-for-unknown-phixs`.
 
 ### Other commands
 The package installs three more commands:
 
-- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less. The ChiantiPy rates need the `chianti` extra (`uv sync --frozen --extra chianti`). recombrates.txt has no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion.
 - `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file.
 - `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
 

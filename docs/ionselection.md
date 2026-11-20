@@ -50,7 +50,7 @@ With no ion handlers file, the program selects each ion for which one of these h
 
 The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) then remove ions from the selection.
 
-The built-in selection needs these data sets. The page [Data sources](datasources.md) says how to get each one.
+The built-in ion selection needs these data sets. The page [Data sources](datasources.md) says how to get each one.
 
 - The CMFGEN data set. If the folder does not exist, the run stops with the name of the download script.
 - The Floers+25 data set. The run stops if neither the public folder nor the private folder exists. This rule applies for each value of `-maxatomicnumber`.
@@ -58,7 +58,7 @@ The built-in selection needs these data sets. The page [Data sources](datasource
 
 The selection also takes the JPLT ions if the folder `atomic-data-tanaka-jplt/data_v2.1` exists. With no such folder, the selection has no JPLT ion, and the program gives no warning. The ADAS ions also come only from the files that exist.
 
-No data source of the built-in selection holds Sr V. Thus the check of the ion stages stops a selection that holds Sr IV and Sr VI. An example is `-maxionstage 6` with the default values of the other two limits.
+No data source of the built-in ion selection holds Sr V. Thus the check of the ion stages stops a selection that holds Sr IV and Sr VI. An example is `-maxionstage 6` with the default values of the other two limits.
 
 ## Show the selection
 
