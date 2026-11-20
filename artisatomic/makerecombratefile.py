@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 """Write recombrates.txt from the Nahar total recombination rate files."""
 
 import argparse
@@ -7,6 +8,7 @@ import re
 import typing as t
 from pathlib import Path
 
+import argcomplete
 import numpy as np
 from artistools.atomic import get_composition_data
 
@@ -112,12 +114,26 @@ max_chianti_atomic_number = 30
 
 def main():
     """Write recombrates.txt from the Nahar recombination rate files."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        description=__doc__,
+        epilog=(
+            "The program reads compositiondata.txt in the output folder. Run makeartisatomicfiles before this"
+            " program. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less."
+            " The ChiantiPy rates need the chianti extra (uv sync --frozen --extra chianti). recombrates.txt has"
+            " no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion."
+        ),
+    )
     # the same default as makeartisatomicfiles, relative to the working directory, so the two
     # scripts read and write one folder
     parser.add_argument(
-        "-output_folder", default="artis_files", type=Path, help="folder of compositiondata.txt and the output file"
+        "-output_folder",
+        "--output-folder",
+        default="artis_files",
+        type=Path,
+        help="Folder of compositiondata.txt and the output file",
     )
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
     artis_files_path = Path(args.output_folder)
 
@@ -156,7 +172,7 @@ def main():
 
     firstchiantiion = next(
         (
-            f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {lowerionstage}"
+            f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {lowerionstage + 1}"
             for atomic_number, lowerionstage, naharfilename in ionsources
             if naharfilename is None
         ),
@@ -175,7 +191,10 @@ def main():
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(recombrates)}\n")
                 frecombrates.writelines(f"{row.logT} {row.RRC_low_n} {row.RRC_total}\n" for row in recombrates)
             else:
-                assert ch is not None
+                if ch is None:
+                    # import_chianti_core() ran for the first ion with no Nahar file, so this cannot occur
+                    msg = "ChiantiPy is not imported, but an ion needs its rates"
+                    raise RuntimeError(msg)
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
                 arr_temperature = 10**arr_logT_e

@@ -1,10 +1,10 @@
 # Output checksum test sets
 
 Each directory here is one entry of the `tests` matrix in
-[../.github/workflows/test.yml](../.github/workflows/test.yml). The job copies the set's
-`artisatomicionhandlers.json` to the repository root, runs `python -m artisatomic` under coverage
-(`-m` is the form `coverage run` can name), and checks the four output files against
-`checksums.txt`. That is the same `main()` the `makeartisatomicfiles` console script calls, so the
+[.github/workflows/test.yml](https://github.com/artis-mcrt/artisatomic/blob/main/.github/workflows/test.yml). The job gives the
+`artisatomicionhandlers.json` of the set to `-ionhandlersfile`. It runs `python -m artisatomic` under
+coverage, and checks the four output files against `checksums.txt`. `coverage run` can name the
+module only in the `-m` form. That is the same `main()` the `makeartisatomicfiles` console script calls, so the
 recipe below reproduces it.
 
 Verification is whole-file MD5, so **any** change to level naming, sorting, phixs downsampling or a
@@ -14,9 +14,7 @@ same after `grep -v '^#'`. Regenerate a set with:
 
 ```bash
 export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"
-cp tests/<name>/artisatomicionhandlers.json .
-uv run makeartisatomicfiles -output_folder tests/<name>/output
-rm artisatomicionhandlers.json
+uv run makeartisatomicfiles -ionhandlersfile tests/<name>/artisatomicionhandlers.json -output_folder tests/<name>/output
 (cd tests/<name>/output && md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt > ../checksums.txt)
 ```
 
@@ -25,10 +23,13 @@ Name the four files. The output folder holds the log file `artisatomiclog.txt` a
 `ARTISATOMIC_TESTMODE=1` also gives the file comments a creation time of 1970-01-01T00:00:00Z, so the checksums do not depend on the time of the run. The test mode comes before `SOURCE_DATE_EPOCH`, which a build environment can set for its own use. It is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
 `test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
 `test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
-`OutputFiles_withforbidden` directory out of the test runs. The `rm` matters:
-`get_ion_handlers()` prefers `artisatomicionhandlers.json` whenever it exists, so a copy left in the
-repository root silently overrides the built-in ion selection of every later local run. A later run that
-gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an error instead.
+`OutputFiles_withforbidden` directory out of the test runs.
+
+Do not copy the file of a set to the repository root. With no `-ionhandlersfile` option,
+`find_handlers_file()` finds `artisatomicionhandlers.json` in the working directory if that file exists.
+Thus a copy left in the repository root silently overrides the built-in ion selection of every later
+local run. A later run that gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an
+error instead.
 
 Every set except `mons` needs the CMFGEN corpus, not just the `cmfgen` ones. The hydrogenic estimate
 reads the tables of HYD/I, and the mons handler has no level-name parser, so it gives no estimate. The

@@ -1071,9 +1071,7 @@ def get_nist_ionization_energies_ev() -> dict[tuple[int, int], float]:
     return _read_nist_ionization_table()[1]
 
 
-_process_pool: ProcessPoolExecutor | None = None
-
-
+@lru_cache(maxsize=1)
 def get_process_pool() -> ProcessPoolExecutor:
     """Get the one process pool for the whole run, and create it on the first use.
 
@@ -1082,14 +1080,11 @@ def get_process_pool() -> ProcessPoolExecutor:
     for each ion and for each photoionisation file. A new pool for each call would spend most of
     its time in startup. The peak memory does not change (the same workers, alive for longer).
     """
-    global _process_pool
-    if _process_pool is None:
-        # an explicit spawn context rather than mp.set_start_method(force=True), which reached
-        # outside this function to change the default for the whole process
-        _process_pool = ProcessPoolExecutor(mp_context=mp.get_context("spawn"))
-        atexit.register(_process_pool.shutdown, wait=False, cancel_futures=True)
-
-    return _process_pool
+    # an explicit spawn context rather than mp.set_start_method(force=True), which reached
+    # outside this function to change the default for the whole process
+    pool = ProcessPoolExecutor(mp_context=mp.get_context("spawn"))
+    atexit.register(pool.shutdown, wait=False, cancel_futures=True)
+    return pool
 
 
 def parallel_map[ResultType](

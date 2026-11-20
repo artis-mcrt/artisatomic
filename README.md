@@ -1,40 +1,53 @@
 # artisatomic
 [![Build and test](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml/badge.svg)](https://github.com/artis-mcrt/artisatomic/actions/workflows/test.yml)
+[![Documentation](https://readthedocs.org/projects/artisatomic/badge/?version=latest)](https://artisatomic.readthedocs.io)
 
 >The Python package converts atomic data from several sources (for example CMFGEN, Kurucz, JPLT, ADAS) into the ARTIS format.
 
-The documentation is at <https://artisatomic.readthedocs.io>.
+The documentation is at <https://artisatomic.readthedocs.io>. It has these pages:
 
-## Installation and Development
-First clone the repository, for example:
+- [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html): how to select the ions and the handler of each ion.
+- [Data sources](https://artisatomic.readthedocs.io/en/latest/datasources.html): the data set of each handler and how to get it.
+- [Output files](https://artisatomic.readthedocs.io/en/latest/outputfiles.html): the files of a run and their comments.
+- [Commands](https://artisatomic.readthedocs.io/en/latest/commands.html): the help text of each command.
+- [Development](https://artisatomic.readthedocs.io/en/latest/development.html): the tests, the checks and the code layout.
+
+## Installation
+The package needs Python 3.13 or later. The data folders are in the repository. Clone the repository:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
 cd artisatomic
 ```
 
-To use a uv project virtual environment with locked dependency versions run:
+To use a [uv](https://docs.astral.sh/uv/) project virtual environment with locked dependency versions run:
 ```sh
 uv sync --frozen
 source .venv/bin/activate
 ```
 
-Or to install into the system environment with pip:
+Or to install into the current environment with pip:
 ```sh
-python3 -m pip install --group dev -e .
+python3 -m pip install -e .
 ```
 
-Then install the pre-commit hooks once:
+## Quick start
+The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB.
+
 ```sh
-prek install
+(cd atomic-data-hillier && . ./setup_cmfgen_data.sh)
+makeartisatomicfiles -ionhandlersfile tests/cmfgen_lowz/artisatomicionhandlers.json
 ```
+
+The file `tests/cmfgen_lowz/artisatomicionhandlers.json` selects some ions of H, He, C, N, F and P. The run writes these files into the folder `artis_files`:
+
+- `adata.txt`, `compositiondata.txt`, `transitiondata.txt` and `phixsdata_v2.txt`, which ARTIS reads;
+- `artisatomiclog.txt`, the log of the run;
+- `artisatomicionhandlers_used.json`, the record of the ions and the handlers of the run.
+
+Copy the four output files to the folder of an ARTIS model.
 
 ## Usage
-Run "makeartisatomicfiles" at the command-line to create adata.txt, compositiondata.txt, phixsdata_v2.txt, and transitiondata.txt. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an `artisatomicionhandlers.json` file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. No data source of the built-in selection holds Sr V, so `-maxionstage 6` or more stops at the check of the ion stages, unless `-maxatomicnumber` is 37 or less.
-
-### The ion handlers file
-`artisatomicionhandlers.json` in the working directory selects the ions and the handler that reads each ion. When the file exists, the run ignores the built-in ion selection. The run stops if the command also gives `-minionstage`, `-maxionstage` or `-maxatomicnumber`, because the file selects the ions itself.
-
-The file is a JSON list with one entry for each element. An entry is the atomic number and a list of `[ion stage, handler]` pairs. Ion stage 1 is the neutral atom. This example selects Ca III and Co II–IV:
+`makeartisatomicfiles` writes the four output files. An ion handlers file selects the ions and the handler that reads each ion. This example selects Ca III and Co II–IV:
 
 ```json
 [
@@ -43,55 +56,44 @@ The file is a JSON list with one entry for each element. An entry is the atomic 
 ]
 ```
 
-The selection must contain at least one ion. An element can have an empty ion list if another element contains an ion.
+Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in ion selection needs the CMFGEN data set, the Floers+25 data set and the Kurucz line lists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in ion selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
 
-The ion stages of an element must have no gap. The handlers are:
+These commands give information and write no output file:
 
-- `adas`
-- `boyle`
-- `cmfgen`
-- `cmfgen_qubphixs`
-- `dream`
-- `fac`
-- `floers25calib`
-- `floers25calibwithforbidden`
-- `floers25uncalib`
-- `gsnist`
-- `kurucz`
-- `lisbon`
-- `mons`
-- `tanakajplt`
+| command | result |
+|---|---|
+| `makeartisatomicfiles --help` | each option with its default value |
+| `makeartisatomicfiles --listhandlers` | each handler with its data source |
+| `makeartisatomicfiles --listions` | the ion selection, in the format of an ion handlers file |
+| `makeartisatomicfiles --version` | the version of the package |
 
-The `handlers` registry in `artisatomic/iondata.py` gives the reader of each handler. The run stops before it writes an output file if the file names an unknown handler. Each set in `tests/` except `chargetransfer` holds an example file.
+Each option has a form with one dash and a form with two dashes, for example `-maxionstage` and `--maxionstage`. In the form with two dashes, `-output_folder` and `-nlevels_hydrogenic_for_unknown_phixs` use hyphens: `--output-folder` and `--nlevels-hydrogenic-for-unknown-phixs`.
 
-Each run writes `artisatomicionhandlers_used.json` into the output folder, in the same format. Copy that record to `artisatomicionhandlers.json` to repeat the run. Remove `artisatomicionhandlers.json` after the run. The file controls every later run in that directory.
-
-### Comments in the output files
-adata.txt, transitiondata.txt and phixsdata_v2.txt start with a file comment. The file comment explains each field of the file. It says that level numbers and ion stages start at 1, and not at 0. It also gives the options of the run that apply to all ions. Two examples are the temperature of the cross section downsample (`-optimaltemperature`) and the temperature of the collision strengths (`-electrontemperature`). In phixsdata_v2.txt the file comment comes after the first two numbers, because ARTIS reads them with no comment skip.
-
-The file comment gives the creation time in UTC. Set `SOURCE_DATE_EPOCH` for a run whose files must be the same as the files of an earlier run. `ARTISATOMIC_TESTMODE=1` gives a fixed time of 1970-01-01T00:00:00Z, and the test mode comes before `SOURCE_DATE_EPOCH`.
-
-adata.txt, transitiondata.txt and phixsdata_v2.txt have a comment block before the data of each ion. Each line of a comment block starts with `#`. A comment block gives:
-
-- the ion and the handler;
-- the data source with its reference (the `source:` line);
-- the source files;
-- the choices and the warnings for that file.
-
-A comment block does not repeat a number of the header line of the ion, for example the count of levels or the ionisation energy.
-
-In phixsdata_v2.txt, an ion with no cross section table has no comment block. The log file `artisatomiclog.txt` holds the same lines for all ions. A kind of detail line that occurs for many levels or transitions of one ion gives one line in the comment block: the first such line, with the count. The log file has each of those lines. The log file is in the output folder, beside `artisatomicionhandlers_used.json`, which records the ions and the handlers of the run. Copy that record to `artisatomicionhandlers.json` in the working directory to repeat the run. compositiondata.txt has no comment block, because ARTIS reads it with no comment skip. The comment blocks contain ASCII characters only.
-
-ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops on them. Remove them from all three files for such a release. `grep -v` only prints the lines. Write the result to a new file, then replace the old file:
-
-```sh
-for f in adata.txt transitiondata.txt phixsdata_v2.txt; do grep -v '^#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
-```
-
-artistools needs a version that skips the comment blocks.
-
+### Other commands
 The package installs three more commands:
 
-- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. An ion with no Nahar file takes the ChiantiPy rates, which need the `chianti` extra (`uv sync --frozen --extra chianti`).
+- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less. The ChiantiPy rates need the `chianti` extra (`uv sync --frozen --extra chianti`). recombrates.txt has no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion.
 - `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file.
 - `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
+
+### Tab completion
+The commands with options use [argcomplete](https://kislyuk.github.io/argcomplete/). To complete the options of a command in bash or zsh, run this line:
+
+```sh
+eval "$(register-python-argcomplete makeartisatomicfiles)"
+```
+
+To use the completion in each new shell, add the line to the startup file of the shell.
+
+## Development
+Install the development tools:
+```sh
+uv sync --frozen
+```
+
+Then install the pre-commit hooks one time:
+```sh
+prek install
+```
+
+With pip, the command is `python3 -m pip install --group dev -e .`. The page [Development](https://artisatomic.readthedocs.io/en/latest/development.html) gives the commands for the tests and the checks.

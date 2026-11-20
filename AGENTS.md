@@ -23,7 +23,9 @@ Use these terms and spellings in the prose. Identifiers, output-file formats and
 
 ## What this project is
 
-artisatomic converts published atomic data (for example CMFGEN, Kurucz, JPLT, DREAM, Floers+25, ADAS, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion. The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an ion handlers JSON file. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers JSON file, because that file selects the ions itself.
+artisatomic converts published atomic data (for example CMFGEN, Kurucz, JPLT, DREAM, Floers+25, ADAS, MONS) into the ARTIS atomic database format. The output files are adata.txt, compositiondata.txt, transitiondata.txt, and phixsdata_v2.txt. The command `makeartisatomicfiles` starts the conversion.
+
+The tool has no configuration interface for the ion selection. To change ions or data sources, edit the Python code or supply an ion handlers file in the JSON format. The option `-ionhandlersfile` names that file. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if it exists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) also limit the built-in ion selection. The program stops if one of those options comes with an ion handlers file, because that file selects the ions itself.
 
 The command-line scripts (`makeartisatomicfiles`, `makeartisrecombratefile`, `makeartischargetransferfile`, and `makeartisgammaspecfiles`) are the only callers of the package, and this repository holds all of them. Change a function signature or a module layout when you must.
 
@@ -60,10 +62,10 @@ CI (`.github/workflows/test.yml`) runs the lint check, the format check, both ty
 
 ## Output checksums
 
-The output files must stay byte-identical unless the change intends a different output. Each directory in `tests/` (except `chargetransfer`) holds an ion handlers file and the MD5 checksums of the four output files. [tests/README.md](tests/README.md) gives the recipe to regenerate a set and explains which ions each set covers. Two rules from it matter for every run:
+The output files must stay byte-identical unless the change intends a different output. Each directory in `tests/` (except `chargetransfer`) holds an ion handlers file and the MD5 checksums of the four output files. [tests/README.md](https://github.com/artis-mcrt/artisatomic/blob/main/tests/README.md) gives the recipe to regenerate a set and explains which ions each set covers. Two rules from it matter for every run:
 
 - Set `ARTISATOMIC_TESTMODE=1`. It redirects the Kurucz, ADAS, MONS and Floers+25 readers to their committed samples.
-- Remove `artisatomicionhandlers.json` from the repository root after the run. A copy left there silently overrides the ion selection of every later run.
+- Give the ion handlers file of the set with `-ionhandlersfile`. Do not copy it to the repository root. A copy left there silently overrides the ion selection of every later run that has no such option.
 
 When a change alters the output on purpose, verify the new values, then regenerate every set that the change touches.
 
@@ -85,11 +87,12 @@ When a change alters the output on purpose, verify the new values, then regenera
 - A reader that takes its ionisation energy from the NIST table records `nist_ionization_energy_comment`, because the `source:` line names a different data set.
 - Each reader module holds a `description`: the name of its data source, with the full reference where the repository holds one. `read_ion_data()` records it as the `source:` line of adata.txt and transitiondata.txt.
 - A function that gives cross sections records the `source:` line of phixsdata_v2.txt itself, and only when it gives a table. The source can be different for each ion of a handler.
-- `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there.
+- `artisatomic/iondata.py` reads one ion and holds the result in an `IonData` record. Its `handlers` registry maps each handler name to the reader, the level-name parser, the return shape, and the optional collision-strength and photoionisation readers. Add a data source with an entry there. An entry whose `description` is a function also gives `source_summary`, which `--listhandlers` prints.
 - `artisatomic/levelnames.py` parses the parts of a level name that more than one reader needs, for example the parity of a configuration.
-- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
-- `docs/` holds the Sphinx documentation, which readthedocs.org builds from `.readthedocs.yaml`. All pages use MyST Markdown. Do not add a reStructuredText page. `docs/index.md` includes README.md, and `docs/tests.md` includes tests/README.md. Sphinx reads no docstring, so the docs have no module reference. `.github/workflows/linkcheck.yml` checks the links of the docs each week.
-- `tests/` contains test configurations and reference checksums for the data sources that CI covers. `artisatomic/test_artisatomic.py` and `artisatomic/test_chargetransfer.py` contain the test functions.
+- `artisatomic/cli.py` contains the `makeartisatomicfiles` entry point. `check_arguments()` there raises `ValueError` for a bad option, and `main()` reports it through `parser.error()`, with no traceback. Give each new option a form with one dash and a form with two dashes. `artisatomic/makerecombratefile.py` contains the `makeartisrecombratefile` entry point. `artisatomic/makechargetransferfile.py` contains the `makeartischargetransferfile` entry point. `artisatomic/download_gammaspec_betaminus_alpha.py` contains the `makeartisgammaspecfiles` entry point.
+- `docs/` holds the Sphinx documentation, which readthedocs.org builds from `.readthedocs.yaml`. All pages use MyST Markdown. Do not add a reStructuredText page. Sphinx reads no docstring, so the docs have no module reference. `.github/workflows/linkcheck.yml` checks the links of the docs each week.
+- `docs/index.md` includes README.md, and `docs/tests.md` includes tests/README.md. `docs/development.md` includes this file from the section "Setup" to the end. Write each link in those sections as an absolute address. `docs/datasources.md` holds a table of the handlers. Update it when you add a handler.
+- `tests/` contains test configurations and reference checksums for the data sources that CI covers. The modules `artisatomic/test_*.py` contain the test functions.
 - The pytest settings in `pyproject.toml` fail the run if a test gives a warning (`max_warnings = "0"`). Do not use `filterwarnings = ["error"]` for this. polars gives some deprecations from its Rust core, and that filter hides them.
 
 ## Code style

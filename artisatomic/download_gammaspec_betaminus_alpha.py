@@ -153,8 +153,8 @@ def main():
                 )
 
                 newcols: list[str] = []
-                for colname in dfnuclide.columns:
-                    colname = colname.strip()
+                for rawcolname in dfnuclide.columns:
+                    colname = rawcolname.strip()
                     if colname.startswith("Unc"):
                         colname = f"{newcols[-1]} (Unc)"
                     if colname in colreplacements:
