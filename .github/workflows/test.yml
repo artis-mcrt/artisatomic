@@ -254,9 +254,10 @@ jobs:
               run: source ./setup_jplt_data.sh
 
             - name: Generate artis atomic data files
-              run: |
-                  cp tests/${{ matrix.testname }}/artisatomicionhandlers.json .
-                  uv run coverage run -p -m artisatomic -output_folder tests/${{ matrix.testname }}/output
+              run: >
+                  uv run coverage run -p -m artisatomic
+                  -ionhandlersfile tests/${{ matrix.testname }}/artisatomicionhandlers.json
+                  -output_folder tests/${{ matrix.testname }}/output
 
             - name: Checksum output files
               working-directory: tests/${{ matrix.testname }}/output

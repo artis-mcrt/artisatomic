@@ -273,6 +273,17 @@ def description_of_ion(atomic_number: int, ion_stage: int) -> str:
     return bare_proton_description if (atomic_number, ion_stage) == (1, 2) else description
 
 
+def check_data_folder() -> None:
+    """Stop the run if the CMFGEN data set is absent, with a message that names the download script."""
+    datafolder = hillier_datadir / "atomic_21jun23"
+    if not datafolder.is_dir():
+        msg = (
+            f"The CMFGEN data folder {datafolder} does not exist. To download the data set, run"
+            f" '. ./setup_cmfgen_data.sh' in {hillier_datadir}."
+        )
+        raise FileNotFoundError(msg)
+
+
 def hillier_ion_folder(atomic_number, ion_stage):
     """Directory of one ion's CMFGEN data, e.g. atomic_21jun23/FE/II for Fe II."""
     return str(
@@ -2085,8 +2096,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
     See SUB_PHOT_GEN in CMFGEN's newsubs/sub_phot_gen.f.
     """
-    assert l_start >= 0
-    assert l_end <= n - 1
+    if l_start < 0 or l_end > n - 1:
+        msg = f"The l range {l_start} to {l_end} of a hydrogenic cross section is not in 0 to {n - 1} for n = {n}"
+        raise ValueError(msg)
     energygrid = hyd_phixs_energygrid_ryd[n, l_start]
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
@@ -2108,7 +2120,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
         arr_sigma = arr_sigma_summed_over_l * scale_factor
     else:
-        assert zion is not None, "offset (type 8) hydrogenic cross sections need the ion charge"
+        if zion is None:
+            msg = "An offset (type 8) hydrogenic cross section needs the ion charge"
+            raise ValueError(msg)
         # type 8: CMFGEN ignores the n_eff correction and uses 1 / zion**2 (see sub_phot_gen.f)
         scale_factor = 1 / (zion**2) / l_degeneracy
         e_o_ev = nu_o * 1e15 * h_in_ev_seconds
@@ -2915,6 +2929,9 @@ def read_hyd_phixsdata() -> None:
     global max_hyd_l_n, max_hyd_gaunt_n
     if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1:
         return
+
+    # the hydrogenic estimate of an ion of a different handler reads these tables also
+    check_data_folder()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         _hillier_ionization_energy_ev, dfhillier_energy_levels, _transitions = read_levels_and_transitions(

@@ -537,8 +537,8 @@ def read_adf04(
                 " not a J value. The levels have no J value. The rules of LS coupling apply in place of the delta J rule.",
             )
 
-        for adas_id, config, multiplicity, l_hex, j, energy_percm in levelrows:
-            config = _standardise_config(config, eissner_order=eissner_order)
+        for adas_id, fileconfig, multiplicity, l_hex, j, energy_percm in levelrows:
+            config = _standardise_config(fileconfig, eissner_order=eissner_order)
             xj = float(j)
             # a null J turns off the delta J rule of add_level_ids_forbidden() for the level
             energylevel = ADASEnergyLevel(
@@ -762,7 +762,7 @@ def adas_transitions_frame(levelcount: int, dfpairs: pl.DataFrame, filepath) -> 
 
 def read_photoionizations(atomic_number, ion_stage, dfenergylevels, args, flog) -> PhixsData:
     """Read the cross sections of an ion of the "adas" handler. Only Co III, with its QUB levels, has data."""
-    fill_arrays = _fill_co3_phixs if (atomic_number, ion_stage) == (27, 3) else None
+    fill_arrays = phixs_fillers.get((atomic_number, ion_stage))
     return _read_qub_phixs(fill_arrays, atomic_number, ion_stage, dfenergylevels.height, args, flog)
 
 
@@ -1135,6 +1135,11 @@ def _fill_co3_phixs(
             photoionization_crosssections[levelid] = phixsvalues
 
 
+# The function that fills the cross sections of each ion of the "adas" handler that has data. The
+# check before a run reads the keys: each other ion below the top ion gets the hydrogenic estimate.
+phixs_fillers = {(27, 3): _fill_co3_phixs}
+
+
 def _read_qub_phixs(fill_arrays, atomic_number, ion_stage, levelcount: int, args, flog) -> PhixsData:
     """Read the photoionisation cross sections for one ion, downsampled onto the output grid.
 
@@ -1216,7 +1221,8 @@ def get_level_valence_n(levelname: str) -> int | None:
     # of the previous orbital, then n. For example, the '24' in '3d24s' is two electrons and
     # n=4. The same rule as readkuruczdata applies, and it also reads '5s111s1' (5s1 11s1) as
     # n = 11. A space in front of the run separates two shells, so the run holds n alone
-    if nmatch[1] and nmatch[1] in lchars_lower:
-        return split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
-
-    return int(nmatch[2])
+    return (
+        split_count_and_n(nmatch[1], nmatch[2], valenceorbital)
+        if nmatch[1] and nmatch[1] in lchars_lower
+        else int(nmatch[2])
+    )

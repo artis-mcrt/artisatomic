@@ -52,7 +52,7 @@ dev = [
     "pyrefly>=1.5.0",
     "pytest>=9.1.0",
     "ruff>=0.17.5",
-    "ty>=0.0.74",
+    "ty>=0.0.107",
     "types-requests>=2.32.0.20241016",
 ]
 docs = [
@@ -64,6 +64,7 @@ docs = [
 ]
 
 [project.urls]
+Documentation = "https://artisatomic.readthedocs.io"
 Repository = "https://www.github.com/artis-mcrt/artisatomic"
 Source = "https://www.github.com/artis-mcrt/artisatomic"
 
@@ -116,9 +117,7 @@ ignore = [
     "float-equality-comparison",
     "missing-type-function-argument",
     "missing-return-type-public-function",
-    "missing-return-type-private-function",
     "any-type",
-    "strip-with-multi-characters",
     "complex-structure",
     "missing-trailing-comma",
     "missing-copyright-notice",
@@ -130,31 +129,19 @@ ignore = [
     "docstring-missing-exception",
     "ambiguous-variable-name",
     "FBT",
-    "line-contains-todo",
     "invalid-function-name",
     "invalid-argument-name",
     "non-lowercase-variable-in-function",
     "mixed-case-variable-in-global-scope",
-    "try-except-in-loop",
     "import-outside-top-level",
     "too-many-locals",
     "too-many-positional-arguments",
     "too-many-nested-blocks",
-    "too-many-return-statements",
     "too-many-branches",
     "too-many-arguments",
     "too-many-statements",
     "magic-value-comparison",
-    "global-statement",
-    "redefined-loop-name",
-    "glob",
-    "assert",
-    "hardcoded-password-string",
     "print",
-    "missing-todo-author",
-    "missing-todo-link",
-    "missing-todo-colon",
-    "missing-todo-description",
 ]
 fixable = ["ALL"]
 unfixable = [
@@ -168,6 +155,8 @@ unfixable = [
 [tool.ruff.lint.per-file-ignores]
 # Sphinx runs docs/conf.py as a script, so the folder is not a package
 "docs/conf.py" = ["implicit-namespace-package"]
+# pytest reads a plain assert, and the helper functions of the tests need no return type
+"artisatomic/test_*.py" = ["assert", "missing-return-type-private-function"]
 
 [tool.ruff.lint.pydocstyle]
 # Resolves the D203/D211 and D212/D213 conflicts that selecting the whole D group creates, and
@@ -190,10 +179,15 @@ local_scheme = "no-local-version"
 
 [tool.ty.rules]
 unused-ignore-comment = "ignore"
+# rules that are off by default
+disjoint-cast = "error"
+missing-override-decorator = "error"
+redundant-condition-strict = "error"
+truthiness-test-of-none-union = "error"
 
 [tool.coverage.run]
 source = ["artisatomic"]
-omit = ["artisatomic/test_artisatomic.py", "artisatomic/test_chargetransfer.py"]
+omit = ["artisatomic/test_*.py"]
 # separate runners' paths only line up in the combined report if they are relative
 relative_files = true
 # parallel_map sends reduce_phixs_tables_worker to a spawn-context ProcessPoolExecutor, and a

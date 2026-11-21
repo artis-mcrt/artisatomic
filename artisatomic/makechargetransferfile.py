@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# PYTHON_ARGCOMPLETE_OK
 """Write the file of charge transfer rates for ARTIS (data/chargetransfer.txt in the artis repository).
 
 The script reads the published fits and rate tables from the folder atomic-data-chargetransfer.
@@ -30,6 +31,7 @@ from collections import Counter
 from itertools import starmap
 from pathlib import Path
 
+import argcomplete
 import numpy as np
 
 from artisatomic.base import comment_lines
@@ -613,16 +615,30 @@ def write_chargetransfer_file(entries: list[CTEntry], outdir: Path) -> None:
 
 def main() -> None:
     """Read the sources of the charge transfer rates and write chargetransfer.txt for ARTIS."""
-    parser = argparse.ArgumentParser(description=__doc__)
+    # the description is the docstring of the module, which holds a list and a formula
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter, description=__doc__)
     defaultoutdir = PYDIR.parent / "artis_files" / "data"
     defaultsourcedir = PYDIR.parent / "atomic-data-chargetransfer"
-    parser.add_argument("-output_folder", default=defaultoutdir, type=Path, help="folder of the output file")
+    # The help text names each default folder relative to the repository. The full path depends on
+    # the computer, and the documentation shows this help text.
+    parser.add_argument(
+        "-output_folder",
+        "--output-folder",
+        default=defaultoutdir,
+        type=Path,
+        help="Folder of the output file (default: artis_files/data in the repository)",
+    )
     parser.add_argument(
         "-sourcedir",
+        "--sourcedir",
         default=defaultsourcedir,
         type=Path,
-        help="folder of the source files; setup_chargetransfer_data.sh in that folder downloads them",
+        help=(
+            "Folder of the source files. setup_chargetransfer_data.sh in that folder downloads them"
+            " (default: atomic-data-chargetransfer in the repository)"
+        ),
     )
+    argcomplete.autocomplete(parser)
     args = parser.parse_args()
 
     print("Reactions with hydrogen (Cloudy, with KF96 plus updates):")

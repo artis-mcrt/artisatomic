@@ -919,7 +919,11 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     assert "has a cross section table in 2 photoionisation files" in log
 
     # every level that the reader read has a table, not only the ones from the first file
-    assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
+    assert all(
+        np.any(crosssections[levelid])
+        for levelid, targets in enumerate(targetconfigs)
+        if targets is not None and len(targets) > 0
+    )
 
     # the routes of every level, read the way read_phixs_tables() reads them
     levelnames = dflevels["levelname"].to_list()
@@ -2307,7 +2311,8 @@ def test_add_handlers_if_not_set():
     assert ion_handlers == unchanged
 
     # the caller can give the ion stages as tuples or as lists (e.g. directly from json.load())
-    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # json.load() gives the type Any, so the lists reach the function with no type error
+    ion_handlers_json: t.Any = [(26, [[1, "cmfgen"]])]
     result = add_handlers_if_not_set(ion_handlers_json, [(26, 1)], "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 
@@ -2358,7 +2363,7 @@ def test_read_csv_columns_stops_for_an_empty_field(tmp_path, monkeypatch):
         readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
 
 
-def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
+def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch, capsys):
     """An ion handlers file selects the ions, so a limit with that file is an error and not a filter."""
     from artisatomic.cli import main
     from artisatomic.ionhandlers import get_ion_handlers
@@ -2372,13 +2377,17 @@ def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
     assert get_ion_handlers(1, 5, 8) == [(8, [(ion_stage, "cmfgen") for ion_stage in range(1, 7)])]
 
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "3", "-maxatomicnumber", "30"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage, -maxatomicnumber\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage, -maxatomicnumber." in capsys.readouterr().err
 
     # a limit that holds the value of its default is still a limit that the command line gave
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "5"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage." in capsys.readouterr().err
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
@@ -6010,6 +6019,8 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
     monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
     # main() moves the files of atomic-data-qub of the repository, which a test must not do
     monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+    # the run reads no ion, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     cli.main()
 
@@ -6042,7 +6053,7 @@ def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handle
     from artisatomic import cli
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
     run_main_with_no_ion_read(monkeypatch, ".")
 
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
@@ -6549,7 +6560,7 @@ def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_pat
         ("-phixsnuincrement", "inf"),
     ],
 )
-def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, option, value):
+def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, capsys, option, value):
     """A bad value must stop the run before the run empties the output files of an earlier run."""
     from artisatomic.cli import main
 
@@ -6558,8 +6569,14 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     outputfolder.mkdir()
     (outputfolder / "adata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), option, value])
-    with pytest.raises(ValueError, match=f"{option} must be a finite number more than 0"):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    # The message is the last line, with no traceback. With colour output, argparse puts colour
+    # codes between "error:" and the message.
+    error = capsys.readouterr().err
+    assert f"{option} must be a finite number more than 0" in error.splitlines()[-1]
+    assert "Traceback" not in error
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 
@@ -6596,7 +6613,9 @@ def cli_run_with_stub_writer(
     monkeypatch.setattr(Path, "replace", replace)
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    # the stub writer reads no CMFGEN file, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr(cli, "write_files", write_files)
     outputfolder = tmp_path / "artis_files"
     outputfolder.mkdir(exist_ok=True)
@@ -6637,7 +6656,7 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     """A failed cleanup after the moves must not stop the run, because the new output is complete."""
     from artisatomic import cli
 
-    def remove_old_log_folder(_outputfolder):
+    def remove_old_log_folder(_outputfolder, **_kwargs: object):
         msg = "the cleanup failed"
         raise OSError(msg)
 

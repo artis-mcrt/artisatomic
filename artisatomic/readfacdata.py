@@ -37,7 +37,8 @@ from artisatomic.base import xopen_check_extension
 from artisatomic.levelnames import parse_orbital_n
 from artisatomic.readfloers25data import reference as floers25_reference
 
-USE_CALIBRATED = True
+# a switch for the code: the type bool, and not the value True, so the type checkers check both branches
+USE_CALIBRATED: bool = True
 
 # the "source:" line of the comment blocks in the output files (see Handler.description in iondata.py)
 fac_reference = "FAC: Gu, M. F. (2008), Can. J. Phys., 86, 675-689, doi:10.1139/p07-197"
