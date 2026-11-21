@@ -2,7 +2,6 @@
 
 import contextlib
 import io
-import operator
 import os
 import re
 import typing as t
@@ -272,6 +271,17 @@ bare_proton_description = (
 def description_of_ion(atomic_number: int, ion_stage: int) -> str:
     """Give the "source:" line of the levels and the transitions of one ion."""
     return bare_proton_description if (atomic_number, ion_stage) == (1, 2) else description
+
+
+def check_data_folder() -> None:
+    """Stop the run if the CMFGEN data set is absent, with a message that names the download script."""
+    datafolder = hillier_datadir / "atomic_21jun23"
+    if not datafolder.is_dir():
+        msg = (
+            f"The CMFGEN data folder {datafolder} does not exist. To download the data set, run"
+            f" '. ./setup_cmfgen_data.sh' in {hillier_datadir}."
+        )
+        raise FileNotFoundError(msg)
 
 
 def hillier_ion_folder(atomic_number, ion_stage):
@@ -1791,12 +1801,6 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     reduced_phixs_dict: dict[str, np.ndarray] = {}
     phixs_targetconfigfractions_of_levelname: dict[str, list[tuple[str, float]]] = {}
     num_levelnames_with_zero_crosssection = 0
-    # every route of each level: (file number, reduced table)
-    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray]]] = defaultdict(list)
-    # the routes of the tables of one level (see PhotFileReader.store_fit()), and the names that have such tables
-    routes_of_levelid: defaultdict[int, list[tuple[int, np.ndarray]]] = defaultdict(list)
-    names_with_leveltables: set[str] = set()
-    routes_of_levelkey: dict[int, list[tuple[int, np.ndarray]]] = {}
 
     for filenum, photfilename in enumerate(photfilenames):
         filename = Path(
@@ -1808,64 +1812,52 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         )
         reader.read_file(filenum, filename, photfilename)
 
-        reduced_phixstables_onetarget = reduce_phixs_tables(
-            reader.phixstables[filenum],
-            args.optimaltemperature,
-            args.nphixspoints,
-            args.phixsnuincrement,
-            interpolation=args.phixsinterpolation,
-            label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
+    # The downsample weights each bin with the absolute frequency, so a reduced table applies only at the edge
+    # of its downsample. Without J splitting, one name covers the J levels of a term. Such a name gives each
+    # of its levels its own routes in two cases. In the first case, a file has a table for each level (see
+    # PhotFileReader.store_fit()). In the second case, the levels have different edges.
+    names_by_level = {name for leveltables in reader.leveltables for name, _ in leveltables}
+    if not reader.j_splitting_on:
+        names_by_level.update(
+            name
+            for name, levelindices in reader.levelindices_of_levelnamenoJ.items()
+            if len({lambdaangstroms[levelindex] for levelindex in levelindices}) > 1
         )
 
-        for lowerlevelname, reduced_phixstable in reduced_phixstables_onetarget.items():
-            tablein = reader.phixstables[filenum][lowerlevelname]
+    # every route of each name: (file number, reduced table)
+    routes_of_levelname: defaultdict[str, list[tuple[int, np.ndarray]]] = defaultdict(list)
+    # Every route of the levels of a name in names_by_level. The key is the name and Lam(A) of the level. The
+    # levels of a name with one Lam(A) have one edge in each file, so they share one downsample.
+    routes_of_edge: defaultdict[tuple[str, float], list[tuple[int, np.ndarray]]] = defaultdict(list)
+    for filenum, photfilename in enumerate(photfilenames):
+        tables: dict[str | tuple[str, float], np.ndarray] = {
+            (lowerlevelname, lambdaangstroms[levelindex]): table
+            for (lowerlevelname, levelindex), table in reader.leveltables[filenum].items()
+        }
+        for lowerlevelname, tablein in reader.phixstables[filenum].items():
             if len(tablein) == 0 or tablein[0][0] == 0.0:
                 # the worker gives such a table an all-zero reduced table, which is a closed route
                 continue
-            routes_of_levelname[lowerlevelname].append((filenum, reduced_phixstable))
-
-        reduced_leveltables = reduce_phixs_tables(
-            reader.leveltables[filenum],
-            args.optimaltemperature,
-            args.nphixspoints,
-            args.phixsnuincrement,
-            interpolation=args.phixsinterpolation,
-            label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
-        )
-        for (lowerlevelname, levelindex), reduced_phixstable in reduced_leveltables.items():
-            routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
-            names_with_leveltables.add(lowerlevelname)
-
-    # A name with a table for each of its levels gives each level its own routes. These are the
-    # routes of the level, and the routes of the name in the other files. The downsample weights
-    # each bin with the absolute frequency. The table of the name therefore moves to the edge of
-    # each level before the downsample.
-    for filenum, photfilename in enumerate(photfilenames):
-        movedtables: dict[tuple[str, int], np.ndarray] = {}
-        for lowerlevelname in sorted(names_with_leveltables):
-            tablein = reader.phixstables[filenum].get(lowerlevelname)
-            if tablein is None or len(tablein) == 0 or tablein[0][0] == 0.0:
+            if lowerlevelname not in names_by_level:
+                tables[lowerlevelname] = tablein
                 continue
             for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
                 moved = reader.shared_table_at_level_edge(filenum, lowerlevelname, levelindex)
                 if moved is not None:
-                    movedtables[lowerlevelname, levelindex] = moved
-        reduced_movedtables = reduce_phixs_tables(
-            movedtables,
+                    tables[lowerlevelname, lambdaangstroms[levelindex]] = moved
+        reduced_tables = reduce_phixs_tables(
+            tables,
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
             interpolation=args.phixsinterpolation,
             label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
         )
-        for (_, levelindex), reduced_phixstable in reduced_movedtables.items():
-            routes_of_levelid[levelindex].append((filenum, reduced_phixstable))
-    for lowerlevelname in sorted(names_with_leveltables):
-        routes_of_levelname.pop(lowerlevelname, None)
-        for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
-            routes = sorted(routes_of_levelid.get(levelindex, []), key=operator.itemgetter(0))
-            if routes:
-                routes_of_levelkey[levelindex] = routes
+        for key, reduced_phixstable in reduced_tables.items():
+            if isinstance(key, str):
+                routes_of_levelname[key].append((filenum, reduced_phixstable))
+            else:
+                routes_of_edge[key].append((filenum, reduced_phixstable))
 
     def combine_routes(
         label: str, routes: list[tuple[int, np.ndarray]]
@@ -1909,12 +1901,16 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         reduced_phixs_dict[lowerlevelname], phixs_targetconfigfractions_of_levelname[lowerlevelname] = result
 
     reduced_phixs_of_levelid: dict[int, tuple[np.ndarray, list[tuple[str, float]]]] = {}
-    for levelindex, routes in routes_of_levelkey.items():
-        result = combine_routes(levelnames[levelindex], routes)
-        if result is None:
-            num_levelnames_with_zero_crosssection += 1
-        else:
-            reduced_phixs_of_levelid[levelindex] = result
+    for lowerlevelname in sorted(names_by_level):
+        for levelindex in reader.levelindices_of_levelnamenoJ[lowerlevelname]:
+            routes = routes_of_edge.get((lowerlevelname, lambdaangstroms[levelindex]))
+            if routes is None:
+                continue
+            result = combine_routes(levelnames[levelindex], routes)
+            if result is None:
+                num_levelnames_with_zero_crosssection += 1
+            else:
+                reduced_phixs_of_levelid[levelindex] = result
 
     # one summary for the ion, not one per photoionisation file. The counts below accumulate
     # over every file, so a log inside that loop repeated them with partial totals.
@@ -2101,8 +2097,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
 
     See SUB_PHOT_GEN in CMFGEN's newsubs/sub_phot_gen.f.
     """
-    assert l_start >= 0
-    assert l_end <= n - 1
+    if l_start < 0 or l_end > n - 1:
+        msg = f"The l range {l_start} to {l_end} of a hydrogenic cross section is not in 0 to {n - 1} for n = {n}"
+        raise ValueError(msg)
     energygrid = hyd_phixs_energygrid_ryd[n, l_start]
 
     thresholdenergyev = hc_in_ev_angstrom / lambda_angstrom
@@ -2124,7 +2121,9 @@ def get_hydrogenic_nl_phixstable(lambda_angstrom, n, l_start, l_end, nu_o=None, 
         scale_factor = 1 / thresholdenergyryd / (n**2) / l_degeneracy
         arr_sigma = arr_sigma_summed_over_l * scale_factor
     else:
-        assert zion is not None, "offset (type 8) hydrogenic cross sections need the ion charge"
+        if zion is None:
+            msg = "An offset (type 8) hydrogenic cross section needs the ion charge"
+            raise ValueError(msg)
         # type 8: CMFGEN ignores the n_eff correction and uses 1 / zion**2 (see sub_phot_gen.f)
         scale_factor = 1 / (zion**2) / l_degeneracy
         e_o_ev = nu_o * 1e15 * h_in_ev_seconds
@@ -2931,6 +2930,9 @@ def read_hyd_phixsdata() -> None:
     global max_hyd_l_n, max_hyd_gaunt_n
     if max_hyd_l_n != -1 and max_hyd_gaunt_n != -1:
         return
+
+    # the hydrogenic estimate of an ion of a different handler reads these tables also
+    check_data_folder()
 
     with Path(os.devnull).open("w", encoding="utf-8") as devnull:
         _hillier_ionization_energy_ev, dfhillier_energy_levels, _transitions = read_levels_and_transitions(

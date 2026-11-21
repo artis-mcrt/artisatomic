@@ -919,7 +919,11 @@ def test_read_phixs_tables_multiple_photoionisation_files():
     assert "has a cross section table in 2 photoionisation files" in log
 
     # every level that the reader read has a table, not only the ones from the first file
-    assert all(np.any(crosssections[levelid]) for levelid, targets in enumerate(targetconfigs) if targets)
+    assert all(
+        np.any(crosssections[levelid])
+        for levelid, targets in enumerate(targetconfigs)
+        if targets is not None and len(targets) > 0
+    )
 
     # the routes of every level, read the way read_phixs_tables() reads them
     levelnames = dflevels["levelname"].to_list()
@@ -938,18 +942,29 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         io.StringIO(),
         levelnames=levelnames,
     )
+    wavelengths = dflevels["lambdaangstrom"].to_list()
     reduced_of_filenum = []
     for filenum, photfilename in enumerate(ionfiles.photfilenames):
         photpath = Path(rhd.hillier_ion_folder(8, 1), ionfiles.folder, photfilename)
         with contextlib.redirect_stdout(io.StringIO()):
             reader.read_file(filenum, photpath, photfilename)
+        tables = {}
+        for levelid, name in enumerate(levelnames):
+            matchname = name if reader.j_splitting_on else name.split("[")[0]
+            if matchname not in reader.phixstables[filenum]:
+                continue
+            table = reader.phixstables[filenum][matchname].copy()
+            firstid = firstindex_of_name[name] if reader.j_splitting_on else firstindex_of_namenoj[matchname]
+            edge_shift = (
+                hc_in_ev_angstrom / wavelengths[levelid] - hc_in_ev_angstrom / wavelengths[firstid]
+            ) / ryd_to_ev
+            table[:, 0] *= (table[0, 0] + edge_shift) / table[0, 0]
+            tables[levelid] = table
         reduced_of_filenum.append(
-            reduce_phixs_tables(
-                reader.phixstables[filenum], args.optimaltemperature, args.nphixspoints, args.phixsnuincrement
-            )
+            reduce_phixs_tables(tables, args.optimaltemperature, args.nphixspoints, args.phixsnuincrement)
         )
 
-    def expected_routes(matchname: str) -> list[tuple[str, float, np.ndarray]]:
+    def expected_routes(levelid: int) -> list[tuple[str, float, np.ndarray]]:
         """Give the target, the factor and the reduced table of each open route of a level.
 
         The factor is the sum of the reduced table. A route with no reduced table or with an
@@ -957,22 +972,21 @@ def test_read_phixs_tables_multiple_photoionisation_files():
         """
         factors = []
         for filenum, reduced in enumerate(reduced_of_filenum):
-            reducedtable = reduced.get(matchname)
+            reducedtable = reduced.get(levelid)
             if reducedtable is None or not np.any(reducedtable):
                 continue
             factors.append((reader.phixstargets[filenum], float(reducedtable.sum()), reducedtable))
         return factors
 
-    matchname_of_levelid = [name if reader.j_splitting_on else name.split("[")[0] for name in levelnames]
     levelids_in_both = [
         levelid
-        for levelid, matchname in enumerate(matchname_of_levelid)
-        if all(np.any(reduced.get(matchname, np.zeros(1))) for reduced in reduced_of_filenum)
+        for levelid in range(len(levelnames))
+        if all(np.any(reduced.get(levelid, np.zeros(1))) for reduced in reduced_of_filenum)
     ]
     assert levelids_in_both, "expected O I levels with a cross section table in both phot files"
 
     for levelid in levelids_in_both:
-        factors = expected_routes(matchname_of_levelid[levelid])
+        factors = expected_routes(levelid)
         assert len(factors) > 1, f"level {levelid}: expected a route in each of the two files"
         # the targets below the 2% cut drop out, and the rest normalise to one. The strongest
         # route always stays.
@@ -2297,7 +2311,8 @@ def test_add_handlers_if_not_set():
     assert ion_handlers == unchanged
 
     # the caller can give the ion stages as tuples or as lists (e.g. directly from json.load())
-    ion_handlers_json = t.cast("list[tuple[int, list[tuple[int, str]]]]", [(26, [[1, "cmfgen"]])])
+    # json.load() gives the type Any, so the lists reach the function with no type error
+    ion_handlers_json: t.Any = [(26, [[1, "cmfgen"]])]
     result = add_handlers_if_not_set(ion_handlers_json, [(26, 1)], "dream")
     assert result == [(26, [[1, "cmfgen"]])]
 
@@ -2348,7 +2363,7 @@ def test_read_csv_columns_stops_for_an_empty_field(tmp_path, monkeypatch):
         readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
 
 
-def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
+def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch, capsys):
     """An ion handlers file selects the ions, so a limit with that file is an error and not a filter."""
     from artisatomic.cli import main
     from artisatomic.ionhandlers import get_ion_handlers
@@ -2362,13 +2377,17 @@ def test_ion_limits_with_an_input_file_stop_the_run(tmp_path, monkeypatch):
     assert get_ion_handlers(1, 5, 8) == [(8, [(ion_stage, "cmfgen") for ion_stage in range(1, 7)])]
 
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "3", "-maxatomicnumber", "30"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage, -maxatomicnumber\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage, -maxatomicnumber." in capsys.readouterr().err
 
     # a limit that holds the value of its default is still a limit that the command line gave
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-maxionstage", "5"])
-    with pytest.raises(ValueError, match=r"remove -maxionstage\."):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    assert "remove -maxionstage." in capsys.readouterr().err
 
 
 def test_parent_elevel_zero_normalisation_is_anchored():
@@ -6000,6 +6019,8 @@ def run_main_with_no_ion_read(monkeypatch, outputfolder) -> None:
     monkeypatch.setattr(cli, "process_files", lambda _ion_handlers, _args: None)
     # main() moves the files of atomic-data-qub of the repository, which a test must not do
     monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+    # the run reads no ion, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     cli.main()
 
@@ -6032,7 +6053,7 @@ def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handle
     from artisatomic import cli
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_limits: [(38, [(1, "kurucz"), (2, "kurucz")])])
     run_main_with_no_ion_read(monkeypatch, ".")
 
     assert not (tmp_path / "artisatomicionhandlers.json").exists()
@@ -6539,7 +6560,7 @@ def test_floers25uncalib_source_line_names_the_private_data(monkeypatch, tmp_pat
         ("-phixsnuincrement", "inf"),
     ],
 )
-def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, option, value):
+def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch, capsys, option, value):
     """A bad value must stop the run before the run empties the output files of an earlier run."""
     from artisatomic.cli import main
 
@@ -6548,8 +6569,14 @@ def test_main_rejects_a_phixs_option_that_is_not_positive(tmp_path, monkeypatch,
     outputfolder.mkdir()
     (outputfolder / "adata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder), option, value])
-    with pytest.raises(ValueError, match=f"{option} must be a finite number more than 0"):
+    with pytest.raises(SystemExit) as exit_info:
         main()
+    assert exit_info.value.code == 2
+    # The message is the last line, with no traceback. With colour output, argparse puts colour
+    # codes between "error:" and the message.
+    error = capsys.readouterr().err
+    assert f"{option} must be a finite number more than 0" in error.splitlines()[-1]
+    assert "Traceback" not in error
     assert (outputfolder / "adata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
 
 
@@ -6586,7 +6613,9 @@ def cli_run_with_stub_writer(
     monkeypatch.setattr(Path, "replace", replace)
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(cli, "get_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    # the stub writer reads no CMFGEN file, so the test needs no CMFGEN data set
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr(cli, "write_files", write_files)
     outputfolder = tmp_path / "artis_files"
     outputfolder.mkdir(exist_ok=True)
@@ -6627,7 +6656,7 @@ def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, 
     """A failed cleanup after the moves must not stop the run, because the new output is complete."""
     from artisatomic import cli
 
-    def remove_old_log_folder(_outputfolder):
+    def remove_old_log_folder(_outputfolder, **_kwargs: object):
         msg = "the cleanup failed"
         raise OSError(msg)
 
@@ -7614,6 +7643,60 @@ def test_shared_table_moves_to_the_edge_of_each_level():
     assert moved[:, 0].tolist() == pytest.approx([edge1_ryd, 2.0 * edge1_ryd])
     assert moved[:, 1].tolist() == [1.0, 0.125]
     assert reader.shared_table_at_level_edge(0, "2p_3Po", 2) is None
+
+
+@pytest.mark.parametrize("j_splitting", [False, True])
+def test_read_phixs_tables_uses_each_j_level_threshold(tmp_path, monkeypatch, j_splitting):
+    """A table of a name gets one downsample at each threshold of the levels of the name.
+
+    The type 20 table has no fit that depends on the edge. The levels [1] and [2] have one threshold, so they
+    share one downsample. The level [3] has no threshold and gets no table. With J splitting, each level
+    has its own table.
+    """
+    names = ["3d_5De[0]", "3d_5De[1]", "3d_5De[2]", "3d_5De[3]"]
+    wavelengths = [911.0, 1000.0, 1000.0, 0.0]
+    x = np.array([1.0, 1.015, 1.03, 1.5, 4.0])
+    sigma = np.array([1.0, 3.0, 0.5, 0.1, 0.01])
+    blocks = []
+    for levelid, name in enumerate(names if j_splitting else ["3d_5De"]):
+        amplitude = levelid + 1
+        blocks.append(
+            f"{name} !Configuration name\n20 !Type of cross-section\n5 !Number of cross-section points\n"
+            + "".join(f"{ratio} {amplitude * value}\n" for ratio, value in zip(x, sigma, strict=True))
+            + "\n"
+        )
+    (tmp_path / "phot_data_A").write_text(
+        f"target !Final state in ion\nMegabarns !Cross-section unit\n{j_splitting} !Split J levels\n" + "".join(blocks),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(
+        readhillierdata.ions_data,
+        (8, 1),
+        readhillierdata.ions_data[8, 1]._replace(folder="", photfilenames=("phot_data_A",)),
+    )
+    monkeypatch.setattr(readhillierdata, "hillier_ion_folder", lambda *_args: str(tmp_path))
+    monkeypatch.setattr(readhillierdata, "read_hyd_phixsdata", lambda: None)
+    reduced_keys: list[object] = []
+
+    def serial_map(function, tables, keys):
+        reduced_keys.extend(keys)
+        return list(map(function, tables, keys))
+
+    monkeypatch.setattr("artisatomic.phixs.parallel_map", serial_map)
+    levels = pl.DataFrame({"levelname": names, "lambdaangstrom": wavelengths})
+    args = phixs_args()
+    result = readhillierdata.read_phixs_tables(8, 1, levels, args, io.StringIO())
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)
+    for levelid in (0, 1, 2):
+        amplitude = levelid + 1 if j_splitting else 1
+        table = np.column_stack((x * (hc_in_ev_angstrom / wavelengths[levelid] / ryd_to_ev), amplitude * sigma))
+        expected = reduce_phixs_tables_worker(args.optimaltemperature, xgrid, table)
+        assert result.crosssections[levelid] == pytest.approx(expected, rel=1e-12)
+    assert not np.array_equal(result.crosssections[0], result.crosssections[1])
+    assert len(reduced_keys) == (3 if j_splitting else 2)
+    assert np.all(result.crosssections[3] == 0.0)
+    assert result.targetconfigs is not None
+    assert result.targetconfigs[3] is None
 
 
 def test_read_coldata_takes_a_j_line_of_an_unsplit_level_as_a_line_of_that_level():

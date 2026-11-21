@@ -19,7 +19,7 @@ output.txt
 testoutput
 # written by the checksum verification runs in tests/*/
 tests/*/output/
-# the ion selection file that the checksum recipe copies into the root, and its sync copies
+# an ion handlers file in the root, which controls each run there with no -ionhandlersfile, and its sync copies
 /artisatomicionhandlers*.json
 _version.py
 build

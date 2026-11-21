@@ -57,3 +57,15 @@ layouts that it reads.
 
 ```{program-output} python -m artisatomic.hdf5_to_parquet --help
 ```
+
+## Tab completion
+
+`makeartisatomicfiles`, `makeartisrecombratefile` and `makeartischargetransferfile` use
+[argcomplete](https://kislyuk.github.io/argcomplete/). To complete the options of a command in bash
+or zsh, run this line:
+
+```sh
+eval "$(register-python-argcomplete makeartisatomicfiles)"
+```
+
+To use the completion in each new shell, add the line to the startup file of the shell.

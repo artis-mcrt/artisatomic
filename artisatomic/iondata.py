@@ -89,7 +89,10 @@ class Handler:
     wins.
 
     read_phixs, when set, takes the same arguments and returns the PhixsData of the ion. Without
-    it, the hydrogenic estimate is the only source of cross sections.
+    it, the hydrogenic estimate is the only source of cross sections. phixs_ions, when set, names
+    the only ions for which read_phixs gives cross sections. Each other ion gets the estimate, and
+    the check before a run uses that fact. With read_phixs and no phixs_ions, only the data shows
+    which ions get the estimate.
 
     description is the name of the data source of the levels and the transitions, with its
     reference where the repository holds one. read_ion_data() records it as the "source:" line of
@@ -97,6 +100,9 @@ class Handler:
     function of the atomic number and the ion stage instead. A function that gives cross sections
     records the "source:" line of phixsdata_v2.txt itself, because the source can be different for
     each ion of a handler.
+
+    source_summary is the name of the data source for a list of the handlers. A handler whose
+    description is a function gives it, because such a function needs an ion.
     """
 
     description: str | Callable[[int, int], str]
@@ -108,6 +114,18 @@ class Handler:
     reader_takes_args: bool = False
     read_coldata: Callable[..., pl.DataFrame] | None = None
     read_phixs: Callable[..., PhixsData] | None = None
+    phixs_ions: frozenset[tuple[int, int]] | None = None
+    source_summary: str | None = None
+
+    @property
+    def summary(self) -> str:
+        """The name of the data source of the handler, for a list of the handlers."""
+        if self.source_summary is not None:
+            return self.source_summary
+        if isinstance(self.description, str):
+            return self.description
+        msg = "A handler whose description is a function must give source_summary."
+        raise TypeError(msg)
 
 
 handlers: dict[str, Handler] = {
@@ -130,6 +148,7 @@ handlers: dict[str, Handler] = {
         readfloers25data.description_calibrated_withforbidden,
         partial(readfloers25data.read_levels_and_transitions, calibrated=True, withforbidden=True),
         readfloers25data.get_level_valence_n,
+        source_summary=readfloers25data.description_withforbidden,
     ),
     "floers25calib": Handler(
         readfloers25data.description.format(variant="calibrated"),
@@ -140,11 +159,17 @@ handlers: dict[str, Handler] = {
         readfloers25data.description_uncalibrated,
         partial(readfloers25data.read_levels_and_transitions, calibrated=False),
         readfloers25data.get_level_valence_n,
+        source_summary=(
+            f"{readfloers25data.description.format(variant='uncalibrated')}. If the folder"
+            f" OutputFiles_withforbidden exists, the handler reads it first: "
+            f"{readfloers25data.description_uncalibrated_withforbidden}"
+        ),
     ),
     "fac": Handler(
         readfacdata.description_of_ion,
         readfacdata.read_levels_and_transitions,
         readfacdata.get_level_valence_n,
+        source_summary=f"{readfacdata.description}. U II and U III: {readfacdata.description_uranium}",
     ),
     "mons": Handler(
         readmonsdata.description,
@@ -169,6 +194,11 @@ handlers: dict[str, Handler] = {
         returns_upsilons=True,
         reader_takes_args=True,
         read_phixs=readadasdata.read_photoionizations,
+        phixs_ions=frozenset(readadasdata.phixs_fillers),
+        source_summary=(
+            f"{readadasdata.description}. Co III has {readadasdata.qub_cobalt_phixs_description}."
+            f" Co IV: {readadasdata.description_co4}"
+        ),
     ),
     # levels, collision strengths and cross sections
     "cmfgen": Handler(
@@ -177,6 +207,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
+        source_summary=f"{readhillierdata.description}. H II: {readhillierdata.bare_proton_description}",
     ),
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.
@@ -186,6 +217,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
+        source_summary=f"{readhillierdata.description}. Co II has {readadasdata.qub_cobalt_phixs_description}",
     ),
 }
 
