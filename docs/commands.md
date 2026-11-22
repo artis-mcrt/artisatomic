@@ -30,7 +30,8 @@ The last classic value is for the interval above the last point. ARTIS also scal
 
 A coarse grid still changes the shape of the cross section and the rates at other temperatures.
 The combination of routes with different shapes can also change the rate of a target.
-Use more points or a smaller frequency step if those errors are important.
+If those errors are important, decrease `-phixsnuincrement` and increase `-nphixspoints` together.
+More points with the same step only extend the frequency range of a table.
 
 ## makeartisrecombratefile
 
