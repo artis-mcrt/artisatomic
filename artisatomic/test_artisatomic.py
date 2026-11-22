@@ -817,7 +817,7 @@ def test_photoion_target_fraction_at_repeated_open_edge(monkeypatch):
     assert sums[0] > 0.0
     assert [fraction for _, fraction in targets] == pytest.approx([tablesum / sum(sums) for tablesum in sums])
     # the values on their own, so that a worker that reads the zero row at the repeated edge fails
-    assert [fraction for _, fraction in targets] == pytest.approx([0.85387, 0.14613], abs=1e-4)
+    assert [fraction for _, fraction in targets] == pytest.approx([0.85343, 0.14657], abs=1e-4)
     assert "so its levels get no table" not in log
 
 
@@ -2591,61 +2591,54 @@ def test_reduce_phixs_tables_worker():
     reduced_const = reduce_phixs_tables_worker(temperature, xgrid, tablein_const)
     assert np.allclose(reduced_const, 2.5, rtol=1e-6)
 
-    # the downsample must keep the recombination rate integral
-    # sigma(nu) * nu**2 * exp(-h*nu / (k_B * T)) at the optimisation temperature
-    ryd_to_hz = 3289841960250880.5
-    h_over_kb_in_k_sec = 4.799243073366221e-11
 
-    def recomb_integral(en_ryd, sigmas):
-        nu = np.asarray(en_ryd) * ryd_to_hz
-        return np.trapezoid(sigmas * nu**2 * np.exp(-h_over_kb_in_k_sec * nu / temperature), nu)
-
-    # reconstruct the reduced table as piecewise-constant over the output grid intervals
-    interval_edges = [xgrid[0], *(0.5 * (xgrid[i] + xgrid[i + 1]) for i in range(nphixspoints))]
-    dense_en: list[float] = []
-    dense_sigma: list[float] = []
-    for i in range(nphixspoints):
-        segment = np.linspace(interval_edges[i], interval_edges[i + 1], 200)
-        dense_en.extend(segment)
-        dense_sigma.extend([reduced[i]] * len(segment))
-
-    integral_reduced = recomb_integral(dense_en, np.array(dense_sigma))
-    selection = (energyryd >= interval_edges[0]) & (energyryd <= interval_edges[-1])
-    integral_input = recomb_integral(energyryd[selection], tablein[selection, 1])
-    assert abs(integral_reduced / integral_input - 1) < 0.01
-
-
-def test_reduce_phixs_tables_worker_keeps_a_narrow_peak():
-    """A narrow peak of the table adds its area to its bin, wherever it is in the bin.
-
-    A resample of each bin at a fixed set of points lost a peak between two points. It also spread
-    a peak at one point over a whole step of the set.
-    """
-    temperature = 6000.0
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+@pytest.mark.parametrize("threshold", [0.1, 1.0, 10.0])
+@pytest.mark.parametrize("source_end", [1.5, 5.0])
+def test_reduce_phixs_tables_preserves_the_artis_integral(interpolation, threshold, source_end):
+    """The ARTIS representation keeps the rate of a narrow source resonance and a power-law tail."""
     xgrid = output_xgrid(100, 0.03)
-    threshold = 0.5
-    enlow = 0.5 * (xgrid[9] + xgrid[10]) * threshold
-    enhigh = 0.5 * (xgrid[10] + xgrid[11]) * threshold
-    step = (enhigh - enlow) / 50
+    x = np.unique(np.r_[np.linspace(1, source_end, 1001), 1.005, 1.006, 1.007])
+    sigma = x**-3 + 100 * np.maximum(0, 1 - np.abs((x - 1.006) / 0.001))
+    table = np.column_stack((threshold * x, sigma))
+    reduced = reduce_phixs_tables_worker(6000, xgrid, table, interpolation=interpolation)
+    assert np.all(reduced >= 0)
+    # The two-point case has the same finite interval as the consumer.
+    for npoints in (2, 100):
+        grid = output_xgrid(npoints, 0.03)
+        values = reduce_phixs_tables_worker(6000, grid, table, interpolation=interpolation)
+        # ARTIS reads the printed values as float, with a conversion from Mb to cm^2.
+        printed = np.array([float(f"{value:16.8E}") for value in values], dtype=np.float32)
+        values = (printed * 1e-18).astype(float) / 1e-18
+        # Split at every source knot and output knot. Quadrature then cannot miss the narrow resonance.
+        knots = np.unique(np.r_[grid[:-1], x[(x >= 1) & (x <= grid[-2])]])
+        nodes, weights = np.polynomial.legendre.leggauss(16)
+        mid = 0.5 * (knots[:-1] + knots[1:])
+        halfwidth = 0.5 * np.diff(knots)
+        sample = mid[:, None] + halfwidth[:, None] * nodes
+        quadrature = halfwidth[:, None] * weights
+        thermal = sample**2 * np.exp(-h_over_kb_in_K_sec * ryd_to_hz * threshold / 6000 * (sample - 1))
+        source = np.interp(sample, x, sigma)
+        beyond = sample > x[-1]
+        source[beyond] = sigma[-1] * (x[-1] / sample[beyond]) ** 3
+        if interpolation == "linear":
+            output = np.interp(sample, grid[:-1], values)
+        else:
+            indices = np.searchsorted(grid[:-1], sample, side="right") - 1
+            output = values[indices]
+        expected = np.sum(source * thermal * quadrature)
+        actual = np.sum(output * thermal * quadrature)
+        assert actual == pytest.approx(expected, rel=1e-6)
 
-    def bin_average(table: np.ndarray) -> float:
-        energies = np.union1d(
-            np.linspace(enlow, enhigh, 200001), table[:, 0][(table[:, 0] > enlow) & (table[:, 0] < enhigh)]
-        )
-        sigma = np.interp(energies, table[:, 0], table[:, 1])
-        nu = energies * ryd_to_hz
-        weight = nu**2 * np.exp(-h_over_kb_in_K_sec / temperature * (nu - nu[0]))
-        return np.trapezoid(sigma * weight, energies) / np.trapezoid(weight, energies)
 
-    for peakcentre in (enlow + 20.5 * step, enlow + 20 * step):
-        halfwidth = step / 100
-        energies = [threshold, peakcentre - halfwidth, peakcentre, peakcentre + halfwidth, 4 * threshold]
-        table = np.array([[energy, 1.0] for energy in energies])
-        table[2, 1] = 1000.0
-        reduced = reduce_phixs_tables_worker(temperature, xgrid, table)
-        assert reduced[10] == pytest.approx(bin_average(table), rel=1e-4)
-        assert reduced[9] == pytest.approx(1.0)
-        assert reduced[11] == pytest.approx(1.0)
+def test_reduce_phixs_tables_with_a_source_step_at_the_last_point():
+    """A step at the last point changes only the classic value of the interval above that point."""
+    grid = output_xgrid(4, 0.1)
+    table = np.array([[1.0, 2.0], [grid[-2], 2.0], [grid[-2], 200.0], [2.0, 200.0]])
+    linear = reduce_phixs_tables_worker(6000, grid, table)
+    classic = reduce_phixs_tables_worker(6000, grid, table, interpolation="classic")
+    assert linear == pytest.approx([2.0] * 4)
+    assert classic == pytest.approx([2.0, 2.0, 2.0, 200.0])
 
 
 def test_reduce_phixs_tables_worker_weight_does_not_underflow():
@@ -5459,28 +5452,35 @@ def test_type9_table_has_no_step_for_a_threshold_outside_the_grid():
     assert np.all(table[:, 1] == 0.0)
 
 
-def test_type9_downsample_matches_integrals_at_a_shell_step():
-    """The bin with an inner-shell threshold agrees with the integral of the shell from the threshold to the bin end."""
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_type9_downsample_matches_integrals_at_a_shell_step(interpolation):
+    """Each output value at an inner-shell threshold agrees with the integral of the shell above the threshold.
+
+    The integral has the weight of the output value: its interval in classic mode, and its basis function in
+    linear mode.
+    """
     threshold_ev = float(type9_grid_ev[0])
     edge_ev = 2.812345 * threshold_ev
     xgrid = output_xgrid(100, 0.03)
-    actual = reduce_phixs_tables_worker(6000.0, xgrid, type9_table_of_inner_shells(edge_ev, 1))
-    binid = 60
-    low = 0.5 * (xgrid[binid - 1] + xgrid[binid]) * threshold_ev
-    high = 0.5 * (xgrid[binid] + xgrid[binid + 1]) * threshold_ev
-    assert low < edge_ev < high
-    nodes, weights = np.polynomial.legendre.leggauss(64)
+    table = type9_table_of_inner_shells(edge_ev, 1)
+    actual = reduce_phixs_tables_worker(6000.0, xgrid, table, interpolation=interpolation)
+    points = xgrid * threshold_ev
+    pointid = 60
+    assert points[pointid] < edge_ev < points[pointid + 1]
     kt_ev = 6000.0 * h_in_ev_seconds / h_over_kb_in_K_sec
 
-    def integral(start: float, end: float, with_sigma: bool) -> float:
-        energy = start + 0.5 * (nodes + 1.0) * (end - start)
-        weight = energy**2 * np.exp(-(energy - low) / kt_ev)
-        sigma = type9_inner_shell_sigma(energy) if with_sigma else 1.0
-        return float(0.5 * (end - start) * np.sum(weights * weight * sigma))
-
-    expected = integral(edge_ev, high, True) / integral(low, high, False)
-    assert actual[binid] == pytest.approx(expected, rel=2e-4)
-    assert np.all(actual[:binid] == 0.0)
+    for index in (pointid,) if interpolation == "classic" else (pointid, pointid + 1):
+        low = points[index] if interpolation == "classic" else points[index - 1]
+        high = points[index + 1]
+        energy = np.linspace(low, high, 400001)
+        basis = np.ones_like(energy)
+        if interpolation == "linear":
+            basis = np.interp(energy, points[index - 1 : index + 2], [0.0, 1.0, 0.0])
+        weight = energy**2 * np.exp(-(energy - low) / kt_ev) * basis
+        sigma = np.where(energy >= edge_ev, type9_inner_shell_sigma(energy), 0.0)
+        expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
+        assert actual[index] == pytest.approx(expected, rel=2e-4)
+    assert np.all(actual[:pointid] == 0.0)
 
 
 def test_read_adf04_selects_the_nearest_temperature():
@@ -7456,16 +7456,21 @@ def test_photfilereader_skips_a_level_name_that_the_oscillator_file_lacks(tmp_pa
     assert "threshold energy of zero or below" not in flog.getvalue()
 
 
-def test_read_photoionizations_downsamples_the_co3_table_on_its_own_grid():
-    """The grid of the Co III table itself gets the bin averages too, as every other table does."""
-    args = phixs_args(nphixspoints=100, phixsnuincrement=0.1)
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_read_photoionizations_downsamples_the_co3_table_on_its_own_grid(interpolation):
+    """The first Co III output value matches the weighted integral of its source segment."""
+    args = phixs_args(nphixspoints=100, phixsnuincrement=0.1, phixsinterpolation=interpolation)
     phixs = readadasdata.read_photoionizations(27, 3, pl.DataFrame({"levelid": range(5)}), args, io.StringIO())
 
-    # the table falls from 9.338 Mb at the threshold to 7.016 Mb one step above it, so the
-    # average over the first bin is below the value at the threshold
+    # The source gives 33.50 eV for the edge and these cross sections for its first two points.
+    energy = np.linspace(33.50, 33.50 * 1.1, 100001)
+    sigma = np.interp(energy, [energy[0], energy[-1]], [9.3380692, 7.015829602])
+    weight = energy**2 * np.exp(-h_over_kb_in_K_sec / h_in_ev_seconds / args.optimaltemperature * (energy - energy[0]))
+    if interpolation == "linear":
+        weight *= (energy[-1] - energy) / (energy[-1] - energy[0])
+    expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
     assert 8.0 < phixs.crosssections[0][0] < 9.338
-    # the value of the table with its energies in Rydberg. eV or a ratio to the threshold give 9.31 or 8.87
-    assert phixs.crosssections[0][0] == pytest.approx(9.0212, abs=1e-3)
+    assert phixs.crosssections[0][0] == pytest.approx(expected, rel=1e-7)
     assert phixs.crosssections[4].tolist() == [0.0] * 100
     assert phixs.targetfractions == [[(0, 1.0)]] * 5
 
@@ -7521,27 +7526,33 @@ def test_readdreamdata_level_frame_keeps_the_first_mention_of_two_levels_of_one_
     ]
 
 
-def test_reduce_phixs_tables_worker_is_accurate_where_a_bin_is_many_kt_wide():
-    """A bin of 52 kT (150 eV threshold, -optimaltemperature 1000) with sharp windows gives the bin average to 1e-5.
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_reduce_phixs_tables_worker_is_accurate_where_a_bin_is_many_kt_wide(interpolation):
+    """Each output value matches an independent dense integral over its basis function.
 
-    The trapezoid rule on the 51 points of a bin gave errors of 19% in such a bin. A dense
-    trapezoid rule on each bin is the reference.
+    The intervals are 52 kT wide (150 eV threshold, -optimaltemperature 1000). The last classic value is the
+    average over the interval above the last point, where ARTIS uses it.
     """
     xgrid = output_xgrid(100, 0.03)
     temperature = 1000.0
     threshold_ryd = 150.0 / ryd_to_ev
     x = np.linspace(1.0, 4.2, 801)
     table = np.column_stack((x * threshold_ryd, x**-3 * (1 + 5 * (np.sin(37 * x) > 0.95))))
-    averages = reduce_phixs_tables_worker(temperature, xgrid, table)
-
-    nbins = len(xgrid) - 1
-    lowedges = 0.5 * (xgrid[np.maximum(np.arange(nbins) - 1, 0)] + xgrid[:-1]) * threshold_ryd
-    highedges = 0.5 * (xgrid[:-1] + xgrid[1:]) * threshold_ryd
+    averages = reduce_phixs_tables_worker(temperature, xgrid, table, interpolation=interpolation)
+    points = xgrid[:-1] * threshold_ryd
     for index in (0, 10, 50, 99):
-        energy = np.linspace(lowedges[index], highedges[index], 40001)
-        weight = (energy * ryd_to_hz) ** 2 * np.exp(
-            -h_over_kb_in_K_sec / temperature * (energy - lowedges[index]) * ryd_to_hz
-        )
+        if interpolation == "classic":
+            low, high = xgrid[index : index + 2] * threshold_ryd
+        else:
+            low = points[max(index - 1, 0)]
+            high = points[min(index + 1, len(points) - 1)]
+        energy = np.linspace(low, high, 200001)
+        basis = np.ones_like(energy)
+        if interpolation == "linear":
+            nodal = np.zeros(len(points))
+            nodal[index] = 1
+            basis = np.interp(energy, points, nodal)
+        weight = energy**2 * np.exp(-h_over_kb_in_K_sec / temperature * (energy - low) * ryd_to_hz) * basis
         sigma = np.interp(energy, table[:, 0], table[:, 1])
         expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
         assert averages[index] == pytest.approx(expected, rel=1e-5)
@@ -7575,22 +7586,36 @@ def test_reduce_phixs_tables_worker_with_an_edge_narrower_than_a_segment():
     assert averages[0] == pytest.approx(0.999914, rel=1e-5)
 
 
-def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level():
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_read_phixs_tables_evaluates_an_edge_fit_with_the_edge_of_each_level(interpolation):
     """K II 3s2_3p5_5g_3Ho is a type 2 fit, and its J levels have two edges (2.178 and 1.907 eV).
 
-    CMFGEN evaluates the fit with the edge of each level. The levels [4] and [5] have a different edge from
-    the level [6]. They have 4.848 Mb in the first bin, and the level [6] has 4.244 Mb.
+    CMFGEN evaluates the fit with the edge of each level. The reference integrates the hydrogenic source values
+    with the basis function of the first output point.
     """
     if not Path(readhillierdata.hillier_ion_folder(19, 2)).is_dir():
         pytest.skip("the CMFGEN atomic data is not present")
     flog = io.StringIO()
+    args = phixs_args(phixsinterpolation=interpolation)
     with contextlib.redirect_stdout(io.StringIO()):
         _, dflevels, _ = readhillierdata.read_levels_and_transitions(19, 2, flog)
-        phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, phixs_args(), flog)
+        phixs = readhillierdata.read_phixs_tables(19, 2, dflevels, args, flog)
     names = dflevels["levelname"].to_list()
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[6]")][0] == pytest.approx(4.2443, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[4]")][0] == pytest.approx(4.8481, rel=1e-3)
-    assert phixs.crosssections[names.index("3s2_3p5_5g_3Ho[5]")][0] == pytest.approx(4.8481, rel=1e-3)
+    for angular_momentum in (6, 4, 5):
+        levelid = names.index(f"3s2_3p5_5g_3Ho[{angular_momentum}]")
+        edge_ryd = hc_in_ev_angstrom / dflevels["lambdaangstrom"][levelid] / ryd_to_ev
+        u = np.linspace(1.0, 1.0 + args.phixsnuincrement, 100001)
+        energy = edge_ryd * u
+        source_u = readhillierdata.hyd_phixs_energygrid_ryd[5, 4].copy()
+        source_u /= source_u[0]
+        sigma = 10 ** np.interp(np.log10(u), np.log10(source_u), np.log10(readhillierdata.hyd_phixs[5, 4]))
+        sigma /= edge_ryd * 5**2
+        weight = energy**2 * np.exp(-h_over_kb_in_K_sec * ryd_to_hz / args.optimaltemperature * (energy - energy[0]))
+        if interpolation == "linear":
+            weight *= (u[-1] - u) / (u[-1] - u[0])
+        expected = np.trapezoid(sigma * weight, energy) / np.trapezoid(weight, energy)
+        # The reader joins the refined source points with straight lines.
+        assert phixs.crosssections[levelid][0] == pytest.approx(expected, rel=1e-3)
     # fill_missing_phixs_thresholds() gives each threshold from the first target of the level
     assert np.isnan(phixs.thresholds_ev).all()
 
@@ -8558,3 +8583,11 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         texts.append(ftransitiondata.getvalue())
     assert texts[0] == texts[1]
     assert texts[0].count("\n") > nrows
+
+
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_reduce_phixs_tables_with_a_large_finite_temperature(interpolation):
+    """A finite temperature must not divide by an underflowed moment in an unused branch."""
+    table = np.array([[1.0, 2.5], [5.0, 2.5]])
+    result = reduce_phixs_tables_worker(10**80, output_xgrid(100, 0.03), table, interpolation=interpolation)
+    assert result == pytest.approx(np.full(100, 2.5), rel=1e-12)

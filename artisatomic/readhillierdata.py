@@ -1850,6 +1850,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
             args.optimaltemperature,
             args.nphixspoints,
             args.phixsnuincrement,
+            interpolation=args.phixsinterpolation,
             label=f"{ion_label(atomic_number, ion_stage)} {photfilename}",
         )
         for key, reduced_phixstable in reduced_tables.items():

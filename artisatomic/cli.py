@@ -105,6 +105,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Step between two cross section points, as a fraction of nu_edge",
     )
     parser.add_argument(
+        "-phixsinterpolation",
+        "--phixsinterpolation",
+        choices=("linear", "classic"),
+        default="linear",
+        help="Cross section mode of the ARTIS run. Use classic if PHIXS_CLASSIC_NO_INTERPOLATION is true in ARTIS",
+    )
+    parser.add_argument(
         "-optimaltemperature",
         "--optimaltemperature",
         type=int,
