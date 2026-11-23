@@ -89,6 +89,9 @@ eval "$(register-python-argcomplete makeartisatomicfiles)"
 
 To use the completion in each new shell, add the line to the startup file of the shell.
 
+## Support
+The project has no resources for support. An issue or a question can stay with no reply. The documentation, the help text of each command and the log file of a run are the sources of information.
+
 ## Development
 Install the development tools:
 ```sh
