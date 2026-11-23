@@ -40,9 +40,10 @@ More points with the same step only extend the frequency range of a table.
 ```
 
 The repository does not hold the Nahar files. The command looks for them in the folder
-`atomic-data-nahar` in the repository root. The name of a file is the element symbol in lower case,
-the ion stage of the ion after the recombination, and `.rrc.txt`. For example, `fe2.rrc.txt` holds
-the rates of the recombination to Fe II. With no such folder, each ion with an atomic number of 30
+`atomic-data-nahar` in the repository root. The name of a file starts with the element symbol in lower case
+and the ion stage of the ion after the recombination. Then come `.rrc`, optional characters, and `.txt`.
+For example, `fe2.rrc.txt` holds the rates of the recombination to Fe II. The command skips a name
+that holds a space or a bracket. With no such folder, each ion with an atomic number of 30
 or less takes the ChiantiPy rates.
 
 ChiantiPy reads the CHIANTI database, which is a different download. The environment variable

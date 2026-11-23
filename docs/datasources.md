@@ -57,6 +57,7 @@ Each download script calls these tools. Install them before you run the script.
 | `setup_floers25_data.sh` | `curl`, `unzip`, `zstd` |
 | `setup_mons_data.sh` | `curl`, `unzip` |
 | `setup_jplt_data.sh` | `curl`, `md5sum`, `tar`, `zstd` |
+| `setup_chargetransfer_data.sh` in `atomic-data-chargetransfer` | `curl` |
 
 `artisatomic/hdf5_to_parquet.py` starts with a `uv run --script` line, so [uv](https://docs.astral.sh/uv/) installs its dependencies. The page [Commands](commands.md) shows its help text.
 
