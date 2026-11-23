@@ -1,7 +1,6 @@
 # Commands
 
-The package installs four console scripts. This page gives the help text of each script that has an
-argument parser.
+The package installs four console scripts. This page gives the help text of each script.
 
 ## makeartisatomicfiles
 
@@ -35,10 +34,25 @@ More points with the same step only extend the frequency range of a table.
 
 ## makeartisrecombratefile
 
+`makeartisrecombratefile` writes recombrates.txt into the output folder of `makeartisatomicfiles`.
+
 ```{program-output} makeartisrecombratefile --help
 ```
 
+The repository does not hold the Nahar files. The command looks for them in the folder
+`atomic-data-nahar` in the repository root. The name of a file is the element symbol in lower case,
+the ion stage of the ion after the recombination, and `.rrc.txt`. For example, `fe2.rrc.txt` holds
+the rates of the recombination to Fe II. With no such folder, each ion with an atomic number of 30
+or less takes the ChiantiPy rates.
+
+ChiantiPy reads the CHIANTI database, which is a different download. The environment variable
+`XUVTOP` gives the folder of the database to ChiantiPy.
+
 ## makeartischargetransferfile
+
+`makeartischargetransferfile` writes chargetransfer.txt. The default output folder is
+`artis_files/data` in the repository, and not in the working directory. Git tracks the source files
+in `atomic-data-chargetransfer`, so the command needs no download.
 
 ```{program-output} makeartischargetransferfile --help
 ```
@@ -46,6 +60,9 @@ More points with the same step only extend the frequency range of a table.
 ## makeartisgammaspecfiles
 
 `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
+The command needs a network connection. It reads the nuclides from `betaminusdecays.txt` and
+`alphadecays.txt` in the data folder of artistools. It writes each file `gamma_<nuclide>.txt` into
+`artis_files/data` in the repository, and no option changes that folder.
 
 ```{program-output} makeartisgammaspecfiles --help
 ```
