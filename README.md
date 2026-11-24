@@ -13,7 +13,7 @@ The documentation is at <https://artisatomic.readthedocs.io>. It has these pages
 - [Development](https://artisatomic.readthedocs.io/en/latest/development.html): the tests, the checks and the code layout.
 
 ## Installation
-The package needs Python 3.13 or later. The data folders are in the repository. Clone the repository:
+The package needs Python 3.13 or later. The data folders are in the repository, and the program looks for them beside the package folder. Thus the package must run from a clone. The two install commands below keep the package in the clone. Clone the repository:
 ```sh
 git clone https://github.com/artis-mcrt/artisatomic.git
 cd artisatomic
@@ -31,7 +31,7 @@ python3 -m pip install -e .
 ```
 
 ## Quick start
-The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB.
+The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB. The page [Data sources](https://artisatomic.readthedocs.io/en/latest/datasources.html) lists the tools that each download script calls.
 
 ```sh
 (cd atomic-data-hillier && . ./setup_cmfgen_data.sh)
@@ -47,14 +47,16 @@ The file `tests/cmfgen_lowz/artisatomicionhandlers.json` selects some ions of H,
 Copy the four output files to the folder of an ARTIS model.
 
 ## Usage
-`makeartisatomicfiles` writes the four output files. An ion handlers file selects the ions and the handler that reads each ion. This example selects Ca III and Co II–IV:
+`makeartisatomicfiles` writes the four output files. An ion handlers file selects the ions and the handler that reads each ion. This example selects O I–III and Ca III:
 
 ```json
 [
-    [20, [[3, "adas"]]],
-    [27, [[2, "cmfgen_qubphixs"], [3, "adas"], [4, "adas"]]]
+    [8, [[1, "cmfgen"], [2, "cmfgen"], [3, "cmfgen"]]],
+    [20, [[3, "adas"]]]
 ]
 ```
+
+The example needs only the CMFGEN data set. The `adas` handler reads Ca III from a file that Git tracks.
 
 Give the file with `-ionhandlersfile`. With no such option, the program reads `artisatomicionhandlers.json` in the working directory, if that file exists. With no file, the program uses the built-in ion selection. The built-in ion selection needs the CMFGEN data set, the Floers+25 data set and the Kurucz line lists. The options `-minionstage` (default 1), `-maxionstage` (default 5) and `-maxatomicnumber` (no limit) limit the built-in ion selection. The page [Ion selection](https://artisatomic.readthedocs.io/en/latest/ionselection.html) gives the rules.
 
@@ -72,9 +74,11 @@ Each option has a form with one dash and a form with two dashes, for example `-m
 ### Other commands
 The package installs three more commands:
 
-- `makeartisrecombratefile` writes recombrates.txt from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less. The ChiantiPy rates need the `chianti` extra (`uv sync --frozen --extra chianti`). recombrates.txt has no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion.
-- `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file.
-- `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines.
+- `makeartisrecombratefile` writes recombrates.txt into the output folder, from the Nahar recombination rate files. It reads compositiondata.txt in the output folder. Run `makeartisatomicfiles` before this command. The repository does not hold the Nahar files. The command looks for them in the folder `atomic-data-nahar` in the repository root. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less. The ChiantiPy rates need the `chianti` extra (`uv sync --frozen --extra chianti`) and the CHIANTI database. recombrates.txt has no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion.
+- `makeartischargetransferfile` writes chargetransfer.txt, the charge transfer rate file. The default output folder is `artis_files/data` in the repository, and not in the working directory.
+- `makeartisgammaspecfiles` downloads the NuDat3 decay tables and writes a gamma spectrum for each nuclide that has gamma lines. It needs a network connection and has no option. It writes the files into `artis_files/data` in the repository.
+
+The page [Commands](https://artisatomic.readthedocs.io/en/latest/commands.html) gives the details of each command.
 
 ### Tab completion
 The commands with options use [argcomplete](https://kislyuk.github.io/argcomplete/). To complete the options of a command in bash or zsh, run this line:
@@ -84,6 +88,9 @@ eval "$(register-python-argcomplete makeartisatomicfiles)"
 ```
 
 To use the completion in each new shell, add the line to the startup file of the shell.
+
+## Support
+The project has no resources for support. An issue or a question can stay with no reply. The documentation, the help text of each command and the log file of a run are the sources of information.
 
 ## Development
 Install the development tools:

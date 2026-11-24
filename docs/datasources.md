@@ -33,10 +33,10 @@ Run each command in the data folder of the handler, unless the step names a diff
 
 | handler | step | size |
 |---|---|---|
-| `adas` | Git tracks the Ca III file and the Sr I file. ARTIS members get the Co and Fe files from the shared drive of the collaboration. | |
-| `boyle` | Save the data set as `aoife.hdf5`. Then run `artisatomic/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5` in the repository root. | |
+| `adas` | Git tracks the Ca III file and the Sr I file. Git also tracks a Co sample in the folder `co_tyndall_test_sample`. The reader uses that sample only in the test mode. The repository does not hold the full Co data set (the folder `co_tyndall`) or the Fe files. ARTIS members get them from the shared drive of the collaboration. | |
+| `boyle` | Save the data set as `aoife.hdf5`. `README.txt` of the folder holds a link to the data set. Then run `artisatomic/hdf5_to_parquet.py atomic-data-helium-boyle/aoife.hdf5` in the repository root. | |
 | `cmfgen` | `. ./setup_cmfgen_data.sh` | 363 MiB download, 1.8 GiB after the extraction |
-| `cmfgen_qubphixs` | Do the step of `cmfgen`. Then get the Co files of `atomic-data-adas`, as the row of `adas` says. | |
+| `cmfgen_qubphixs` | Do the step of `cmfgen`. Then get the full Co data set of `atomic-data-adas`, as the row of `adas` says. | |
 | `dream` | Make the HDF5 file as `README.md` of the folder says. Then run `artisatomic/hdf5_to_parquet.py` on that file in the repository root. | |
 | `fac` | Set `ARTISATOMIC_FAC_PATH` to the folder that holds the folder `OptimizedFAC_lanthanides_calibrated`. U II and U III also need the folder `Paper_Nd_U` beside the folder that `ARTISATOMIC_FAC_PATH` names. The repository does not hold the data. | |
 | `floers25calib`, `floers25uncalib` | `./setup_floers25_data.sh` | 1.6 GiB download. The extraction needs about 7 GiB of free space. |
@@ -48,6 +48,18 @@ Run each command in the data folder of the handler, unless the step names a diff
 | `tanakajplt` | `. ./setup_jplt_data.sh` | 1.4 GiB download, 0.7 GiB after the extraction |
 
 The scripts `setup_floers25_data.sh` and `setup_mons_data.sh` start with `#!/usr/bin/env zsh`. On a computer with no zsh, run each script with bash. For example: `bash setup_floers25_data.sh`.
+
+Each download script calls these tools. Install them before you run the script.
+
+| script | tools |
+|---|---|
+| `setup_cmfgen_data.sh` | `curl`, `md5sum`, `tar` with `xz`, `iconv`, `zstd` |
+| `setup_floers25_data.sh` | `curl`, `unzip`, `zstd` |
+| `setup_mons_data.sh` | `curl`, `unzip` |
+| `setup_jplt_data.sh` | `curl`, `md5sum`, `tar`, `zstd` |
+| `setup_chargetransfer_data.sh` in `atomic-data-chargetransfer` | `curl` |
+
+`artisatomic/hdf5_to_parquet.py` starts with a `uv run --script` line, so [uv](https://docs.astral.sh/uv/) installs its dependencies. The page [Commands](commands.md) shows its help text.
 
 The README file of each data folder gives the reference of the data set and the layout of the files.
 

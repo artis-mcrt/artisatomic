@@ -10,19 +10,24 @@ The program looks for the file in this order:
 2. `artisatomicionhandlers.json` in the working directory;
 3. no file, which gives the built-in ion selection.
 
-The file is a JSON list with one entry for each element. An entry is the atomic number and a list of `[ion stage, handler]` pairs. Ion stage 1 is the neutral atom. This example selects Ca III and Co II–IV:
+The file is a JSON list with one entry for each element. An entry is the atomic number and a list of `[ion stage, handler]` pairs. Ion stage 1 is the neutral atom. This example selects O I–III and Ca III:
 
 ```json
 [
-    [20, [[3, "adas"]]],
-    [27, [[2, "cmfgen_qubphixs"], [3, "adas"], [4, "adas"]]]
+    [8, [[1, "cmfgen"], [2, "cmfgen"], [3, "cmfgen"]]],
+    [20, [[3, "adas"]]]
 ]
 ```
+
+The example needs only the CMFGEN data set. The `adas` handler reads Ca III from a file that Git tracks.
 
 These rules apply:
 
 - The selection must contain at least one ion.
 - An element can have an empty ion list if another element contains an ion.
+- The atomic number is a whole number from 1 to 118. The file names each element one time only.
+- The ion stage is a whole number from 1 to the atomic number plus 1. An element names each ion stage one time only.
+- Each ion names its handler. The program rejects an ion stage with no handler.
 - The ion stages of an element must have no gap.
 - Each handler name must be one of the names on the page [Data sources](datasources.md). The program also accepts the old names `qub`, `qub_data` and `qub_cobalt`, and changes each one to a name of that page.
 

@@ -7,7 +7,7 @@
 | `adata.txt` | the levels of each ion |
 | `compositiondata.txt` | the elements and the range of ion stages of each element |
 | `transitiondata.txt` | the transitions of each ion, with the collision strengths |
-| `phixsdata_v2.txt` | the photoionisation cross sections. `--nophixs` writes no such file. |
+| `phixsdata_v2.txt` | the photoionisation cross sections. `--nophixs` writes no such file, and removes the file of an earlier run from the output folder. |
 | `artisatomiclog.txt` | the log of the run, for all ions |
 | `artisatomicionhandlers_used.json` | the record of the ions and the handlers of the run |
 
@@ -39,4 +39,14 @@ ARTIS v2023.10 and later skip the comment blocks. An older ARTIS release stops o
 for f in adata.txt transitiondata.txt phixsdata_v2.txt; do grep -v '^#' "$f" > "$f.tmp" && mv "$f.tmp" "$f"; done
 ```
 
-artistools needs a version that skips the comment blocks.
+artistools v2026.9.22 and later skip the comment blocks.
+
+## Files of the other commands
+
+| file | command | folder |
+|---|---|---|
+| `recombrates.txt` | `makeartisrecombratefile` | the output folder (`-output_folder`, default `artis_files`) |
+| `chargetransfer.txt` | `makeartischargetransferfile` | `-output_folder`, default `artis_files/data` in the repository |
+| `gamma_<nuclide>.txt` | `makeartisgammaspecfiles` | `artis_files/data` in the repository |
+
+The page [Commands](commands.md) gives the details of each command.
