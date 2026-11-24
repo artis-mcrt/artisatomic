@@ -156,9 +156,11 @@ T={optimaltemperature} K (option -optimaltemperature). The integral of that rate
 threshold to the last frequency of the table, as in ARTIS. In classic mode, the last value of a
 table is the average over one step above the last frequency, where ARTIS uses that value.
 {hydrogenicrule}
-A target with less than {targetcut:.0%} of the cross section of a level is not in the target list of that level. A
-target is a final state of the data source, which can be a term. The share of a term goes to its levels in
-proportion to their g, so a target level can have less than {targetcut:.0%}. The fractions then sum to 1.
+For each target of a level, artisatomic sums the cross sections in the reduced table for that target.
+It keeps each target whose sum is more than {targetcut:.0%} of the total for the level.
+It also keeps every target with the largest positive sum. The fractions of the targets it keeps sum to 1.
+A target can be a term of the data source. Its levels share its fraction in proportion to their
+statistical weights, so a level can receive less than {targetcut:.0%}.
 """
     + file_comment_end
 )

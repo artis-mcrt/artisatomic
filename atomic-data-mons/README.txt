@@ -1,20 +1,25 @@
-Lanthanide (La-Lu) V-VII atomic data of the University of Mons.
-Paper: Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., Quinet, P. (2024), A&A, 685, A91,
-doi:10.1051/0004-6361/202347723.
-Data set: https://doi.org/10.5281/zenodo.10635803 (setup_mons_data.sh downloads the two archives).
+The University of Mons data set covers La to Lu in ion stages V to VII.
+The script setup_mons_data.sh downloads two archives. Each archive contains one file for each of the 45 ions.
+The data record is at https://doi.org/10.5281/zenodo.10635803.
 
-outggf_Ln_V-VII.zip folder:
-	45 files outggf for each lanthanide between the V and VII spectra:
-	first column is wavelength of the E1 transition (A),
-	second column is the lower energy level of the transition (1000 cm^-1)
-	third column is the oscillator strength
+The Zenodo data record gives these columns for the transition archive outggf_Ln_V--VII.zip.
 
-outglv_Ln_V--VII.zip folder:
-	45 files outglv for each lanthanide between the V and VII spectra:
-	first column is the energy of levels (1000 cm^-1)
-	second column is the total angular momentum (J-value)
+1. Wavelength of the electric dipole transition in angstroms.
+2. Energy of the lower level in units of 1000 cm^-1.
+3. Oscillator strength.
 
+The reader interprets column 3 as the weighted oscillator strength g_l f_lu.
+Here f_lu is the absorption oscillator strength and g_l is the statistical weight of the lower level.
 
-test_sample/ folder:
-	A reduced sample of both archives for the CI checksum test.
-	tests/README.md describes it.
+The level archive outglv_Ln_V--VII.zip has two columns.
+
+1. Level energy in units of 1000 cm^-1.
+2. Total angular momentum J.
+
+The test_sample/ folder contains a sample of both archives. See tests/README.md for the checksum test.
+
+Reference
+
+Carvajal Gallego, H., Deprince, J., Maison, L., Palmeri, P., and Quinet, P. (2024).
+"Overview of the contributions from all lanthanide elements to kilonova opacity in the temperature range
+from 25 000 to 40 000 K". Astronomy & Astrophysics, 685, A91, pp. 1-16. https://doi.org/10.1051/0004-6361/202347723

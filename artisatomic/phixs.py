@@ -170,7 +170,6 @@ def match_hydrogenic_phixs(
     return photoionization_crosssections, photoionization_targetfractions, photoionization_thresholds_ev
 
 
-# a target below this share of the level's total drops out of the target list, with its route.
 # Every multi-route target of the CMFGEN test sets is above 3%, so the value only acts on the QUB Co data.
 PHIXS_TARGET_FRACTION_CUT = 0.02
 
@@ -182,7 +181,7 @@ class PhixsRoutes[TargetType](t.NamedTuple):
     # the kept targets with their fractions, and the open targets with their factors
     fractions: list[tuple[TargetType, float]]
     factors: list[tuple[TargetType, float]]
-    # the open targets below the cut
+    # the open targets that the cut removes
     dropped: list[tuple[TargetType, float]]
 
 
@@ -197,10 +196,9 @@ def combine_phixs_routes[TargetType](
     Each reduced table is on the ratio grid of its own route, which is the grid that ARTIS reads
     for that target. A target then gets its share of the total shape.
 
-    The factor of a target is the sum of its reduced table. That sum is the integral of the
-    cross section over the output grid, with the weights that build the table. A route whose
-    table is zero everywhere is closed and drops out. A target below fractioncut of the factor
-    sum drops out with its route. The strongest target always stays.
+    The factor of a target is the sum of the cross sections in its reduced table. A zero factor
+    means that the route is closed. The function keeps each target whose share of the total is
+    greater than fractioncut. It also keeps every target with the largest positive factor.
 
     The sum is exact for routes of one shape. For routes of different shapes it spreads the
     error over the targets, so no target gets a zero where its own route is open. With no open

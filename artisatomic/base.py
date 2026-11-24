@@ -394,8 +394,7 @@ def log_and_print(flog, strout):
     flog.write(strout + "\n")
 
 
-# the output files that take a comment block. compositiondata.txt is absent, because ARTIS reads
-# it with no comment skip.
+# Older ARTIS releases need compositiondata.txt without comments.
 COMMENT_TABLES = ("adata", "transitiondata", "phixsdata")
 
 
