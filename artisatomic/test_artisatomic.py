@@ -833,7 +833,7 @@ def test_photoion_target_below_cut_drops_with_its_route(monkeypatch):
     np.testing.assert_allclose(
         result.crosssections[0], reduce_phixs_tables_worker(args.optimaltemperature, xgrid, tables[0])
     )
-    assert "The target target1 of ground has less than 2% of the total, so the output drops it." in log
+    assert "The output drops the target target1 of ground. Its sum is at most 2% of the total." in log
 
 
 def test_read_hyd_table_file_stops_for_a_file_that_ends_inside_a_table(tmp_path):
@@ -2551,15 +2551,17 @@ def test_combine_phixs_routes():
     # the input tables stay as they were
     np.testing.assert_array_equal(strong, [4.0, 2.0, 1.0])
 
-    # a higher cut drops the weak route, and the kept route takes the whole fraction
-    combined = combine_phixs_routes([("a", strong), ("b", weak)], fractioncut=0.5)
+    # The weaker route has exactly 2% of the total.
+    combined = combine_phixs_routes([("a", np.array([98.0])), ("b", np.array([2.0]))])
     assert combined.fractions == [("a", 1.0)]
-    np.testing.assert_array_equal(combined.table, strong)
+    assert combined.dropped == [("b", 2.0)]
+    np.testing.assert_array_equal(combined.table, [98.0])
 
-    # the strongest routes stay at every cut, so the table is never empty
-    combined = combine_phixs_routes([("a", weak), ("b", weak)], fractioncut=0.5)
-    assert combined.fractions == [("a", 0.5), ("b", 0.5)]
+    # All 50 targets have exactly 2% of the total.
+    combined = combine_phixs_routes([(target, weak) for target in range(50)])
+    assert combined.fractions == [(target, 0.02) for target in range(50)]
     assert combined.dropped == []
+    np.testing.assert_array_equal(combined.table, 50 * weak)
 
     # no open route gives a zero table and no target
     combined = combine_phixs_routes([("a", closed)])

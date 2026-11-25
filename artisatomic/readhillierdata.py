@@ -1882,9 +1882,9 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
                 log_detail(
                     flog,
                     ("phixsdata",),
-                    "target below the cut",
-                    f"The target {target} of {label} has less than {PHIXS_TARGET_FRACTION_CUT:.0%} of the"
-                    " total, so the output drops it.",
+                    "target removed by the cut",
+                    f"The output drops the target {target} of {label}. Its sum is at most"
+                    f" {PHIXS_TARGET_FRACTION_CUT:.0%} of the total. Another target has a larger sum.",
                 )
         return combined.table, combined.fractions
 

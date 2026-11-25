@@ -1,29 +1,37 @@
 # Output checksum test sets
 
-Each directory here except `chargetransfer` is one entry of the `tests` matrix in
-[.github/workflows/test.yml](https://github.com/artis-mcrt/artisatomic/blob/main/.github/workflows/test.yml). The job gives the
-`artisatomicionhandlers.json` of the set to `-ionhandlersfile`. It runs `python -m artisatomic` under
-coverage, and checks the four output files against `checksums.txt`. `coverage run` can name the
-module only in the `-m` form. That is the same `main()` the `makeartisatomicfiles` console script calls, so the
-recipe below reproduces it.
+The test workflow runs each atomic data set with its own ion handlers file. It checks the four output files against
+`checksums.txt`. The charge transfer set has a separate job. [Test workflow](https://github.com/artis-mcrt/artisatomic/blob/main/.github/workflows/test.yml)
 
-Verification is whole-file MD5, so **any** change to level naming, sorting, phixs downsampling or a
-default argument invalidates every checksum at once. A change to a log line that goes into a comment block
-(`log_comment()`) or to a `Handler` description changes the checksums too. Such a change must leave the files the
-same after `grep -v '^#'`. Regenerate a set with:
+Each MD5 checksum covers one complete file, including its comments. The `mons` set has no photoionisation tables.
+The file comment in `phixsdata_v2.txt` records `-optimaltemperature`.
+If you change this option from 6000 K to 7000 K for `mons`, only that file gets a different checksum.
+
+Run this example from the repository root. The `mons` set uses the sample that Git tracks.
+`python -m artisatomic` starts the same program as `makeartisatomicfiles`.
 
 ```bash
-export ARTISATOMIC_TESTMODE=1 PYTHONPATH="$PWD"
-uv run makeartisatomicfiles -ionhandlersfile tests/<name>/artisatomicionhandlers.json -output_folder tests/<name>/output
-(cd tests/<name>/output && md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt > ../checksums.txt)
+testset=mons
+ARTISATOMIC_TESTMODE=1 uv run -m artisatomic \
+    --ionhandlersfile "tests/$testset/artisatomicionhandlers.json" \
+    --output-folder "tests/$testset/output"
+(cd "tests/$testset/output" && md5sum -c ../checksums.txt)
 ```
 
-Name the four files. The output folder holds the log file `artisatomiclog.txt` also, and `*.txt` would put it into `checksums.txt`.
+If a checksum differs, compare the new file with the original file.
+For a change to comments only, compare both files after you remove the `#` lines with `grep -v '^#'`.
+The data rows must match. For an intended change to a data row, verify the new values.
+Update the reference checksums only after you verify the changes for that set.
 
-`ARTISATOMIC_TESTMODE=1` also gives the file comments a creation time of 1970-01-01T00:00:00Z, so the checksums do not depend on the time of the run. The test mode comes before `SOURCE_DATE_EPOCH`, which a build environment can set for its own use. It is what redirects the Kurucz, ADAS, MONS and Floers+25 readers to their
-`test_sample/` directories, so it is required — the workflow sets it globally. The Floers+25
-`test_sample/` comes from `testdata.tar.xz`, and the redirect also keeps the private
-`OutputFiles_withforbidden` directory out of the test runs.
+```bash
+(cd "tests/$testset/output" && md5sum adata.txt compositiondata.txt phixsdata_v2.txt transitiondata.txt > ../checksums.txt)
+```
+
+Name the four files explicitly. The output folder also contains the log file `artisatomiclog.txt`.
+
+`ARTISATOMIC_TESTMODE=1` selects the test samples and sets the creation time in file comments to 1970-01-01T00:00:00Z.
+The test mode takes precedence over `SOURCE_DATE_EPOCH`. For the Floers+25 set, extract `testdata.tar.xz` in
+`atomic-data-floers25` first. The test mode uses the sample in place of the public and private data sets.
 
 Do not copy the file of a set to the repository root. With no `-ionhandlersfile` option,
 `find_handlers_file()` finds `artisatomicionhandlers.json` in the working directory if that file exists.
@@ -31,12 +39,12 @@ Thus a copy left in the repository root silently overrides the built-in ion sele
 local run. A later run that gives `-minionstage`, `-maxionstage` or `-maxatomicnumber` stops with an
 error instead.
 
-Every set except `mons` needs the CMFGEN corpus, not just the `cmfgen` ones. The hydrogenic estimate
-reads the tables of HYD/I, and the mons handler has no level-name parser, so it gives no estimate. The
-workflow's CMFGEN setup step is therefore not gated on `matrix.testname` (the comment there says why). `jplt`
-downloads its own corpus on top; Kurucz, ADAS, MONS and Floers+25 come from committed samples. When a set
-needs a new ion, prefer adding it to a committed sample over introducing another download: the
-published Floers+25 corpus is 5.5 GiB, but `testdata.tar.xz` carries only the ions the tests name.
+Of the seven atomic data sets, only `mons` runs without the CMFGEN data set.
+The hydrogenic estimate uses the CMFGEN tables for H I. The MONS level names contain no configuration for this estimate.
+The `jplt` set also needs the JPLT download. The remaining input files come from the repository.
+
+When a set needs a new ion, add the ion to a sample if possible.
+For example, `testdata.tar.xz` contains the ions for the Floers+25 tests. The full Floers+25 data set uses 5.5 GiB.
 
 ## What each set is for
 
@@ -55,8 +63,7 @@ trimming a set for speed can silently delete coverage while looking like a routi
 
 ## Adding a set
 
-Prefer a new set over extending an existing one when the ions are unrelated: matrix entries run in
-parallel, so a new set is free in wall clock, while extending a set churns its four checksums.
+Add a separate set if the new ions are unrelated to the ions of an existing set. The workflow runs the sets in parallel.
 
 ## The charge transfer set
 

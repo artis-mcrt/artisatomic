@@ -63,7 +63,19 @@ Each download script calls these tools. Install them before you run the script.
 
 The README file of each data folder gives the reference of the data set and the layout of the files.
 
-An ion with no cross sections in its data source gets a hydrogenic estimate (see the option `-nlevels_hydrogenic_for_unknown_phixs`). The estimate reads the hydrogen tables of the CMFGEN data set. Thus a run of a different handler can also need the CMFGEN data set. If the data set is absent, the run stops with the name of the download script. `--nophixs` gives no estimate. A handler with no parser for its level names, for example `mons`, also gives no estimate.
+## Photoionisation cross sections
+
+A photoionisation table connects an initial level to one or more levels of the next ion stage.
+The highest selected stage of each element has no target stage in the selection, so it gets no photoionisation table.
+
+For each lower stage, the program uses the cross section tables that its data source supplies.
+If the source supplies no tables, the program can estimate hydrogenic cross sections for the lowest levels.
+The estimate needs the principal quantum number of each level. Some handlers, such as `mons`, cannot determine this number.
+The estimate also needs the hydrogen tables from CMFGEN, even for a different handler.
+If the CMFGEN data set is missing, the error message names the download script.
+
+Set `--nlevels-hydrogenic-for-unknown-phixs 0` to disable the estimate. The program still writes the tables from the data source.
+The option `--nophixs` skips all cross sections and omits `phixsdata_v2.txt`.
 
 ## Environment variables
 
