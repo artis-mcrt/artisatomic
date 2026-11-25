@@ -178,6 +178,7 @@ include = ["artisatomic*"]
 local_scheme = "no-local-version"
 
 # ty asks uv for the workspace root and the environment. This setting is in preview.
+# ty needs uv 0.12.3 or later for it, and [tool.uv] sets that minimum.
 [tool.ty.project-manager]
 project = "uv"
 
@@ -188,6 +189,10 @@ disjoint-cast = "error"
 missing-override-decorator = "error"
 redundant-condition-strict = "error"
 truthiness-test-of-none-union = "error"
+
+[tool.uv]
+# the first uv with the command "uv workspace metadata", which ty runs (see [tool.ty.project-manager])
+required-version = ">=0.12.3"
 
 [tool.coverage.run]
 source = ["artisatomic"]
