@@ -177,6 +177,10 @@ include = ["artisatomic*"]
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
 
+# ty asks uv for the workspace root and the environment. This setting is in preview.
+[tool.ty.project-manager]
+project = "uv"
+
 [tool.ty.rules]
 unused-ignore-comment = "ignore"
 # rules that are off by default
