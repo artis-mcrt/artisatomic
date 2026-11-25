@@ -31,20 +31,39 @@ python3 -m pip install -e .
 ```
 
 ## Quick start
-The repository holds the download scripts and not the data. This example needs only the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB. The page [Data sources](https://artisatomic.readthedocs.io/en/latest/datasources.html) lists the tools that each download script calls.
+
+### Ca III with the data in the repository
+
+Run these commands from the repository root. The `adas` handler reads the Ca III data that Git tracks.
+
+```sh
+printf '%s\n' '[[20, [[3, "adas"]]]]' > ca_iii.json
+makeartisatomicfiles --ionhandlersfile ca_iii.json --output-folder artis_files_ca_iii
+```
+
+In `artis_files_ca_iii`, `adata.txt` contains 86 levels and `transitiondata.txt` contains 3,164 transitions.
+This selection has no Ca IV target, so `phixsdata_v2.txt` contains no photoionisation tables.
+
+### Several ion stages with CMFGEN
+
+This example produces photoionisation tables for ions with a target in the next stage.
+It needs the CMFGEN data set. The download is 363 MiB, and the data set uses 1.8 GiB.
+For the tools that the download script needs, see [Data sources](https://artisatomic.readthedocs.io/en/latest/datasources.html).
 
 ```sh
 (cd atomic-data-hillier && . ./setup_cmfgen_data.sh)
 makeartisatomicfiles -ionhandlersfile tests/cmfgen_lowz/artisatomicionhandlers.json
 ```
 
-The file `tests/cmfgen_lowz/artisatomicionhandlers.json` selects some ions of H, He, C, N, F and P. The run writes these files into the folder `artis_files`:
+The ion handlers file selects ions of six elements. The run writes the following files to `artis_files`.
 
-- `adata.txt`, `compositiondata.txt`, `transitiondata.txt` and `phixsdata_v2.txt`, which ARTIS reads;
-- `artisatomiclog.txt`, the log of the run;
-- `artisatomicionhandlers_used.json`, the record of the ions and the handlers of the run.
+- `adata.txt` contains the levels.
+- `compositiondata.txt` lists the elements and their ion stages.
+- `transitiondata.txt` contains the transitions.
+- `phixsdata_v2.txt` contains the photoionisation tables.
 
-Copy the four output files to the folder of an ARTIS model.
+Copy these four files to the folder of an ARTIS model.
+The output folder also contains the log `artisatomiclog.txt` and the selection record `artisatomicionhandlers_used.json`.
 
 ## Usage
 `makeartisatomicfiles` writes the four output files. An ion handlers file selects the ions and the handler that reads each ion. This example selects O I–III and Ca III:

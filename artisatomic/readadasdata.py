@@ -974,10 +974,10 @@ def _fill_co2_phixs(
             log_detail(
                 flog,
                 ("phixsdata",),
-                "target below the cut",
-                f"The cross section of level {lowerlevelid + 1} to the upper level {target + 1} sums to"
-                f" {factor:.4e} Mb, less than {PHIXS_TARGET_FRACTION_CUT:.0%} of the total, so the output drops"
-                " that target.",
+                "target removed by the cut",
+                f"The reduced cross sections from level {lowerlevelid + 1} to upper level {target + 1} sum to"
+                f" {factor:.4e} Mb. This is at most {PHIXS_TARGET_FRACTION_CUT:.0%} of the total."
+                " Another target has a larger sum, so the output drops this target.",
             )
 
         photoionization_targetfractions[lowerlevelid] = combined.fractions
