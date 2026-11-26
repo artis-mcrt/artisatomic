@@ -177,16 +177,26 @@ def test_hydrogenic_tables_with_no_data_folder_name_the_setup_script(tmp_path, m
         readhillierdata.read_hyd_phixsdata()
 
 
+@pytest.mark.parametrize("handlername", ["cmfgen", "cmfgen_qubphixs"])
 @pytest.mark.parametrize(("atomic_number", "ion_stage"), [(1, 2), (2, 3)])
-def test_bare_nucleus_needs_no_cmfgen_data_folder(tmp_path, monkeypatch, atomic_number, ion_stage):
-    """The reader builds H II and He III from constants. Each is a top ion, so the run reads no CMFGEN file."""
+def test_bare_nucleus_needs_no_cmfgen_data_folder(tmp_path, monkeypatch, atomic_number, ion_stage, handlername):
+    """The reader builds H II and He III from constants. Each is a top ion, so the run reads no CMFGEN file.
+
+    The source: lines of adata.txt and transitiondata.txt name the constants, and not the CMFGEN data set.
+    """
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(readhillierdata, "hillier_datadir", tmp_path / "atomic-data-hillier")
     handlersfile = tmp_path / "barenucleus.json"
-    handlersfile.write_text(json.dumps([[atomic_number, [[ion_stage, "cmfgen"]]]]), encoding="utf-8")
+    handlersfile.write_text(json.dumps([[atomic_number, [[ion_stage, handlername]]]]), encoding="utf-8")
     run_main(monkeypatch, "-ionhandlersfile", str(handlersfile))
-    rows = (tmp_path / "artis_files" / "compositiondata.txt").read_text(encoding="utf-8").splitlines()
+    outputfolder = tmp_path / "artis_files"
+    rows = (outputfolder / "compositiondata.txt").read_text(encoding="utf-8").splitlines()
     assert rows[3].split()[:4] == [str(atomic_number), "1", str(ion_stage), str(ion_stage)]
+    for filename in ("adata.txt", "transitiondata.txt"):
+        lines = (outputfolder / filename).read_text(encoding="utf-8").splitlines()
+        assert [line for line in lines if line.startswith("# source:")] == [
+            f"# source: {readhillierdata.bare_nucleus_description}"
+        ]
 
 
 @pytest.mark.parametrize(

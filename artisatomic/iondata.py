@@ -212,12 +212,15 @@ handlers: dict[str, Handler] = {
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.
     "cmfgen_qubphixs": Handler(
-        readhillierdata.description,
+        readhillierdata.description_of_ion,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
-        source_summary=f"{readhillierdata.description}. Co II has {readadasdata.qub_cobalt_phixs_description}",
+        source_summary=(
+            f"{readhillierdata.description}. Co II has {readadasdata.qub_cobalt_phixs_description}."
+            f" H II and He III: {readhillierdata.bare_nucleus_description}"
+        ),
     ),
 }
 
