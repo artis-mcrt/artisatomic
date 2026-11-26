@@ -207,7 +207,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.get_level_valence_n,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
-        source_summary=f"{readhillierdata.description}. H II: {readhillierdata.bare_proton_description}",
+        source_summary=f"{readhillierdata.description}. H II and He III: {readhillierdata.bare_nucleus_description}",
     ),
     # CMFGEN levels, transitions and collision strengths, with the QUB cross sections for Co II.
     # The QUB Co II tables are for the CMFGEN levels of Co II.

@@ -111,7 +111,7 @@ def test_listhandlers_prints_each_handler_with_its_source(tmp_path, monkeypatch,
     run_main(monkeypatch, "--listhandlers")
     lines = capsys.readouterr().out.splitlines()
     assert [line for line in lines if line and not line.startswith(" ")] == sorted(handlers)
-    assert lines[lines.index("cmfgen") + 1].startswith(f"    {readhillierdata.description}. H II: ")
+    assert lines[lines.index("cmfgen") + 1].startswith(f"    {readhillierdata.description}. H II and He III: ")
     # the QUB cross sections of Co II are the difference between the two CMFGEN handlers
     assert lines[lines.index("cmfgen_qubphixs") + 1] != lines[lines.index("cmfgen") + 1]
     # U II and U III of the fac handler come from a different folder
@@ -177,15 +177,16 @@ def test_hydrogenic_tables_with_no_data_folder_name_the_setup_script(tmp_path, m
         readhillierdata.read_hyd_phixsdata()
 
 
-def test_bare_proton_needs_no_cmfgen_data_folder(tmp_path, monkeypatch):
-    """The reader builds H II from constants, and H II is the top ion, so the run reads no CMFGEN file."""
+@pytest.mark.parametrize(("atomic_number", "ion_stage"), [(1, 2), (2, 3)])
+def test_bare_nucleus_needs_no_cmfgen_data_folder(tmp_path, monkeypatch, atomic_number, ion_stage):
+    """The reader builds H II and He III from constants. Each is a top ion, so the run reads no CMFGEN file."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(readhillierdata, "hillier_datadir", tmp_path / "atomic-data-hillier")
-    handlersfile = tmp_path / "hii.json"
-    handlersfile.write_text(json.dumps([[1, [[2, "cmfgen"]]]]), encoding="utf-8")
+    handlersfile = tmp_path / "barenucleus.json"
+    handlersfile.write_text(json.dumps([[atomic_number, [[ion_stage, "cmfgen"]]]]), encoding="utf-8")
     run_main(monkeypatch, "-ionhandlersfile", str(handlersfile))
     rows = (tmp_path / "artis_files" / "compositiondata.txt").read_text(encoding="utf-8").splitlines()
-    assert rows[3].split()[:4] == ["1", "1", "2", "2"]
+    assert rows[3].split()[:4] == [str(atomic_number), "1", str(ion_stage), str(ion_stage)]
 
 
 @pytest.mark.parametrize(
@@ -193,6 +194,7 @@ def test_bare_proton_needs_no_cmfgen_data_folder(tmp_path, monkeypatch):
     [
         ([(1, [(2, "cmfgen")])], [], False),
         ([(1, [(2, "cmfgen_qubphixs")])], [], False),
+        ([(2, [(3, "cmfgen")])], [], False),
         ([(8, [(1, "cmfgen"), (2, "cmfgen")])], ["--nophixs"], True),
         ([(38, [(1, "kurucz"), (2, "kurucz")])], [], True),
         ([(38, [(1, "kurucz"), (2, "kurucz")])], ["--nophixs"], False),
