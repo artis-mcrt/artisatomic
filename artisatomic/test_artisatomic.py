@@ -2469,7 +2469,7 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
     """
     expected_ion_stages = {
         1: [1, 2],  # H
-        2: [1, 2],  # He
+        2: [1, 2, 3],  # He
         6: [1, 2, 3, 4, 5, 6],  # C
         7: [1, 2, 3, 4, 5, 6, 7],  # N
         8: [1, 2, 3, 4, 5, 6, 7, 8],  # O
@@ -2501,13 +2501,14 @@ def test_hillier_ions_data_matches_the_cmfgen_corpus():
     }
     assert ion_stages == expected_ion_stages
 
-    # every ion whose phot files are not the single default file. H II is the bare top ion, so
-    # it has no files at all.
+    # every ion whose phot files are not the single default file. H II and He III are bare top
+    # ions, so they have no files at all.
     expected_photfilenames = {
         (1, 1): ("hiphot.dat",),
         (1, 2): (),
         (2, 1): ("heiphot_a7.dat",),
         (2, 2): ("he2phot.dat",),
+        (2, 3): (),
         (6, 2): ("phot_data_A", "phot_data_B"),
         (6, 3): ("phot_data_A", "phot_data_B"),
         (7, 1): ("phot_data_A", "phot_data_B", "phot_data_C", "phot_data_D"),
@@ -5038,9 +5039,12 @@ def test_write_transition_data_format():
     assert out.getvalue() == expected
 
 
-def test_readhillierdata_bare_proton_has_one_state():
-    """The H II placeholder level has g = 1: ARTIS divides the H I to H II Saha ratio by it."""
-    ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(1, 2, io.StringIO())
+@pytest.mark.parametrize(("atomic_number", "ion_stage"), sorted(readhillierdata.bare_nuclei))
+def test_readhillierdata_bare_nucleus_has_one_state(atomic_number, ion_stage):
+    """The placeholder level of H II and He III has g = 1. ARTIS divides the Saha ratio of the ion below by it."""
+    ionization_energy_ev, dflevels, dftransitions = readhillierdata.read_levels_and_transitions(
+        atomic_number, ion_stage, io.StringIO()
+    )
     assert ionization_energy_ev == 0.0
     assert dflevels["g"].to_list() == [1.0]
     assert dftransitions.is_empty()
@@ -8445,7 +8449,7 @@ def test_hillier_ions_data_names_files_that_exist():
     cmfgen_corpus_or_skip()
     for (atomic_number, ion_stage), ionfiles in readhillierdata.ions_data.items():
         if not ionfiles.folder:
-            continue  # the bare nucleus of H II has no file
+            continue  # a bare nucleus (H II, He III) has no file
         folder = Path(readhillierdata.hillier_ion_folder(atomic_number, ion_stage)) / ionfiles.folder
         assert folder.is_dir(), folder
         names = [ionfiles.levelstransitionsfilename, *ionfiles.photfilenames]

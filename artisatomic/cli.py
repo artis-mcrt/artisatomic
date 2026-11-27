@@ -243,8 +243,8 @@ def format_handlers() -> str:
 def cmfgen_data_needed(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> bool:
     """Whether the run reads the CMFGEN data set for certain.
 
-    Each ion of the cmfgen and cmfgen_qubphixs handlers reads its files, except H II. The reader
-    builds H II from constants, and H II is the top ion of H, so it needs no cross section.
+    Each ion of the cmfgen and cmfgen_qubphixs handlers reads its files, except the bare nuclei H II
+    and He III. The reader builds them from constants. Each is a top ion, so it needs no cross section.
 
     The hydrogenic estimate of an ion below the top ion reads the hydrogen tables of the data set.
     An ion gets the estimate if its handler has a parser for its level names and no cross sections
@@ -254,11 +254,12 @@ def cmfgen_data_needed(ion_handlers: list[tuple[int, list[tuple[int, str]]]], ar
     read_hyd_phixsdata() checks the folder then.
     """
     from artisatomic.iondata import handlers
+    from artisatomic.readhillierdata import bare_nuclei
 
     estimate = not args.nophixs and args.nlevels_hydrogenic_for_unknown_phixs > 0
     for atomic_number, listions in ion_handlers:
         for index, (ion_stage, handlername) in enumerate(listions):
-            if handlername in {"cmfgen", "cmfgen_qubphixs"} and (atomic_number, ion_stage) != (1, 2):
+            if handlername in {"cmfgen", "cmfgen_qubphixs"} and (atomic_number, ion_stage) not in bare_nuclei:
                 return True
             handler = handlers[handlername]
             is_top_ion = index == len(listions) - 1

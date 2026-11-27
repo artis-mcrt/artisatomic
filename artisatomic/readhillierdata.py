@@ -158,6 +158,7 @@ ions_data |= {
     # He
     (2, 1): IonFiles("11may07", "heioscdat_a7.dat_old", ("heiphot_a7.dat",), "heicol.dat"),
     (2, 2): IonFiles("5dec96", "he2_osc.dat", ("he2phot.dat",), "he2col.dat"),
+    (2, 3): IonFiles("", "", (), ""),
     # C
     (6, 2): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
     (6, 3): IonFiles("19apr23", "osc_data", phot_data_names(2), "col_data"),
@@ -261,16 +262,18 @@ description = (
     " doi:10.1086/305350"
 )
 
-# H II has no oscillator file. read_levels_and_transitions() gives it one level from constants in the code.
-bare_proton_description = (
-    "constants of artisatomic, because no CMFGEN file gives the bare proton. The ion has one level with g = 1"
+# The bare nuclei H II and He III have no oscillator file. read_levels_and_transitions() gives each
+# one level from constants in the code.
+bare_nuclei: frozenset[tuple[int, int]] = frozenset({(1, 2), (2, 3)})
+bare_nucleus_description = (
+    "constants of artisatomic, because no CMFGEN file gives a bare nucleus. The ion has one level with g = 1"
     " and no transition."
 )
 
 
 def description_of_ion(atomic_number: int, ion_stage: int) -> str:
     """Give the "source:" line of the levels and the transitions of one ion."""
-    return bare_proton_description if (atomic_number, ion_stage) == (1, 2) else description
+    return bare_nucleus_description if (atomic_number, ion_stage) in bare_nuclei else description
 
 
 def check_data_folder() -> None:
@@ -544,15 +547,15 @@ def read_levels_and_transitions_from_file(
     """
     hillier_ionization_energy_ev = 0.0
 
-    if atomic_number == 1 and ion_stage == 2:
-        # a bare proton: a single dummy level, and no oscillator file to read
+    if (atomic_number, ion_stage) in bare_nuclei:
+        # a bare nucleus: a single dummy level, and no oscillator file to read
         return (
             hillier_ionization_energy_ev,
             pl.DataFrame(
                 [
                     HillierEnergyLevel(
                         levelname="I",
-                        # one state: ARTIS divides the Saha ratio of H I to H II by this g
+                        # one state: ARTIS divides the Saha ratio of the ion below to this ion by this g
                         g=1.0,
                         energyabovegsinpercm=0.0,
                         lambdaangstrom=0.0,
@@ -755,8 +758,8 @@ def read_levels_and_transitions_from_file(
         msg = f"{filename} declares {expected_energy_levels} levels but has {len(levelrows)}"
         raise ValueError(msg)
 
-    # not an assert: this guards the ionisation energy that adata.txt gets. H II returns above
-    # with 0.0, because a bare nucleus has no file to read one from.
+    # not an assert: this guards the ionisation energy that adata.txt gets. A bare nucleus returns
+    # above with 0.0, because it has no file to read one from.
     if hillier_ionization_energy_ev == 0.0:
         msg = f"{filename} has no '!Ionization energy' line in its header"
         raise ValueError(msg)
@@ -2448,7 +2451,7 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
         return 10.0 ** fortran_float(label) if logtemperatures else fortran_float(label) * 1e4
 
     coldatafilename = ions_data[atomic_number, ion_stage].coldatafilename
-    if (atomic_number, ion_stage) == (1, 2):
+    if (atomic_number, ion_stage) in bare_nuclei:
         return pl.DataFrame(schema=upsilon_schema)
     if not coldatafilename:
         log_comment(flog, ("transitiondata",), "CMFGEN has no collision data file for this ion.")
