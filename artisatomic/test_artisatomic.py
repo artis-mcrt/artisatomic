@@ -6658,6 +6658,249 @@ def test_cli_restores_the_earlier_output_when_a_move_fails(tmp_path, monkeypatch
     assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
 
 
+database_names = (
+    "adata.txt",
+    "artisatomicionhandlers_used.json",
+    "artisatomiclog.txt",
+    "compositiondata.txt",
+    "phixsdata_v2.txt",
+    "transitiondata.txt",
+)
+
+# The child process moves files as install_files() or recover_install() does, and stops with no
+# cleanup directly after the move with the given number. os._exit() runs no except clause and no
+# finally clause, as a process kill does.
+install_child_script = """
+import os
+import sys
+from pathlib import Path
+
+from artisatomic import cli
+
+outputfolder, workfoldername, stopafter, mode = Path(sys.argv[1]), sys.argv[2], int(sys.argv[3]), sys.argv[4]
+moves = 0
+original_replace = Path.replace
+
+
+def replace(self, target):
+    global moves
+    result = original_replace(self, target)
+    moves += 1
+    if moves == stopafter:
+        os._exit(77)
+    return result
+
+
+Path.replace = replace
+if mode == "install":
+    cli.install_files(outputfolder / workfoldername, outputfolder)
+else:
+    cli.recover_install(outputfolder, locked=True)
+os._exit(0)
+"""
+
+
+def write_database(folder: Path, text: str, names: t.Iterable[str] = database_names) -> None:
+    """Write the files of one run into a folder. Each file holds the text that names its run."""
+    folder.mkdir(parents=True, exist_ok=True)
+    for name in names:
+        (folder / name).write_text(f"{text}\n", encoding="utf-8")
+
+
+def database_state(outputfolder: Path) -> dict[str, str]:
+    """Give the text of each file of the output folder that is not a part of an install."""
+    return {
+        path.name: path.read_text(encoding="utf-8").strip()
+        for path in sorted(outputfolder.iterdir())
+        if path.is_file() and not path.name.startswith(".") and path.name != "artisatomiclog_failed.txt"
+    }
+
+
+def run_install_child(outputfolder: Path, stopafter: int, mode: str = "install") -> int:
+    """Run install_files() or recover_install() in a child process that stops after a move. Give its exit status."""
+    import os
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]  # the test stops a child process during an install
+    import sys
+
+    result = subprocess.run(  # ruff: ignore[subprocess-without-shell-equals-true]
+        [sys.executable, "-c", install_child_script, str(outputfolder), ".artisatomic_run_test", str(stopafter), mode],
+        check=False,
+        env={**os.environ, "PYTHONPATH": str(PYDIR.parent)},
+    )
+    return result.returncode
+
+
+@pytest.mark.parametrize("nophixs", [False, True])
+def test_recover_install_after_a_process_kill_at_each_move(tmp_path, monkeypatch, nophixs):
+    """A process kill after each move of an install must leave an output folder that the recovery makes consistent.
+
+    install_files() writes its record, moves each earlier file to a folder, and moves each new
+    file to the output folder. The level ids of one file refer to the others, so the recovery
+    must give the files of one run only. A second stop, during the recovery, must be safe also.
+    """
+    import shutil
+
+    from artisatomic import cli
+
+    newnames = [name for name in database_names if not (nophixs and name == "phixsdata_v2.txt")]
+    earlierstate = dict.fromkeys(database_names, "earlier")
+    newstate = dict.fromkeys(newnames, "new")
+    # the record, the earlier files and the new files
+    nmoves = 1 + len(database_names) + len(newnames)
+
+    def prepare(folder: Path) -> Path:
+        write_database(folder, "earlier")
+        write_database(folder / ".artisatomic_run_test", "new", newnames)
+        return folder
+
+    def assert_recovered(outputfolder: Path, expected: dict[str, str]) -> None:
+        assert database_state(outputfolder) == expected
+        assert not (outputfolder / cli.install_record_name).exists()
+        assert not list(outputfolder.glob(".artisatomic_earlier_*"))
+
+    for stopafter in range(1, nmoves + 2):
+        outputfolder = prepare(tmp_path / f"stop{stopafter}")
+        status = run_install_child(outputfolder, stopafter)
+        if stopafter > nmoves:
+            # the install had no stop: the record is gone, and the caller removes the folder of the earlier files
+            assert status == 0
+            assert database_state(outputfolder) == newstate
+            assert not (outputfolder / cli.install_record_name).exists()
+            continue
+        assert status == 77
+        assert (outputfolder / cli.install_record_name).exists()
+        # After the last move, each new file is in the output folder, so the install is complete.
+        # After each earlier stop, the recovery gives the earlier database, also phixsdata_v2.txt.
+        expected = newstate if stopafter == nmoves else earlierstate
+
+        # a second stop after each move of the recovery, and then a recovery with no stop
+        for recoverystop in range(1, nmoves + 1):
+            copyfolder = tmp_path / f"stop{stopafter}_recovery{recoverystop}"
+            shutil.copytree(outputfolder, copyfolder)
+            original_replace = Path.replace
+            moves = 0
+
+            def replace_then_stop(self, target, original_replace=original_replace, recoverystop=recoverystop):
+                nonlocal moves
+                result = original_replace(self, target)
+                moves += 1
+                if moves == recoverystop:
+                    # a BaseException that recover_install() does not handle stops it as a kill does
+                    raise KeyboardInterrupt
+                return result
+
+            stopped = False
+            with monkeypatch.context() as patch:
+                patch.setattr(Path, "replace", replace_then_stop)
+                try:
+                    cli.recover_install(copyfolder, locked=True)
+                except KeyboardInterrupt:
+                    stopped = True
+            if stopped:
+                cli.recover_install(copyfolder, locked=True)
+            assert_recovered(copyfolder, expected)
+            # a recovery with nothing to recover changes nothing
+            cli.recover_install(copyfolder, locked=True)
+            assert_recovered(copyfolder, expected)
+            if not stopped:
+                break
+
+        cli.recover_install(outputfolder, locked=True)
+        assert_recovered(outputfolder, expected)
+        if expected == earlierstate and stopafter > 1 + len(database_names):
+            # the log of the run that stopped stays for the user
+            assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "new\n"
+
+
+def test_recover_install_also_stops_safely_in_a_child_process(tmp_path):
+    """A real process kill during the recovery, after a real kill during the install, leaves a state that recovers."""
+    from artisatomic import cli
+
+    outputfolder = tmp_path / "artis_files"
+    write_database(outputfolder, "earlier")
+    write_database(outputfolder / ".artisatomic_run_test", "new")
+    # the stop comes after the record, the six earlier files and two new files
+    assert run_install_child(outputfolder, 9) == 77
+    state = database_state(outputfolder)
+    assert sorted(set(state.values())) == ["earlier", "new"] or len(state) < len(database_names)
+    # the recovery stops after it moved one new file back
+    assert run_install_child(outputfolder, 1, mode="recover") == 77
+    assert (outputfolder / cli.install_record_name).exists()
+    assert run_install_child(outputfolder, 0, mode="recover") == 0
+    assert database_state(outputfolder) == dict.fromkeys(database_names, "earlier")
+    assert not (outputfolder / cli.install_record_name).exists()
+
+
+def test_cli_recovers_a_stopped_install_before_it_removes_the_stale_work_folder(tmp_path, monkeypatch, capsys):
+    """The next run puts the earlier database back first. Then a failure of that run still keeps the earlier database.
+
+    The record names the work folder of the run that stopped. The removal of the stale work
+    folders must therefore come after the recovery.
+    """
+    outputfolder = tmp_path / "artis_files"
+    write_database(outputfolder, "earlier")
+    # the work folder of a process that does not exist, as remove_stale_work_folders() tests it
+    import socket
+
+    workfolder = outputfolder / f".artisatomic_run_999999999@{socket.gethostname()}@test"
+    write_database(workfolder, "new")
+    workfolder.rename(outputfolder / ".artisatomic_run_test")
+    assert run_install_child(outputfolder, 9) == 77
+    (outputfolder / ".artisatomic_run_test").rename(workfolder)
+    recordpath = outputfolder / ".artisatomic_install.json"
+    record = json.loads(recordpath.read_text(encoding="utf-8"))
+    recordpath.write_text(json.dumps({**record, "workfolder": workfolder.name}), encoding="utf-8")
+
+    # the stub writer of the new run fails, so the output folder must hold the earlier database
+    original_text = Path.write_text
+
+    def keep_the_earlier_files(self: Path, *args: t.Any, **kwargs: t.Any) -> int:
+        # cli_run_with_stub_writer() writes three files of an earlier run, which this test has already
+        if self.parent == outputfolder and self.name in database_names:
+            return 0
+        return original_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", keep_the_earlier_files)
+    cli_run_with_stub_writer(tmp_path, monkeypatch, fail=True)
+    monkeypatch.undo()
+    assert database_state(outputfolder) == dict.fromkeys(database_names, "earlier")
+    assert not recordpath.exists()
+    assert not workfolder.exists()
+    assert "An earlier run stopped during its install" in capsys.readouterr().out
+
+
+def test_recover_install_without_a_lock_acts_only_on_a_process_that_does_not_exist(tmp_path):
+    """With no lock, the record of a process that exists, or of another host, can be the record of a run in its install."""
+    import os
+    import socket
+
+    from artisatomic import cli
+
+    outputfolder = tmp_path / "artis_files"
+    write_database(outputfolder, "earlier")
+    write_database(outputfolder / ".artisatomic_run_test", "new")
+    assert run_install_child(outputfolder, 9) == 77
+    recordpath = outputfolder / cli.install_record_name
+    record = json.loads(recordpath.read_text(encoding="utf-8"))
+    mixedstate = database_state(outputfolder)
+
+    for changes in ({"pid": os.getpid()}, {"host": f"not-{socket.gethostname()}"}):
+        recordpath.write_text(json.dumps({**record, **changes}), encoding="utf-8")
+        with pytest.raises(RuntimeError, match="is the record of an install that is not complete"):
+            cli.recover_install(outputfolder, locked=False)
+        assert database_state(outputfolder) == mixedstate
+
+    # the child process of the record does not exist now
+    recordpath.write_text(json.dumps(record), encoding="utf-8")
+    cli.recover_install(outputfolder, locked=False)
+    assert database_state(outputfolder) == dict.fromkeys(database_names, "earlier")
+
+    # a record that is not readable stops the run, and the message names the folders of the earlier files
+    recordpath.write_text("{", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="the program cannot read it"):
+        cli.recover_install(outputfolder, locked=True)
+
+
 def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, capsys):
     """A failed cleanup after the moves must not stop the run, because the new output is complete."""
     from artisatomic import cli
@@ -6710,12 +6953,16 @@ def test_cli_holds_a_sigterm_during_the_wait_for_the_output_folder_lock(tmp_path
     if not hasattr(signal, "SIGTERM") or os.name != "posix":
         pytest.skip("the test sends SIGTERM to its own process")
     original_lock = cli.output_folder_lock
+    lockcalls = []
 
     @contextmanager
     def lock_after_a_signal(outputfolder: Path):
-        os.kill(os.getpid(), signal.SIGTERM)
-        with original_lock(outputfolder):
-            yield
+        # the first lock of a run is the lock of the recovery at its start, and the second is the lock of the install
+        lockcalls.append(outputfolder)
+        if len(lockcalls) == 2:
+            os.kill(os.getpid(), signal.SIGTERM)
+        with original_lock(outputfolder) as locked:
+            yield locked
 
     monkeypatch.setattr(cli, "output_folder_lock", lock_after_a_signal)
     with pytest.raises(SystemExit):

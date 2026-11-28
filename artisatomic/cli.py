@@ -402,7 +402,11 @@ def main() -> None:
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)
-    remove_stale_work_folders(outputfolder)
+    # The record of an install that a process kill stopped names a work folder and the folder of the
+    # earlier files. The recovery needs both, so it comes before the removal of the stale work folders.
+    with stop_signals_as_exit(), signals_held(), output_folder_lock(outputfolder) as locked:
+        recover_install(outputfolder, locked=locked)
+        remove_stale_work_folders(outputfolder)
 
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
     # that fails then leaves the output of the earlier run. The level ids of one file refer to the
@@ -424,8 +428,10 @@ def main() -> None:
         # the files in the output folder, so the folder holds the files of one run. A signal waits
         # until the end of the install and its cleanup, also during the wait for the lock. Between the
         # last move and the cleanup, no handler could tell a full install from a part install.
-        with signals_held(), output_folder_lock(outputfolder):
+        with signals_held(), output_folder_lock(outputfolder) as locked:
             try:
+                # a run that stopped in its install after this run started
+                recover_install(outputfolder, locked=locked)
                 earlierfolder = install_files(workfolder, outputfolder)
             except BaseException:
                 discard_run(workfolder, outputfolder)
@@ -552,31 +558,33 @@ def process_exists(pid: int) -> bool:
 
 
 @contextmanager
-def output_folder_lock(outputfolder: Path) -> Generator[None]:
+def output_folder_lock(outputfolder: Path) -> Generator[bool]:
     """Hold an exclusive lock on the output folder. A second run waits until the first run releases it.
 
-    The operating system releases the lock when the process stops, so a run that crashes leaves no
-    lock. Windows has no flock(), so there the function gives no lock. Some file systems refuse
-    flock() (Lustre with the option noflock, NFS with no lock daemon), and a folder with no read
-    permission refuses the open. There the function gives a warning and no lock, so a run does not
-    fail after all of its work.
+    The value of the context is True if the function holds the lock. The operating system releases
+    the lock when the process stops, so a run that crashes leaves no lock. Windows has no flock(),
+    so there the function gives no lock. Some file systems refuse flock() (Lustre with the option
+    noflock, NFS with no lock daemon), and a folder with no read permission refuses the open. There
+    the function gives a warning and no lock, so a run does not fail after all of its work.
     """
     try:
         import fcntl
     except ImportError:
-        yield
+        yield False
         return
     folderfd = None
+    locked = False
     try:
         try:
             folderfd = os.open(outputfolder, os.O_RDONLY)
             fcntl.flock(folderfd, fcntl.LOCK_EX)
+            locked = True
         except OSError as error:
             print(
                 f"WARNING: {outputfolder} gives no lock ({error}). The run continues with no lock."
                 " Two runs that end at one time can mix their files."
             )
-        yield
+        yield locked
     finally:
         if folderfd is not None:
             os.close(folderfd)
@@ -592,32 +600,159 @@ def discard_run(workfolder: Path, outputfolder: Path) -> None:
     print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
 
 
+# The record of an install that is not complete. It is in the output folder from before the first
+# move to after the last move. A dot at the start keeps it out of a list of the output files.
+install_record_name = ".artisatomic_install.json"
+
+
+def write_install_record(outputfolder: Path, record: dict[str, t.Any]) -> None:
+    """Write the record of an install. A reader sees the full record or no record."""
+    temppath = outputfolder / f"{install_record_name}.{os.getpid()}.tmp"
+    with temppath.open("w", encoding="utf-8") as frecord:
+        json.dump(record, frecord)
+        frecord.flush()
+        os.fsync(frecord.fileno())
+    temppath.replace(outputfolder / install_record_name)
+
+
+def read_install_record(recordpath: Path) -> tuple[Path, Path, list[str], set[str], int, str]:
+    """Read the record of an install: the two folders, the new names, the earlier names, the process id and the host.
+
+    Each name is the last part of its path only, so a record cannot name a file outside the output folder.
+    """
+    record = json.loads(recordpath.read_text(encoding="utf-8"))
+    outputfolder = recordpath.parent
+    return (
+        outputfolder / Path(record["workfolder"]).name,
+        outputfolder / Path(record["earlierfolder"]).name,
+        [Path(name).name for name in record["newnames"]],
+        {Path(name).name for name in record["earliernames"]},
+        int(record["pid"]),
+        str(record["host"]),
+    )
+
+
 def install_files(workfolder: Path, outputfolder: Path) -> Path:
     """Move the files of the run from workfolder into outputfolder. Give the folder that holds the earlier files.
 
-    The files of the earlier run go to a new folder first. If a move fails, the function moves the
-    new files back to workfolder, restores the earlier files, and raises the error again.
-    phixsdata_v2.txt goes to the new folder also, because --nophixs writes no new one. Its level
-    ids belong to the adata.txt of the earlier run.
+    The files of the earlier run go to a new folder first. phixsdata_v2.txt goes to the new folder
+    also, because --nophixs writes no new one. Its level ids belong to the adata.txt of the
+    earlier run.
+
+    The function writes a record before the first move and removes it after the last move. The
+    record names the two folders, the new files and the earlier files. If a move fails, or if a
+    process kill stops the function, the record lets recover_install() put the output folder
+    back. The level ids of one output file refer to the others, so a mix of the files of two
+    runs is not a usable database. After the removal of the record, the output folder holds the
+    new files, and the caller removes the folder of the earlier files.
     """
-    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     newnames = sorted(newfile.name for newfile in workfolder.iterdir())
-    installednames: list[str] = []
+    earliernames = [name for name in sorted({*newnames, "phixsdata_v2.txt"}) if (outputfolder / name).exists()]
+    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
+    write_install_record(
+        outputfolder,
+        {
+            "workfolder": workfolder.name,
+            "earlierfolder": earlierfolder.name,
+            "newnames": newnames,
+            "earliernames": earliernames,
+            "pid": os.getpid(),
+            "host": socket.gethostname(),
+        },
+    )
     try:
-        for name in sorted({*newnames, "phixsdata_v2.txt"}):
-            if (outputfolder / name).exists():
-                (outputfolder / name).replace(earlierfolder / name)
+        for name in earliernames:
+            (outputfolder / name).replace(earlierfolder / name)
         for name in newnames:
             (workfolder / name).replace(outputfolder / name)
-            installednames.append(name)
     except BaseException:
-        for name in installednames:
-            (outputfolder / name).replace(workfolder / name)
-        for earlierfile in earlierfolder.iterdir():
-            earlierfile.replace(outputfolder / earlierfile.name)
-        earlierfolder.rmdir()
+        recover_install(outputfolder, locked=True, ownrecord=True)
         raise
+    (outputfolder / install_record_name).unlink()
     return earlierfolder
+
+
+def recover_install(outputfolder: Path, *, locked: bool, ownrecord: bool = False) -> None:
+    """Finish or undo an install that stopped between its first move and the removal of its record.
+
+    A process kill gives the run no time to put the files back, so the output folder can hold new
+    files beside earlier files. The record of install_files() shows which is which:
+
+    - If each new file is in the output folder, the install was complete. The function removes
+      the record and the folder of the earlier files.
+    - Else the function moves each new file back into the work folder, and then puts each
+      earlier file back from its folder. The output folder then holds the earlier database. For
+      a run that stopped, the log of that run goes to failedlogname, and the work folder goes
+      away with the stale work folders.
+
+    Each step tests the state of the disk, and the record goes away last. A second stop during
+    the recovery thus leaves a state that the next call can recover. The folder of the earlier
+    files stays until each earlier file is back.
+
+    locked tells if the caller holds the lock of output_folder_lock(). A run holds that lock
+    during its install, so with the lock the record is the record of a run that stopped. Without
+    the lock, the function acts only if the process of the record is on this host and does not
+    exist. For each other record it stops the run, because it cannot know that no run uses the
+    record. ownrecord is True if the caller wrote the record.
+    """
+    recordpath = outputfolder / install_record_name
+    if not recordpath.exists():
+        return
+    try:
+        workfolder, earlierfolder, newnames, earliernames, recordpid, recordhost = read_install_record(recordpath)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        msg = (
+            f"{recordpath} is the record of an install that stopped, and the program cannot read it ({error})."
+            " The output folder can hold the files of two runs. Do not use the files. The folders with a name that"
+            " starts with .artisatomic_earlier_ hold the files of the earlier run."
+        )
+        raise RuntimeError(msg) from error
+    if not locked and not ownrecord:
+        isdead = recordhost == socket.gethostname() and not process_exists(recordpid)
+        if not isdead:
+            msg = (
+                f"{recordpath} is the record of an install that is not complete, and {outputfolder} gives no lock."
+                f" The program cannot know that the run with the process id {recordpid} on {recordhost} stopped."
+                " If no run uses the folder, remove the record and move the files of"
+                f" {earlierfolder.name} back into {outputfolder}. Then run this again."
+            )
+            raise RuntimeError(msg)
+
+    iscomplete = all(not (workfolder / name).exists() and (outputfolder / name).exists() for name in newnames)
+    if iscomplete:
+        if not ownrecord:
+            print(f"An earlier run stopped at the end of its install into {outputfolder}. Its files are complete.")
+        recordpath.unlink()
+        shutil.rmtree(earlierfolder, ignore_errors=True)
+        return
+
+    if not ownrecord:
+        print(
+            f"An earlier run stopped during its install into {outputfolder}. The program puts the files of the run"
+            " before it back."
+        )
+    for name in newnames:
+        # A new file is in the output folder if it left the work folder. With an earlier file of
+        # the same name, that earlier file is then in its folder, because each earlier file moves
+        # before the first new file.
+        isinstalled = not (workfolder / name).exists() and (outputfolder / name).exists()
+        if isinstalled and (name not in earliernames or (earlierfolder / name).exists()):
+            if workfolder.is_dir():
+                (outputfolder / name).replace(workfolder / name)
+            else:
+                (outputfolder / name).unlink()
+    for name in sorted(earliernames):
+        # with no file in the folder of the earlier files, the earlier file did not move
+        if (earlierfolder / name).exists():
+            (earlierfolder / name).replace(outputfolder / name)
+    if not ownrecord:
+        # the log of the run that stopped, as for a run that failed (discard_run())
+        from artisatomic.base import log_path
+
+        if log_path(workfolder).is_file():
+            log_path(workfolder).replace(outputfolder / failedlogname)
+    recordpath.unlink()
+    shutil.rmtree(earlierfolder, ignore_errors=True)
 
 
 def write_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
