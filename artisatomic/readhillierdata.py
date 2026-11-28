@@ -2386,7 +2386,7 @@ def split_coldata_row(row: list[str]) -> tuple[str, str, list[str]]:
     The names come first and the values after them, as CMFGEN reads a row (gen_omega_rd_v2.f).
     The first value is the first token after the first token that is a number. A row can have more
     values than the header declares: the P II file writes a value of 10 or more as two tokens
-    ('1  1.539'). The caller takes the first values.
+    ('1  1.539'). join_split_tens_digits() puts such a value together again.
     """
     firstvalue = next((index for index, token in enumerate(row) if index > 0 and isfloat(token)), len(row))
     namefromnameto = "".join(row[:firstvalue])
@@ -2396,6 +2396,34 @@ def split_coldata_row(row: list[str]) -> tuple[str, str, list[str]]:
         # Assume there is just a space between them (as is the case in Ni XIV)
         namefrom, nameto = row[:2]
     return namefrom, nameto, row[firstvalue:]
+
+
+tens_digit_regex = re.compile(r"[1-9]")
+value_below_ten_regex = re.compile(r"[0-9]\.[0-9]+")
+
+
+def join_split_tens_digits(values: list[str]) -> list[str]:
+    """Join each value of a collision row that the file gives as a tens digit and the rest of the number.
+
+    PHOS/II/19apr23/col_data writes 11.539 as '1  1.539' and 30.998 as '3  0.998'. A split at
+    white space gives two tokens for such a value. A plain token of one digit, with no decimal
+    point, before a token of the form d.ddd is the tens digit of that token. The join is a
+    join of text, so the digits of the file do not change. Each other token stays as it is.
+    """
+    joined: list[str] = []
+    index = 0
+    while index < len(values):
+        if (
+            index + 1 < len(values)
+            and tens_digit_regex.fullmatch(values[index])
+            and value_below_ten_regex.fullmatch(values[index + 1])
+        ):
+            joined.append(values[index] + values[index + 1])
+            index += 2
+        else:
+            joined.append(values[index])
+            index += 1
+    return joined
 
 
 def coldata_filename(atomic_number: int, ion_stage: int) -> Path | None:
@@ -2599,6 +2627,26 @@ def read_coldata(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, args, 
 
             if header_row != []:
                 namefrom, nameto, upsilonvalues = split_coldata_row(row)
+                joinedvalues = join_split_tens_digits(upsilonvalues)
+                if len(joinedvalues) != len(upsilonvalues):
+                    # not an assert: this validates an input file. A join that does not give the
+                    # count of the header shows that the tokens are not a tens digit and its number.
+                    if len(joinedvalues) != num_expected_t_values:
+                        msg = (
+                            f"The collision data file gives {len(upsilonvalues):d} fields for {namefrom} -> {nameto}."
+                            f" With each tens digit joined to its number, the row has {len(joinedvalues):d} values,"
+                            f" but the header declares {num_expected_t_values:d}."
+                        )
+                        raise ValueError(msg)
+                    log_detail(
+                        flog,
+                        ("transitiondata",),
+                        "collision value in two fields",
+                        f"The collision data file gives {len(upsilonvalues) - len(joinedvalues):d} values of"
+                        f" {namefrom} -> {nameto} as a tens digit and the rest of the number, for example"
+                        " '1  1.539' for 11.539. The reader joins the two fields.",
+                    )
+                    upsilonvalues = joinedvalues
                 if len(upsilonvalues) > num_expected_t_values:
                     log_detail(
                         flog,

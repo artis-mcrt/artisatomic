@@ -8028,6 +8028,91 @@ def test_split_coldata_row_takes_the_names_first_and_then_the_values():
     )
 
 
+def test_join_split_tens_digits_joins_only_a_digit_before_a_number_below_ten():
+    """The P II file gives a value of 10 or more as a tens digit and the rest (PHOS/II/19apr23/col_data, line 129)."""
+    values = ["8.380", "9.574", "1", "0.660", "1", "4.933", "1", "7.964", "2", "0.454", "3", "6.679"]
+    assert readhillierdata.join_split_tens_digits(values) == [
+        "8.380",
+        "9.574",
+        "10.660",
+        "14.933",
+        "17.964",
+        "20.454",
+        "36.679",
+    ]
+    # an ordinary row stays as it is: no plain digit, an exponent form, a digit at the end, a digit before 10.5
+    for ordinary in (
+        ["0.624", "0.626", "7.355"],
+        ["1.0D0", "1.0D0"],
+        ["9.31E-01", "1.01E+00"],
+        ["0.5", "1"],
+        ["1", "10.5"],
+        ["1", "2"],
+        ["0", "1.539"],
+        ["12", "1.539"],
+    ):
+        assert readhillierdata.join_split_tens_digits(ordinary) == ordinary
+
+
+def test_read_coldata_joins_the_split_values_of_p2():
+    """P II gets 11.539 at 1e6 K, and not the tens digit 1. A value after an earlier split stays in its column.
+
+    Line 61 of the file gives '7.355 1  1.539' for 8e5 K and 1e6 K. Line 129 gives its first value in
+    two fields at 1e5 K, so each later column was one field further to the right for each split.
+    """
+    cmfgen_corpus_or_skip()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = readhillierdata.read_levels_and_transitions(15, 2, io.StringIO())
+    levelid = {name: index for index, name in enumerate(dflevels["levelname"].to_list())}
+    line61 = (levelid["3s2_3p2_3Pe[0]"], levelid["3s_3p3_3So[1]"])
+    line129 = (levelid["3s2_3p2_3Pe[2]"], levelid["3s2_3p_3d_3Do[3]"])
+
+    def upsilons_at(temperature: float) -> tuple[dict[tuple[int, int], float], str]:
+        stream = io.StringIO()
+        flog = IonLog(stream, {"adata": [], "transitiondata": [], "phixsdata": []})
+        with contextlib.redirect_stdout(io.StringIO()):
+            dfupsilon = readhillierdata.read_coldata(15, 2, dflevels, phixs_args(electrontemperature=temperature), flog)
+        return upsilon_dict(dfupsilon), stream.getvalue()
+
+    for temperature, expected61, expected129 in (
+        (8e4, 0.891, 9.574),
+        (1e5, 0.966, 10.660),
+        (2e5, 1.293, 14.933),
+        (8e5, 7.355, 30.998),
+        (1e6, 11.539, 36.679),
+    ):
+        upsilons, log = upsilons_at(temperature)
+        assert upsilons[line61] == pytest.approx(expected61)
+        assert upsilons[line129] == pytest.approx(expected129)
+        assert "collision row with more values" not in log
+        assert "as a tens digit and the rest of the number" in log
+    # the file gives 190 rows, and a temperature with no split value has the same count of values
+    assert len(upsilons_at(1e3)[0]) == len(upsilons_at(1e6)[0])
+
+
+def test_read_coldata_rejects_a_row_whose_joined_values_do_not_match_the_header(tmp_path, monkeypatch):
+    """A row with a plain digit that is not a tens digit must not shift the columns silently."""
+    coldata = (
+        "2                               !Number of transitions\n"
+        "3                               !Number of T values OMEGA tabulated at\n"
+        "1.0                             !Scaling factor for OMEGA (non-FILE values).\n"
+        "    Transition\\T      0.10D0    1.00D0    10.0D0\n"
+        "A-B     0.624     7.355 1  1.539\n"
+        "A-C     0.624     7.355 1  1.539     2.000\n"
+    )
+    filepath = tmp_path / "col_data"
+    filepath.write_text(coldata, encoding="utf-8")
+    monkeypatch.setattr(
+        readhillierdata, "xopen_check_extension", lambda _filename, **_kwargs: filepath.open(encoding="utf-8")
+    )
+    dflevels = pl.DataFrame({"levelname": ["A", "B", "C"], "g": [1.0, 3.0, 5.0]})
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": [], "phixsdata": []})
+    with pytest.raises(
+        ValueError, match=r"gives 5 fields for A -> C\. .* the row has 4 values, but the header declares 3"
+    ):
+        readhillierdata.read_coldata(15, 2, dflevels, phixs_args(electrontemperature=1e5), flog)
+
+
 def cmfgen_corpus_or_skip() -> None:
     """Skip a test that reads the CMFGEN data where the data is not present."""
     if not Path(readhillierdata.hillier_ion_folder(26, 2)).is_dir():
