@@ -7174,6 +7174,21 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
         readadasdata.read_co2_phixs_channels(27, 2, args, io.StringIO())
 
 
+@pytest.mark.parametrize("declared", [39, 41])
+def test_qub_co2_column_count_must_equal_the_targets_of_photo_input(tmp_path, monkeypatch, declared):
+    """A photo_input with fewer targets than the files have columns must not leave the other columns out silently."""
+    write_qub_co2_phixs_files(tmp_path, level3scale=1.0)
+    targetlines = [f"{index:3d}    4    3   9   0" for index in range(1, declared + 1)]
+    (tmp_path / "photo_input").write_text(
+        "\n".join([f"{declared} 15 200 ! counts", *targetlines]) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+    with pytest.raises(
+        ValueError, match=rf"1\.gz has 40 target columns, and photo_input declares {declared} target states"
+    ):
+        readadasdata.read_co2_phixs_channels(27, 2, phixs_args(), io.StringIO())
+
+
 def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monkeypatch):
     """The error names the bad file, and the log line that names the file comes directly before it.
 

@@ -937,10 +937,14 @@ def read_co2_phixs_channels(atomic_number, ion_stage, args, flog) -> PhixsChanne
 
     def read_table(filename: Path) -> pl.DataFrame:
         try:
-            return (
-                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
-                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
-                .collect()
+            lazytable = pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+            columncount = len(lazytable.collect_schema())
+            table = (
+                lazytable.select(
+                    pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames)
+                ).collect()
+                if columncount == len(columnnames)
+                else None
             )
         except (pl.exceptions.PolarsError, OSError) as exc:
             # The error does not name the file. The first line of a polars error gives the cause.
@@ -949,6 +953,15 @@ def read_co2_phixs_channels(atomic_number, ion_stage, args, flog) -> PhixsChanne
                 f" {str(exc).partition(chr(10))[0]}"
             )
             raise ValueError(msg) from exc
+        # not an assert: this validates the input files. With more columns than photo_input
+        # declares, the reader would leave the cross sections of the other targets out.
+        if table is None:
+            msg = (
+                f"{filename} has {columncount - 1} target columns, and photo_input declares {ntargets} target states."
+                " The two files do not belong to the same data set."
+            )
+            raise ValueError(msg)
+        return table
 
     # The threads read the files at the same time. The loop takes the tables in file order, so the
     # first bad file in that order stops the run.
