@@ -782,9 +782,9 @@ def drop_parities_that_strong_lines_contradict(dflevels: pl.DataFrame, transitio
         flog,
         ("transitiondata",),
         f"The labels give a parity to {known:d} of {dflevels.height:d} levels. The reader removed the parity of"
-        f" {levelids.len():d} of them: {contradictions.height:d} lines with A above {min_a_asserts_e1:g} /s connect two"
-        " levels of the same label parity, and such a line changes the parity. A line between two levels of"
-        " the same parity is forbidden.",
+        f" {levelids.len():d} of them. {contradictions.height:d} lines with A above {min_a_asserts_e1:g} /s connect two"
+        " levels of the same label parity. Such a line changes the parity, so one of its two labels is wrong."
+        " A line between two levels of the same parity is forbidden.",
     )
     return dflevels.with_columns(
         parity=pl.when(pl.col("levelid").is_in(levelids.implode())).then(None).otherwise(pl.col("parity"))

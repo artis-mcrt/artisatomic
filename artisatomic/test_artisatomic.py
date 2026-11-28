@@ -7165,8 +7165,9 @@ def test_readkuruczdata_removes_a_parity_that_a_strong_line_contradicts(tmp_path
         (26830.5, 40466.9): (True, -2.0),
     }
     assert (
-        "The labels give a parity to 7 of 7 levels. The reader removed the parity of 2 of them: 1 lines with A"
-        " above 100000 /s connect two levels of the same label parity" in comments
+        "The labels give a parity to 7 of 7 levels. The reader removed the parity of 2 of them. 1 lines with A"
+        " above 100000 /s connect two levels of the same label parity. Such a line changes the parity, so one of"
+        " its two labels is wrong." in comments
     )
 
 
