@@ -14,10 +14,12 @@ import secrets
 import sys
 import typing as t
 import unicodedata
+from collections import deque
 from collections.abc import Callable
 from collections.abc import Generator
 from collections.abc import Iterable
 from collections.abc import Iterator
+from concurrent.futures import Future
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -1131,19 +1133,46 @@ def parallel_map[ResultType](
 
 
 def map_chunks[ItemType, ResultType](
-    fn: Callable[[ItemType], ResultType], chunks: list[ItemType]
+    fn: Callable[[ItemType], ResultType], chunks: Iterable[ItemType], max_pending: int | None = None
 ) -> Iterator[ResultType]:
-    """Map fn over a few large chunks of work in the run-wide pool, and give the results in order.
+    """Map fn over large chunks of work in the run-wide pool, and give the results in order.
 
     parallel_map() does a list of 32 items or fewer in this process, because a small item costs
     more in IPC than in work. A chunk here is large, so each chunk goes to the pool. The results
     come one at a time, so a caller can write each result and release it before the next one.
+
+    The function takes a chunk from chunks only when it gives that chunk to the pool, so chunks
+    can be a generator. At most max_pending chunks are with the pool at one time, as work or as
+    results that the caller did not take yet. None gives one chunk for each processor. Without the
+    limit, the pool holds the result of each chunk until the caller takes the results before it.
     """
+    max_pending = max(1, max_pending if max_pending is not None else (os.process_cpu_count() or 1))
     if not sys._is_gil_enabled():  # ruff: ignore[private-member-access]
         with ThreadPoolExecutor() as executor:
-            yield from executor.map(fn, chunks)
+            yield from _map_with_limit(executor, fn, chunks, max_pending)
         return
-    yield from get_process_pool().map(fn, chunks)
+    yield from _map_with_limit(get_process_pool(), fn, chunks, max_pending)
+
+
+def _map_with_limit[ItemType, ResultType](
+    executor: ProcessPoolExecutor | ThreadPoolExecutor,
+    fn: Callable[[ItemType], ResultType],
+    chunks: Iterable[ItemType],
+    max_pending: int,
+) -> Iterator[ResultType]:
+    """Give the results of fn for each chunk in order, with at most max_pending chunks in the executor."""
+    pending: deque[Future[ResultType]] = deque()
+    try:
+        for chunk in chunks:
+            if len(pending) >= max_pending:
+                yield pending.popleft().result()
+            pending.append(executor.submit(fn, chunk))
+        while pending:
+            yield pending.popleft().result()
+    finally:
+        # after an error, or if the caller stops early, the chunks that wait must not run
+        for future in pending:
+            future.cancel()
 
 
 def drop_handlers(list_ions: list[tuple[int, str]]) -> list[int]:

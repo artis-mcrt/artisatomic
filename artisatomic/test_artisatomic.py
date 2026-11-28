@@ -4634,6 +4634,106 @@ def test_get_nearest_level_indices():
     assert onelevel_second.tolist() == [0, 0]
 
 
+@pytest.mark.parametrize("text", ["1.0 ,2.0\n 3.5,4.0 \n5.0,6.0\n7.0,8.0\n", "1.0 ,2.0\n 3.5,4.0 \n5.0,6.0\n7.0,8.0"])
+def test_mons_batches_keep_the_rows_and_their_order(tmp_path, monkeypatch, text):
+    """A batch of each size gives the rows of the file in file order, also where a batch ends in a row."""
+    with zipfile.ZipFile(tmp_path / "archive.zip", "w") as ziparchive:
+        ziparchive.writestr("member.csv", text)
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    expected = [[float(field) for field in line.split(",")] for line in text.splitlines() if line.strip()]
+    for batchbytes in (1, 2, 5, 9, 10, 11, 20, 1000):
+        batches = list(readmonsdata.iter_csv_columns("archive.zip", "member.csv", 2, batchbytes=batchbytes))
+        rows = [list(row) for columns in batches for row in zip(*(column.tolist() for column in columns), strict=True)]
+        assert rows == expected, batchbytes
+        # a batch holds the rows that end in its bytes, so small batches give more than one batch
+        assert all(len(columns[0]) > 0 for columns in batches)
+        if batchbytes <= 5 and len(expected) > 1:
+            assert len(batches) > 1
+    monkeypatch.setattr(readmonsdata, "TRANSITION_BATCH_BYTES", 7)
+    columns = readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
+    assert [column.tolist() for column in columns] == [list(column) for column in zip(*expected, strict=True)]
+
+
+def test_mons_member_with_no_rows_stops_the_run(tmp_path, monkeypatch):
+    """An empty member gives no batch. The run must stop, and not write an ion with no transition."""
+    with zipfile.ZipFile(tmp_path / "archive.zip", "w") as ziparchive:
+        ziparchive.writestr("member.csv", "")
+        ziparchive.writestr("blank.csv", "1.0,2.0\n\n3.0,4.0\n")
+    monkeypatch.setattr(readmonsdata, "datafilepath", tmp_path)
+    with pytest.raises(ValueError, match=r"member[.]csv in archive[.]zip has no rows"):
+        readmonsdata.read_csv_columns("archive.zip", "member.csv", 2)
+    # an empty line stops the run in each position of a batch, also as the only line of a batch
+    for batchbytes in (1, 8, 9, 10, 1000):
+        with pytest.raises(ValueError, match="not a finite number, or an empty value"):
+            list(readmonsdata.iter_csv_columns("archive.zip", "blank.csv", 2, batchbytes=batchbytes))
+
+
+def test_readmonsdata_gives_the_same_ion_with_small_batches(monkeypatch):
+    """Ce V of the sample in 1200 batches: the same transitions in the same order, and the same match counts."""
+    from artisatomic.base import IonLog
+
+    monkeypatch.setattr(readmonsdata, "datafilepath", PYDIR / ".." / "atomic-data-mons" / "test_sample")
+    results = []
+    for batchbytes in (readmonsdata.TRANSITION_BATCH_BYTES, 1024):
+        monkeypatch.setattr(readmonsdata, "TRANSITION_BATCH_BYTES", batchbytes)
+        flog = IonLog(io.StringIO())
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, dftransitions = readmonsdata.read_levels_and_transitions(58, 5, flog)
+        results.append((dflevels, dftransitions, flog.comments))
+        assert dftransitions.schema == empty_transitions_schema
+    dflevels, dftransitions, comments = results[0]
+    assert dftransitions.height == 17139
+    assert dftransitions.n_chunks() == 1
+    for otherlevels, othertransitions, othercomments in results[1:]:
+        assert othertransitions.n_chunks() > 200
+        assert othertransitions.equals(dftransitions)
+        assert otherlevels.equals(dflevels)
+        assert othercomments == comments
+    assert any(
+        "largest difference between the energies of the two files" in line for line in comments["transitiondata"]
+    )
+
+
+def test_map_chunks_keeps_the_order_and_limits_the_chunks_in_the_pool():
+    """The pool holds at most max_pending chunks, as work or as results that the caller did not take."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from artisatomic.base import _map_with_limit
+
+    taken = 0
+    largest_ahead = 0
+
+    def chunks() -> t.Iterator[int]:
+        nonlocal taken
+        for value in range(50):
+            taken += 1
+            yield value
+
+    given = 0
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = []
+        for result in _map_with_limit(executor, lambda value: value * value, chunks(), 3):
+            results.append(result)
+            given += 1
+            # the generator of the chunks is at most max_pending chunks in front of the results
+            largest_ahead = max(largest_ahead, taken - given)
+    assert results == [value * value for value in range(50)]
+    assert largest_ahead <= 3
+
+    # an error of one chunk comes at its place in the order
+    def fail_at_five(value: int) -> int:
+        if value == 5:
+            msg = "chunk 5"
+            raise ValueError(msg)
+        return value
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = []
+        with pytest.raises(ValueError, match="chunk 5"):
+            results.extend(_map_with_limit(executor, fail_at_five, range(20), 3))
+    assert results == [0, 1, 2, 3, 4]
+
+
 def test_readmonsdata_matches_the_tagged_energy_of_a_single_level():
     """An ion with one level has no pair of neighbours to compare, so each energy gets that level."""
     levels, untagged, second = readmonsdata.match_tagged_levels(
@@ -8589,6 +8689,24 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         texts.append(ftransitiondata.getvalue())
     assert texts[0] == texts[1]
     assert texts[0].count("\n") > nrows
+
+    # Rows at the end of a chunk and at the start of the next chunk: a count of rows one below a
+    # multiple of the chunk size, at it, and one above it. Each row must be in the file one time, in order.
+    monkeypatch.setattr(output, "transition_rows_per_chunk", 100)
+    for count in (99, 100, 101, 250, 1000):
+        part = dftransitions.head(count)
+        ftransitiondata = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()):
+            output.write_transition_data(ftransitiondata, 26, 2, part, io.StringIO())
+        columns = (
+            (part["lowerlevel"] + 1).to_numpy(),
+            (part["upperlevel"] + 1).to_numpy(),
+            part["A"].to_numpy(),
+            part["coll_str"].to_numpy(),
+            part["forbidden"].to_numpy(),
+        )
+        header = f"{26:7d}{2:7d}{count:12d}\n"
+        assert ftransitiondata.getvalue().endswith(header + output.format_transition_rows(columns) + "\n"), count
 
 
 @pytest.mark.parametrize("interpolation", ["linear", "classic"])

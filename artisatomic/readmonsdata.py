@@ -6,6 +6,7 @@ atomic-data-mons/README.txt for the file formats).
 """
 
 import zipfile
+from collections.abc import Iterator
 
 import numpy as np
 import polars as pl
@@ -57,27 +58,68 @@ def transitions_member(atomic_number: int, ion_stage: int) -> str:
     return f"outggf_Ln_V--VII/outggf_sorted_{elsymbols[atomic_number]}_{roman_numerals[ion_stage]}"
 
 
-def read_csv_columns(archivename: str, membername: str, columncount: int) -> list[np.ndarray]:
-    """Read the columns of one comma-separated member of a zip archive.
+# The reader takes this count of bytes of a transition file for one batch. A row has about 72
+# bytes, so a batch holds about 117000 rows. An ion can have 45 million transitions. A read of
+# the complete file holds each field as text, and needs several times the memory of the numbers.
+# For 12 million rows, the read added 3.2 GiB to the memory of the process as one batch, 1.4 GiB
+# with batches of 32 MiB, and 0.5 GiB with batches of 8 MiB. The time was 2.3 s, 2.3 s and 2.5 s.
+TRANSITION_BATCH_BYTES = 8 * 1024 * 1024
+
+
+def parse_csv_columns(data: bytes, archivename: str, membername: str, columncount: int) -> list[np.ndarray]:
+    """Convert complete comma-separated rows to one array of numbers for each column.
 
     The files pad the fields with spaces, which polars cannot convert to a float directly. The
     reader takes each column as text, removes the spaces, and then converts it.
     """
     columnnames = [f"column{i}" for i in range(columncount)]
-    with zipfile.ZipFile(datafilepath / archivename) as ziparchive, ziparchive.open(membername) as datafile:
-        dfcolumns = pl.read_csv(
-            datafile,
-            has_header=False,
-            new_columns=columnnames,
-            separator=",",
-            schema_overrides=dict.fromkeys(columnnames, pl.String),
-        ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
+    msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
+    # A batch of empty lines only has no column for polars. In a batch with other rows, an empty
+    # line reads as a row of nulls, which the check below rejects.
+    if not data.strip():
+        raise ValueError(msg)
+    dfcolumns = pl.read_csv(
+        data,
+        has_header=False,
+        new_columns=columnnames,
+        separator=",",
+        schema_overrides=dict.fromkeys(columnnames, pl.String),
+    ).select(pl.col(name).str.strip_chars().cast(pl.Float64) for name in columnnames)
 
     # polars casts the text "NaN" or "inf" to a float with no error, and a NaN energy passes the tolerance test
     if dfcolumns.select(pl.all().is_finite().fill_null(value=False).all()).row(0) != (True,) * columncount:
-        msg = f"{membername} in {archivename} has a value that is not a finite number, or an empty value"
         raise ValueError(msg)
     return [dfcolumns[name].to_numpy() for name in columnnames]
+
+
+def iter_csv_columns(
+    archivename: str, membername: str, columncount: int, batchbytes: int | None = None
+) -> Iterator[list[np.ndarray]]:
+    """Read one comma-separated member of a zip archive in batches of complete rows, in file order.
+
+    Each batch has about batchbytes bytes (TRANSITION_BATCH_BYTES with None). A batch ends at
+    the end of a row. The values of a row do not depend on the batch that holds it. An empty
+    line stops the run in each position, because it is a row with no value.
+    """
+    batchbytes = TRANSITION_BATCH_BYTES if batchbytes is None else batchbytes
+    with zipfile.ZipFile(datafilepath / archivename) as ziparchive, ziparchive.open(membername) as datafile:
+        remainder = b""
+        while chunk := datafile.read(batchbytes):
+            complete, newline, remainder = (remainder + chunk).rpartition(b"\n")
+            # a chunk with no end of a row is a part of one row, which continues in the next chunk
+            if newline:
+                yield parse_csv_columns(complete + newline, archivename, membername, columncount)
+        if remainder:
+            yield parse_csv_columns(remainder, archivename, membername, columncount)
+
+
+def read_csv_columns(archivename: str, membername: str, columncount: int) -> list[np.ndarray]:
+    """Read the columns of one comma-separated member of a zip archive. An empty member stops the run."""
+    batches = list(iter_csv_columns(archivename, membername, columncount))
+    if not batches:
+        msg = f"{membername} in {archivename} has no rows"
+        raise ValueError(msg)
+    return [np.concatenate(columns) for columns in zip(*batches, strict=True)]
 
 
 def extend_ion_list(
@@ -143,7 +185,10 @@ def tagged_level_energies(energies1000percm: np.ndarray, j_arr: np.ndarray) -> n
 
 
 def match_tagged_levels(
-    tagged1000percm: np.ndarray, sorted_energies_percm: np.ndarray, energies1000percm: np.ndarray
+    tagged1000percm: np.ndarray,
+    sorted_energies_percm: np.ndarray,
+    energies1000percm: np.ndarray,
+    order: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Find the level of each transition energy.
 
@@ -152,8 +197,12 @@ def match_tagged_levels(
     energy. The function gives the level ids, the positions of the energies without a tag, and the
     second closest level id of each such energy. Only those energies get the second search, because
     an ion can have 45 million transitions.
+
+    order is the stable sort order of tagged1000percm. A caller that matches many batches of one
+    ion gives it, so the sort of the levels runs one time for the ion.
     """
-    order = np.argsort(tagged1000percm, kind="stable")
+    if order is None:
+        order = np.argsort(tagged1000percm, kind="stable")
     sorted_tagged = tagged1000percm[order]
     if len(order) > 1:
         right = np.searchsorted(sorted_tagged, energies1000percm).clip(1, len(order) - 1)
@@ -210,25 +259,61 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         ("transitiondata",),
         f"The transitions come from {transitionspath}/{transitions_member(atomic_number, ion_stage)}.",
     )
-    transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength = read_csv_columns(
+    # The reader matches each batch and keeps three numbers for each transition. The text of the
+    # file, the energies and the work arrays of the match go away with their batch.
+    taggedorder = np.argsort(tagged_levels1000percm, kind="stable")
+    batches: list[pl.DataFrame] = []
+    maxmismatch_percm = 0.0
+    untaggedcount = 0
+    ambiguouscount = 0
+    for transition_wavelength_A, energy_levels_lower_1000percm, weighted_oscillator_strength in iter_csv_columns(
         transitions_archive, transitions_member(atomic_number, ion_stage), 3
-    )
-    log_and_print(flog, f"The reader got {len(energy_levels_lower_1000percm)} transitions.")
+    ):
+        energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
+        energy_levels_upper_1000percm = energy_levels_lower_1000percm + 1e5 / transition_wavelength_A
+        energy_levels_upper_percm = energy_levels_upper_1000percm * 1000
+        lowerlevels, lower_untagged, lowerlevels_second = match_tagged_levels(
+            tagged_levels1000percm, energiesabovegsinpercm, energy_levels_lower_1000percm, order=taggedorder
+        )
+        upperlevels, upper_untagged, upperlevels_second = match_tagged_levels(
+            tagged_levels1000percm, energiesabovegsinpercm, energy_levels_upper_1000percm, order=taggedorder
+        )
+        maxmismatch_percm = max(
+            maxmismatch_percm,
+            np.abs(energiesabovegsinpercm[lowerlevels] - energy_levels_lower_percm).max(),
+            np.abs(energiesabovegsinpercm[upperlevels] - energy_levels_upper_percm).max(),
+        )
+        untaggedcount += len(lower_untagged) + len(upper_untagged)
+        # A match without a tag is a guess where a second level is inside the match tolerance. The reader
+        # keeps the closest level, and the count says how much of the ion depends on that choice.
+        ambiguouscount += int(
+            (
+                np.abs(energy_levels_lower_percm[lower_untagged] - energiesabovegsinpercm[lowerlevels_second])
+                <= MATCH_TOLERANCE_PERCM
+            ).sum()
+            + (
+                np.abs(energy_levels_upper_percm[upper_untagged] - energiesabovegsinpercm[upperlevels_second])
+                <= MATCH_TOLERANCE_PERCM
+            ).sum()
+        )
+        # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
+        # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
+        # not.
+        A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
+        batches.append(
+            pl.DataFrame(
+                {"lowerlevel": lowerlevels, "upperlevel": upperlevels, "A": A_ul}, schema=empty_transitions_schema
+            )
+        )
+    if not batches:
+        msg = f"{transitions_member(atomic_number, ion_stage)} in {transitions_archive} has no rows"
+        raise ValueError(msg)
+    # rechunk=False: a copy into one block would hold each column two times
+    dftransitions = pl.concat(batches, rechunk=False)
+    del batches
+    transitioncount = dftransitions.height
+    log_and_print(flog, f"The reader got {transitioncount} transitions.")
 
-    energy_levels_upper_1000percm = energy_levels_lower_1000percm + 1e5 / transition_wavelength_A
-    energy_levels_lower_percm = energy_levels_lower_1000percm * 1000
-    energy_levels_upper_percm = energy_levels_upper_1000percm * 1000
-    lowerlevels, lower_untagged, lowerlevels_second = match_tagged_levels(
-        tagged_levels1000percm, energiesabovegsinpercm, energy_levels_lower_1000percm
-    )
-    upperlevels, upper_untagged, upperlevels_second = match_tagged_levels(
-        tagged_levels1000percm, energiesabovegsinpercm, energy_levels_upper_1000percm
-    )
-
-    maxmismatch_percm = max(
-        np.abs(energiesabovegsinpercm[lowerlevels] - energy_levels_lower_percm).max(),
-        np.abs(energiesabovegsinpercm[upperlevels] - energy_levels_upper_percm).max(),
-    )
     log_comment(
         flog,
         ("transitiondata",),
@@ -236,12 +321,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         " transition file. n is the position of the level in its block of one J in the level file, from 1. The"
         f" largest difference between the energies of the two files is {maxmismatch_percm:.3g} cm^-1.",
     )
-    untaggedcount = len(lower_untagged) + len(upper_untagged)
     if untaggedcount > 0:
         log_comment(
             flog,
             ("transitiondata",),
-            f"WARNING: {untaggedcount} of {2 * len(lowerlevels)} level matches found no tagged energy. They take the"
+            f"WARNING: {untaggedcount} of {2 * transitioncount} level matches found no tagged energy. They take the"
             " closest level energy.",
         )
     if maxmismatch_percm > MATCH_TOLERANCE_PERCM:
@@ -252,18 +336,6 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
         raise ValueError(msg)
 
-    # A match without a tag is a guess where a second level is inside the match tolerance. The reader
-    # keeps the closest level, and the count says how much of the ion depends on that choice.
-    ambiguouscount = int(
-        (
-            np.abs(energy_levels_lower_percm[lower_untagged] - energiesabovegsinpercm[lowerlevels_second])
-            <= MATCH_TOLERANCE_PERCM
-        ).sum()
-        + (
-            np.abs(energy_levels_upper_percm[upper_untagged] - energiesabovegsinpercm[upperlevels_second])
-            <= MATCH_TOLERANCE_PERCM
-        ).sum()
-    )
     if ambiguouscount > 0:
         log_comment(
             flog,
@@ -273,14 +345,5 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog):
         )
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
-
-    # the third column of the transition file is gf, not f: single lines reach gf = 25. The sum of
-    # gf / g_lower over the lines of one level reaches the electron count, while the sum of gf does
-    # not.
-    A_ul = weighted_oscillator_strength / (gf_to_a_coefficient * g_arr[upperlevels] * transition_wavelength_A**2)
-
-    dftransitions = pl.DataFrame(
-        {"lowerlevel": lowerlevels, "upperlevel": upperlevels, "A": A_ul}, schema=empty_transitions_schema
-    )
 
     return ionization_energy_in_ev, dflevels, dftransitions
