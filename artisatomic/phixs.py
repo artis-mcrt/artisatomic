@@ -267,14 +267,32 @@ def channel_excitation_energies(channels: PhixsChannels) -> dict[int, float]:
     """Give the energy of each target channel above the lowest channel, in cm^-1.
 
     The thresholds of the channels of one lower level differ by the energies of the targets. The
-    function takes the lower level with the most channels, and the first such level if two have
-    the same count. A channel with no cross section for that level has no entry.
+    function starts with the lower level that has the most channels, and the first such level if
+    two have the same count. A different lower level can have a channel that this level does not
+    have. Such a channel gets its energy from a channel that the two levels share. A channel with
+    no such link has no entry.
     """
-    if not channels.thresholds_ryd:
+    ryd_to_percm = ryd_to_ev / hc_in_ev_cm
+    remaining = sorted(
+        (thresholds for thresholds in channels.thresholds_ryd.values() if thresholds), key=len, reverse=True
+    )
+    if not remaining:
         return {}
-    thresholds = max(channels.thresholds_ryd.values(), key=len)
-    lowest = min(thresholds.values(), default=0.0)
-    return {channel: (threshold - lowest) * ryd_to_ev / hc_in_ev_cm for channel, threshold in thresholds.items()}
+    energies = {channel: threshold * ryd_to_percm for channel, threshold in remaining.pop(0).items()}
+    linked = True
+    while remaining and linked:
+        linked = False
+        for thresholds in list(remaining):
+            shared = sorted(channel for channel in thresholds if channel in energies)
+            if not shared:
+                continue
+            remaining.remove(thresholds)
+            linked = True
+            offset = energies[shared[0]] - thresholds[shared[0]] * ryd_to_percm
+            for channel, threshold in thresholds.items():
+                energies.setdefault(channel, threshold * ryd_to_percm + offset)
+    lowest = min(energies.values())
+    return {channel: energy - lowest for channel, energy in energies.items()}
 
 
 class ChannelMatch(t.NamedTuple):
@@ -285,6 +303,42 @@ class ChannelMatch(t.NamedTuple):
     sameterm: bool  # False if 2S + 1 or L of the level is not that of the channel
 
 
+def match_in_energy_order(
+    channelenergies: list[float], levelenergies: list[float], tolerance: float
+) -> list[int | None]:
+    """Match two lists of energies in ascending order, and give the position of the level of each channel.
+
+    A channel and its level differ by tolerance at most. The match keeps the energy order: a
+    channel above another channel gets a level above the level of that channel. Of the matches of
+    that kind, the function takes one with the largest count of channels, and of those the one
+    with the smallest sum of the differences. A match of each channel to its nearest free level
+    can leave a channel with no level where a complete match exists.
+    """
+    nchannels, nlevels = len(channelenergies), len(levelenergies)
+    # best[i][j] is (count, -sum of the differences) for the first i channels and the first j levels
+    best = [[(0, 0.0)] * (nlevels + 1) for _ in range(nchannels + 1)]
+    for i in range(1, nchannels + 1):
+        for j in range(1, nlevels + 1):
+            options = [best[i - 1][j], best[i][j - 1]]
+            difference = abs(channelenergies[i - 1] - levelenergies[j - 1])
+            if difference <= tolerance:
+                count, cost = best[i - 1][j - 1]
+                options.append((count + 1, cost - difference))
+            best[i][j] = max(options)
+    matches: list[int | None] = [None] * nchannels
+    i, j = nchannels, nlevels
+    while i > 0 and j > 0:
+        if best[i][j] == best[i - 1][j]:
+            i -= 1
+        elif best[i][j] == best[i][j - 1]:
+            j -= 1
+        else:
+            matches[i - 1] = j - 1
+            i -= 1
+            j -= 1
+    return matches
+
+
 def match_channels_to_levels(channels: PhixsChannels, dfupperlevels: pl.DataFrame) -> dict[int, ChannelMatch]:
     """Give the level of the upper ion for each target channel that has one.
 
@@ -292,36 +346,51 @@ def match_channels_to_levels(channels: PhixsChannels, dfupperlevels: pl.DataFram
     the energy of the channel, within channel_energy_tolerance_percm. That rule applies to an
     upper ion from the same calculation, and it does not need the term. photo_input gives L = 2
     for the target 29 of Co III, and the level at its energy is a 4P level. The second rule
-    takes the nearest level with the term of the channel also, within
-    channel_term_energy_tolerance_percm. That rule applies to an upper ion from another data
-    set. Each level gets one channel. A channel with no such level has no entry.
+    applies to the channels and the levels that the first rule left. It matches the channels of
+    one term, J and parity to the levels of the same term, J and parity in energy order, within
+    channel_term_energy_tolerance_percm (match_in_energy_order()). That rule applies to an upper
+    ion from another data set. Each level gets one channel. A channel with no such level has no
+    entry.
     """
     excitation = channel_excitation_energies(channels)
     levelenergies = dfupperlevels["energyabovegsinpercm"].to_list()
     levelnumbers = level_quantum_numbers(dfupperlevels)
     matches: dict[int, ChannelMatch] = {}
     used: set[int] = set()
-    for sameterm, tolerance in ((False, channel_energy_tolerance_percm), (True, channel_term_energy_tolerance_percm)):
-        for channel, energy in sorted(excitation.items()):
-            if channel in matches:
-                continue
-            twosplusone, l, twoj, parity = channels.quantumnumbers[channel]
-            candidates = [
-                (abs(levelenergies[levelid] - energy), levelid)
-                for levelid, numbers in enumerate(levelnumbers)
-                if numbers is not None
-                and levelid not in used
-                and numbers[2:] == (twoj, parity)
-                and (not sameterm or numbers[:2] == (twosplusone, l))
-            ]
-            if candidates and min(candidates)[0] <= tolerance:
-                _, levelid = min(candidates)
-                numbers = levelnumbers[levelid]
-                matches[channel] = ChannelMatch(
-                    levelid,
-                    levelenergies[levelid] - energy,
-                    numbers is not None and numbers[:2] == (twosplusone, l),
-                )
+    for channel, energy in sorted(excitation.items()):
+        twosplusone, l, twoj, parity = channels.quantumnumbers[channel]
+        candidates = [
+            (abs(levelenergies[levelid] - energy), levelid)
+            for levelid, numbers in enumerate(levelnumbers)
+            if numbers is not None and levelid not in used and numbers[2:] == (twoj, parity)
+        ]
+        if candidates and min(candidates)[0] <= channel_energy_tolerance_percm:
+            _, levelid = min(candidates)
+            numbers = levelnumbers[levelid]
+            sameterm = numbers is not None and numbers[:2] == (twosplusone, l)
+            matches[channel] = ChannelMatch(levelid, levelenergies[levelid] - energy, sameterm)
+            used.add(levelid)
+
+    for numbers in sorted({channels.quantumnumbers[channel] for channel in excitation if channel not in matches}):
+        termchannels = sorted(
+            (energy, channel)
+            for channel, energy in excitation.items()
+            if channel not in matches and channels.quantumnumbers[channel] == numbers
+        )
+        termlevels = sorted(
+            (levelenergies[levelid], levelid)
+            for levelid, levelnumber in enumerate(levelnumbers)
+            if levelnumber == numbers and levelid not in used
+        )
+        positions = match_in_energy_order(
+            [energy for energy, _ in termchannels],
+            [energy for energy, _ in termlevels],
+            channel_term_energy_tolerance_percm,
+        )
+        for (energy, channel), position in zip(termchannels, positions, strict=True):
+            if position is not None:
+                levelenergy, levelid = termlevels[position]
+                matches[channel] = ChannelMatch(levelid, levelenergy - energy, sameterm=True)
                 used.add(levelid)
     return matches
 

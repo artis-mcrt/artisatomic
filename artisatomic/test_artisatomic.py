@@ -7106,6 +7106,64 @@ def test_match_channels_to_levels_of_another_data_set():
     )
 
 
+def test_match_channels_keeps_each_valid_match_of_a_term():
+    """Two channels of one term keep a level each, where the nearest level of the first channel is the only level of the second.
+
+    The channels are at 1000 and 4000 cm^-1, and the levels at 0 and 1100 cm^-1. A match of each
+    channel to its nearest free level gives the level at 1100 cm^-1 to the first channel, and
+    the second channel then has no level within 3000 cm^-1.
+    """
+    from artisatomic.phixs import match_in_energy_order
+
+    assert match_in_energy_order([1000.0, 4000.0], [0.0, 1100.0], 3000.0) == [0, 1]
+    # with a free choice, a channel takes its nearest level, and a level too far away stays free
+    assert match_in_energy_order([1000.0, 4000.0], [0.0, 1100.0, 4100.0], 3000.0) == [1, 2]
+    assert match_in_energy_order([1000.0], [5000.0], 3000.0) == [None]
+    assert match_in_energy_order([], [1.0], 3000.0) == []
+    assert match_in_energy_order([100.0, 200.0, 9000.0], [150.0], 3000.0) in ([0, None, None], [None, 0, None])
+
+    table = np.ones(3)
+    # the ground channel, and the two channels of one term, J and parity
+    thresholds = {
+        channel: 1.0 + energy * hc_in_ev_cm / ryd_to_ev for channel, energy in enumerate([0.0, 1000.0, 4000.0])
+    }
+    channels = PhixsChannels(
+        [(4, 3, 9, 0), (2, 2, 5, 0), (2, 2, 5, 0)], {0: dict.fromkeys(range(3), table)}, {0: thresholds}
+    )
+    dfupperlevels = pl.DataFrame(
+        {
+            "levelname": ["3d7_a4Fe[9/2]", "3d7_a2De[5/2]", "3d7_b2De[5/2]"],
+            "energyabovegsinpercm": [0.0, 20.0, 1100.0],
+            "j": [4.5, 2.5, 2.5],
+        }
+    )
+    matches = match_channels_to_levels(channels, dfupperlevels)
+    assert {channel: match.levelid for channel, match in matches.items()} == {0: 0, 1: 1, 2: 2}
+
+
+def test_channel_excitation_energies_use_each_lower_level():
+    """A channel that the lower level with the most channels does not have gets its energy through a shared channel."""
+    from artisatomic.phixs import channel_excitation_energies
+
+    table = np.ones(3)
+    percm = hc_in_ev_cm / ryd_to_ev
+    channels = PhixsChannels(
+        [(4, 3, 9, 0)] * 5,
+        {0: {0: table, 1: table}, 1: {0: table, 2: table}, 2: {3: table, 4: table}},
+        {
+            # the second level is 0.2 Ryd above the first level, so each of its thresholds is 0.2 Ryd lower
+            0: {0: 1.0, 1: 1.0 + 1500.0 * percm},
+            1: {0: 0.8, 2: 0.8 + 4000.0 * percm},
+            # no channel of the third level is a channel of a different level
+            2: {3: 0.5, 4: 0.6},
+        },
+    )
+    energies = channel_excitation_energies(channels)
+    assert sorted(energies) == [0, 1, 2]
+    assert [energies[channel] for channel in (0, 1, 2)] == pytest.approx([0.0, 1500.0, 4000.0], abs=1e-6)
+    assert channel_excitation_energies(PhixsChannels([], {}, {})) == {}
+
+
 def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     """A cross section is never negative, so a negative value in a target column is an error in the file."""
     write_qub_co2_phixs_files(tmp_path, level3scale=-1.0)
