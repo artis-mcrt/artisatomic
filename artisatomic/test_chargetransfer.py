@@ -7,6 +7,7 @@ committed files in atomic-data-chargetransfer, so a change of their format fails
 import hashlib
 import math
 import sys
+import typing as t
 from collections.abc import Callable
 from pathlib import Path
 
@@ -55,6 +56,7 @@ def test_makechargetransferfile_cds_totals_and_fit():
     # a reaction that needs energy has no channel on the floor, so its total stays below the floor
     assert totals["Ge", 3] == pytest.approx([5.00e-21] * len(makechargetransferfile.SS11_TGRID))
 
+    tgrid = makechargetransferfile.SS11_TGRID
     fit = makechargetransferfile.fit_ss11_curve(totals["Ge", 1])
     assert fit.a == pytest.approx(3.0e-10, rel=0.01)
     assert fit.b == pytest.approx(0.5, rel=0.01)
@@ -65,19 +67,99 @@ def test_makechargetransferfile_cds_totals_and_fit():
     assert (fit.tmin, fit.tmax) == (1000, 40000)
 
     # the floor curve has no usable points, so the fit is flat at the 2e4 K value
-    assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (1.00e-14, 0.0, 0.0, 0.0, 0.0, 20000, 20000)
+    assert makechargetransferfile.fit_ss11_curve(totals["Ge", 2]) == (
+        1.00e-14,
+        0.0,
+        0.0,
+        0.0,
+        0,
+        20000,
+        20000,
+        0.0,
+        0.0,
+    )
 
-    # a curve with fewer than four usable points gets the flat 2e4 K value. The result must
-    # report the error of that value over the usable points.
-    steep = [
-        2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 1.00e-14)
-        for temp in makechargetransferfile.SS11_TGRID
+    # A curve with one usable point gets the flat 2e4 K value. The result must report the error
+    # of that value over the usable points.
+    onepoint = [2.5e-13 if temp == 40000 else 1.00e-14 for temp in makechargetransferfile.SS11_TGRID]
+    fallback = makechargetransferfile.fit_ss11_curve(onepoint)
+    assert fallback.a == pytest.approx(1.0e-14)
+    assert fallback.npts == 1
+    assert fallback.maxerr == pytest.approx(0.96)
+    assert (fallback.tmin, fallback.tmax, fallback.c, fallback.d) == (20000, 20000, 0.0, 0.0)
+
+    # A curve that needs energy has no floor, so two values above zero give a flat value also.
+    # get_ss11_entries() writes no line for such a curve.
+    nofloor = [2.5e-13 if temp == 40000 else (5.0e-14 if temp == 20000 else 0.0) for temp in tgrid]
+    assert makechargetransferfile.fit_ss11_floor_curve(nofloor, usable_min=0.0) is None
+    assert makechargetransferfile.fit_ss11_curve(nofloor, usable_min=0.0).c == 0.0
+
+
+def ctfit_rate(coefficients: t.Sequence[float], temperature: float) -> float:
+    """Evaluate a line of chargetransfer.txt as evaluate_ctfit() of ARTIS does (chargetransfer.cc), in cm3/s."""
+    a, b, c, d, eexp, tmin, tmax = coefficients
+    t4 = min(max(temperature, tmin), tmax) / 1e4
+    rate = a * 1e-9 * t4**b * (1.0 + c * math.exp(d * t4))
+    return rate * math.exp(-eexp / temperature) if eexp > 0.0 else rate
+
+
+def test_makechargetransferfile_keeps_the_temperature_dependence_of_a_sparse_floor_curve(tmp_path):
+    """Ge3+ + H has two values above the floor in the fit range, and the written line must give both.
+
+    The flat value of the 2e4 K entry is 3.36e-14 cm3/s, 18 times below the table at 4e4 K. The
+    table is on the radiative floor of 1e-14 cm3/s up to 1e4 K, so the line must go to that floor.
+    """
+    sourcedir = Path(makechargetransferfile.PYDIR).parent / "atomic-data-chargetransfer"
+    entries, report = makechargetransferfile.get_ss11_entries(sourcedir)
+    (entry,) = [e for e in entries if (e.z_acc, e.ionstage_acc, e.z_don, e.ionstage_don) == (32, 4, 1, 1)]
+    assert entry.comment == (
+        "SS11; radiative floor plus an exponential, fit to their 2 values above the floor;"
+        " max fit error 47% over 1000-40000 K"
+    )
+    assert any(line.startswith("rec Ge q=3: a=1.000e-14 b=0.000 c=9.392e-02 d=1.612") for line in report)
+
+    # the numbers as ARTIS reads them from the file
+    makechargetransferfile.write_chargetransfer_file(makechargetransferfile.set_autoreverse_flags(entries), tmp_path)
+    (line,) = [
+        line
+        for line in (tmp_path / "chargetransfer.txt").read_text(encoding="utf-8").splitlines()
+        if line.startswith("32 4 1 1 ")
     ]
-    fallback = makechargetransferfile.fit_ss11_curve(steep)
-    assert fallback.a == pytest.approx(5.0e-14)
-    assert fallback.npts == 2
-    assert fallback.maxerr == pytest.approx(0.8)
-    assert (fallback.tmin, fallback.tmax) == (20000, 20000)
+    columns = line.split("#")[0].split()
+    coefficients = [float(column) for column in columns[4:11]]
+    assert coefficients[1] == coefficients[4] == 0.0
+    assert coefficients[5:] == [1000.0, 40000.0]
+    assert columns[11] == "1"
+
+    assert ctfit_rate(coefficients, 20000.0) == pytest.approx(3.36e-14, rel=1e-4)
+    assert ctfit_rate(coefficients, 40000.0) == pytest.approx(6.03e-13, rel=1e-4)
+    # between the two values the rate rises
+    assert 3.36e-14 < ctfit_rate(coefficients, 30000.0) < 6.03e-13
+    # below 2e4 K the table is on the floor. The line stays above the floor and within 48% of it.
+    for temperature in (1000.0, 2000.0, 4000.0, 6000.0, 8000.0, 10000.0):
+        assert 1.0e-14 < ctfit_rate(coefficients, temperature) < 1.48e-14
+    assert ctfit_rate(coefficients, 1000.0) == pytest.approx(1.11e-14, rel=0.01)
+    # outside tmin and tmax the line holds its value, as each other line of the file
+    assert ctfit_rate(coefficients, 100.0) == ctfit_rate(coefficients, 1000.0)
+    assert ctfit_rate(coefficients, 1.0e5) == ctfit_rate(coefficients, 40000.0)
+
+
+def test_fit_ss11_floor_curve_fits_three_points_by_least_squares():
+    """Two usable points give their rates exactly. Three points give the line of least squares in ln(k/floor - 1)."""
+    tgrid = makechargetransferfile.SS11_TGRID
+    floor = makechargetransferfile.SS11_FLOOR
+    c, d = 0.05, 1.5
+
+    def curve(firsttemp: int) -> list[float]:
+        return [floor * (1.0 + c * math.exp(d * temp / 1e4)) if temp >= firsttemp else floor for temp in tgrid]
+
+    for firsttemp, npts in ((20000, 2), (10000, 3)):
+        fit = makechargetransferfile.fit_ss11_curve(curve(firsttemp))
+        assert (fit.a, fit.b, fit.eexp, fit.npts) == (floor, 0.0, 0.0, npts)
+        assert (fit.c, fit.d) == pytest.approx((c, d))
+        assert (fit.tmin, fit.tmax) == (1000, 40000)
+    # four usable points take the fit of ln k, with c = d = 0
+    assert makechargetransferfile.fit_ss11_curve(curve(8000)).c == 0.0
 
 
 def test_makechargetransferfile_ss11_autoreverse(patch_sources, tmp_path):

@@ -255,7 +255,7 @@ def format_header(source_counts: Counter[str]) -> str:
         "  PARAMETERS. The tables resolve the final state; the fit uses the sum over the final states.",
         "",
         "PARAMETERS",
-        "SS11 fits: ln k = ln a + b ln t4 - eexp/T, so c = d = 0. A fit uses the tabulated totals between",
+        "SS11 fits: ln k = ln a + b ln t4 - eexp/T, with c = d = 0. A fit uses the tabulated totals between",
         f"  {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K that lie above {SS11_USABLE_MIN:g} cm3/s. The tables floor each total of",
         f"  a reaction that releases energy at {SS11_FLOOR:g} cm3/s. tmin and tmax of a fitted entry span the points that",
         f"  the fit used. A curve with fewer than {SS11_MIN_POINTS} usable points gets the flat value of its {SS11_FLAT_TEMP} K",
@@ -263,6 +263,10 @@ def format_header(source_counts: Counter[str]) -> str:
         "  has fewer usable points, the fit takes each tabulated total above zero in that temperature range.",
         "  The comment of each line gives the largest relative error of the fit or the flat value",
         "  over the usable points. eexp of an SS11 entry is a fit coefficient and not a measured energy.",
+        "  A curve on the floor with 2 or 3 usable points gets k = floor * (1 + c * exp(d * t4)), so a is",
+        f"  {fnum(SS11_FLOOR / 1e-9)} and b = eexp = 0. The rate goes to the floor at low temperatures. The fit is a line",
+        f"  through ln(k/floor - 1) at the usable points. tmin and tmax are {SS11_FIT_TMIN} and {SS11_FIT_TMAX} K, and the",
+        "  error in the comment covers each tabulated total in that range, also the totals on the floor.",
         "  Below tmin, an entry with eexp > 0 keeps falling and an entry with eexp = 0 holds its value at tmin.",
         "autoreverse: set from the full list of reactions in this file, not from one source alone.",
     ]
@@ -466,9 +470,37 @@ class SS11Fit(t.NamedTuple):
     b: float
     eexp: float  # in K
     maxerr: float  # the largest relative error over the usable points
-    npts: int  # the count of usable points; below SS11_MIN_POINTS, a is a flat value and not a fit
+    npts: int  # the count of usable points; below SS11_MIN_POINTS, the fit is not the fit of ln k
     tmin: float  # the span of the usable points, which the output clamps T into
     tmax: float
+    c: float = 0.0  # c and d are above zero only for the fit of a floor curve (fit_ss11_floor_curve())
+    d: float = 0.0  # in 1/(1e4 K)
+
+
+def fit_ss11_floor_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11Fit | None:
+    """Fit k = floor * (1 + c exp(d t4)) to a curve that is on the radiative floor at all but a few points.
+
+    The function gives None if the curve has fewer than two usable points, or if a point that is
+    not usable is not on the floor. The fit is a line through ln(k / floor - 1) against t4, so
+    two usable points give their two rates exactly. With a = floor and b = eexp = 0, the fit is
+    the term 1 + c exp(d t4) of the KF96 form, which ARTIS evaluates. Towards low temperatures
+    the fit goes to the floor, as the table does. A flat value of the SS11_FLAT_TEMP entry would
+    be Ge3+ + H at 3.36e-14 cm3/s at each temperature, where the table gives 6.03e-13 cm3/s at
+    4e4 K and the floor at 1e4 K.
+
+    tmin and tmax are the fit window, and maxerr is the largest relative error over each point
+    of the window, also the points on the floor.
+    """
+    window = [(temp, k) for temp, k in zip(SS11_TGRID, ks, strict=True) if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX]
+    pts = [(temp, k) for temp, k in window if k > usable_min]
+    if len(pts) < 2 or any(k != SS11_FLOOR for _, k in window if k <= usable_min):
+        return None
+    t4 = np.array([temp / 1e4 for temp, _ in pts])
+    design = np.column_stack([np.ones_like(t4), t4])
+    lnc, d = map(float, np.linalg.lstsq(design, np.log([k / SS11_FLOOR - 1.0 for _, k in pts]), rcond=None)[0])
+    c = math.exp(lnc)
+    maxerr = max(abs(SS11_FLOOR * (1.0 + c * math.exp(d * temp / 1e4)) / k - 1.0) for temp, k in window)
+    return SS11Fit(SS11_FLOOR, 0.0, 0.0, maxerr, len(pts), SS11_FIT_TMIN, SS11_FIT_TMAX, c, d)
 
 
 def fit_ss11_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11Fit:
@@ -481,7 +513,8 @@ def fit_ss11_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11
 
     Below tmin, the reader clamps t4 and the Boltzmann factor keeps the true temperature. A fit
     with eexp > 0 therefore continues to decrease, like the tabulated values. A fit with eexp = 0
-    holds its value at tmin. A curve with fewer than SS11_MIN_POINTS usable points gets the flat
+    holds its value at tmin. A curve with fewer than SS11_MIN_POINTS usable points gets the fit
+    of fit_ss11_floor_curve() if that function gives one. Each other such curve gets the flat
     value of its SS11_FLAT_TEMP entry, with tmin = tmax = SS11_FLAT_TEMP. The result includes the
     error of that value over the usable points.
     """
@@ -491,6 +524,9 @@ def fit_ss11_curve(ks: list[float], usable_min: float = SS11_USABLE_MIN) -> SS11
         if SS11_FIT_TMIN <= temp <= SS11_FIT_TMAX and k > usable_min
     ]
     if len(pts) < SS11_MIN_POINTS:
+        floorfit = fit_ss11_floor_curve(ks, usable_min)
+        if floorfit is not None:
+            return floorfit
         flat = ks[SS11_TGRID.index(SS11_FLAT_TEMP)]
         maxerr = max((abs(flat / k - 1.0) for _, k in pts), default=0.0)
         return SS11Fit(flat, 0.0, 0.0, maxerr, len(pts), SS11_FLAT_TEMP, SS11_FLAT_TEMP)
@@ -543,8 +579,9 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                 )
                 continue
             warning = "  WARNING: the fit error is large" if fit.maxerr > MAXERR_WARN else ""
+            floortext = f" c={fit.c:.3e} d={fit.d:.3f}" if fit.c > 0.0 else ""
             report.append(
-                f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f} eexp={fit.eexp:.0f}"
+                f"{direction} {elsymbol} q={q}: a={fit.a:.3e} b={fit.b:.3f}{floortext} eexp={fit.eexp:.0f}"
                 f" maxerr={fit.maxerr * 100:.0f}% npts={fit.npts}{warning}"
             )
             window = f"{fnum(SS11_FIT_TMIN)}-{fnum(SS11_FIT_TMAX)} K"
@@ -555,6 +592,11 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                 )
                 if fit_takes_all_values:
                     source += " (the reaction needs energy, so the fit takes each value above zero)"
+            elif fit.c > 0.0:
+                source = (
+                    f"radiative floor plus an exponential, fit to their {fit.npts} values above the floor;"
+                    f" max fit error {fit.maxerr * 100:.0f}% over {window}"
+                )
             elif fit.npts > 0:
                 source = (
                     f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry"
@@ -564,7 +606,7 @@ def get_ss11_entries(sourcedir: Path) -> tuple[list[CTEntry], list[str]]:
                 source = f"flat value from their {fnum(SS11_FLAT_TEMP)} K entry (no usable fit points over {window})"
             comment = f"SS11; {source}"
             reaction = (z, q + 1, 1, 1) if is_recombination else (1, 2, z, q + 1)
-            entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, 0.0, 0.0, fit.eexp, fit.tmin, fit.tmax, comment))
+            entries.append(CTEntry(*reaction, fit.a / 1e-9, fit.b, fit.c, fit.d, fit.eexp, fit.tmin, fit.tmax, comment))
     return entries, report
 
 
