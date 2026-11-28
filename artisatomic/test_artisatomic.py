@@ -6880,6 +6880,76 @@ def test_makerecombratefile_keeps_the_old_file_when_an_ion_fails(tmp_path, monke
     assert (outputfolder / "recombrates.txt").read_text(encoding="utf-8") == "the rates of an earlier run\n"
 
 
+def test_makerecombratefile_omits_an_ion_with_no_chianti_radiative_parameters(tmp_path, monkeypatch, capsys):
+    """ChiantiPy gives zeros for an absent parameter file. A total of zero must not reach recombrates.txt.
+
+    ARTIS scales each cross section of the lower ion to the total rate. A dielectronic rate of
+    zero is valid, for example for a bare nucleus, and the ion then keeps its radiative rate.
+    """
+    from artisatomic import makerecombratefile
+
+    class FakeIon:
+        def __init__(self, ionname: str, temperature: np.ndarray) -> None:
+            self.ionname = ionname
+            self.temperature = temperature
+
+        def rrRate(self) -> None:
+            # he_2 has no .rrparams file, so ChiantiPy sets no RrParams and gives zeros
+            if self.ionname == "he_3":
+                self.RrParams = {"rrtype": 3}
+                self.RrRate = {"rate": 1e-10 / self.temperature}
+            else:
+                self.RrRate = {"rate": np.zeros_like(self.temperature)}
+
+        def drRate(self) -> None:
+            self.DrRate = {"rate": np.zeros_like(self.temperature)}
+
+    class FakeChianti:
+        ion = FakeIon
+
+    (tmp_path / "artisatomic").mkdir()
+    monkeypatch.setattr(makerecombratefile, "PYDIR", tmp_path / "artisatomic")
+    monkeypatch.setattr(
+        makerecombratefile,
+        "get_composition_data",
+        lambda _path: pl.DataFrame({"Z": [2], "lowermost_ion_stage": [1], "uppermost_ion_stage": [3]}),
+    )
+    monkeypatch.setattr(makerecombratefile, "import_chianti_core", lambda _firstion: FakeChianti)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    monkeypatch.setattr("sys.argv", ["makeartisrecombratefile", "-output_folder", str(outputfolder)])
+    makerecombratefile.main()
+
+    lines = (outputfolder / "recombrates.txt").read_text(encoding="utf-8").splitlines()
+    assert lines[0] == "2 3 81"
+    assert len(lines) == 82
+    logtemperature, lown, total = lines[1].split()
+    assert (logtemperature, lown) == ("1.0", "-1.0")
+    assert float(total) == pytest.approx(1e-11)
+    assert all(float(line.split()[2]) > 0.0 for line in lines[1:])
+    output = capsys.readouterr().out
+    assert "WARNING: CHIANTI has no radiative recombination parameters for Z=2 He ion stage 2." in output
+    assert "1 ions have no rates in recombrates.txt" in output
+
+
+def test_chianti_total_rates_rejects_an_unknown_radiative_fit_type():
+    """ChiantiPy gives zeros also for a fit type that it does not evaluate, so that is no source of a rate."""
+    from artisatomic.makerecombratefile import chianti_total_rates
+
+    class FakeIon:
+        def __init__(self, _ionname: str, temperature: np.ndarray) -> None:
+            self.RrParams = {"rrtype": 4}
+            self.RrRate = {"rate": np.zeros_like(temperature)}
+
+        def rrRate(self) -> None:
+            pass
+
+    class FakeChianti:
+        ion = FakeIon
+
+    assert chianti_total_rates(FakeChianti, 26, 2, np.array([1e4])) is None
+
+
 def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):
     """A copy such as "fe2.rrc (1).txt" sorts before each other file, and the function skips it."""
     from artisatomic.makerecombratefile import find_nahar_file

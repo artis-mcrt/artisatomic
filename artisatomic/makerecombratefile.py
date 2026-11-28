@@ -108,6 +108,29 @@ def import_chianti_core(firstion: str) -> t.Any:
         raise ModuleNotFoundError(msg) from err
 
 
+def chianti_total_rates(
+    ch: t.Any, atomic_number: int, upperionstage: int, temperatures: np.ndarray
+) -> np.ndarray | None:
+    """Give the total recombination rate of CHIANTI at each temperature, or None if CHIANTI has no radiative rate.
+
+    The total is the radiative rate plus the dielectronic rate. ChiantiPy gives an array of zeros
+    for a process with no parameter file, and it sets RrParams only when it finds the file of the
+    radiative parameters. It also gives zeros for a fit type of the radiative parameters that it
+    does not know. ARTIS scales the cross sections of the lower ion to the total, so a total of
+    zero from an absent file removes each cross section. A dielectronic rate of zero is correct for
+    some ions, for example a bare nucleus, so absent dielectronic parameters stop nothing.
+    """
+    ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=temperatures)
+    ion.rrRate()
+    if getattr(ion, "RrParams", {}).get("rrtype") not in chianti_rr_fit_types:
+        return None
+    ion.drRate()
+    return np.asarray(ion.RrRate["rate"], dtype=float) + np.asarray(ion.DrRate["rate"], dtype=float)
+
+
+# the fit types of the radiative parameters that ChiantiPy evaluates (Ion.rrRate())
+chianti_rr_fit_types = (1, 2, 3)
+
 # the largest atomic number of the CHIANTI database
 max_chianti_atomic_number = 30
 
@@ -121,7 +144,8 @@ def main():
             "The program reads compositiondata.txt in the output folder. Run makeartisatomicfiles before this"
             " program. An ion with no Nahar file takes the ChiantiPy rates if its atomic number is 30 or less."
             " The ChiantiPy rates need the chianti extra (uv sync --frozen --extra chianti). recombrates.txt has"
-            " no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion."
+            " no rates for each other ion with no Nahar file, and ARTIS then uses its own rates for that ion. The"
+            " same applies to an ion for which CHIANTI has no radiative recombination parameters."
         ),
     )
     # the same default as makeartisatomicfiles, relative to the working directory, so the two
@@ -181,6 +205,7 @@ def main():
     ch = import_chianti_core(firstchiantiion) if firstchiantiion is not None else None
 
     # the earlier recombrates.txt stays if a reader or Chianti fails
+    ions_without_rate: list[str] = []
     with open_for_atomic_write(artis_files_path / "recombrates.txt") as frecombrates:
         for atomic_number, lowerionstage, naharfilename in ionsources:
             upperionstage = lowerionstage + 1
@@ -197,18 +222,28 @@ def main():
                     raise RuntimeError(msg)
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                arr_temperature = 10**arr_logT_e
-                ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=arr_temperature)
-                ion.rrRate()
-                arr_rrc = ion.RrRate["rate"]
-                ion.drRate()
-                arr_drc = ion.DrRate["rate"]
+                arr_total = chianti_total_rates(ch, atomic_number, upperionstage, 10**arr_logT_e)
+                if arr_total is None:
+                    ionname = f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {upperionstage}"
+                    print(
+                        f"WARNING: CHIANTI has no radiative recombination parameters for {ionname}."
+                        " recombrates.txt gives no rates for this ion."
+                    )
+                    ions_without_rate.append(ionname)
+                    continue
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 # the third column is the total recombination rate, the same as RRC(total) of
                 # the Nahar files above, so the sum must include dielectronic recombination
                 frecombrates.writelines(
-                    f"{logT_e:.1f} {-1.0} {arr_rrc[i] + arr_drc[i]}\n" for i, logT_e in enumerate(arr_logT_e)
+                    f"{logT_e:.1f} {-1.0} {total}\n" for logT_e, total in zip(arr_logT_e, arr_total, strict=True)
                 )
+
+    if ions_without_rate:
+        print(
+            f"WARNING: {len(ions_without_rate)} ions have no rates in recombrates.txt, because CHIANTI has no"
+            f" radiative recombination parameters for them: {', '.join(ions_without_rate)}."
+            " Check that the CHIANTI database is complete."
+        )
 
 
 if __name__ == "__main__":
