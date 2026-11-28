@@ -42,6 +42,7 @@ from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import IonLog
 from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import output_xgrid
+from artisatomic.base import PhixsChannels
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import resolve_transition_levelid_columns
@@ -65,9 +66,11 @@ from artisatomic.output import write_adata
 from artisatomic.output import write_phixs_data
 from artisatomic.output import write_transition_data
 from artisatomic.phixs import combine_phixs_routes
+from artisatomic.phixs import match_channels_to_levels
 from artisatomic.phixs import match_hydrogenic_phixs
 from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
 from artisatomic.phixs import reduce_phixs_tables_worker
+from artisatomic.phixs import resolve_phixs_channels
 
 
 def phixs_args(**overrides: t.Any) -> argparse.Namespace:
@@ -6901,6 +6904,9 @@ def write_qub_co2_phixs_files(folder: Path, level3scale: float) -> None:
         rows = (" ".join(f"{value:.6e}" for value in [energy, *[scale / energy] * 40]) for energy in energies)
         with gzip.open(folder / f"{levelnumber}.gz", "wt", encoding="utf-8") as fout:
             fout.write("\n".join(rows) + "\n")
+    # 40 target states with 2S + 1 = 4, L = 3, 2J = 9 and even parity
+    targetlines = [f"{index:3d}    4    3   9   0" for index in range(1, 41)]
+    (folder / "photo_input").write_text("\n".join(["40 15 200 ! counts", *targetlines]) + "\n", encoding="utf-8")
 
 
 def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, monkeypatch):
@@ -6922,16 +6928,240 @@ def test_qub_co2_level_with_no_positive_cross_section_gets_no_table(tmp_path, mo
     targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     stream = io.StringIO()
     flog = IonLog(stream)
-    readadasdata._fill_co2_phixs(27, 2, 8, args, flog, crosssections, targetfractions)  # ruff: ignore[private-member-access]
-
-    assert targetfractions[2] == []
-    assert all(targetfractions[levelid] for levelid in range(8) if levelid != 2)
-    assert any("level 3 has a zero cross section to each target" in line for line in flog.comments["phixsdata"])
+    channels = readadasdata.read_co2_phixs_channels(27, 2, args, flog)
+    assert channels.reducedtables[2] == {}
+    assert all(len(channels.reducedtables[levelid]) == 40 for levelid in range(8) if levelid != 2)
     assert (
-        "WARNING: level 3 has no positive cross section to the upper level 1, so the reader drops that target."
-        " (the first of 4 such lines in the log file)"
+        "Level 3 has no positive cross section to the target channel 1. (the first of 40 such lines in the log file)"
     ) in flog.comments["phixsdata"]
     assert "The cross sections of level 3 come from atomic-data-adas/co_tyndall/3." in stream.getvalue()
+
+    # each channel of the test files has its threshold at one energy, so each one is the first level
+    # with its J and its parity at that energy. One level of the upper ion then gets one channel.
+    dfupperlevels = pl.DataFrame(
+        {
+            "levelname": ["3d7_a4Fe[9/2]", "3d6(5D)4s_b4Fe[9/2]"],
+            "energyabovegsinpercm": [0.0, 5.0],
+            "j": [4.5, 4.5],
+        }
+    )
+    resolve_phixs_channels(channels, dfupperlevels, crosssections, targetfractions, flog)
+    assert targetfractions[2] == []
+    assert all([target for target, _ in targetfractions[levelid]] == [0, 1] for levelid in range(8) if levelid != 2)
+    assert any("level 3 has a zero cross section to each target" in line for line in flog.comments["phixsdata"])
+    assert any(
+        line.startswith("WARNING: 38 target channels match no level of the upper ion")
+        for line in flog.comments["phixsdata"]
+    )
+    assert any(
+        line.startswith(
+            "The channels with no level of the upper ion hold 95.00% of the reduced cross section of level 1."
+        )
+        for line in flog.comments["phixsdata"]
+    )
+
+
+def read_co2_sample_channels(monkeypatch) -> tuple[PhixsChannels, pl.DataFrame]:
+    """Read the target channels of the committed QUB Co II sample, and the QUB levels of Co III."""
+    samplepath = adf04_sample_path().parent
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", samplepath)
+    with contextlib.redirect_stdout(io.StringIO()):
+        channels = readadasdata.read_co2_phixs_channels(27, 2, phixs_args(), IonLog(io.StringIO()))
+        _, energylevels, _, _ = readadasdata.read_adf04(adf04_sample_path(), io.StringIO(), 6000.0, 27, 3)
+    return channels, leveltuples_to_pldataframe(energylevels)
+
+
+def test_qub_co2_sample_holds_the_40_target_channels(monkeypatch):
+    """The reader takes each of the 40 target columns, and the first four hold less than half of the cross section.
+
+    The reader took the first four columns only. In the ground level file, the other 36 columns
+    hold 57.9% of the sum at 2.222 Ryd and 60.5% at 3.222 Ryd.
+    """
+    channels, dfco3levels = read_co2_sample_channels(monkeypatch)
+    assert len(channels.quantumnumbers) == 40
+    # 4F J = 9/2 even, and the last target is 4G J = 11/2 even
+    assert (channels.quantumnumbers[0], channels.quantumnumbers[39]) == ((4, 3, 9, 0), (4, 4, 11, 0))
+    assert all(len(channels.reducedtables[levelid]) == 40 for levelid in range(8))
+
+    # the sums of the source file, before a downsample and before a cut
+    with xopen(adf04_sample_path().parent / "1.gz", "rt", encoding="utf-8") as fin:
+        rows = np.array([[float(field) for field in line.split()] for line in fin])
+    assert rows.shape[1] == 41
+    for energy_ryd, othershare in ((2.22178, 0.57905), (3.22177, 0.605154)):
+        row = rows[np.argmin(np.abs(rows[:, 0] - energy_ryd))]
+        assert row[5:].sum() / row[1:].sum() == pytest.approx(othershare, abs=1e-5)
+    # the sample holds the first row of each channel with a cross section, which is its threshold
+    assert rows[0, 0] == channels.thresholds_ryd[0][0]
+    assert all(rows[0, column] == 0.0 for column in range(2, 41))
+
+    # The threshold of a channel above the threshold of the first channel is the energy of its target.
+    # The rows of the source are 1e-5 Ryd (1.1 cm^-1) apart.
+    levelenergies = dfco3levels["energyabovegsinpercm"].to_list()
+    for channel in range(40):
+        excitation_percm = (
+            (channels.thresholds_ryd[0][channel] - channels.thresholds_ryd[0][0]) * ryd_to_ev / hc_in_ev_cm
+        )
+        assert excitation_percm == pytest.approx(levelenergies[channel], abs=1.2)
+
+    reducedsums = [float(channels.reducedtables[0][channel].sum()) for channel in range(40)]
+    assert sum(reducedsums[:4]) / sum(reducedsums) == pytest.approx(0.452, abs=1e-3)
+
+
+def test_qub_co2_channels_go_to_the_co3_levels_and_the_cut_comes_after(monkeypatch):
+    """Each channel goes to its level of Co III, and the 2% cut then applies to the 40 targets of a level."""
+    channels, dfco3levels = read_co2_sample_channels(monkeypatch)
+    matches = match_channels_to_levels(channels, dfco3levels)
+    # the levels of Co III come from the same calculation, so channel n is the level with the file index n
+    assert {channel: match.levelid for channel, match in matches.items()} == {channel: channel for channel in range(40)}
+    assert max(abs(match.energydifference_percm) for match in matches.values()) < 1.2
+    # photo_input gives L = 2 for the target 29, and the level at its energy is 3p63d64s(4P) J = 5/2
+    assert [channel for channel, match in matches.items() if not match.sameterm] == [28]
+    assert dfco3levels["levelname"][28] == "3p63d64s(4P)_4Pe[5/2]_id=29"
+
+    nphixspoints = phixs_args().nphixspoints
+    crosssections = np.zeros((dfco3levels.height, nphixspoints))
+    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(dfco3levels.height)]
+    flog = IonLog(io.StringIO())
+    with contextlib.redirect_stdout(io.StringIO()):
+        resolve_phixs_channels(channels, dfco3levels, crosssections, targetfractions, flog)
+
+    # the target level ids and the fractions of the ground level of Co II
+    assert [target for target, _ in targetfractions[0]] == [0, 1, 2, 4, 7, 9, 11, 12]
+    assert [fraction for _, fraction in targetfractions[0]] == pytest.approx(
+        [0.3314, 0.1173, 0.0348, 0.0953, 0.1556, 0.0279, 0.1786, 0.0591], abs=1e-4
+    )
+    # the level 3d7(4F)4s a5F J = 5 goes mainly to the levels of 3d6 4s, which the first four columns do not hold
+    assert [target for target, _ in targetfractions[3]] == [0, 17, 18, 28, 29, 30, 35, 39]
+    for levelid in range(8):
+        reduced = channels.reducedtables[levelid]
+        total = sum(float(table.sum()) for table in reduced.values())
+        kept = [target for target, _ in targetfractions[levelid]]
+        assert sum(fraction for _, fraction in targetfractions[levelid]) == pytest.approx(1.0)
+        # the cut: each target that stays has more than 2% of the sum of the 40 channels, and each other has less
+        assert all(float(reduced[channel].sum()) / total > PHIXS_TARGET_FRACTION_CUT for channel in kept)
+        assert all(
+            float(reduced[channel].sum()) / total <= PHIXS_TARGET_FRACTION_CUT
+            for channel in range(40)
+            if channel not in kept
+        )
+        # the table is the sum of the reduced tables of the targets that stay
+        assert crosssections[levelid] == pytest.approx(np.sum([reduced[channel] for channel in kept], axis=0))
+    assert crosssections[0].sum() / sum(
+        float(table.sum()) for table in channels.reducedtables[0].values()
+    ) == pytest.approx(0.9287, abs=1e-4)
+    assert not crosssections[8:].any()
+    assert targetfractions[8:] == [[] for _ in range(dfco3levels.height - 8)]
+    comments = "\n".join(flog.comments["phixsdata"])
+    assert "40 of the 40 target channels of the cross section files match a level of the upper ion" in comments
+    assert "The source gives 2S + 1 = 4 and L = 2 for the target channel 29." in comments
+    assert (
+        "Level 1 keeps 8 of 40 targets, with 92.87% of the reduced cross section of its matched channels." in comments
+    )
+
+
+def test_match_channels_to_levels_of_another_data_set():
+    """With levels of another data set, a channel goes to the nearest level of its term, and a channel can have no level."""
+    table = np.ones(3)
+    # the thresholds of one lower level: the targets are at 0, 15200, 55700 and 90000 cm^-1
+    excitations_percm = [0.0, 15200.0, 55700.0, 90000.0]
+    thresholds = {channel: 1.2 + energy * hc_in_ev_cm / ryd_to_ev for channel, energy in enumerate(excitations_percm)}
+    channels = PhixsChannels(
+        [(4, 3, 9, 0), (4, 1, 5, 0), (4, 2, 7, 0), (2, 5, 11, 0)],
+        {0: dict.fromkeys(range(4), table), 1: {0: table}},
+        {0: thresholds, 1: {0: 1.3}},
+    )
+    # CMFGEN names, with the 4D level before the 4P level, and energies that differ by a calculation error.
+    # 3d7_b4Pe[5/2] has the term of the second channel, and it is too far from that channel.
+    dfupperlevels = pl.DataFrame(
+        {
+            "levelname": ["3d7_a4Fe[9/2]", "3d6(5D)4s_a4De[7/2]", "3d7_a4Pe[5/2]", "3d7_b4Pe[5/2]", "3d7_a4Do[7/2]"],
+            "energyabovegsinpercm": [0.0, 54000.0, 16000.0, 70000.0, 55700.0],
+            "j": [4.5, 3.5, 2.5, 2.5, 3.5],
+        }
+    )
+    matches = match_channels_to_levels(channels, dfupperlevels)
+    # the odd level at the exact energy of the third channel has the wrong parity. The fourth channel has no level.
+    assert {channel: match.levelid for channel, match in matches.items()} == {0: 0, 1: 2, 2: 1}
+    assert matches[1].energydifference_percm == pytest.approx(800.0)
+    assert all(match.sameterm for match in matches.values())
+
+    crosssections = np.zeros((2, 3))
+    targetfractions: list[list[tuple[int, float]]] = [[], []]
+    flog = IonLog(io.StringIO())
+    with contextlib.redirect_stdout(io.StringIO()):
+        resolve_phixs_channels(channels, dfupperlevels, crosssections, targetfractions, flog)
+    assert targetfractions == [
+        [(0, pytest.approx(1 / 3)), (2, pytest.approx(1 / 3)), (1, pytest.approx(1 / 3))],
+        [(0, 1.0)],
+    ]
+    assert crosssections.tolist() == [[3.0, 3.0, 3.0], [1.0, 1.0, 1.0]]
+    comments = "\n".join(flog.comments["phixsdata"])
+    assert "3 of the 4 target channels of the cross section files match a level of the upper ion" in comments
+    assert (
+        "WARNING: 1 target channels match no level of the upper ion, so their cross sections are not in the output."
+        " The first is the channel 4 with 2S + 1 = 2, L = 5, 2J = 11 and the parity 0." in comments
+    )
+    assert (
+        "The channels with no level of the upper ion hold 25.00% of the reduced cross section of level 1." in comments
+    )
+
+
+def test_match_channels_keeps_each_valid_match_of_a_term():
+    """Two channels of one term keep a level each, where the nearest level of the first channel is the only level of the second.
+
+    The channels are at 1000 and 4000 cm^-1, and the levels at 0 and 1100 cm^-1. A match of each
+    channel to its nearest free level gives the level at 1100 cm^-1 to the first channel, and
+    the second channel then has no level within 3000 cm^-1.
+    """
+    from artisatomic.phixs import match_in_energy_order
+
+    assert match_in_energy_order([1000.0, 4000.0], [0.0, 1100.0], 3000.0) == [0, 1]
+    # with a free choice, a channel takes its nearest level, and a level too far away stays free
+    assert match_in_energy_order([1000.0, 4000.0], [0.0, 1100.0, 4100.0], 3000.0) == [1, 2]
+    assert match_in_energy_order([1000.0], [5000.0], 3000.0) == [None]
+    assert match_in_energy_order([], [1.0], 3000.0) == []
+    assert match_in_energy_order([100.0, 200.0, 9000.0], [150.0], 3000.0) in ([0, None, None], [None, 0, None])
+
+    table = np.ones(3)
+    # the ground channel, and the two channels of one term, J and parity
+    thresholds = {
+        channel: 1.0 + energy * hc_in_ev_cm / ryd_to_ev for channel, energy in enumerate([0.0, 1000.0, 4000.0])
+    }
+    channels = PhixsChannels(
+        [(4, 3, 9, 0), (2, 2, 5, 0), (2, 2, 5, 0)], {0: dict.fromkeys(range(3), table)}, {0: thresholds}
+    )
+    dfupperlevels = pl.DataFrame(
+        {
+            "levelname": ["3d7_a4Fe[9/2]", "3d7_a2De[5/2]", "3d7_b2De[5/2]"],
+            "energyabovegsinpercm": [0.0, 20.0, 1100.0],
+            "j": [4.5, 2.5, 2.5],
+        }
+    )
+    matches = match_channels_to_levels(channels, dfupperlevels)
+    assert {channel: match.levelid for channel, match in matches.items()} == {0: 0, 1: 1, 2: 2}
+
+
+def test_channel_excitation_energies_use_each_lower_level():
+    """A channel that the lower level with the most channels does not have gets its energy through a shared channel."""
+    from artisatomic.phixs import channel_excitation_energies
+
+    table = np.ones(3)
+    percm = hc_in_ev_cm / ryd_to_ev
+    channels = PhixsChannels(
+        [(4, 3, 9, 0)] * 5,
+        {0: {0: table, 1: table}, 1: {0: table, 2: table}, 2: {3: table, 4: table}},
+        {
+            # the second level is 0.2 Ryd above the first level, so each of its thresholds is 0.2 Ryd lower
+            0: {0: 1.0, 1: 1.0 + 1500.0 * percm},
+            1: {0: 0.8, 2: 0.8 + 4000.0 * percm},
+            # no channel of the third level is a channel of a different level
+            2: {3: 0.5, 4: 0.6},
+        },
+    )
+    energies = channel_excitation_energies(channels)
+    assert sorted(energies) == [0, 1, 2]
+    assert [energies[channel] for channel in (0, 1, 2)] == pytest.approx([0.0, 1500.0, 4000.0], abs=1e-6)
+    assert channel_excitation_energies(PhixsChannels([], {}, {})) == {}
 
 
 def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
@@ -6940,11 +7170,23 @@ def test_qub_co2_negative_cross_section_stops_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
 
     args = build_parser().parse_args([])
-    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
-    with pytest.raises(ValueError, match=r"3\.gz has 800 negative cross sections in the columns of the 4 targets"):
-        readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, io.StringIO(), np.zeros((8, args.nphixspoints)), targetfractions
-        )
+    with pytest.raises(ValueError, match=r"3\.gz has 8000 negative cross sections in the columns of the 40 targets"):
+        readadasdata.read_co2_phixs_channels(27, 2, args, io.StringIO())
+
+
+@pytest.mark.parametrize("declared", [39, 41])
+def test_qub_co2_column_count_must_equal_the_targets_of_photo_input(tmp_path, monkeypatch, declared):
+    """A photo_input with fewer targets than the files have columns must not leave the other columns out silently."""
+    write_qub_co2_phixs_files(tmp_path, level3scale=1.0)
+    targetlines = [f"{index:3d}    4    3   9   0" for index in range(1, declared + 1)]
+    (tmp_path / "photo_input").write_text(
+        "\n".join([f"{declared} 15 200 ! counts", *targetlines]) + "\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
+    with pytest.raises(
+        ValueError, match=rf"1\.gz has 40 target columns, and photo_input declares {declared} target states"
+    ):
+        readadasdata.read_co2_phixs_channels(27, 2, phixs_args(), io.StringIO())
 
 
 def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monkeypatch):
@@ -6964,12 +7206,13 @@ def test_qub_co2_read_error_comes_after_the_log_line_of_its_file(tmp_path, monke
     monkeypatch.setattr(readadasdata, "tyndall_co3_path", tmp_path)
 
     args = phixs_args()
-    targetfractions: list[list[tuple[int, float]]] = [[] for _ in range(8)]
     flog = io.StringIO()
-    with pytest.raises(ValueError, match=r"artisatomic cannot read .*3\.gz: conversion from `str` to `f64` failed"):
-        readadasdata._fill_co2_phixs(  # ruff: ignore[private-member-access]
-            27, 2, 8, args, flog, np.zeros((8, args.nphixspoints)), targetfractions
-        )
+    with pytest.raises(
+        ValueError,
+        match=r"artisatomic cannot read the energy and the 40 target columns of .*3\.gz: conversion from `str` to `f64`"
+        r" failed",
+    ):
+        readadasdata.read_co2_phixs_channels(27, 2, args, flog)
     assert "The cross sections of level 3 come from" in flog.getvalue().splitlines()[-1]
 
 

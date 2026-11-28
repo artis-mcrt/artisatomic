@@ -157,21 +157,44 @@ class Transition(t.NamedTuple):
     A: float
 
 
+class PhixsChannels(t.NamedTuple):
+    """The cross sections of one ion by target channel, for a data source that gives each target its quantum numbers.
+
+    The QUB files of Co II give one column for each target state of Co III, and a separate file
+    gives 2S + 1, L, 2J and the parity of each target. The reader cannot know the level ids of the
+    upper ion, because the run reads that ion later, and with a handler that the user selects.
+    phixs.resolve_phixs_channels() matches the channels to the levels after the run reads the
+    upper ion. The cut of the weak targets is a part of that step.
+    """
+
+    # (2S + 1, L, 2J, parity) of each channel, in the order of the source
+    quantumnumbers: list[tuple[int, int, int, int]]
+    # level id of the lower ion -> index of the channel -> reduced table. A channel with no
+    # positive cross section has no entry.
+    reducedtables: dict[int, dict[int, npt.NDArray[np.float64]]]
+    # level id of the lower ion -> index of the channel -> threshold energy in Rydberg. The
+    # difference of two thresholds of one level is the difference of the two target energies.
+    thresholds_ryd: dict[int, dict[int, float]]
+
+
 class PhixsData(t.NamedTuple):
     """The photoionisation cross sections of one ion, indexed by zero-based level id.
 
     A data source with no cross sections for the ion gives empty arrays, not zero-filled ones. The
     function iondata.read_ion_data() reads an empty cross section array as "no data" and applies the
-    hydrogenic estimate. A reader gives the targets of a level in one of two forms. CMFGEN names
+    hydrogenic estimate. A reader gives the targets of a level in one of three forms. CMFGEN names
     the upper ion's levels with their fractions, and get_photoiontargetfractions() resolves the
     names after the run reads the upper ion. The ADAS reader gives the upper ion's level ids with their
-    fractions.
+    fractions for Co III, and the channels of PhixsChannels for Co II.
     """
 
     crosssections: npt.NDArray[np.float64]  # (levelcount, nphixspoints), in Mb
     thresholds_ev: npt.NDArray[np.float64]  # (levelcount,)
     targetconfigs: list[list[tuple[str, float]] | None] | None = None
     targetfractions: list[list[tuple[int, float]]] | None = None
+    # the third form of the targets (see PhixsChannels). The cross sections are then zero until
+    # phixs.resolve_phixs_channels() fills them.
+    channels: PhixsChannels | None = None
 
 
 def output_xgrid(nphixspoints: int, phixsnuincrement: float) -> npt.NDArray[np.float64]:

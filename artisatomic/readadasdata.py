@@ -18,6 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+import numpy.typing as npt
 import polars as pl
 
 # the "cmfgen_qubphixs" handler takes the CMFGEN phot files for an ion with no QUB cross sections.
@@ -40,6 +41,7 @@ from artisatomic.base import log_detail
 from artisatomic.base import log_source
 from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import path_in_data_folder
+from artisatomic.base import PhixsChannels
 from artisatomic.base import PhixsData
 from artisatomic.base import PYDIR
 from artisatomic.base import ryd_to_ev
@@ -56,8 +58,6 @@ from artisatomic.levelnames import lchars
 from artisatomic.levelnames import lchars_lower
 from artisatomic.levelnames import looks_like_eissner_config
 from artisatomic.levelnames import split_count_and_n
-from artisatomic.phixs import combine_phixs_routes
-from artisatomic.phixs import PHIXS_TARGET_FRACTION_CUT
 from artisatomic.phixs import reduce_phixs_tables
 
 adasfolder = PYDIR / ".." / "atomic-data-adas"
@@ -773,7 +773,16 @@ def read_cmfgen_qubphixs_photoionizations(atomic_number, ion_stage, dfenergyleve
     other ion takes the CMFGEN phot files.
     """
     if (atomic_number, ion_stage) == (27, 2):
-        return _read_qub_phixs(_fill_co2_phixs, atomic_number, ion_stage, dfenergylevels.height, args, flog)
+        log_source(flog, ("phixsdata",), "the cross sections", qub_cobalt_phixs_description)
+        channels = read_co2_phixs_channels(atomic_number, ion_stage, args, flog)
+        levelcount = dfenergylevels.height
+        # zeros and empty lists until resolve_phixs_channels() fills them, after the run reads Co III
+        return PhixsData(
+            np.zeros((levelcount, args.nphixspoints)),
+            np.full(levelcount, np.nan),
+            targetfractions=[[] for _ in range(levelcount)],
+            channels=channels,
+        )
     return readhillierdata.read_phixs_tables(atomic_number, ion_stage, dfenergylevels, args, flog)
 
 
@@ -880,45 +889,86 @@ def read_adas_levels_and_transitions(atomic_number, ion_stage, flog, args):
     return ionization_energy_ev, adas_energylevels, adas_transitions, dfupsilon
 
 
-def _fill_co2_phixs(
-    atomic_number,
-    ion_stage,
-    _levelcount: int,
-    args,
-    flog,
-    photoionization_crosssections,
-    photoionization_targetfractions,
-) -> None:
-    """Fill the arrays with the QUB cross sections of Co II. The tables are for the CMFGEN levels of Co II."""
+def read_photo_input(filepath: Path) -> list[tuple[int, int, int, int]]:
+    """Read the quantum numbers of the target states of the QUB Co II cross section files.
+
+    The first line of photo_input gives the count of the target states. One line for each target
+    follows, with its index, 2S + 1, L, 2J and the parity (0 for even). The function gives
+    (2S + 1, L, 2J, parity) of each target, in the order of the file. The columns of the cross
+    section files have the same order.
+    """
+    with xopen_check_extension(filepath, encoding="utf-8") as fin:
+        lines = fin.read().splitlines()
+    try:
+        ntargets = int(lines[0].split()[0])
+        rows = [
+            [int(field) for field in line.split("!", maxsplit=1)[0].split()[:5]] for line in lines[1 : 1 + ntargets]
+        ]
+    except (IndexError, ValueError) as exc:
+        msg = f"artisatomic cannot read the target states of {filepath}: {exc}"
+        raise ValueError(msg) from exc
+    # not an assert: this validates an input file. A wrong index gives each column a wrong target.
+    if len(rows) != ntargets or any(len(row) != 5 or row[0] != index for index, row in enumerate(rows, start=1)):
+        msg = f"{filepath} does not give the {ntargets} target states that its first line declares, with the indices 1 to {ntargets}."
+        raise ValueError(msg)
+    return [(twosplusone, l, twoj, parity) for _, twosplusone, l, twoj, parity in rows]
+
+
+def read_co2_phixs_channels(atomic_number, ion_stage, args, flog) -> PhixsChannels:
+    """Read the QUB cross sections of Co II for each target channel. The tables are for the CMFGEN levels of Co II.
+
+    Each file has the photon energy and one column for each target state of photo_input. The
+    function reads each column. phixs.resolve_phixs_channels() gives each channel its level of
+    Co III, and then applies the cut of the weak targets.
+    """
     log_comment(
         flog,
         ("phixsdata",),
-        f"The cross sections come from the files 1 to 8 in {path_in_data_folder(tyndall_co3_path, adasfolder)}.",
+        f"The cross sections come from the files 1 to 8 in {path_in_data_folder(tyndall_co3_path, adasfolder)}."
+        " The file photo_input in that folder gives the quantum numbers of the target states.",
     )
+    quantumnumbers = read_photo_input(tyndall_co3_path / "photo_input")
+    ntargets = len(quantumnumbers)
     # the name of a cross section file is the level's number in the source data, which counts from one
     filenames = [tyndall_co3_path / f"{lowerlevelid + 1:d}.gz" for lowerlevelid in range(8)]
-    ntargets = 4  # just the 4Fe ground quartet (the file has 40 target columns)
     # One space separates the columns, and every field is a number. So a null means that
-    # the columns are not where the read expects them. A read of the first five columns
-    # of the 41 costs a third of the time of a cut of every line into its parts.
+    # the columns are not where the read expects them.
     columnnames = ["energy", *(f"target{column}" for column in range(1, ntargets + 1))]
 
     def read_table(filename: Path) -> pl.DataFrame:
         try:
-            return (
-                pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
-                .select(pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames))
-                .collect()
+            lazytable = pl.scan_csv(filename, separator=" ", has_header=False, infer_schema_length=0)
+            columncount = len(lazytable.collect_schema())
+            table = (
+                lazytable.select(
+                    pl.nth(column).cast(pl.Float64).alias(name) for column, name in enumerate(columnnames)
+                ).collect()
+                if columncount == len(columnnames)
+                else None
             )
         except (pl.exceptions.PolarsError, OSError) as exc:
             # The error does not name the file. The first line of a polars error gives the cause.
-            msg = f"artisatomic cannot read {filename}: {str(exc).partition(chr(10))[0]}"
+            msg = (
+                f"artisatomic cannot read the energy and the {ntargets} target columns of {filename}:"
+                f" {str(exc).partition(chr(10))[0]}"
+            )
             raise ValueError(msg) from exc
+        # not an assert: this validates the input files. With more columns than photo_input
+        # declares, the reader would leave the cross sections of the other targets out.
+        if table is None:
+            msg = (
+                f"{filename} has {columncount - 1} target columns, and photo_input declares {ntargets} target states."
+                " The two files do not belong to the same data set."
+            )
+            raise ValueError(msg)
+        return table
 
     # The threads read the files at the same time. The loop takes the tables in file order, so the
     # first bad file in that order stops the run.
     with ThreadPoolExecutor(max_workers=len(filenames)) as executor:
         tablereads = [executor.submit(read_table, filename) for filename in filenames]
+    reducedtables: dict[int, dict[int, npt.NDArray[np.float64]]] = {}
+    thresholds_ryd: dict[int, dict[int, float]] = {}
     for lowerlevelid, (filename, tableread) in enumerate(zip(filenames, tablereads, strict=True)):
         log_and_print(
             flog,
@@ -932,25 +982,25 @@ def _fill_co2_phixs(
         if nnegative > 0:
             msg = f"{filename} has {nnegative} negative cross sections in the columns of the {ntargets} targets."
             raise ValueError(msg)
+        energies = photdata["energy"].to_numpy()
         phixstables = {}
-
-        # column n of the file holds the cross section to the upper ion's level id n - 1
-        for targetcolumn in range(1, ntargets + 1):
-            targetname = f"target{targetcolumn}"
-            phixstable = photdata.filter(pl.col(targetname) > 0.0).select("energy", targetname).to_numpy()
-            if len(phixstable) == 0:
-                # reduce_phixs_tables() gives zeros for an empty table, and combine_phixs_routes()
-                # then leaves the target out of the fractions
+        for channel in range(ntargets):
+            values = photdata[columnnames[channel + 1]].to_numpy()
+            ispositive = values > 0.0
+            if not ispositive.any():
                 log_detail(
                     flog,
                     ("phixsdata",),
-                    "target with no positive cross section",
-                    f"WARNING: level {lowerlevelid + 1} has no positive cross section to the upper level"
-                    f" {targetcolumn}, so the reader drops that target.",
+                    "target channel with no positive cross section",
+                    f"Level {lowerlevelid + 1} has no positive cross section to the target channel {channel + 1}.",
                 )
-            phixstables[targetcolumn] = phixstable
+                continue
+            # The first row with a cross section above zero is the threshold of the channel. The
+            # downsample reads the first energy of a table as its threshold.
+            phixstables[channel] = np.column_stack((energies[ispositive], values[ispositive]))
 
-        reduced_phixs_dict = reduce_phixs_tables(
+        thresholds_ryd[lowerlevelid] = {channel: float(table[0, 0]) for channel, table in phixstables.items()}
+        reducedtables[lowerlevelid] = reduce_phixs_tables(
             phixstables,
             args.optimaltemperature,
             args.nphixspoints,
@@ -958,30 +1008,7 @@ def _fill_co2_phixs(
             interpolation=args.phixsinterpolation,
             label=f"{ion_label(atomic_number, ion_stage)} QUB level id {lowerlevelid}",
         )
-        combined = combine_phixs_routes(
-            [(targetcolumn - 1, reduced) for targetcolumn, reduced in reduced_phixs_dict.items()]
-        )
-        if not combined.fractions:
-            # the code assigns nothing for this level, so write_phixs_data() will skip it
-            log_detail(
-                flog,
-                ("phixsdata",),
-                "level with zero cross section to each target",
-                f"WARNING: level {lowerlevelid + 1} has a zero cross section to each target, so it gets no table.",
-            )
-            continue
-        for target, factor in combined.dropped:
-            log_detail(
-                flog,
-                ("phixsdata",),
-                "target removed by the cut",
-                f"The reduced cross sections from level {lowerlevelid + 1} to upper level {target + 1} sum to"
-                f" {factor:.4e} Mb. This is at most {PHIXS_TARGET_FRACTION_CUT:.0%} of the total."
-                " Another target has a larger sum, so the output drops this target.",
-            )
-
-        photoionization_targetfractions[lowerlevelid] = combined.fractions
-        photoionization_crosssections[lowerlevelid] = combined.table
+    return PhixsChannels(quantumnumbers, reducedtables, thresholds_ryd)
 
 
 def _fill_co3_phixs(

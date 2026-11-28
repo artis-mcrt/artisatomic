@@ -32,9 +32,11 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_path
 from artisatomic.base import log_source
+from artisatomic.base import PhixsChannels
 from artisatomic.base import PhixsData
 from artisatomic.base import upsilon_schema
 from artisatomic.phixs import match_hydrogenic_phixs
+from artisatomic.phixs import resolve_phixs_channels
 
 
 @dataclass(slots=True)
@@ -65,6 +67,10 @@ class IonData:
     # The lines for the comment block of each output file (see base.IonLog). Each pass records
     # into the same lists: the read pass first, then the resolve pass, then the write pass.
     comments: dict[str, list[str]] = field(default_factory=empty_comments)
+    # The cross sections by target channel, for a reader that gives the quantum numbers of each
+    # target and not a level id. resolve_photoion_targetfractions() fills the two fields
+    # photoionization_crosssections and photoionization_targetfractions from them.
+    photoion_channels: PhixsChannels | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,6 +254,7 @@ def read_ion_data(
     photoionization_crosssections: npt.NDArray[np.float64] = np.empty((0, args.nphixspoints))  # in Mb
     photoionization_targetfractions: list[list[tuple[int, float]]] = []
     photoionization_thresholds_ev: npt.NDArray[np.float64] = np.empty(0)
+    photoion_channels: PhixsChannels | None = None
 
     with log_path(args.output_folder).open("a", encoding="utf-8") as logstream:
         flog = IonLog(logstream)
@@ -282,6 +289,7 @@ def read_ion_data(
             photoionization_thresholds_ev = phixs.thresholds_ev
             photoion_targetconfigs = phixs.targetconfigs
             photoionization_targetfractions = phixs.targetfractions or []
+            photoion_channels = phixs.channels
 
         # The len() == 0 test limits the estimate to the ions for which the handler gave nothing.
         # An ion with even one cross section table keeps its data, so the estimate never replaces
@@ -321,6 +329,7 @@ def read_ion_data(
         photoionization_targetfractions=photoionization_targetfractions,
         photoionization_thresholds_ev=photoionization_thresholds_ev,
         comments=flog.comments,
+        photoion_channels=photoion_channels,
     )
 
 
@@ -350,7 +359,21 @@ def resolve_photoion_targetfractions(iondatalist: list[IonData], atomic_number: 
         raise ValueError(msg)
 
     for iondata, upperiondata in itertools.pairwise(iondatalist):
-        if not iondata.photoionization_targetfractions:
+        if iondata.photoion_channels is not None:
+            with Path(logpath).open("a", encoding="utf-8") as logstream:
+                # the IonLog records into the comment lists of the read pass
+                flog = IonLog(logstream, iondata.comments)
+                log_and_print(
+                    flog, f"\n===========> {ion_label(atomic_number, iondata.ion_stage)} photoionisation targets:"
+                )
+                resolve_phixs_channels(
+                    iondata.photoion_channels,
+                    upperiondata.dfenergylevels,
+                    iondata.photoionization_crosssections,
+                    iondata.photoionization_targetfractions,
+                    flog,
+                )
+        elif not iondata.photoionization_targetfractions:
             with Path(logpath).open("a", encoding="utf-8") as logstream:
                 # the IonLog records into the comment lists of the read pass
                 flog = IonLog(logstream, iondata.comments)
