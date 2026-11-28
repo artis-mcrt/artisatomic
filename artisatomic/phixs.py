@@ -16,11 +16,14 @@ from artisatomic.base import hc_in_ev_angstrom
 from artisatomic.base import hc_in_ev_cm
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
+from artisatomic.base import log_detail
 from artisatomic.base import log_source
 from artisatomic.base import output_xgrid
 from artisatomic.base import parallel_map
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import phixs_nu_cubed_tail
+from artisatomic.base import PhixsChannels
+from artisatomic.base import ryd_to_ev
 from artisatomic.base import ryd_to_hz
 
 
@@ -227,6 +230,196 @@ def combine_phixs_routes[TargetType](
         factors,
         [(target, factor) for target, factor in factors if target not in kepttargets],
     )
+
+
+def level_quantum_numbers(dflevels: pl.DataFrame) -> list[tuple[int, int, int, int] | None]:
+    """Give (2S + 1, L, 2J, parity) of each level, or None for a level with one of them unknown.
+
+    An ADAS level frame has the columns twosplusone, l, j and parity. For each other frame, the
+    function reads the term and the parity from the level name with the CMFGEN conventions, as
+    get_photoiontargetfractions() does for the target names. J comes from the column j.
+    """
+    names = dflevels["levelname"].to_list()
+    columns = dflevels.columns
+    jvalues = dflevels["j"].to_list() if "j" in columns else [None] * len(names)
+    if "twosplusone" in columns and "l" in columns:
+        terms = list(
+            zip(dflevels["twosplusone"].to_list(), dflevels["l"].to_list(), dflevels["parity"].to_list(), strict=True)
+        )
+    else:
+        terms = [readhillierdata.get_term_as_tuple(name) for name in names]
+    quantumnumbers: list[tuple[int, int, int, int] | None] = []
+    for (twosplusone, l, parity), j in zip(terms, jvalues, strict=True):
+        known = j is not None and None not in {twosplusone, l, parity} and min(twosplusone, l, parity) >= 0
+        quantumnumbers.append((int(twosplusone), int(l), round(2 * j), int(parity)) if known else None)
+    return quantumnumbers
+
+
+# A channel and a level of one calculation have the same energy. The threshold of a channel is
+# the first row of the file with a cross section above zero, and the rows of the QUB files are
+# 1e-5 Ryd (1.1 cm^-1) apart.
+channel_energy_tolerance_percm = 10.0
+# A channel and a level of two data sets can differ by the error of a calculated energy.
+channel_term_energy_tolerance_percm = 3000.0
+
+
+def channel_excitation_energies(channels: PhixsChannels) -> dict[int, float]:
+    """Give the energy of each target channel above the lowest channel, in cm^-1.
+
+    The thresholds of the channels of one lower level differ by the energies of the targets. The
+    function takes the lower level with the most channels, and the first such level if two have
+    the same count. A channel with no cross section for that level has no entry.
+    """
+    if not channels.thresholds_ryd:
+        return {}
+    thresholds = max(channels.thresholds_ryd.values(), key=len)
+    lowest = min(thresholds.values(), default=0.0)
+    return {channel: (threshold - lowest) * ryd_to_ev / hc_in_ev_cm for channel, threshold in thresholds.items()}
+
+
+class ChannelMatch(t.NamedTuple):
+    """The level of the upper ion that a target channel goes to."""
+
+    levelid: int
+    energydifference_percm: float  # the energy of the level minus the energy of the channel
+    sameterm: bool  # False if 2S + 1 or L of the level is not that of the channel
+
+
+def match_channels_to_levels(channels: PhixsChannels, dfupperlevels: pl.DataFrame) -> dict[int, ChannelMatch]:
+    """Give the level of the upper ion for each target channel that has one.
+
+    A level must have the J and the parity of the channel. The first rule takes the level with
+    the energy of the channel, within channel_energy_tolerance_percm. That rule applies to an
+    upper ion from the same calculation, and it does not need the term. photo_input gives L = 2
+    for the target 29 of Co III, and the level at its energy is a 4P level. The second rule
+    takes the nearest level with the term of the channel also, within
+    channel_term_energy_tolerance_percm. That rule applies to an upper ion from another data
+    set. Each level gets one channel. A channel with no such level has no entry.
+    """
+    excitation = channel_excitation_energies(channels)
+    levelenergies = dfupperlevels["energyabovegsinpercm"].to_list()
+    levelnumbers = level_quantum_numbers(dfupperlevels)
+    matches: dict[int, ChannelMatch] = {}
+    used: set[int] = set()
+    for sameterm, tolerance in ((False, channel_energy_tolerance_percm), (True, channel_term_energy_tolerance_percm)):
+        for channel, energy in sorted(excitation.items()):
+            if channel in matches:
+                continue
+            twosplusone, l, twoj, parity = channels.quantumnumbers[channel]
+            candidates = [
+                (abs(levelenergies[levelid] - energy), levelid)
+                for levelid, numbers in enumerate(levelnumbers)
+                if numbers is not None
+                and levelid not in used
+                and numbers[2:] == (twoj, parity)
+                and (not sameterm or numbers[:2] == (twosplusone, l))
+            ]
+            if candidates and min(candidates)[0] <= tolerance:
+                _, levelid = min(candidates)
+                numbers = levelnumbers[levelid]
+                matches[channel] = ChannelMatch(
+                    levelid,
+                    levelenergies[levelid] - energy,
+                    numbers is not None and numbers[:2] == (twosplusone, l),
+                )
+                used.add(levelid)
+    return matches
+
+
+def resolve_phixs_channels(
+    channels: PhixsChannels,
+    dfupperlevels: pl.DataFrame,
+    crosssections: npt.NDArray[np.float64],
+    targetfractions: list[list[tuple[int, float]]],
+    flog,
+) -> None:
+    """Fill the cross sections and the target fractions of an ion from its target channels.
+
+    The function first selects the channels: each channel that match_channels_to_levels() gives
+    a level of the upper ion. A channel with no such level has no target in the output, so its
+    cross section goes away, and the comment block reports the share. combine_phixs_routes()
+    then applies the cut of the weak targets to the selected channels of each level. The two
+    steps are separate, so the cut sees each channel that has a target.
+    """
+    matches = match_channels_to_levels(channels, dfupperlevels)
+    uppernames = dfupperlevels["levelname"].to_list()
+    nchannels = len(channels.quantumnumbers)
+    unmatched = [channel for channel in range(nchannels) if channel not in matches]
+    log_comment(
+        flog,
+        ("phixsdata",),
+        f"{len(matches):d} of the {nchannels:d} target channels of the cross section files match a level of the upper"
+        " ion, by the energy, J and the parity, or by the term, J and the parity.",
+    )
+    for channel, match in sorted(matches.items()):
+        log_and_print(
+            flog,
+            f"The target channel {channel + 1} is the upper level {match.levelid + 1}, {uppernames[match.levelid]}."
+            f" The level is {match.energydifference_percm:+.1f} cm^-1 from the channel.",
+        )
+        if not match.sameterm:
+            twosplusone, l, _, _ = channels.quantumnumbers[channel]
+            log_detail(
+                flog,
+                ("phixsdata",),
+                "target channel with a different term",
+                f"The source gives 2S + 1 = {twosplusone} and L = {l} for the target channel {channel + 1}. The level"
+                f" at its energy, with its J and its parity, is the upper level {match.levelid + 1},"
+                f" {uppernames[match.levelid]}. The reader takes that level.",
+            )
+    if unmatched:
+        twosplusone, l, twoj, parity = channels.quantumnumbers[unmatched[0]]
+        log_comment(
+            flog,
+            ("phixsdata",),
+            f"WARNING: {len(unmatched):d} target channels match no level of the upper ion, so their cross sections"
+            f" are not in the output. The first is the channel {unmatched[0] + 1} with 2S + 1 = {twosplusone}, L = {l},"
+            f" 2J = {twoj} and the parity {parity}.",
+        )
+    for lowerlevelid, reducedtables in sorted(channels.reducedtables.items()):
+        total = sum(float(reduced.sum()) for reduced in reducedtables.values())
+        routes = [
+            (matches[channel].levelid, reduced) for channel, reduced in reducedtables.items() if channel in matches
+        ]
+        combined = combine_phixs_routes(routes) if routes else None
+        if combined is None or not combined.fractions:
+            # the code assigns nothing for this level, so write_phixs_data() will skip it
+            log_detail(
+                flog,
+                ("phixsdata",),
+                "level with zero cross section to each target",
+                f"WARNING: level {lowerlevelid + 1} has a zero cross section to each target, so it gets no table.",
+            )
+            continue
+        matchedtotal = sum(factor for _, factor in combined.factors)
+        if unmatched and matchedtotal < total:
+            log_detail(
+                flog,
+                ("phixsdata",),
+                "cross section of the channels with no level",
+                f"The channels with no level of the upper ion hold {1.0 - matchedtotal / total:.2%} of the reduced"
+                f" cross section of level {lowerlevelid + 1}.",
+            )
+        for target, factor in combined.dropped:
+            log_detail(
+                flog,
+                ("phixsdata",),
+                "target removed by the cut",
+                f"The reduced cross sections from level {lowerlevelid + 1} to upper level {target + 1} sum to"
+                f" {factor:.4e} Mb. This is at most {PHIXS_TARGET_FRACTION_CUT:.0%} of the total."
+                " Another target has a larger sum, so the output drops this target.",
+            )
+        kepttargets = {target for target, _ in combined.fractions}
+        keptfactor = sum(factor for target, factor in combined.factors if target in kepttargets)
+        log_detail(
+            flog,
+            ("phixsdata",),
+            "targets after the cut",
+            f"Level {lowerlevelid + 1} keeps {len(combined.fractions):d} of {len(routes):d} targets, with"
+            f" {keptfactor / matchedtotal:.2%} of the reduced cross section of its matched channels.",
+        )
+        targetfractions[lowerlevelid] = combined.fractions
+        crosssections[lowerlevelid] = combined.table
 
 
 def reduce_phixs_tables[KeyType](
