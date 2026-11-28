@@ -632,7 +632,12 @@ def read_adf04(
         has_indices = pl.col("upper").is_not_null() & pl.col("lower").is_not_null()
         # A row that stops before the selected temperature has no upsilon there. It is a good
         # row, and the caller takes its A-value.
-        is_short = has_indices & (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0)
+        upsilon_field = fixed_width_column(upsilon_offset, adf04_value_width)
+        is_short = has_indices & (upsilon_field.str.len_chars() == 0)
+        # Fortran fills a field with asterisks if the value does not fit. Such a row is in the fixed
+        # columns, so its A-value is good. Without this, the radiative line of the row would depend
+        # on the selected temperature.
+        is_overflow = has_indices & upsilon_field.str.contains(r"^\*+$")
         rowcount = len(collision_lines)
         collisiondf = (
             pl.LazyFrame({"line": collision_lines}, schema={"line": pl.String})
@@ -644,12 +649,14 @@ def read_adf04(
             )
             # The caller makes a transition from each row of this frame, so a row that the reader
             # cannot parse must not be in it.
-            .filter(is_short | (has_indices & pl.col("upsilon").is_not_null()))
-            .select("upper", "lower", "avalue", "upsilon")
+            .filter(is_short | is_overflow | (has_indices & pl.col("upsilon").is_not_null()))
+            .select("upper", "lower", "avalue", "upsilon", is_overflow.alias("overflow"))
             .collect()
         )
+        overflow_rows = collisiondf.filter("overflow")
+        collisiondf = collisiondf.drop("overflow")
         goodrows = collisiondf.drop_nulls(subset=["upsilon"])
-        short_rows = collisiondf.height - goodrows.height
+        short_rows = collisiondf.height - goodrows.height - overflow_rows.height
         unreadable_rows = rowcount - collisiondf.height
         if rowcount and collisiondf.is_empty():
             msg = (
@@ -703,6 +710,14 @@ def read_adf04(
     if unreadable_rows:
         log_comment(
             flog, ("transitiondata",), f"The reader skipped {unreadable_rows:d} collision rows that it could not parse."
+        )
+    if not overflow_rows.is_empty():
+        upper, lower = overflow_rows.select("upper", "lower").row(0)
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {overflow_rows.height:d} collision rows have asterisks in place of the value at the selected"
+            f" temperature, so they give no collision strength. The first has the file indices {lower} -> {upper}.",
         )
     if short_rows:
         warning = (

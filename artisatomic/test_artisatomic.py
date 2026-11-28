@@ -3102,6 +3102,42 @@ def test_read_adf04_returns_only_the_rows_that_it_can_parse(tmp_path):
     assert "WARNING" not in flog.getvalue()
 
 
+def test_read_adf04_keeps_the_radiative_rate_of_a_row_with_an_overflow_field(tmp_path):
+    """A field of asterisks at one temperature must not remove the radiative line of its row.
+
+    The row 1 -> 3 of the Sr I sample has A = 46600 /s. The copy has asterisks in its field at
+    1000 K only. The line must be the same at 1000 K and at 2000 K, and the collision strength
+    at 2000 K must still reach the caller.
+    """
+    with xopen(readadasdata.adaspath / "38_1.adf04.zst", "rt", encoding="utf-8") as fin:
+        lines = fin.read().splitlines()
+    rowindex = next(index for index, line in enumerate(lines) if line.startswith("   3   1 4.66+04 7.74-01 9.26-01"))
+    lines[rowindex] = lines[rowindex].replace(" 7.74-01", "********", 1)
+    filepath = tmp_path / "38_1.adf04"
+    filepath.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    radiative_lines = {}
+    upsilons = {}
+    logs = {}
+    for temperature in (1000.0, 2000.0):
+        flog = io.StringIO()
+        _, energylevels, dfupsilon, collisiondf = readadasdata.read_adf04(filepath, flog, temperature, 38, 1)
+        dftransitions = readadasdata.adas_transitions_frame(len(energylevels), collisiondf, filepath)
+        radiative_lines[temperature] = dftransitions.filter(lowerlevel=0, upperlevel=2).rows()
+        upsilons[temperature] = upsilon_dict(dfupsilon).get((0, 2))
+        logs[temperature] = flog.getvalue()
+
+    assert radiative_lines[1000.0] == radiative_lines[2000.0] == [(0, 2, 4.66e4)]
+    assert upsilons[1000.0] is None
+    assert upsilons[2000.0] == pytest.approx(0.926)
+    assert (
+        "WARNING: 1 collision rows have asterisks in place of the value at the selected temperature, so they give"
+        " no collision strength. The first has the file indices 1 -> 3." in logs[1000.0]
+    )
+    assert "asterisks" not in logs[2000.0]
+    assert "could not parse" not in logs[1000.0]
+
+
 def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
     """Rows that are not in the fixed columns give no value. The ion must not lose each transition silently."""
     for row in ("   1    2  6.27+08  4.29-01  5.29-01", "\t  2   1 6.27+08 4.29-01 5.29-01"):
