@@ -33,6 +33,7 @@ from artisatomic.base import add_handlers_if_not_set
 from artisatomic.base import converted_parquet_path
 from artisatomic.base import drop_transitions_of_levels
 from artisatomic.base import empty_transitions_schema
+from artisatomic.base import find_file_check_extension
 from artisatomic.base import find_file_check_extension_or_raise
 from artisatomic.base import gf_to_a_coefficient
 from artisatomic.base import h_in_ev_seconds
@@ -8297,6 +8298,94 @@ def test_readtanakajpltdata_writes_each_transition_as_permitted(tmp_path, monkey
     assert dftransitions["forbidden"].to_list() == [False, False]
     assert add_level_ids_forbidden(dflevels, dftransitions)["forbidden"].to_list() == [False, False]
     assert "WARNING: 2 of 2 transitions break the parity rule or the delta J rule" in flog.getvalue()
+
+
+def test_readtanakajpltdata_corrects_a_unique_level_assignment(tmp_path, monkeypatch):
+    """A row that names a level of almost the same energy as the correct level gets the correct level.
+
+    The file has four rows from levels above the even ground level, which has J = 2:
+    - 3 -> 1 names an even level. Level 2 is odd, 0.08 cm^-1 below it, and fits the wavelength: a unique correction.
+    - 4 -> 1 names an even level. The odd levels 5 and 6 both fit the wavelength: ambiguous.
+    - 7 -> 1 names an even level with no other level near it: unresolved.
+    - 8 -> 1 is a consistent pair.
+    """
+    lines = [
+        "# Japan-Lithuania Opacity Database for Kilonova (version 2.1)",
+        "# Gd II ",
+        "# 64 2 ",
+        "# 8 4 ",
+        "#  ",
+        "# IP = 12.090 ",
+        "# Energy levels ",
+        "# num  weight parity      E(eV)           configuration   LS_term",
+        "      1   5.0  even  0.0000000e+00          4f7_5d1_6s1    a",
+        "      2   5.0   odd  1.0000000e+00          4f7_5d1_6s1    b",
+        "      3   3.0  even  1.0000100e+00          4f7_5d1_6s1    c",
+        "      4   3.0  even  1.5000000e+00          4f7_5d1_6s1    d",
+        "      5   3.0   odd  1.5000020e+00          4f7_5d1_6s1    e",
+        "      6   7.0   odd  1.5000040e+00          4f7_5d1_6s1    f",
+        "      7   9.0  even  3.0000000e+00          4f7_5d1_6s1    g",
+        "      8   5.0   odd  2.0000000e+00          4f7_5d1_6s1    h",
+        "# Transitions ",
+        "# num_u   num_l   wavelength(nm)     g_u*A      log(g_l*f)",
+        "      3       1      1239.842     3.000e+06        -3.000 ",
+        "      4       1       826.560     3.000e+06        -3.000 ",
+        "      7       1       413.281     9.000e+06        -3.000 ",
+        "      8       1       619.921     5.000e+06        -3.000 ",
+    ]
+    (tmp_path / "64_2.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", tmp_path)
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(64, 2, flog)
+
+    assert dftransitions.select("lowerlevel", "upperlevel").rows() == [(0, 1), (0, 3), (0, 6), (0, 7)]
+    # the first row has the weight 5 of its new upper level, and not the weight 3 of the named level
+    assert dftransitions["A"].to_list() == pytest.approx([3e6 / 5, 3e6 / 3, 9e6 / 9, 5e6 / 5])
+    assert dftransitions["forbidden"].to_list() == [False] * 4
+    comments = "\n".join(flog.comments["transitiondata"])
+    assert (
+        "3 of 4 transitions name two levels that break the parity rule or the delta J rule of an electric dipole"
+        " transition. For 1 of them, one other level fits the wavelength and the rules, and the reader takes that"
+        " level. Such a level is at most 0.081 cm^-1 from the named level. The first is the row 3 -> 1 at 1239.842 nm,"
+        " which is now 2 -> 1. 1 have more than one such level (ambiguous), and 1 have none (unresolved)." in comments
+    )
+    assert "WARNING: 2 of 4 transitions break the parity rule or the delta J rule" in comments
+    assert dflevels.height == 8
+
+
+@pytest.mark.parametrize(
+    ("atomic_number", "counts"),
+    [(64, (54377, 1383763, 53716, 78, 583)), (60, (51964, 2929144, 51671, 83, 210))],
+)
+def test_readtanakajpltdata_corrects_the_level_assignments_of_gd2_and_nd2(atomic_number, counts, monkeypatch):
+    """The full Gd II and Nd II files: the count of rows that break a rule, and the counts of each result."""
+    datapath = PYDIR.parent / "atomic-data-tanaka-jplt" / "data_v2.1"
+    if find_file_check_extension(datapath / f"{atomic_number}_2.txt") is None:
+        pytest.skip("the JPLT data_v2.1 files are not present")
+    monkeypatch.setattr(readtanakajpltdata, "jpltpath", datapath)
+    nbreaks, ntransitions, ncorrected, nambiguous, nunresolved = counts
+    flog = IonLog(io.StringIO(), {"adata": [], "transitiondata": []})
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, dftransitions = readtanakajpltdata.read_levels_and_transitions(atomic_number, 2, flog)
+    comments = "\n".join(flog.comments["transitiondata"])
+    assert f"{nbreaks} of {ntransitions} transitions name two levels that break the parity rule" in comments
+    assert f"For {ncorrected} of them, one other level fits the wavelength and the rules" in comments
+    assert (
+        f"{nambiguous} have more than one such level (ambiguous), and {nunresolved} have none (unresolved)." in comments
+    )
+    assert nbreaks == ncorrected + nambiguous + nunresolved
+    # the rows that still break a rule are the ambiguous rows and the unresolved rows
+    parity = dflevels["parity"].to_numpy()
+    jvalues = dflevels["j"].to_numpy()
+    lower = dftransitions["lowerlevel"].to_numpy()
+    upper = dftransitions["upperlevel"].to_numpy()
+    satisfies = (parity[lower] != parity[upper]) & (np.abs(jvalues[lower] - jvalues[upper]) <= 1)
+    assert int((~satisfies).sum()) <= nambiguous + nunresolved
+    if atomic_number == 64:
+        # the row 2884 -> 4 at 136.866 nm connected two odd levels. Level 2883 is even.
+        assert "The first is the row 2884 -> 4 at 136.866 nm, which is now 2883 -> 4." in comments
+        assert (parity[3], parity[2883], parity[2882]) == (1, 1, 0)
 
 
 def test_readtanakajpltdata_drops_a_repeated_transition_row(tmp_path, monkeypatch):

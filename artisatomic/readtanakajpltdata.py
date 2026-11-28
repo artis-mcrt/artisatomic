@@ -8,6 +8,7 @@ The second line of each data file names the paper of that ion.
 
 import re
 
+import numpy as np
 import polars as pl
 
 from artisatomic.base import add_handlers_if_not_set
@@ -221,6 +222,7 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
             raise ValueError(msg)
 
     check_wavelengths_against_levels(dftransitions, dflevels, filename, flog)
+    dftransitions = correct_level_assignments(dftransitions, dflevels, flog)
 
     # a row that repeats the levels, the wavelength and g_u*A of an earlier row is the same line two
     # times. ARTIS adds the A values of two rows of one level pair, so it would double the line.
@@ -268,13 +270,131 @@ def read_levels_and_transitions(atomic_number, ion_stage, flog):
     return ionization_energy_in_ev, dflevels, dftransitions.with_columns(forbidden=pl.lit(value=False))
 
 
+# The wavelength column has three decimal places in nm. A wavelength fits a pair of levels if
+# the wave number of the pair is within this count of half units of the last place, plus a
+# constant, of the wave number of the wavelength. In Gd II and Nd II, 99.5% and 99.9% of the
+# rows whose levels satisfy the selection rules fit with these two values.
+wavelength_fit_half_units = 1.2
+wavelength_fit_constant_percm = 0.06
+# the unit of the last place of the wavelength column [nm]
+wavelength_unit_nm = 0.001
+# with fewer rows that satisfy the rules, the scale of the wavelengths stays 1
+min_rows_for_wavelength_scale = 100
+# A level can replace a named level only if it is this near to it [cm^-1]. In the 14 files with
+# such rows, each replacement but a few of Dy II is less than 0.36 cm^-1 from the named level. A
+# level far from the named level that fits the wavelength is a chance fit.
+replacement_level_limit_percm = 1.0
+
+
+def satisfies_e1_rules(parity_a, j_a, parity_b, j_b):
+    """Whether two levels can have an electric dipole transition: a change of parity, |delta J| <= 1, and no J = 0 -> 0."""
+    return (parity_a != parity_b) & (abs(j_a - j_b) <= 1) & ~((j_a == 0) & (j_b == 0))
+
+
+def correct_level_assignments(dftransitions: pl.DataFrame, dflevels: pl.DataFrame, flog) -> pl.DataFrame:
+    """Give the correct level to each transition that names a level of almost the same energy as the correct one.
+
+    The file lists electric dipole transitions only. 14 GRASP files of the lanthanides have rows
+    whose two levels break a selection rule (1.7% of the transitions of data_v2.1). The parity
+    or the J of one named level is then wrong, because the row names a level that is less than
+    0.4 cm^-1 from the correct level. The wavelength of the row belongs to the correct pair.
+
+    For such a row, the function looks for a level that can replace one of the two named levels.
+    The new pair must satisfy the selection rules, and its energy difference must fit the
+    wavelength. It must also be within replacement_level_limit_percm of the level that it
+    replaces. If exactly one level does that, the row gets that level. With more than one
+    level, the assignment is ambiguous, and with none it is unresolved. Such a row keeps its
+    two levels. The caller divides g_u*A by the weight of the upper level after this step, so a
+    row with a new upper level gets A from the weight of that level.
+
+    The wavelengths of a file differ from the level energies by a constant factor (5.5e-6 in
+    Gd II and in Nd II). The function takes the factor from the rows that satisfy the rules.
+    """
+    if dftransitions.is_empty():
+        return dftransitions
+    levels = dflevels.sort("levelid")
+    energy = levels["energyabovegsinpercm"].to_numpy()
+    parity = levels["parity"].to_numpy()
+    jvalues = levels["j"].to_numpy()
+    first = dftransitions["upperlevel"].to_numpy().copy()
+    second = dftransitions["lowerlevel"].to_numpy().copy()
+    wavelength_nm = dftransitions["wavelength_nm"].to_numpy()
+    satisfies = satisfies_e1_rules(parity[first], jvalues[first], parity[second], jvalues[second])
+    breaks = np.flatnonzero(~satisfies)
+    if breaks.size == 0:
+        return dftransitions
+
+    wavenumber = 1e7 / wavelength_nm
+    scale = 1.0
+    if satisfies.sum() >= min_rows_for_wavelength_scale:
+        scale = float(np.median((np.abs(energy[first] - energy[second]) / wavenumber)[satisfies]))
+    wavenumber *= scale
+    tolerance = (
+        wavelength_fit_half_units * 1e7 * (0.5 * wavelength_unit_nm) / wavelength_nm**2 + wavelength_fit_constant_percm
+    )
+
+    order = np.argsort(energy, kind="stable")
+    sortedenergy = energy[order]
+
+    def fitting_levels(target: float, tol: float, exclude: int, partner: int) -> list[int]:
+        start, stop = np.searchsorted(sortedenergy, [target - tol, target + tol], side="left")
+        return [
+            int(levelid)
+            for levelid in order[start : stop + 1]
+            if levelid != exclude
+            and abs(energy[levelid] - target) <= tol
+            and abs(energy[levelid] - energy[exclude]) <= replacement_level_limit_percm
+            and satisfies_e1_rules(parity[levelid], jvalues[levelid], parity[partner], jvalues[partner])
+        ]
+
+    ncorrected = 0
+    nambiguous = 0
+    largestdistance = 0.0
+    firstcorrection = ""
+    for row in breaks.tolist():
+        levelfirst, levelsecond = int(first[row]), int(second[row])
+        sign = 1.0 if energy[levelfirst] >= energy[levelsecond] else -1.0
+        newfirst = fitting_levels(energy[levelsecond] + sign * wavenumber[row], tolerance[row], levelfirst, levelsecond)
+        newsecond = fitting_levels(energy[levelfirst] - sign * wavenumber[row], tolerance[row], levelsecond, levelfirst)
+        if len(newfirst) + len(newsecond) > 1:
+            nambiguous += 1
+            continue
+        if newfirst:
+            distance = abs(energy[newfirst[0]] - energy[levelfirst])
+            first[row] = newfirst[0]
+        elif newsecond:
+            distance = abs(energy[newsecond[0]] - energy[levelsecond])
+            second[row] = newsecond[0]
+        else:
+            continue
+        if not firstcorrection:
+            firstcorrection = (
+                f" The first is the row {levelfirst + 1} -> {levelsecond + 1} at {wavelength_nm[row]} nm, which is now"
+                f" {int(first[row]) + 1} -> {int(second[row]) + 1}."
+            )
+        ncorrected += 1
+        largestdistance = max(largestdistance, float(distance))
+
+    nunresolved = breaks.size - ncorrected - nambiguous
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"{breaks.size:d} of {dftransitions.height:d} transitions name two levels that break the parity rule or the"
+        f" delta J rule of an electric dipole transition. For {ncorrected:d} of them, one other level fits the"
+        f" wavelength and the rules, and the reader takes that level. Such a level is at most {largestdistance:.3f} cm^-1"
+        f" from the named level.{firstcorrection} {nambiguous:d} have more than one such level (ambiguous), and"
+        f" {nunresolved:d} have none (unresolved). These keep their two levels.",
+    )
+    return dftransitions.with_columns(upperlevel=pl.Series(first), lowerlevel=pl.Series(second))
+
+
 def log_rule_breaks(dftransitions: pl.DataFrame, dflevels: pl.DataFrame, flog) -> None:
     """Report the transitions whose levels break a selection rule of an electric dipole transition.
 
     The two rules are a change of the parity, and |delta J| <= 1 with no J = 0 -> J = 0. The
     transitions are electric dipole transitions, so a break shows a wrong level number in the
-    file. 14 GRASP files of the lanthanides have such transitions (1.7% of the transitions of
-    data_v2.1). A level less than 0.3 cm-1 from the named level fits 91% to 100% of them in each file.
+    file. correct_level_assignments() gives most of such rows the correct level, and this
+    function counts the rows that remain.
     """
     if dftransitions.is_empty():
         return
