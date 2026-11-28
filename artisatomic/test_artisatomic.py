@@ -1808,6 +1808,95 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [3.0]
 
 
+def converted_table(value: float, hdf5name: str = "data.h5") -> tuple[str, pl.DataFrame, dict[str, str]]:
+    """Give the table a.parquet as convert_file() gives it to write_tables(), with the record of its HDF5 file."""
+    return ("a.parquet", pl.DataFrame({"value": [value]}), {"hdf5_file": hdf5name, "hdf5_file_sha256": "00"})
+
+
+def test_write_tables_keeps_a_parquet_file_that_the_script_did_not_write(tmp_path):
+    """An unrelated Parquet file beside the converted tables must stop the conversion, and each file must stay.
+
+    The script replaces the output folder as a whole. The extension .parquet does not show that
+    the script wrote a file.
+    """
+    hdf5path = tmp_path / "data.h5"
+    hdf5path.write_bytes(b"")
+    outputfolder = tmp_path / "data"
+    tables = [
+        converted_table(1.0),
+        ("group/b.parquet", pl.DataFrame({"value": [5.0]}), {"hdf5_file": "data.h5", "hdf5_file_sha256": "00"}),
+    ]
+    hdf5_to_parquet.write_tables(outputfolder, tables, hdf5path)
+    pl.DataFrame({"result": [42]}).write_parquet(outputfolder / "analysis.parquet")
+
+    def contents() -> dict[str, bytes]:
+        return {
+            str(path.relative_to(tmp_path)): path.read_bytes() for path in sorted(tmp_path.rglob("*")) if path.is_file()
+        }
+
+    before = contents()
+    with pytest.raises(FileExistsError, match=r"did not write from data\.h5, for example .*analysis\.parquet"):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert contents() == before
+
+    # a file that is not a Parquet file, with the extension .parquet
+    (outputfolder / "analysis.parquet").write_text("notes of the user", encoding="utf-8")
+    before = contents()
+    with pytest.raises(FileExistsError, match=r"analysis\.parquet"):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert contents() == before
+
+    # with no such file, a changed source converts again, and a table that it no longer holds goes away
+    (outputfolder / "analysis.parquet").unlink()
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert sorted(str(path.relative_to(outputfolder)) for path in outputfolder.rglob("*")) == ["a.parquet"]
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
+
+
+def test_write_tables_replaces_the_tables_of_an_earlier_release(tmp_path):
+    """A table with the record of the same HDF5 file and a different hash is a table of the script."""
+    hdf5path = tmp_path / "data.h5"
+    hdf5path.write_bytes(b"")
+    outputfolder = tmp_path / "data"
+    outputfolder.mkdir()
+    # the metadata of the first release of the script: the name and the hash of the HDF5 file
+    pl.DataFrame({"value": [1.0]}).write_parquet(
+        outputfolder / "old.parquet", metadata={"hdf5_file": "data.h5", "hdf5_file_sha256": "an earlier hash"}
+    )
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert [path.name for path in outputfolder.iterdir()] == ["a.parquet"]
+
+
+def test_write_tables_compares_the_source_name_as_the_file_system_does(tmp_path):
+    """Tables of a different HDF5 file with the same output folder stay. A second spelling of one file converts."""
+    outputfolder = tmp_path / "data"
+    (tmp_path / "data.h5").write_bytes(b"")
+    (tmp_path / "data.hdf5").write_bytes(b"")
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0, "data.hdf5")], tmp_path / "data.hdf5")
+    with pytest.raises(FileExistsError, match=r"did not write from data\.h5"):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [1.0]
+    # a recorded name that is a path names no file beside the HDF5 file
+    hdf5_to_parquet.write_tables(tmp_path / "other", [converted_table(1.0, "../data.h5")], tmp_path / "other.h5")
+    with pytest.raises(FileExistsError, match=r"did not write from other\.h5"):
+        hdf5_to_parquet.write_tables(tmp_path / "other", [converted_table(2.0, "other.h5")], tmp_path / "other.h5")
+
+    # Data.h5 and data.h5 are one file only on a file system that ignores the case
+    upperpath = tmp_path / "Data.h5"
+    onefile = upperpath.exists()
+    if not onefile:
+        upperpath.write_bytes(b"")
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(3.0, "data.hdf5")], tmp_path / "data.hdf5")
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(4.0, "Data.h5")], tmp_path / "data.hdf5")
+    if onefile:
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(5.0)], tmp_path / "data.h5")
+        assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [5.0]
+    else:
+        with pytest.raises(FileExistsError, match=r"did not write from data\.h5"):
+            hdf5_to_parquet.write_tables(outputfolder, [converted_table(5.0)], tmp_path / "data.h5")
+        assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [4.0]
+
+
 def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_path, monkeypatch):
     """Another process can make the output folder between the two renames. The backup must stay.
 
@@ -1815,7 +1904,7 @@ def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_p
     the earlier tables.
     """
     outputfolder = tmp_path / "data"
-    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0)], tmp_path / "data.h5")
     original_rename = Path.rename
 
     def rename_after_another_process(self, target):
@@ -1827,7 +1916,7 @@ def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_p
 
     monkeypatch.setattr(Path, "rename", rename_after_another_process)
     with pytest.raises(RuntimeError, match="could not put back") as excinfo:
-        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
     monkeypatch.undo()
     backupfolder = Path(str(excinfo.value).removesuffix(".").rpartition(" ")[2])
     assert pl.read_parquet(backupfolder / "a.parquet")["value"].to_list() == [1.0]
@@ -1836,7 +1925,7 @@ def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_p
 def test_hdf5_to_parquet_finishes_when_an_interrupt_follows_the_last_rename(tmp_path, monkeypatch):
     """An interrupt after the last rename finds the new tables in their place, so the backup goes away."""
     outputfolder = tmp_path / "data"
-    hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [1.0]}), {})])
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0)], tmp_path / "data.h5")
     original_rename = Path.rename
 
     def rename_then_interrupt(self, target):
@@ -1847,7 +1936,7 @@ def test_hdf5_to_parquet_finishes_when_an_interrupt_follows_the_last_rename(tmp_
 
     monkeypatch.setattr(Path, "rename", rename_then_interrupt)
     with pytest.raises(KeyboardInterrupt):
-        hdf5_to_parquet.write_tables(outputfolder, [("a.parquet", pl.DataFrame({"value": [2.0]}), {})])
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
     monkeypatch.undo()
     assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
     assert [child.name for child in tmp_path.iterdir()] == ["data"]
@@ -1858,7 +1947,7 @@ def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     outputfolder = tmp_path / "data.parquet"
     outputfolder.write_text("a table of the user")
     with pytest.raises(FileExistsError, match="not a folder"):
-        hdf5_to_parquet.write_tables(outputfolder, [])
+        hdf5_to_parquet.write_tables(outputfolder, [], tmp_path / "data.h5")
     assert outputfolder.read_text() == "a table of the user"
     assert [child.name for child in tmp_path.iterdir()] == ["data.parquet"]
 
@@ -1867,7 +1956,7 @@ def test_hdf5_to_parquet_refuses_a_file_at_the_output_folder_path(tmp_path):
     outputfolder.mkdir()
     (outputfolder / "table.parquet").symlink_to(tmp_path / "data.parquet")
     with pytest.raises(FileExistsError, match=r"table\.parquet"):
-        hdf5_to_parquet.write_tables(outputfolder, [])
+        hdf5_to_parquet.write_tables(outputfolder, [], tmp_path / "data.h5")
     assert (outputfolder / "table.parquet").is_symlink()
 
 
