@@ -7097,8 +7097,8 @@ def oii_forbidden_flags(
 def test_readkuruczdata_keeps_the_parity_of_the_o2_levels(tmp_path, monkeypatch):
     """The four O II lines between the odd levels 2p3 2D and 2p3 2P are forbidden, with coll_str = -2.
 
-    The reader gave each level a null parity, so three of the four lines were permitted and ARTIS
-    used the collision approximation of a permitted line. The fourth has a change of J of 2.
+    The reader gave each level a null parity, so three of the four lines were permitted. ARTIS
+    then used the collision approximation of a permitted line. The fourth has a change of J of 2.
     """
     doublet, dflevels, comments = oii_forbidden_flags(tmp_path, monkeypatch, oii_permitted_rows + oii_forbidden_rows)
     assert doublet == {
@@ -7143,6 +7143,33 @@ def test_readkuruczdata_gives_no_parity_to_a_level_with_conflicting_labels(tmp_p
     }
 
 
+def test_kurucz_level_parities_read_the_mark_in_the_term_only():
+    """A "*" in a parent term is not the odd-parity mark of a level, so such a file keeps an odd parity from the orbitals."""
+
+    def parities(labels: list[str]) -> list[int | None]:
+        count = len(labels)
+        dfgfall = pl.DataFrame(
+            {
+                "energyabovegsinpercm_lower": [0.0] * count,
+                "j_lower": [0.0] * count,
+                "labelkey_lower": [""] * count,
+                "label_lower": ["5s2 1S"] * count,
+                "energyabovegsinpercm_upper": [1000.0 * (index + 1) for index in range(count)],
+                "j_upper": [1.0] * count,
+                "labelkey_upper": [""] * count,
+                "label_upper": labels,
+            }
+        )
+        return readkuruczdata.level_parities(dfgfall).sort("energyabovegsinpercm")["parity"].to_list()[1:]
+
+    # "s5p 3P" is 5s 5p, which is odd by its orbitals
+    assert readkuruczdata.kurucz_label_parity("s5p 3P") == 1
+    # no label has a mark in its term: the "*" of the second label is in its parent terms
+    assert parities(["s5p 3P", "4f3(4I*)6s6p*(3P*) 5I"])[0] == 1
+    # a mark in the term of one label: an odd parity from the orbitals of a label with no mark has no use
+    assert parities(["s5p 3P", "5s6p *3P"]) == [None, 1]
+
+
 def test_readkuruczdata_removes_a_parity_that_a_strong_line_contradicts(tmp_path, monkeypatch):
     """A strong line is an electric dipole line. Two levels of the same label parity on such a line lose the parity.
 
@@ -7165,9 +7192,9 @@ def test_readkuruczdata_removes_a_parity_that_a_strong_line_contradicts(tmp_path
         (26830.5, 40466.9): (True, -2.0),
     }
     assert (
-        "The labels give a parity to 7 of 7 levels. The reader removed the parity of 2 of them. 1 lines with A"
-        " above 100000 /s connect two levels of the same label parity. Such a line changes the parity, so one of"
-        " its two labels is wrong." in comments
+        "The labels give a parity to 7 of 7 levels. The reader removed the parity of 2 of them. It found 1 line"
+        " with A above 100000 /s between two levels of the same label parity. Such a line changes the parity, so"
+        " one of its two labels is wrong." in comments
     )
 
 

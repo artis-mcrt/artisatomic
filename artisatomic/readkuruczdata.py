@@ -721,9 +721,9 @@ def level_parities(dfgfall: pl.DataFrame) -> pl.DataFrame:
     matches no other parity, so add_level_ids_forbidden() then leaves the lines of the level
     permitted.
 
-    kurucz_label_parity() reads the odd-parity mark "*", and for a label with no mark it reads
-    the orbitals of the configuration. In a file with marks, the function accepts only an even
-    parity from the orbitals.
+    kurucz_label_parity() reads the odd-parity mark "*" in the term, and for a label with no mark
+    it reads the orbitals of the configuration. In a file with marks, the function accepts only
+    an even parity from the orbitals.
     """
     levellabels = pl.concat(
         dfgfall.select(
@@ -735,13 +735,14 @@ def level_parities(dfgfall: pl.DataFrame) -> pl.DataFrame:
         for side in ("lower", "upper")
     ).unique(maintain_order=True)
     labels = levellabels["label"].unique().to_list()
-    # A file that marks an odd level with "*" marks each odd level. An odd parity from the orbitals
-    # of a label with no mark is then the sign of a label that leaves out core electrons: Ne I
-    # writes the even 2p5 3p as "3p".
-    file_has_marks = any("*" in label for label in labels)
+    # A file that marks an odd level with "*" marks each odd level. In such a file, a label with no
+    # mark can give an odd parity from its orbitals. That label leaves out core electrons. Ne I
+    # writes the even 2p5 3p as "3p". The mark is in the term of a label. A "*" in a parent term, as
+    # in "4f3(4I*)6s6p*(3P*) 5I", is not a mark of the level.
+    hasmark = {label: "*" in label_words(label)[1] for label in labels}
     parities = {label: kurucz_label_parity(label) for label in labels}
-    if file_has_marks:
-        parities = {label: None if parity == 1 and "*" not in label else parity for label, parity in parities.items()}
+    if any(hasmark.values()):
+        parities = {label: None if parity == 1 and not hasmark[label] else parity for label, parity in parities.items()}
     labelparity = pl.col("label").replace_strict(parities, return_dtype=pl.Int64)
     return (
         levellabels.with_columns(labelparity=labelparity)
@@ -782,9 +783,9 @@ def drop_parities_that_strong_lines_contradict(dflevels: pl.DataFrame, transitio
         flog,
         ("transitiondata",),
         f"The labels give a parity to {known:d} of {dflevels.height:d} levels. The reader removed the parity of"
-        f" {levelids.len():d} of them. {contradictions.height:d} lines with A above {min_a_asserts_e1:g} /s connect two"
-        " levels of the same label parity. Such a line changes the parity, so one of its two labels is wrong."
-        " A line between two levels of the same parity is forbidden.",
+        f" {levelids.len():d} of them. It found {lines_text(contradictions.height)} with A above {min_a_asserts_e1:g} /s"
+        " between two levels of the same label parity. Such a line changes the parity, so one of its two labels"
+        " is wrong. A line between two levels of the same parity is forbidden.",
     )
     return dflevels.with_columns(
         parity=pl.when(pl.col("levelid").is_in(levelids.implode())).then(None).otherwise(pl.col("parity"))
