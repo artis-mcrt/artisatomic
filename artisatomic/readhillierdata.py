@@ -1389,6 +1389,8 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
             # a new block of points starts, so the reader stores a block that no blank line ended as it is
             self.finish_tabulated_block(validate=False)
+            # the fit before this line must be complete, before its declared count goes away
+            self.check_fit_is_complete()
             self.numpointsexpected = int(row[0])
             self.declared_numpoints = self.numpointsexpected
 
@@ -1412,7 +1414,8 @@ class PhotFileReader:
         take_fit_coefficient() and take_vy95_row() make a table only when the count is complete.
         A file that stops in a block, or a block with a missing row, would thus give the level no
         table and no message. The caller runs this at each end of a block: a blank line, the next
-        "!Configuration name" line, and the end of the file.
+        "!Configuration name" line, the next "!Number of cross-section points" line, and the end of
+        the file.
 
         The check uses the count of the "!Number of cross-section points" line, and not the count
         of the fit type. Many files declare one number, a zero, for a type 1 level with no cross

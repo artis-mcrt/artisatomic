@@ -5336,6 +5336,13 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
             ),
             "the next block",
         ),
+        (
+            (
+                "1                                       !Type of cross-section\n"
+                "3                                       !Number of cross-section points\n"
+            ),
+            "the next count line of the same level",
+        ),
         ("", "the end of the file"),
     ],
 )
@@ -5385,9 +5392,11 @@ def test_photfilereader_rejects_an_incomplete_analytic_fit(tmp_path, nextblock, 
     with pytest.raises(ValueError, match=message):
         read(groundblock + excitedblock("2.0\n1.0\n") + nextblock)
 
-    # the complete fit still gives a table at the same boundary
-    reader = read(groundblock + excitedblock("2.0\n1.0\n3.0\n") + nextblock)
-    assert {"A", "B"} <= set(reader.phixstables[0]), boundary
+    # the complete fit still gives a table at the same boundary. A second count line of one level
+    # with no number after it is a different defect, which stops the read at the end of the file.
+    if boundary != "the next count line of the same level":
+        reader = read(groundblock + excitedblock("2.0\n1.0\n3.0\n") + nextblock)
+        assert {"A", "B"} <= set(reader.phixstables[0]), boundary
 
 
 def test_photfilereader_accepts_a_fit_block_that_declares_one_zero(tmp_path):
