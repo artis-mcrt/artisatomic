@@ -5914,6 +5914,39 @@ def test_cmfgen_keeps_the_k3_levels_that_have_only_a_cross_section(tmp_path):
         assert "3p4(3P)3d_2Pe[1/2]" not in iondataofrun.dfenergylevels["levelname"].to_list()
 
 
+def test_phot_file_level_names_keeps_a_fit_with_a_zero_first_coefficient(tmp_path, monkeypatch):
+    """Only the type 0 and a block of one number that is zero give no cross section. A first coefficient of zero is valid."""
+    text = (
+        "\n*****\n  header comment\n"
+        "X                                       !Configuration name\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+        "A                                       !Configuration name\n"
+        "1                                       !Type of cross-section\n"
+        "1                                       !Number of cross-section points\n"
+        "      0.00\n\n"
+        "B[1/2]                                  !Configuration name\n"
+        "5                                       !Type of cross-section\n"
+        "5                                       !Number of cross-section points\n"
+        "0.0\n1.0\n0.5\n0.1\n2.0\n\n"
+        "C                                       !Configuration name\n"
+        "0                                       !Type of cross-section\n"
+        "1                                       !Number of cross-section points\n"
+        "1.0\n\n"
+        "D                                       !Configuration name\n"
+        "1                                       !Type of cross-section\n"
+        "3                                       !Number of cross-section points\n"
+        "2.0\n1.0\n3.0\n"
+    )
+    (tmp_path / "phot_test").write_text(text, encoding="utf-8")
+    monkeypatch.setattr(rhd, "hillier_ion_folder", lambda _atomic_number, _ion_stage: str(tmp_path))
+    monkeypatch.setitem(rhd.ions_data, (56, 2), rhd.IonFiles("", "osc_test", ("phot_test", "phot_absent"), ""))
+    # X comes before the "!Cross-section unit" line, so it is a part of the header. B has no J splitting.
+    assert rhd.phot_file_level_names(56, 2) == {"B", "D"}
+    assert rhd.phot_file_level_names(999, 1) == set()
+
+
 def test_cmfgen_drops_a_level_whose_cross_section_is_zero_on_the_output_grid():
     """A name in a phot file does not keep a level. The level must get a table in the run.
 

@@ -2482,13 +2482,15 @@ def collision_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
 
 
 def phot_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
-    """Give the level names that the phot files of one ion give a cross section.
+    """Give the level names that the phot files of one ion can give a cross section.
 
-    The level reader keeps such a level, also if no radiative transition and no collision row
-    names it. A block of the type 0, and a block whose first number is zero, give no cross
-    section: many files give a type 1 level one number, a zero. Without J splitting, the name
-    has no J, as in PhotFileReader.take_event_line(). The scan reads only the first data row of
-    each block. PhotFileReader does each check of the files.
+    The level reader tests each such level that no radiative transition and no collision row
+    names (see read_levels_and_transitions_from_file()). Two kinds of block give no cross
+    section: a block of the type 0, and a block that declares one number, which is a zero. Many
+    files give a type 1 level such a block. A zero as the first of more numbers is a valid
+    coefficient: the type 5 fit is 10^(a + ...). Without J splitting, the name has no J, as in
+    PhotFileReader.take_event_line(). The scan reads only the first data row of each block.
+    PhotFileReader does each check of the files.
     """
     ionfiles = ions_data.get((atomic_number, ion_stage))
     if ionfiles is None:
@@ -2503,13 +2505,15 @@ def phot_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
         in_table = False
         blockname = ""
         crosssectiontype = -1
+        declaredcount = 0
         with xopen_check_extension(filename) as fphot:
             for line in fphot:
                 if "!" not in line:
                     if blockname and crosssectiontype != -1:
                         row = line.split()
                         if row:
-                            if crosssectiontype != 0 and isfloat(row[0]) and fortran_float(row[0]) != 0.0:
+                            onezero = declaredcount == 1 and isfloat(row[0]) and fortran_float(row[0]) == 0.0
+                            if crosssectiontype != 0 and not onezero:
                                 names.add(blockname)
                             blockname = ""
                     continue
@@ -2523,8 +2527,11 @@ def phot_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
                 elif marker.startswith("Configuration name") and in_table and len(row) >= 2:
                     blockname = row[0] if j_splitting_on else row[0].split("[")[0]
                     crosssectiontype = -1
+                    declaredcount = 0
                 elif marker == "Type of cross-section":
                     crosssectiontype = int(row[0])
+                elif marker == "Number of cross-section points":
+                    declaredcount = int(row[0])
     return names
 
 
