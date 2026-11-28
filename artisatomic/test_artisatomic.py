@@ -5616,6 +5616,10 @@ def test_cmfgen_fit_reaches_the_end_of_a_wide_output_grid(interpolation):
 
     table = readhillierdata.get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, grid_end=grid_end)
     assert table[-1, 0] / table[0, 0] >= grid_end
+    # the count of points grows with the logarithm of the end of the grid, and not with the end
+    assert len(readhillierdata.fit_energy_grid(1e8)) < 10000
+    assert readhillierdata.fit_energy_grid(1e8)[-1] >= 1e8
+    assert readhillierdata.fit_energy_grid(20.9) is readhillierdata.fit_energy_div_threshold
     # the points up to 20.96 are the points of the default grid, so the default output does not change
     defaulttable = readhillierdata.get_seaton_phixstable(lambda_angstrom, sigmat, beta, s)
     assert defaulttable.shape == (1000, 2)
@@ -6411,8 +6415,9 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     # a file that the earlier release did not write stays, and so does its folder. The earlier
     # release gave a log the element symbol and the ion stage as its name.
     oldfolder.mkdir()
-    usernames = ["fe.txt", "fe02.txt", "notes.md", "notes.txt", "xx2.txt"]
-    for name in ("fe2.txt", "u12.txt", *usernames):
+    # he4.txt and n9.txt name an ion stage that the element does not have. n1.txt is the log of N I.
+    usernames = ["fe.txt", "fe02.txt", "he4.txt", "n9.txt", "notes.md", "notes.txt", "xx2.txt"]
+    for name in ("fe2.txt", "he3.txt", "n1.txt", "n8.txt", "u12.txt", *usernames):
         (oldfolder / name).write_text("text\n", encoding="utf-8")
     remove_old_log_folder(tmp_path)
     assert sorted(path.name for path in oldfolder.iterdir()) == usernames

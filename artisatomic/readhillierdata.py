@@ -865,17 +865,20 @@ def fit_energy_grid(grid_end: float = 0.0) -> npt.NDArray[np.float64]:
 
     grid_end is the largest multiple that the output grid needs. Up to the end of
     fit_energy_div_threshold, the grid is that array, so the default output grid gets the same
-    tables for each value of grid_end. Above it, the grid continues to grid_end with the last
-    step of that array. The downsample would otherwise continue a table as nu^-3 above 20.96
-    times the threshold, and most fits do not fall as nu^-3.
+    tables for each value of grid_end. Above it, the grid continues to grid_end with the ratio
+    of the last two points of that array (1.0019). The downsample would otherwise continue a table
+    as nu^-3 above 20.96 times the threshold, and most fits do not fall as nu^-3.
+
+    A constant ratio and not a constant step: the count of points then grows with the logarithm
+    of grid_end. An output grid to 1e8 times the threshold needs 8000 more points, where a
+    constant step would need 2.5e9.
     """
-    laststep = fit_energy_div_threshold[-1] - fit_energy_div_threshold[-2]
-    extrapoints = math.ceil((grid_end - fit_energy_div_threshold[-1]) / laststep)
-    if extrapoints <= 0:
+    lastpoint = fit_energy_div_threshold[-1]
+    if grid_end <= lastpoint:
         return fit_energy_div_threshold
-    grid = np.concatenate(
-        (fit_energy_div_threshold, fit_energy_div_threshold[-1] + laststep * np.arange(1, extrapoints + 1))
-    )
+    ratio = lastpoint / fit_energy_div_threshold[-2]
+    extrapoints = math.ceil(math.log(grid_end / lastpoint) / math.log(ratio))
+    grid = np.concatenate((fit_energy_div_threshold, lastpoint * ratio ** np.arange(1, extrapoints + 1)))
     # the cache gives one array to each caller
     grid.flags.writeable = False
     return grid

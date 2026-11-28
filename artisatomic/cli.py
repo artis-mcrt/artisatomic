@@ -694,7 +694,8 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
     A user could take such a file for a record of the new run. The name of a log file was the
     element symbol in lower case, the ion stage, and ".txt", for example fe2.txt. The function
-    removes only a file with such a name and the copy of the ion handlers. Each other file is a
+    removes only a file with such a name, for an ion stage that the element can have, and the
+    copy of the ion handlers. Each other file is a
     file of the user, and it stays. The function then removes the folder if the folder is empty.
 
     A symbolic link at atomic_data_logs stays, and so does each file of its target. The target
@@ -708,11 +709,13 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
     old_log_folder = output_folder / "atomic_data_logs"
     if old_log_folder.is_symlink() or not old_log_folder.is_dir():
         return
-    symbols = {symbol.lower() for symbol in elsymbols if symbol}
+    # The first entry of elsymbols is not an element. An ion of the element Z has an ion stage of Z + 1 at most.
+    atomic_numbers = {symbol.lower(): atomic_number for atomic_number, symbol in enumerate(elsymbols) if atomic_number}
     oldfiles = [
         logfile
         for logfile in old_log_folder.glob("*.txt")
-        if (namematch := old_log_name_regex.fullmatch(logfile.name)) is not None and namematch.group(1) in symbols
+        if (namematch := old_log_name_regex.fullmatch(logfile.name)) is not None
+        and int(namematch.group(2)) <= atomic_numbers.get(namematch.group(1), -1) + 1
     ]
     for oldfile in sorted([*oldfiles, old_log_folder / "artisatomicionhandlers.json"]):
         if oldfile.is_file() and not is_same_file(oldfile, keep):
@@ -723,7 +726,7 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
 
 
 # the element symbol and the ion stage, with no zero at the left
-old_log_name_regex = re.compile(r"([a-z]{1,2})[1-9][0-9]*\.txt")
+old_log_name_regex = re.compile(r"([a-z]{1,2})([1-9][0-9]*)\.txt")
 
 
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:
