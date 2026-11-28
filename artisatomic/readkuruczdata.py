@@ -19,6 +19,7 @@ from artisatomic.base import leveltuples_to_pldataframe
 from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_detail
+from artisatomic.base import min_a_asserts_e1
 from artisatomic.base import nist_ionization_energy_ev
 from artisatomic.base import null_if_blank
 from artisatomic.base import path_in_data_folder
@@ -709,6 +710,87 @@ def with_level_label_keys(dfgfall: pl.DataFrame) -> pl.DataFrame:
     return gfall.collect()
 
 
+def level_parities(dfgfall: pl.DataFrame) -> pl.DataFrame:
+    """Give the parity of each level of the gfall rows: 1 for odd, 0 for even, or null for no clear parity.
+
+    dfgfall has the label key columns of with_level_label_keys(). The frame that the function
+    gives has one row for each level, with the columns energyabovegsinpercm, j, labelkey and
+    parity. gfall can give one level with more than one spelling of its label. A level gets a
+    parity only if kurucz_label_parity() gives the same parity for each of its labels. A label
+    with no clear parity, or two labels with different parities, give a null. A null parity
+    matches no other parity, so add_level_ids_forbidden() then leaves the lines of the level
+    permitted.
+
+    kurucz_label_parity() reads the odd-parity mark "*", and for a label with no mark it reads
+    the orbitals of the configuration. In a file with marks, the function accepts only an even
+    parity from the orbitals.
+    """
+    levellabels = pl.concat(
+        dfgfall.select(
+            energyabovegsinpercm=pl.col(f"energyabovegsinpercm_{side}"),
+            j=pl.col(f"j_{side}"),
+            labelkey=pl.col(f"labelkey_{side}"),
+            label=pl.col(f"label_{side}"),
+        )
+        for side in ("lower", "upper")
+    ).unique(maintain_order=True)
+    labels = levellabels["label"].unique().to_list()
+    # A file that marks an odd level with "*" marks each odd level. An odd parity from the orbitals
+    # of a label with no mark is then the sign of a label that leaves out core electrons: Ne I
+    # writes the even 2p5 3p as "3p".
+    file_has_marks = any("*" in label for label in labels)
+    parities = {label: kurucz_label_parity(label) for label in labels}
+    if file_has_marks:
+        parities = {label: None if parity == 1 and "*" not in label else parity for label, parity in parities.items()}
+    labelparity = pl.col("label").replace_strict(parities, return_dtype=pl.Int64)
+    return (
+        levellabels.with_columns(labelparity=labelparity)
+        .group_by("energyabovegsinpercm", "j", "labelkey", maintain_order=True)
+        .agg(
+            parity=pl.when(pl.col("labelparity").is_not_null().all() & (pl.col("labelparity").n_unique() == 1))
+            .then(pl.col("labelparity").first())
+            .otherwise(None)
+        )
+    )
+
+
+def drop_parities_that_strong_lines_contradict(dflevels: pl.DataFrame, transitions: pl.DataFrame, flog) -> pl.DataFrame:
+    """Give a null parity to each level that has a strong line to a level of the same label parity.
+
+    A line with A above min_a_asserts_e1 is an electric dipole line, and such a line changes the
+    parity. One of the two labels thus gives a wrong parity, and the line does not show which
+    one. The labels of some ions leave out the core electrons, and gfall has some wrong
+    odd-parity marks. Ne I writes 2p5 3p as "3p", and the orbital p alone gives an odd parity.
+    Without this step, add_level_ids_forbidden() would call such a strong line forbidden.
+    """
+    parityof = dict(zip(dflevels["levelid"].to_list(), dflevels["parity"].to_list(), strict=True))
+    contradictions = transitions.with_columns(
+        lowerparity=pl.col("lowerlevel").replace_strict(parityof, return_dtype=pl.Int64),
+        upperparity=pl.col("upperlevel").replace_strict(parityof, return_dtype=pl.Int64),
+    ).filter((pl.col("A") > min_a_asserts_e1) & (pl.col("lowerparity") == pl.col("upperparity")))
+    known = dflevels["parity"].is_not_null().sum()
+    if contradictions.is_empty():
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"The labels give a parity to {known:d} of {dflevels.height:d} levels. A line between two levels of the"
+            " same parity is forbidden.",
+        )
+        return dflevels
+    levelids = pl.concat([contradictions["lowerlevel"], contradictions["upperlevel"]]).unique()
+    log_comment(
+        flog,
+        ("transitiondata",),
+        f"The labels give a parity to {known:d} of {dflevels.height:d} levels. The reader removed the parity of"
+        f" {levelids.len():d} of them: {contradictions.height:d} lines with A above {min_a_asserts_e1:g} /s connect two"
+        " levels of the same label parity, and such a line changes the parity. A line between two levels of"
+        " the same parity is forbidden.",
+    )
+    return dflevels.with_columns(
+        parity=pl.when(pl.col("levelid").is_in(levelids.implode())).then(None).otherwise(pl.col("parity"))
+    )
+
+
 def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion from the Kurucz line lists.
 
@@ -827,10 +909,11 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         )
         .collect()
     )
-    dflevels = leveltuples_to_pldataframe(dflevels).with_columns(
-        # this data set supplies no parities, and a null one never matches another, so
-        # add_level_ids_forbidden() leaves every transition permitted
-        parity=pl.lit(None, dtype=pl.Int64)
+    dflevels = leveltuples_to_pldataframe(dflevels).join(
+        level_parities(gfall.collect()),
+        on=["energyabovegsinpercm", "j", "labelkey"],
+        how="left",
+        maintain_order="left",
     )
     # ARTIS takes the first level as the ground level. A hydrogenic ion has n-averaged levels with
     # the label AVERAGE, and the filter of parse_gfall() removes all lines of its ground level.
@@ -932,6 +1015,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
     )
 
     log_and_print(flog, f"The reader got {len(transitions):d} transitions.")
+    dflevels = drop_parities_that_strong_lines_contradict(dflevels, transitions, flog)
 
     ionization_energy_in_ev = nist_ionization_energy_ev(atomic_number, ion_stage, flog)
 

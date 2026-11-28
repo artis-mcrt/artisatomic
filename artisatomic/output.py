@@ -27,6 +27,8 @@ from artisatomic.base import log_and_print
 from artisatomic.base import log_comment
 from artisatomic.base import log_path
 from artisatomic.base import map_chunks
+from artisatomic.base import min_a_asserts_e1
+from artisatomic.base import min_f_asserts_e1
 from artisatomic.base import roman_numerals
 from artisatomic.base import transition_count_of_level
 from artisatomic.iondata import IonData
@@ -239,23 +241,6 @@ def clear_files(args: argparse.Namespace) -> None:
                 ).splitlines()
             )
         )
-
-
-# A transition this strong is an electric dipole line, whatever the level names say. Below these
-# values, the code reads a line that breaks the delta J rule as a forbidden line that the source
-# listed with its own small strength, which agrees with the label.
-#
-# The two need their own values because they are not the same quantity. f has no units. A is a
-# rate in s-1 that spans many decades. Neither cut is a law of physics. A weak E1 line can lie
-# well below either cut (an intercombination line, or one between high levels). A strong M1 or E2
-# line in a highly charged ion can lie above the A cut.
-#
-# The cuts lie where the two populations separate in these data sets. Forbidden lines end near
-# f ~ 1e-6 and A ~ 1e2 (the QUB Co III data peaks at 14 s-1). The lines that contradict their own J
-# labels start at f = 7.8e-4 (F III's smallest), only eight times above the cut. A mislabelled
-# line weaker than that falls on the wrong side, and that is the accepted cost.
-min_f_asserts_e1 = 1e-4
-min_a_asserts_e1 = 1e5
 
 
 def strength_asserts_e1(dftransitions_ion: pl.DataFrame) -> pl.Expr:

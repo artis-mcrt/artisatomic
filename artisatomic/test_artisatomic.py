@@ -7035,16 +7035,139 @@ def test_readkuruczdata_combines_isotope_and_hyperfine_components(tmp_path, monk
 
 
 def read_gfall_lines(
-    tmp_path, monkeypatch, lines: list[str], *, atomic_number: int = 3, flog: t.Any = None
+    tmp_path, monkeypatch, lines: list[str], *, atomic_number: int = 3, ion_stage: int = 1, flog: t.Any = None
 ) -> tuple[pl.DataFrame, pl.DataFrame]:
-    """Read gfall lines as the Kurucz file of a neutral atom (Li I by default). Give the levels and the transitions."""
+    """Read gfall lines as the Kurucz file of an ion (Li I by default). Give the levels and the transitions."""
     (tmp_path / "zztar").mkdir(exist_ok=True)
-    (tmp_path / "zztar" / f"gf{atomic_number:02d}00.all").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    filename = f"gf{atomic_number:02d}{ion_stage - 1:02d}.all"
+    (tmp_path / "zztar" / filename).write_text("\n".join(lines) + "\n", encoding="utf-8")
     monkeypatch.setattr(readkuruczdata, "kuruczdatapath", tmp_path)
     _, dflevels, dftransitions = readkuruczdata.read_levels_and_transitions(
-        atomic_number, 1, io.StringIO() if flog is None else flog
+        atomic_number, ion_stage, io.StringIO() if flog is None else flog
     )
     return dflevels, dftransitions
+
+
+# These rows come from zztar/gf0801.all (O II). The first two start at the odd ground level, and the
+# third is a permitted line of 2p3 2D. The last four are the lines between the odd levels 2p3 2D and
+# 2p3 2P. "5s'  2D" has a prime, so the label gives no parity. "5d   2D" gives an even parity.
+oii_permitted_rows = [
+    "    35.9531 -6.760  8.01       0.000  1.5 2p3 *4S     278140.000  2.5 5s'  2D     0.00  0.00  0.00KP   0 0  0 0.000  0 0.000    0    0              0    0",
+    "    37.6143 -1.430  8.01       0.000  1.5 2p3 *4S     265856.000  2.5 5d   2D     0.00  0.00  0.00KP   0 0  0 0.000  0 0.000    0    0              0    0",
+    "    39.7884 -1.610  8.01   26810.700  2.5 2p3 *2D     278140.000  2.5 5s'  2D     0.00  0.00  0.00KP   0 0  0 0.000  0 0.000    0    0              0    0",
+]
+oii_forbidden_rows = [
+    "   731.9860 -9.009  8.01   26810.700  2.5 2p3 *2D      40468.400  0.5 2p3 *2P    -0.79  0.00  0.00NBS  0 0  0 0.000  0 0.000    0    0              0    0",
+    "   732.0664 -8.432  8.01   26810.700  2.5 2p3 *2D      40466.900  1.5 2p3 *2P    -0.75  0.00  0.00NBS  0 0  0 0.000  0 0.000    0    0              0    0",
+    "   733.0488 -8.792  8.01   26830.500  1.5 2p3 *2D      40468.400  0.5 2p3 *2P    -0.79  0.00  0.00NBS  0 0  0 0.000  0 0.000    0    0              0    0",
+    "   733.1294 -8.706  8.01   26830.500  1.5 2p3 *2D      40466.900  1.5 2p3 *2P    -0.75  0.00  0.00NBS  0 0  0 0.000  0 0.000    0    0              0    0",
+]
+
+
+def oii_forbidden_flags(
+    tmp_path, monkeypatch, rows: list[str]
+) -> tuple[dict[tuple[float, float], tuple[bool, float]], pl.DataFrame, str]:
+    """Read O II rows, and give the forbidden flag and coll_str of each line between 2p3 2D and 2p3 2P.
+
+    The key of a line is the energy of its lower level and of its upper level. The function also
+    gives the levels and the comment lines of transitiondata.txt.
+    """
+    from artisatomic.base import IonLog
+    from artisatomic.output import resolve_coll_str
+
+    flog = IonLog(io.StringIO())
+    dflevels, dftransitions = read_gfall_lines(tmp_path, monkeypatch, rows, atomic_number=8, ion_stage=2, flog=flog)
+    energyof = dict(zip(dflevels["levelid"].to_list(), dflevels["energyabovegsinpercm"].to_list(), strict=True))
+    # the writer joins the collision strengths, and O II of Kurucz has none
+    resolved = resolve_coll_str(
+        add_level_ids_forbidden(dflevels, dftransitions).with_columns(upsilon=pl.lit(None, dtype=pl.Float64))
+    )
+    flags = {
+        (energyof[lower], energyof[upper]): (forbidden, coll_str)
+        for lower, upper, forbidden, coll_str in resolved.select(
+            "lowerlevel", "upperlevel", "forbidden", "coll_str"
+        ).iter_rows()
+    }
+    doublet = {key: value for key, value in flags.items() if key[0] in {26810.7, 26830.5} and key[1] < 50000.0}
+    assert len(doublet) == 4
+    assert all(value == (False, -1.0) for key, value in flags.items() if key not in doublet)
+    return doublet, dflevels, "\n".join(flog.comments["transitiondata"])
+
+
+def test_readkuruczdata_keeps_the_parity_of_the_o2_levels(tmp_path, monkeypatch):
+    """The four O II lines between the odd levels 2p3 2D and 2p3 2P are forbidden, with coll_str = -2.
+
+    The reader gave each level a null parity, so three of the four lines were permitted and ARTIS
+    used the collision approximation of a permitted line. The fourth has a change of J of 2.
+    """
+    doublet, dflevels, comments = oii_forbidden_flags(tmp_path, monkeypatch, oii_permitted_rows + oii_forbidden_rows)
+    assert doublet == {
+        (26810.7, 40468.4): (True, -2.0),
+        (26810.7, 40466.9): (True, -2.0),
+        (26830.5, 40468.4): (True, -2.0),
+        (26830.5, 40466.9): (True, -2.0),
+    }
+    parityof = dict(zip(dflevels["energyabovegsinpercm"].to_list(), dflevels["parity"].to_list(), strict=True))
+    assert parityof == {
+        0.0: 1,
+        26810.7: 1,
+        26830.5: 1,
+        40466.9: 1,
+        40468.4: 1,
+        265856.0: 0,
+        278140.0: None,
+    }
+    assert "The labels give a parity to 6 of 7 levels." in comments
+
+
+def test_readkuruczdata_gives_no_parity_to_a_level_with_conflicting_labels(tmp_path, monkeypatch):
+    """A level with an odd label and an even label has no clear parity, so its lines stay permitted."""
+    # the level at 40468.4 cm^-1 with a second spelling, on a line from the ground level
+    conflict = (
+        oii_forbidden_rows[0].replace("26810.700  2.5 2p3 *2D", "    0.000  1.5 2p3 *4S").replace("2p3 *2P", "s2p4 2P")
+    )
+    assert len(conflict) == len(oii_forbidden_rows[0])
+    assert conflict != oii_forbidden_rows[0]
+    doublet, dflevels, _ = oii_forbidden_flags(
+        tmp_path, monkeypatch, [*oii_permitted_rows, conflict, *oii_forbidden_rows]
+    )
+    assert dflevels.height == 7
+    assert dflevels.filter(energyabovegsinpercm=40468.4)["parity"].to_list() == [None]
+    assert dflevels.filter(energyabovegsinpercm=40466.9)["parity"].to_list() == [1]
+    # the line from J = 5/2 to J = 1/2 breaks the delta J rule, so it is forbidden with no parity also
+    assert doublet == {
+        (26810.7, 40468.4): (True, -2.0),
+        (26810.7, 40466.9): (True, -2.0),
+        (26830.5, 40468.4): (False, -1.0),
+        (26830.5, 40466.9): (True, -2.0),
+    }
+
+
+def test_readkuruczdata_removes_a_parity_that_a_strong_line_contradicts(tmp_path, monkeypatch):
+    """A strong line is an electric dipole line. Two levels of the same label parity on such a line lose the parity.
+
+    gfall has some wrong odd-parity marks. For example, Ar II gives the mark to 4p 4P and to 5s 4P,
+    with strong lines between them.
+    """
+    # the upper level of the permitted rows with an odd-parity mark that is wrong
+    rows = [row.replace("5s'  2D", "5s  *2D") for row in oii_permitted_rows] + oii_forbidden_rows
+    assert rows[:3] != oii_permitted_rows
+    doublet, dflevels, comments = oii_forbidden_flags(tmp_path, monkeypatch, rows)
+    parityof = dict(zip(dflevels["energyabovegsinpercm"].to_list(), dflevels["parity"].to_list(), strict=True))
+    # the line from 26810.7 to 278140 cm^-1 has A = 1.7e8 /s
+    assert (parityof[26810.7], parityof[278140.0]) == (None, None)
+    assert (parityof[0.0], parityof[26830.5], parityof[40466.9]) == (1, 1, 1)
+    # the line from J = 5/2 to J = 1/2 breaks the delta J rule, so it is forbidden with no parity also
+    assert doublet == {
+        (26810.7, 40468.4): (True, -2.0),
+        (26810.7, 40466.9): (False, -1.0),
+        (26830.5, 40468.4): (True, -2.0),
+        (26830.5, 40466.9): (True, -2.0),
+    }
+    assert (
+        "The labels give a parity to 7 of 7 levels. The reader removed the parity of 2 of them: 1 lines with A"
+        " above 100000 /s connect two levels of the same label parity" in comments
+    )
 
 
 # These five rows come from extendedatoms/gf3800z.lines. The terms 5s7i 1I and 5s7i 3I have equal energy and J.
