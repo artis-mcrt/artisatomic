@@ -5590,6 +5590,59 @@ def test_readhillierdata_get_level_valence_n():
     assert readhillierdata.get_level_valence_n("8SNG") is None
 
 
+@pytest.mark.parametrize("interpolation", ["linear", "classic"])
+def test_cmfgen_fit_reaches_the_end_of_a_wide_output_grid(interpolation):
+    """An analytic fit must be the fit itself up to the last point that the downsample reads.
+
+    The fit grid ended at 20.96 times the threshold, and the downsample continued the table as
+    nu^-3. The ground level of K III (POT/III/19apr23/phot_data_A) has a type 1 fit that falls as
+    nu^-2. With 401 points and a step of 0.1, the output at 40 times the threshold was 47% low.
+    """
+    lambda_angstrom = 270.6
+    sigmat, beta, s = 1.4382, 1.0, 2.0
+    threshold_ryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
+    nphixspoints, phixsnuincrement = 401, 0.1
+    xgrid = output_xgrid(nphixspoints, phixsnuincrement)
+    grid_end = float(xgrid[-1] if interpolation == "classic" else xgrid[-2])
+
+    table = readhillierdata.get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, grid_end=grid_end)
+    assert table[-1, 0] / table[0, 0] >= grid_end
+    # the points up to 20.96 are the points of the default grid, so the default output does not change
+    defaulttable = readhillierdata.get_seaton_phixstable(lambda_angstrom, sigmat, beta, s)
+    assert defaulttable.shape == (1000, 2)
+    assert np.array_equal(table[:1000], defaulttable)
+
+    # the fit on a grid 40 times finer, with the same weights of the downsample
+    ratio = np.linspace(1.0, grid_end, num=40 * len(table))
+    direct = np.column_stack((ratio * threshold_ryd, sigmat * (beta + (1 - beta) / ratio) * ratio**-s))
+
+    def reduce(tablein: np.ndarray, grid: np.ndarray = xgrid) -> np.ndarray:
+        return reduce_phixs_tables_worker(6000.0, grid, tablein, interpolation=interpolation)
+
+    assert reduce(table) == pytest.approx(reduce(direct), rel=1e-4)
+    index = round((40.0 - 1.0) / phixsnuincrement)
+    assert reduce(defaulttable)[index] == pytest.approx(0.525 * reduce(direct)[index], rel=0.01)
+
+    # the default output grid ends below 20.96, and it gets the same numbers from the two tables
+    defaultxgrid = output_xgrid(100, 0.1)
+    assert np.array_equal(reduce(table, defaultxgrid), reduce(defaulttable, defaultxgrid))
+
+
+def test_read_phixs_tables_gives_the_end_of_the_output_grid_to_the_fits():
+    """read_phixs_tables() evaluates the fit of the K III ground level to the end of a wide output grid."""
+    rhd.read_hyd_phixsdata()
+    args = phixs_args(nphixspoints=401, phixsnuincrement=0.1)
+    flog = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dflevels, _ = rhd.read_levels_and_transitions(19, 3, flog)
+        phixs = rhd.read_phixs_tables(19, 3, dflevels, args, flog)
+    assert dflevels["levelname"][0].startswith("3p5_2Po")
+    index = round((40.0 - 1.0) / 0.1)
+    assert output_xgrid(401, 0.1)[index] == pytest.approx(40.0)
+    # the file gives the term 3p5_2Po the fit sigma = 1.4382 Mb * (nu_edge / nu)^2
+    assert phixs.crosssections[0][index] == pytest.approx(1.4382 / 40.0**2, rel=0.01)
+
+
 def test_cmfgen_fit_functions():
     """Each analytic fit gives its formula's value at the threshold and at one point above it.
 

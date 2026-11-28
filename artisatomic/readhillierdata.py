@@ -2,6 +2,7 @@
 
 import contextlib
 import io
+import math
 import os
 import re
 import typing as t
@@ -9,6 +10,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from collections.abc import Iterable
 from functools import cache
+from functools import lru_cache
 from functools import reduce
 from pathlib import Path
 from string import ascii_uppercase
@@ -33,6 +35,7 @@ from artisatomic.base import log_comment
 from artisatomic.base import log_detail
 from artisatomic.base import log_source
 from artisatomic.base import nist_ionization_energy_comment
+from artisatomic.base import output_xgrid
 from artisatomic.base import path_in_data_folder
 from artisatomic.base import phixs_nu_cubed_tail
 from artisatomic.base import PhixsData
@@ -855,6 +858,29 @@ def compare_ionization_energy_with_nist(
 # grid has 1000 points from the threshold to 20.96 times the threshold, denser near the threshold.
 fit_energy_div_threshold = 1 + 20 * (np.arange(0, 1.0, 0.001) ** 2)
 
+
+@lru_cache(maxsize=8)
+def fit_energy_grid(grid_end: float = 0.0) -> npt.NDArray[np.float64]:
+    """Give the energy grid of the fit types 1, 4, 5, 6, 7 and 9, as a multiple of the threshold energy.
+
+    grid_end is the largest multiple that the output grid needs. Up to the end of
+    fit_energy_div_threshold, the grid is that array, so the default output grid gets the same
+    tables for each value of grid_end. Above it, the grid continues to grid_end with the last
+    step of that array. The downsample would otherwise continue a table as nu^-3 above 20.96
+    times the threshold, and most fits do not fall as nu^-3.
+    """
+    laststep = fit_energy_div_threshold[-1] - fit_energy_div_threshold[-2]
+    extrapoints = math.ceil((grid_end - fit_energy_div_threshold[-1]) / laststep)
+    if extrapoints <= 0:
+        return fit_energy_div_threshold
+    grid = np.concatenate(
+        (fit_energy_div_threshold, fit_energy_div_threshold[-1] + laststep * np.arange(1, extrapoints + 1))
+    )
+    # the cache gives one array to each caller
+    grid.flags.writeable = False
+    return grid
+
+
 # the labels of the cross section types for the log. Lines 10 to 18 of raw_subphot.f list the
 # types 1 to 9. The references are Leibowitz, E. M. (1972), JQSRT, 12, 299-306,
 # doi:10.1016/0022-4073(72)90048-9; Peach, G., Saraph, H. E., Seaton, M. J. (1988), J. Phys. B, 21,
@@ -1003,8 +1029,14 @@ class PhotFileReader:
         firstlevelindex_of_levelnamenoJ: dict[str, int],
         flog,
         levelnames: list[str] | None = None,
+        fit_grid_end: float = 0.0,
     ) -> None:
-        """Set up the reader for one ion. The level lookups come from read_phixs_tables()."""
+        """Set up the reader for one ion. The level lookups come from read_phixs_tables().
+
+        fit_grid_end is the largest multiple of the threshold energy that the output grid needs
+        (fit_energy_grid()).
+        """
+        self.fit_grid_end = fit_grid_end
         self.atomic_number = atomic_number
         self.ion_stage = ion_stage
         # charge of the ion that remains, i.e. CMFGEN's ZION (= ZXzV from the oscillator file,
@@ -1612,7 +1644,8 @@ class PhotFileReader:
         self.fitcoefficients.append(VY95PhixsFitRow(int(row[0]), int(row[1]), *[fortran_float(x) for x in row[2:]]))
         if len(self.fitcoefficients) * 8 == self.numpointsexpected:
             fitrows = list(self.fitcoefficients)
-            self.store_fit(lambda lambda_angstrom: get_vy95_phixstable(lambda_angstrom, fitrows))
+            grid_end = self.fit_grid_end
+            self.store_fit(lambda lambda_angstrom: get_vy95_phixstable(lambda_angstrom, fitrows, grid_end=grid_end))
 
     def store_fit(self, make_table: Callable[[float], np.ndarray]) -> None:
         """Evaluate the fit of the current block at the edge of its level, and store the table.
@@ -1689,7 +1722,8 @@ class PhotFileReader:
             ncoefficients, fitfunc = phixs_fit_functions[crosssectiontype]
             if len(fitcoefficients) == ncoefficients:
                 coefficients = list(fitcoefficients)
-                self.store_fit(lambda lambda_angstrom: fitfunc(lambda_angstrom, *coefficients))
+                grid_end = self.fit_grid_end
+                self.store_fit(lambda lambda_angstrom: fitfunc(lambda_angstrom, *coefficients, grid_end=grid_end))
             return
 
         if crosssectiontype == 2:
@@ -1823,6 +1857,11 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     # on that, so do not initialise this to empty lists.
     photoionization_targetconfig_fractions: list[list[tuple[str, float]] | None] = [None] * levelcount
 
+    # The last point that the downsample reads. In classic mode, the last value is the average up
+    # to the point after it. In linear mode, the recombination integral ends at the last point.
+    xgrid = output_xgrid(args.nphixspoints, args.phixsnuincrement)
+    fit_grid_end = float(xgrid[-1] if args.phixsinterpolation == "classic" else xgrid[-2])
+
     reader = PhotFileReader(
         atomic_number,
         ion_stage,
@@ -1832,6 +1871,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
         firstlevelindex_of_levelnamenoJ,
         flog,
         levelnames=levelnames,
+        fit_grid_end=fit_grid_end,
     )
     # the sum of the reduced tables of the routes of each level, and the fraction of each target
     reduced_phixs_dict: dict[str, np.ndarray] = {}
@@ -2011,7 +2051,7 @@ def read_phixs_tables(atomic_number, ion_stage, dfenergy_levels: pl.DataFrame, a
     )
 
 
-def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
+def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None, *, grid_end: float = 0.0):
     """Evaluate a Seaton formula fit (CMFGEN cross section type 1, or type 7 with nu_o).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. With nu_o the edge has an
@@ -2020,7 +2060,7 @@ def get_seaton_phixstable(lambda_angstrom, sigmat, beta, s, nu_o=None):
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energy_div_threshold = fit_energy_div_threshold
+    energy_div_threshold = fit_energy_grid(grid_end)
 
     if nu_o is None:
         threshold_div_energy = energy_div_threshold**-1
@@ -2244,7 +2284,7 @@ def get_kramers_phixstable(lambda_angstrom, n):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
+def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e, *, grid_end: float = 0.0):
     """Evaluate an Opacity Project fit of Peach, Saraph and Seaton (CMFGEN type 5).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. The reference is Peach, G.,
@@ -2252,7 +2292,7 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energydivthreshold = fit_energy_div_threshold
+    energydivthreshold = fit_energy_grid(grid_end)
     u = energydivthreshold
 
     x = np.log10(np.minimum(u, e))
@@ -2264,7 +2304,7 @@ def get_opproject_phixstable(lambda_angstrom, a, b, c, d, e):
     return np.column_stack([energydivthreshold * thresholdenergyryd, crosssection])
 
 
-def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
+def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f, *, grid_end: float = 0.0):
     """Evaluate the C IV fit of Leibowitz (CMFGEN type 4), a polynomial in E_threshold / E.
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. raw_subphot.f lines 187-193
@@ -2274,7 +2314,7 @@ def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energydivthreshold = fit_energy_div_threshold
+    energydivthreshold = fit_energy_grid(grid_end)
     ru = 1.0 / energydivthreshold
 
     crosssection = np.maximum(a + ru * (b + ru * (c + ru * (d + ru * (e + ru * f)))), 0.0)
@@ -2284,7 +2324,7 @@ def get_leibowitz_phixstable(lambda_angstrom, a, b, c, d, e, f):
 
 # only applies to helium. CMFGEN's HEI_PHOT_OPAC is the source of the fit (raw_subphot.f line 218).
 # The fit does not use the h parameter.
-def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ignore[unused-function-argument]
+def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h, *, grid_end: float = 0.0):  # ruff: ignore[unused-function-argument]
     """Evaluate Hummer's fit to the He I opacity cross sections (CMFGEN type 6).
 
     Returns (energy in Rydberg, cross section in Megabarns) pairs. A cubic in log10(E/E_th)
@@ -2292,7 +2332,7 @@ def get_hummer_phixstable(lambda_angstrom, a, b, c, d, e, f, g, h):  # ruff: ign
     """
     thresholdenergyryd = hc_in_ev_angstrom / lambda_angstrom / ryd_to_ev
 
-    energydivthreshold = fit_energy_div_threshold
+    energydivthreshold = fit_energy_grid(grid_end)
 
     x = np.log10(energydivthreshold)
 
@@ -2313,7 +2353,7 @@ phixs_fit_functions = {
 }
 
 
-def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
+def get_vy95_phixstable(lambda_angstrom, fitcoefficients, *, grid_end: float = 0.0):
     """Verner & Yakovlev (1995) multi-shell ground-state fits (CMFGEN cross section type 9).
 
     The reference is Verner, D. A., Yakovlev, D. G. (1995), A&AS, 109, 125-133, bibcode
@@ -2323,7 +2363,7 @@ def get_vy95_phixstable(lambda_angstrom, fitcoefficients):
     eV divided by E_0. Each shell after the first contributes only where
     FREQ >= EV_TO_HZ * E_th_eV.
     """
-    energy_ev = fit_energy_div_threshold * (hc_in_ev_angstrom / lambda_angstrom)
+    energy_ev = fit_energy_grid(grid_end) * (hc_in_ev_angstrom / lambda_angstrom)
     # The threshold of an inner shell falls between two points of the grid. Two rows at the threshold give the
     # step of CMFGEN: the first row is without the shell, and the second row is with it. Without them the
     # downsample joins the two grid points with a ramp. The grid has each energy one time, so only the first
