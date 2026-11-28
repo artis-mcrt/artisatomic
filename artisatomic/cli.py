@@ -7,6 +7,7 @@ import contextlib
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import socket
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import typing as t
 from collections.abc import Generator
+from collections.abc import Iterable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -402,6 +404,12 @@ def main() -> None:
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)
+    # This check runs before the read of the ions, which can take hours. install_files() repeats
+    # it for the files that the run wrote.
+    try:
+        check_no_folder_at_output_paths(outputfolder, output_file_names)
+    except IsADirectoryError as error:
+        parser.error(str(error))
     remove_stale_work_folders(outputfolder)
 
     # The run writes into a new folder in the output folder, and moves the files at the end. A run
@@ -592,16 +600,47 @@ def discard_run(workfolder: Path, outputfolder: Path) -> None:
     print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
 
 
+# the names that a run writes into the output folder. --nophixs writes no phixsdata_v2.txt. Only a
+# run that fails writes failedlogname, and a good run removes that file.
+output_file_names = (
+    "adata.txt",
+    "compositiondata.txt",
+    "transitiondata.txt",
+    "phixsdata_v2.txt",
+    "artisatomiclog.txt",
+    handlersrecordname,
+    failedlogname,
+)
+
+
+def check_no_folder_at_output_paths(outputfolder: Path, names: Iterable[str]) -> None:
+    """Stop if the output folder holds a folder with the name of an output file.
+
+    install_files() moves each earlier output file into a folder, and the cleanup then removes
+    that folder with its contents. A folder of the user with the name of an output file would
+    therefore lose each of its files.
+    """
+    folders = [name for name in sorted(set(names)) if (outputfolder / name).is_dir()]
+    if folders:
+        msg = (
+            f"{outputfolder} holds a folder with the name of an output file: {', '.join(folders)}."
+            " Move or rename the folder. Then run this again."
+        )
+        raise IsADirectoryError(msg)
+
+
 def install_files(workfolder: Path, outputfolder: Path) -> Path:
     """Move the files of the run from workfolder into outputfolder. Give the folder that holds the earlier files.
 
     The files of the earlier run go to a new folder first. If a move fails, the function moves the
     new files back to workfolder, restores the earlier files, and raises the error again.
     phixsdata_v2.txt goes to the new folder also, because --nophixs writes no new one. Its level
-    ids belong to the adata.txt of the earlier run.
+    ids belong to the adata.txt of the earlier run. The function moves no file if a folder has
+    the name of an output file (check_no_folder_at_output_paths()).
     """
-    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     newnames = sorted(newfile.name for newfile in workfolder.iterdir())
+    check_no_folder_at_output_paths(outputfolder, [*newnames, "phixsdata_v2.txt"])
+    earlierfolder = Path(tempfile.mkdtemp(prefix=".artisatomic_earlier_", dir=outputfolder))
     installednames: list[str] = []
     try:
         for name in sorted({*newnames, "phixsdata_v2.txt"}):
@@ -655,23 +694,53 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
     """Remove the log files that an earlier release wrote to the folder atomic_data_logs.
 
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
-    A user could take such a file for a record of the new run. The function removes each .txt
-    file of the folder and the copy of the ion handlers. That release did the same at the start
-    of each run. The function then removes the folder if the folder is empty.
+    A user could take such a file for a record of the new run. The name of a log file was the
+    element symbol in lower case, the ion stage, and ".txt", for example fe2.txt. The function
+    removes only a file with such a name, for an ion stage that the element can have. It also
+    removes the copy of the ion handlers. Each other file is a file of the user, and it stays.
+    The function then removes the folder if the folder is empty.
+
+    A symbolic link at atomic_data_logs stays, and so does each file of its target. The target
+    can be a folder that the user also uses for other files.
+
+    If the folder stays, the function prints the reason. The folder can then still hold a log
+    of an earlier release.
 
     keep is the ion handlers file of the run. The function keeps that file, also if it is the copy
     of the ion handlers in this folder.
     """
+    from artisatomic.base import elsymbols
+
     old_log_folder = output_folder / "atomic_data_logs"
+    if old_log_folder.is_symlink():
+        print(f"{old_log_folder} is a symbolic link, so the run removes no log of an earlier release from it.")
+        return
     if not old_log_folder.is_dir():
         return
-    for oldfile in sorted([*old_log_folder.glob("*.txt"), old_log_folder / "artisatomicionhandlers.json"]):
+    # The first entry of elsymbols is not an element. An ion of the element Z has an ion stage of Z + 1 at most.
+    atomic_numbers = {symbol.lower(): atomic_number for atomic_number, symbol in enumerate(elsymbols) if atomic_number}
+    oldfiles = [
+        logfile
+        for logfile in old_log_folder.glob("*.txt")
+        if (namematch := old_log_name_regex.fullmatch(logfile.name)) is not None
+        and int(namematch.group(2)) <= atomic_numbers.get(namematch.group(1), -1) + 1
+    ]
+    for oldfile in sorted([*oldfiles, old_log_folder / "artisatomicionhandlers.json"]):
         if oldfile.is_file() and not is_same_file(oldfile, keep):
             print("deleting", oldfile)
             oldfile.unlink()
-    # rmdir() fails on a symbolic link to a folder, so such a link stays
-    if not old_log_folder.is_symlink() and not any(old_log_folder.iterdir()):
+    remaining = sorted(path.name for path in old_log_folder.iterdir())
+    if remaining:
+        print(
+            f"{old_log_folder} stays, because it holds files that are not logs of an earlier release,"
+            f" for example {remaining[0]}."
+        )
+    else:
         old_log_folder.rmdir()
+
+
+# the element symbol and the ion stage, with no zero at the left
+old_log_name_regex = re.compile(r"([a-z]{1,2})([1-9][0-9]*)\.txt")
 
 
 def process_files(ion_handlers: list[tuple[int, list[tuple[int, str]]]], args: argparse.Namespace) -> None:

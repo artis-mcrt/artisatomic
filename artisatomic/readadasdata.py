@@ -632,7 +632,16 @@ def read_adf04(
         has_indices = pl.col("upper").is_not_null() & pl.col("lower").is_not_null()
         # A row that stops before the selected temperature has no upsilon there. It is a good
         # row, and the caller takes its A-value.
-        is_short = has_indices & (fixed_width_column(upsilon_offset, adf04_value_width).str.len_chars() == 0)
+        upsilon_field = fixed_width_column(upsilon_offset, adf04_value_width)
+        is_short = has_indices & (upsilon_field.str.len_chars() == 0)
+        # Fortran fills a field with asterisks if the value does not fit. Such a row is in the fixed
+        # columns, so its A-value is good. Without this, the radiative line of the row would depend
+        # on the selected temperature.
+        is_overflow = has_indices & upsilon_field.str.contains(r"^\*+$")
+        # The A-value of such a row is a null, so the caller makes no radiative line from the row.
+        is_avalue_overflow = has_indices & fixed_width_column(adf04_row_prefix_width, adf04_value_width).str.contains(
+            r"^\*+$"
+        )
         rowcount = len(collision_lines)
         collisiondf = (
             pl.LazyFrame({"line": collision_lines}, schema={"line": pl.String})
@@ -644,12 +653,22 @@ def read_adf04(
             )
             # The caller makes a transition from each row of this frame, so a row that the reader
             # cannot parse must not be in it.
-            .filter(is_short | (has_indices & pl.col("upsilon").is_not_null()))
-            .select("upper", "lower", "avalue", "upsilon")
+            .filter(is_short | is_overflow | (has_indices & pl.col("upsilon").is_not_null()))
+            .select(
+                "upper",
+                "lower",
+                "avalue",
+                "upsilon",
+                is_overflow.alias("overflow"),
+                is_avalue_overflow.alias("avalue_overflow"),
+            )
             .collect()
         )
+        overflow_rows = collisiondf.filter("overflow")
+        avalue_overflow_rows = collisiondf.filter("avalue_overflow")
+        collisiondf = collisiondf.drop("overflow", "avalue_overflow")
         goodrows = collisiondf.drop_nulls(subset=["upsilon"])
-        short_rows = collisiondf.height - goodrows.height
+        short_rows = collisiondf.height - goodrows.height - overflow_rows.height
         unreadable_rows = rowcount - collisiondf.height
         if rowcount and collisiondf.is_empty():
             msg = (
@@ -704,10 +723,28 @@ def read_adf04(
         log_comment(
             flog, ("transitiondata",), f"The reader skipped {unreadable_rows:d} collision rows that it could not parse."
         )
-    if short_rows:
-        warning = (
-            "WARNING: no collision row has an upsilon at the selected temperature. " if dfupsilon.is_empty() else ""
+    if not avalue_overflow_rows.is_empty():
+        upper, lower = avalue_overflow_rows.select("upper", "lower").row(0)
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {avalue_overflow_rows.height:d} collision rows have asterisks in place of the A-value, so they"
+            f" give no radiative line. The first has the file indices {lower} -> {upper}.",
         )
+    # the first of the two messages below gets this text, so the log has it one time
+    no_upsilon = "no collision row has an upsilon at the selected temperature. " if dfupsilon.is_empty() else ""
+    if not overflow_rows.is_empty():
+        upper, lower = overflow_rows.select("upper", "lower").row(0)
+        log_comment(
+            flog,
+            ("transitiondata",),
+            f"WARNING: {no_upsilon}{overflow_rows.height:d} collision rows have asterisks in place of the value at"
+            " the selected temperature, so they give no collision strength."
+            f" The first has the file indices {lower} -> {upper}.",
+        )
+        no_upsilon = ""
+    if short_rows:
+        warning = f"WARNING: {no_upsilon}" if no_upsilon else ""
         log_comment(
             flog,
             ("transitiondata",),
