@@ -1652,6 +1652,7 @@ def test_hdf5_to_parquet_rebuilds_a_pandas_frame(tmp_path):
     # the HDF5 attributes of the group go into the metadata of the Parquet file
     assert metadata["pandas_type"] == "frame"
     assert metadata["hdf5_file"] == "store.h5"
+    assert metadata["hdf5_object"] == "/atomic_data"
     assert metadata["hdf5_file_sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -1717,6 +1718,7 @@ def test_hdf5_to_parquet_writes_each_table(tmp_path):
     assert dfzeta.columns == ["column_0", "column_1"]
     metadata = pl.read_parquet_metadata(tmp_path / "aoife" / "group" / "zeta_data.parquet")
     assert metadata["source"] == "a test"
+    assert metadata["hdf5_object"] == "/group/zeta_data"
     assert metadata["t_rad"] == "[2000, 4000]"
     assert metadata["/md5"] == "6df1b7429ac8df8be7a3e41a877e6338"
     assert pl.read_parquet_metadata(tmp_path / "aoife" / "levels_data.parquet")["/md5"] == metadata["/md5"]
@@ -1810,7 +1812,8 @@ def test_hdf5_to_parquet_replaces_the_output_folder_only_after_a_good_conversion
 
 def converted_table(value: float, hdf5name: str = "data.h5") -> tuple[str, pl.DataFrame, dict[str, str]]:
     """Give the table a.parquet as convert_file() gives it to write_tables(), with the record of its HDF5 file."""
-    return ("a.parquet", pl.DataFrame({"value": [value]}), {"hdf5_file": hdf5name, "hdf5_file_sha256": "00"})
+    metadata = {"hdf5_file": hdf5name, "hdf5_file_sha256": "00", "hdf5_object": "/a"}
+    return ("a.parquet", pl.DataFrame({"value": [value]}), metadata)
 
 
 def test_write_tables_keeps_a_parquet_file_that_the_script_did_not_write(tmp_path):
@@ -1824,7 +1827,11 @@ def test_write_tables_keeps_a_parquet_file_that_the_script_did_not_write(tmp_pat
     outputfolder = tmp_path / "data"
     tables = [
         converted_table(1.0),
-        ("group/b.parquet", pl.DataFrame({"value": [5.0]}), {"hdf5_file": "data.h5", "hdf5_file_sha256": "00"}),
+        (
+            "group/b.parquet",
+            pl.DataFrame({"value": [5.0]}),
+            {"hdf5_file": "data.h5", "hdf5_file_sha256": "00", "hdf5_object": "/group/b"},
+        ),
     ]
     hdf5_to_parquet.write_tables(outputfolder, tables, hdf5path)
     pl.DataFrame({"result": [42]}).write_parquet(outputfolder / "analysis.parquet")
@@ -1835,7 +1842,9 @@ def test_write_tables_keeps_a_parquet_file_that_the_script_did_not_write(tmp_pat
         }
 
     before = contents()
-    with pytest.raises(FileExistsError, match=r"did not write from data\.h5, for example .*analysis\.parquet"):
+    with pytest.raises(
+        FileExistsError, match=r"cannot identify as tables of data\.h5, for example .*analysis\.parquet"
+    ):
         hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
     assert contents() == before
 
@@ -1873,12 +1882,12 @@ def test_write_tables_compares_the_source_name_as_the_file_system_does(tmp_path)
     (tmp_path / "data.h5").write_bytes(b"")
     (tmp_path / "data.hdf5").write_bytes(b"")
     hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0, "data.hdf5")], tmp_path / "data.hdf5")
-    with pytest.raises(FileExistsError, match=r"did not write from data\.h5"):
+    with pytest.raises(FileExistsError, match=r"cannot identify as tables of data\.h5"):
         hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
     assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [1.0]
     # a recorded name that is a path names no file beside the HDF5 file
     hdf5_to_parquet.write_tables(tmp_path / "other", [converted_table(1.0, "../data.h5")], tmp_path / "other.h5")
-    with pytest.raises(FileExistsError, match=r"did not write from other\.h5"):
+    with pytest.raises(FileExistsError, match=r"cannot identify as tables of other\.h5"):
         hdf5_to_parquet.write_tables(tmp_path / "other", [converted_table(2.0, "other.h5")], tmp_path / "other.h5")
 
     # Data.h5 and data.h5 are one file only on a file system that ignores the case
@@ -1892,9 +1901,98 @@ def test_write_tables_compares_the_source_name_as_the_file_system_does(tmp_path)
         hdf5_to_parquet.write_tables(outputfolder, [converted_table(5.0)], tmp_path / "data.h5")
         assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [5.0]
     else:
-        with pytest.raises(FileExistsError, match=r"did not write from data\.h5"):
+        with pytest.raises(FileExistsError, match=r"cannot identify as tables of data\.h5"):
             hdf5_to_parquet.write_tables(outputfolder, [converted_table(5.0)], tmp_path / "data.h5")
         assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [4.0]
+
+
+def folder_contents(folder: Path) -> dict[str, bytes]:
+    """Give the bytes of each file below a folder, with the path of the file in the folder as the key."""
+    return {
+        path.relative_to(folder).as_posix(): path.read_bytes() for path in sorted(folder.rglob("*")) if path.is_file()
+    }
+
+
+def test_write_tables_keeps_a_copy_of_a_table_with_a_different_name(tmp_path):
+    """A copy of a table has the records of the table. Its path is not the path of the object, so it stays.
+
+    A file that a program derives from a table can keep the metadata of the table in the same way.
+    """
+    import shutil
+
+    hdf5path = tmp_path / "data.h5"
+    hdf5path.write_bytes(b"")
+    outputfolder = tmp_path / "data"
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0)], hdf5path)
+    shutil.copyfile(outputfolder / "a.parquet", outputfolder / "backup_of_a.parquet")
+    before = folder_contents(tmp_path)
+    with pytest.raises(
+        FileExistsError, match=r"cannot identify as tables of data\.h5, for example .*backup_of_a\.parquet"
+    ):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert folder_contents(tmp_path) == before
+
+    # filekey() compares the two paths, so a table whose name has a different case is still the table
+    (outputfolder / "backup_of_a.parquet").unlink()
+    (outputfolder / "a.parquet").rename(outputfolder / "A.parquet")
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], hdf5path)
+    assert [path.name for path in outputfolder.iterdir()] == ["a.parquet"]
+
+
+def test_write_tables_stops_for_a_table_that_it_cannot_identify(tmp_path):
+    """A table with no readable record stops the conversion, and the message does not say who wrote the file."""
+    outputfolder = tmp_path / "data"
+    (tmp_path / "data.h5").write_bytes(b"")
+    message = r"cannot identify as tables of data\.h5, for example .*a\.parquet\. Move them out of the folder"
+
+    # the HDF5 file had the name data.hdf5 at the time of the conversion, and that name is gone
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0, "data.hdf5")], tmp_path / "data.hdf5")
+    with pytest.raises(FileExistsError, match=message):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
+
+    # a table that a copy cut short
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0, "data.hdf5")], tmp_path / "data.hdf5")
+    tablepath = outputfolder / "a.parquet"
+    tablepath.write_bytes(tablepath.read_bytes()[: tablepath.stat().st_size // 2])
+    with pytest.raises(FileExistsError, match=message):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
+
+    # a recorded name that is not a valid file name gives the same message, and no other error
+    pl.DataFrame({"value": [1.0]}).write_parquet(tablepath, metadata={"hdf5_file": "a\x00b"})
+    with pytest.raises(FileExistsError, match=message):
+        hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0)], tmp_path / "data.h5")
+
+
+def test_write_tables_permits_the_appledouble_files_of_macos(tmp_path):
+    """An AppleDouble file of macOS must not stop the next conversion.
+
+    On some file systems, macOS writes ._name beside a file or a folder with extended attributes.
+    A file with that name pattern that is not an AppleDouble file, or that has no file beside
+    it, is a file of the user.
+    """
+    hdf5path = tmp_path / "data.h5"
+    hdf5path.write_bytes(b"")
+    outputfolder = tmp_path / "data"
+    grouptable = (
+        "group/b.parquet",
+        pl.DataFrame({"value": [5.0]}),
+        {"hdf5_file": "data.h5", "hdf5_file_sha256": "00", "hdf5_object": "/group/b"},
+    )
+    appledouble = b"\x00\x05\x16\x07\x00\x02\x00\x00Mac OS X        "
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(1.0), grouptable], hdf5path)
+    for name in ("._a.parquet", "._group", "group/._b.parquet"):
+        (outputfolder / name).write_bytes(appledouble)
+    hdf5_to_parquet.write_tables(outputfolder, [converted_table(2.0), grouptable], hdf5path)
+    assert sorted(folder_contents(outputfolder)) == ["a.parquet", "group/b.parquet"]
+    assert pl.read_parquet(outputfolder / "a.parquet")["value"].to_list() == [2.0]
+
+    for name, content in (("._a.parquet", b"notes of the user"), ("._gone.parquet", appledouble), ("._", appledouble)):
+        (outputfolder / name).write_bytes(content)
+        before = folder_contents(tmp_path)
+        with pytest.raises(FileExistsError, match=r"cannot identify as tables of data\.h5"):
+            hdf5_to_parquet.write_tables(outputfolder, [converted_table(3.0)], hdf5path)
+        assert folder_contents(tmp_path) == before
+        (outputfolder / name).unlink()
 
 
 def test_hdf5_to_parquet_keeps_the_backup_when_the_output_folder_reappears(tmp_path, monkeypatch):
@@ -3227,6 +3325,49 @@ def test_read_adf04_keeps_the_radiative_rate_of_a_row_with_an_overflow_field(tmp
     assert "could not parse" not in logs[1000.0]
 
 
+def test_read_adf04_reports_a_row_with_asterisks_in_place_of_the_a_value(tmp_path):
+    """A row with asterisks in its A-value field gives no radiative line, and the log must say so.
+
+    The row 1 -> 3 of the Sr I sample has A = 46600 /s. The message must also come if the field
+    at the selected temperature has asterisks.
+    """
+    with xopen(readadasdata.adaspath / "38_1.adf04.zst", "rt", encoding="utf-8") as fin:
+        lines = fin.read().splitlines()
+    rowindex = next(index for index, line in enumerate(lines) if line.startswith("   3   1 4.66+04 7.74-01 9.26-01"))
+    message = (
+        "WARNING: 1 collision rows have asterisks in place of the A-value, so they give no radiative line."
+        " The first has the file indices 1 -> 3."
+    )
+    for row, upsilon in (
+        (lines[rowindex].replace(" 4.66+04", "********", 1), 0.774),
+        (lines[rowindex].replace(" 4.66+04", "********", 1).replace(" 7.74-01", "********", 1), None),
+    ):
+        filepath = tmp_path / "38_1.adf04"
+        filepath.write_text("\n".join([*lines[:rowindex], row, *lines[rowindex + 1 :]]) + "\n", encoding="utf-8")
+        flog = io.StringIO()
+        _, energylevels, dfupsilon, collisiondf = readadasdata.read_adf04(filepath, flog, 1000.0, 38, 1)
+        dftransitions = readadasdata.adas_transitions_frame(len(energylevels), collisiondf, filepath)
+        # the caller makes a line only from a row with an A-value
+        assert dftransitions.filter(lowerlevel=0, upperlevel=2).rows() == [(0, 2, None)]
+        assert upsilon_dict(dfupsilon).get((0, 2)) == (pytest.approx(upsilon) if upsilon is not None else None)
+        assert message in flog.getvalue()
+        assert "could not parse" not in flog.getvalue()
+
+
+def test_read_adf04_says_if_each_row_has_asterisks_at_the_selected_temperature(tmp_path):
+    """If asterisks leave no collision strength at all, the log has the same warning as for short rows."""
+    filepath = write_hydrogen_adf04(tmp_path, ["   2   1 6.27+08********"])
+    flog = io.StringIO()
+    _, _, dfupsilon, collisiondf = readadasdata.read_adf04(filepath, flog, 5000.0, 1, 1)
+    assert dfupsilon.is_empty()
+    assert collisiondf.rows() == [(2, 1, 6.27e8, None)]
+    assert (
+        "WARNING: no collision row has an upsilon at the selected temperature. 1 collision rows have asterisks"
+        in flog.getvalue()
+    )
+    assert flog.getvalue().count("no collision row has an upsilon") == 1
+
+
 def test_read_adf04_stops_if_no_collision_row_is_readable(tmp_path):
     """Rows that are not in the fixed columns give no value. The ion must not lose each transition silently."""
     for row in ("   1    2  6.27+08  4.29-01  5.29-01", "\t  2   1 6.27+08 4.29-01 5.29-01"):
@@ -3913,13 +4054,15 @@ def test_rewrite_file_as_utf8_gives_a_command_that_keeps_the_compression(tmp_pat
     """If the rewrite fails, the command of the error message must give utf-8 text in the same compression format.
 
     A plain iconv on a compressed file converts the bytes of the archive and replaces the archive.
+    The test gives the command to sh, which has no pipefail option on some systems.
     """
     import shutil
     import subprocess  # ruff: ignore[suspicious-subprocess-import]  # the test runs the command of the message
 
-    bashpath = shutil.which("bash")
-    if bashpath is None or shutil.which("iconv") is None or (tool and shutil.which(tool) is None):
-        pytest.skip("the test needs bash, iconv and the compression tool")
+    shpath = shutil.which("sh")
+    tools = ["bash", "iconv", *([tool] if tool else [])]
+    if shpath is None or any(shutil.which(name) is None for name in tools):
+        pytest.skip("the test needs sh, bash, iconv and the compression tool")
     text = "Reference: Galav\u00eds M.E. 1998\nsecond line\n"
     # a space and a quote in the folder name, which the command must quote
     folder = tmp_path / "data folder's"
@@ -3942,7 +4085,7 @@ def test_rewrite_file_as_utf8_gives_a_command_that_keeps_the_compression(tmp_pat
     assert [path.name for path in folder.iterdir()] == [filepath.name]
 
     command = str(error.value).splitlines()[-1].strip()
-    subprocess.run([bashpath, "-c", command], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+    subprocess.run([shpath, "-c", command], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
     assert [path.name for path in folder.iterdir()] == [filepath.name]
     assert filepath.read_bytes().startswith(magic)
     with xopen(filepath, "rb") as fin:
@@ -5349,8 +5492,8 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
 def test_photfilereader_rejects_an_incomplete_analytic_fit(tmp_path, nextblock, boundary):
     """A fit block that ends before its declared count of coefficients stops the run at each kind of boundary.
 
-    The reader makes a table only when the count of a fit is complete. A block with two of its
-    three coefficients thus gave its level no table, and the run continued with no message.
+    The reader makes a table only when the count of a fit is complete. Without the check, a block
+    with two of its three coefficients gives its level no table and no message.
     """
     from artisatomic.readhillierdata import PhotFileReader
 
@@ -5392,11 +5535,14 @@ def test_photfilereader_rejects_an_incomplete_analytic_fit(tmp_path, nextblock, 
     with pytest.raises(ValueError, match=message):
         read(groundblock + excitedblock("2.0\n1.0\n") + nextblock)
 
-    # the complete fit still gives a table at the same boundary. A second count line of one level
-    # with no number after it is a different defect, which stops the read at the end of the file.
+    # the complete fit still gives a table at the same boundary
     if boundary != "the next count line of the same level":
         reader = read(groundblock + excitedblock("2.0\n1.0\n3.0\n") + nextblock)
         assert {"A", "B"} <= set(reader.phixstables[0]), boundary
+    else:
+        # the second count line starts a part of its own, and that part has none of its numbers
+        with pytest.raises(ValueError, match=r"lowerlevel=B, crosssectiontype=1 .* declares 3 .* ends after 0"):
+            read(groundblock + excitedblock("2.0\n1.0\n3.0\n") + nextblock)
 
 
 def test_photfilereader_accepts_a_fit_block_that_declares_one_zero(tmp_path):
@@ -5423,6 +5569,85 @@ def test_photfilereader_accepts_a_fit_block_that_declares_one_zero(tmp_path):
     reader = PhotFileReader(56, 2, 1, [911.0, 455.5], levelindices, levelindices, io.StringIO())
     reader.read_file(0, photfile, photfile.name)
     assert set(reader.phixstables[0]) == {"B"}
+
+
+phot_type_line = "{} !Type of cross-section\n"
+phot_count_line = "{} !Number of cross-section points\n"
+phot_table_part = phot_type_line.format(21) + phot_count_line.format(3) + "1.0 2.0\n1.5 1.0\n2.0 0.5\n"
+phot_fit_part = phot_type_line.format(1) + phot_count_line.format(3) + "2.0\n1.0\n3.0\n"
+phot_short_fit_part = phot_type_line.format(1) + phot_count_line.format(3) + "2.0\n1.0\n"
+phot_vy95_part = phot_type_line.format(9) + phot_count_line.format(8) + "1 0 20.0 10.0 1.0 2.0 4.0 1.0\n"
+
+
+def read_phot_blocks(tmp_path, blocks: str):
+    """Read a phot file with these level blocks, for an ion with the levels A and B."""
+    from artisatomic.readhillierdata import PhotFileReader
+
+    header = (
+        "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+    )
+    photfile = tmp_path / "phot_test"
+    photfile.write_text(header + blocks, encoding="utf-8")
+    levelindices = {"A": 0, "B": 1}
+    reader = PhotFileReader(56, 2, 1, [911.0, 455.5], levelindices, levelindices, io.StringIO())
+    reader.read_file(0, photfile, photfile.name)
+    return reader
+
+
+@pytest.mark.parametrize(
+    ("parts", "error"),
+    [
+        (phot_table_part + phot_fit_part, None),
+        (phot_vy95_part + phot_fit_part, None),
+        (phot_fit_part + phot_count_line.format(3) + "2.0\n1.0\n3.0\n", None),
+        (phot_short_fit_part + phot_table_part, "crosssectiontype=1 .* declares 3 .* ends after 2"),
+        (phot_short_fit_part + phot_vy95_part, "crosssectiontype=1 .* declares 3 .* ends after 2"),
+        (phot_short_fit_part + phot_count_line.format(3) + "2.0\n1.0\n3.0\n", "declares 3 .* ends after 2"),
+        (phot_fit_part + phot_short_fit_part[:-4], "crosssectiontype=1 .* declares 3 .* ends after 1"),
+    ],
+)
+def test_photfilereader_checks_each_part_of_a_level_with_its_own_type_and_numbers(tmp_path, parts, error):
+    """A second type line or count line of one level starts a new part of the block.
+
+    The check of a part must use the type, the declared count and the numbers of that part. The
+    type line of the next part comes before its count line, so the check must run before the
+    type changes.
+    """
+    blocks = "A !Configuration name\n" + phot_fit_part + "\nB !Configuration name\n" + parts
+    if error is None:
+        assert set(read_phot_blocks(tmp_path, blocks).phixstables[0]) == {"A", "B"}
+    else:
+        with pytest.raises(ValueError, match=f"lowerlevel=B, {error}" if "type=" in error else error):
+            read_phot_blocks(tmp_path, blocks)
+
+
+def test_photfilereader_accepts_a_count_line_before_the_type_line(tmp_path):
+    """A count line before the type line of its level keeps its count, also with no blank line before the block."""
+    reversedpart = phot_count_line.format(3) + phot_type_line.format(1)
+    blocks = "A !Configuration name\n" + phot_fit_part + "B !Configuration name\n" + reversedpart
+    assert set(read_phot_blocks(tmp_path, blocks + "2.0\n1.0\n3.0\n").phixstables[0]) == {"A", "B"}
+    with pytest.raises(ValueError, match=r"lowerlevel=B, crosssectiontype=1 .* declares 3 .* ends after 2"):
+        read_phot_blocks(tmp_path, blocks + "2.0\n1.0\n")
+
+
+def test_photfilereader_accepts_a_type_0_block_with_two_numbers_on_its_row(tmp_path):
+    """A type 0 block gives no table, so the count check does not apply to it.
+
+    CARB/II/14jul98/c2phot_a.dat gives the level 2p2p2p4So a type 0 block with the row "0 0D0".
+    """
+    blocks = (
+        "A !Configuration name\n"
+        + phot_type_line.format(0)
+        + phot_count_line.format(1)
+        + "      0      0D0\n\nB !Configuration name\n"
+        + phot_fit_part
+    )
+    reader = read_phot_blocks(tmp_path, blocks)
+    assert set(reader.phixstables[0]) == {"B"}
+    assert reader.phixs_type_levels[0] == {"A"}
 
 
 def test_photfilereader_excitation_energy_units(tmp_path):
@@ -5603,9 +5828,10 @@ def test_readhillierdata_get_level_valence_n():
 def test_cmfgen_fit_reaches_the_end_of_a_wide_output_grid(interpolation):
     """An analytic fit must be the fit itself up to the last point that the downsample reads.
 
-    The fit grid ended at 20.96 times the threshold, and the downsample continued the table as
-    nu^-3. The ground level of K III (POT/III/19apr23/phot_data_A) has a type 1 fit that falls as
-    nu^-2. With 401 points and a step of 0.1, the output at 40 times the threshold was 47% low.
+    Above the end of a table, the downsample continues the table as nu^-3. The ground level of
+    K III (POT/III/19apr23/phot_data_A) has a type 1 fit that falls as nu^-2. The table of the
+    default grid ends at 20.96 times the threshold. With 401 points and a step of 0.1, its output
+    at 40 times the threshold is 47% low.
     """
     lambda_angstrom = 270.6
     sigmat, beta, s = 1.4382, 1.0, 2.0
@@ -6401,7 +6627,7 @@ def test_main_into_the_working_directory_leaves_the_input_file_of_the_ion_handle
     assert record == [[38, [[1, "kurucz"], [2, "kurucz"]]]]
 
 
-def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
+def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path, capsys):
     """The per-ion logs of an earlier release must not stay beside the log file of a new run."""
     from artisatomic.cli import remove_old_log_folder
 
@@ -6411,6 +6637,7 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     (oldfolder / "artisatomicionhandlers.json").write_text("[]", encoding="utf-8")
     remove_old_log_folder(tmp_path)
     assert not oldfolder.exists()
+    assert "stays" not in capsys.readouterr().out
 
     # a file that the earlier release did not write stays, and so does its folder. The earlier
     # release gave a log the element symbol and the ion stage as its name.
@@ -6421,6 +6648,11 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
         (oldfolder / name).write_text("text\n", encoding="utf-8")
     remove_old_log_folder(tmp_path)
     assert sorted(path.name for path in oldfolder.iterdir()) == usernames
+    # the run says why the folder stays, because the folder can still hold a log of an earlier release
+    assert (
+        f"{oldfolder} stays, because it holds files that are not logs of an earlier release, for example fe.txt."
+        in capsys.readouterr().out
+    )
 
     # no folder is fine too
     remove_old_log_folder(tmp_path / "artis_files")
@@ -6437,6 +6669,7 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     remove_old_log_folder(linkfolder)
     assert (linkfolder / "atomic_data_logs").is_symlink()
     assert [path.name for path in target.iterdir()] == ["fe2.txt"]
+    assert "is a symbolic link, so the run removes no log of an earlier release from it." in capsys.readouterr().out
 
 
 def test_description_of_ion_names_the_source_of_a_special_ion():
@@ -7029,8 +7262,13 @@ def test_install_files_moves_nothing_if_a_folder_has_the_name_of_an_output_file(
         cli.install_files(workfolder, outputfolder)
 
 
-def test_cli_stops_before_the_run_if_a_folder_has_the_name_of_an_output_file(tmp_path, monkeypatch, capsys):
-    """The run must report such a folder before it reads an ion, and not after hours of work."""
+@pytest.mark.parametrize("foldername", ["transitiondata.txt", "artisatomiclog_failed.txt"])
+def test_cli_stops_before_the_run_if_a_folder_has_the_name_of_an_output_file(tmp_path, monkeypatch, capsys, foldername):
+    """The run must report such a folder before it reads an ion, and not after hours of work.
+
+    The log of a run that fails is an output file also. A folder with its name would stop
+    discard_run() and the cleanup of a good run.
+    """
     from artisatomic import cli
 
     def write_files(_ion_handlers, _args):
@@ -7043,15 +7281,15 @@ def test_cli_stops_before_the_run_if_a_folder_has_the_name_of_an_output_file(tmp
     monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
     monkeypatch.setattr(cli, "write_files", write_files)
     outputfolder = tmp_path / "artis_files"
-    (outputfolder / "transitiondata.txt").mkdir(parents=True)
-    (outputfolder / "transitiondata.txt" / "notes.txt").write_text("a file of the user\n", encoding="utf-8")
+    (outputfolder / foldername).mkdir(parents=True)
+    (outputfolder / foldername / "notes.txt").write_text("a file of the user\n", encoding="utf-8")
     monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
     with pytest.raises(SystemExit) as error:
         cli.main()
     assert error.value.code == 2
-    assert "holds a folder with the name of an output file: transitiondata.txt." in capsys.readouterr().err
-    assert [path.name for path in outputfolder.iterdir()] == ["transitiondata.txt"]
-    assert (outputfolder / "transitiondata.txt" / "notes.txt").read_text(encoding="utf-8") == "a file of the user\n"
+    assert f"holds a folder with the name of an output file: {foldername}." in capsys.readouterr().err
+    assert [path.name for path in outputfolder.iterdir()] == [foldername]
+    assert (outputfolder / foldername / "notes.txt").read_text(encoding="utf-8") == "a file of the user\n"
 
 
 def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, capsys):
@@ -7328,22 +7566,147 @@ def test_makerecombratefile_omits_an_ion_with_no_chianti_radiative_parameters(tm
     assert "1 ions have no rates in recombrates.txt" in output
 
 
-def test_chianti_total_rates_rejects_an_unknown_radiative_fit_type():
-    """ChiantiPy gives zeros also for a fit type that it does not evaluate, so that is no source of a rate."""
-    from artisatomic.makerecombratefile import chianti_total_rates
+class FakeChiantiIon:
+    """A stand-in for the ion class of ChiantiPy, which sets RrParams and DrParams as the library does.
 
-    class FakeIon:
-        def __init__(self, _ionname: str, temperature: np.ndarray) -> None:
-            self.RrParams = {"rrtype": 4}
-            self.RrRate = {"rate": np.zeros_like(temperature)}
+    The constructor of the library sets each attribute only if the parameter file exists. The
+    value is None for a fit type that the library does not know, and the rate method then fails.
+    """
 
-        def rrRate(self) -> None:
-            pass
+    # the parameters of each ion name. An ion name that is not a key has no parameter file.
+    rrparams: t.ClassVar[dict[str, dict[str, int] | None]] = {}
+    drparams: t.ClassVar[dict[str, dict[str, int] | None]] = {}
+
+    def __init__(self, ionname: str, temperature: np.ndarray) -> None:
+        """Set the parameters of each process that has a parameter file."""
+        self.temperature = temperature
+        # through __dict__: the attributes exist only for an ion with a parameter file
+        if ionname in self.rrparams:
+            self.__dict__["RrParams"] = self.rrparams[ionname]
+        if ionname in self.drparams:
+            self.__dict__["DrParams"] = self.drparams[ionname]
+
+    def rrRate(self) -> None:
+        """Set the radiative rate, which is zero with no parameter file."""
+        rate = np.zeros_like(self.temperature)
+        if "RrParams" in self.__dict__:
+            # the library evaluates the fit type of None here, which is a TypeError
+            rate = 1e-10 / self.temperature * self.__dict__["RrParams"]["rrtype"]
+        self.RrRate = {"rate": rate}
+
+    def drRate(self) -> None:
+        """Set the dielectronic rate, which is zero with no parameter file."""
+        rate = np.zeros_like(self.temperature)
+        if "DrParams" in self.__dict__:
+            rate = 1e-11 / self.temperature * self.__dict__["DrParams"]["drtype"]
+        self.DrRate = {"rate": rate}
+
+
+def fake_chianti(rrparams: dict[str, dict[str, int] | None], drparams: dict[str, dict[str, int] | None]) -> type:
+    """Give a stand-in for the ChiantiPy core module, with these parameters for each ion name."""
+
+    class Ion(FakeChiantiIon):
+        pass
+
+    Ion.rrparams = rrparams
+    Ion.drparams = drparams
 
     class FakeChianti:
-        ion = FakeIon
+        ion = Ion
 
-    assert chianti_total_rates(FakeChianti, 26, 2, np.array([1e4])) is None
+    return FakeChianti
+
+
+def test_chianti_total_rates_gives_the_reason_for_each_absent_rate():
+    """ChiantiPy gives zeros for an absent file, and it fails for a fit type that it does not know.
+
+    The function must give no rates and the reason for the radiative part. For the dielectronic
+    part, it must give the radiative rate and the reason, but no reason for a bare nucleus.
+    """
+    from artisatomic.makerecombratefile import chianti_total_rates
+
+    temperatures = np.array([1e4])
+    ch = fake_chianti(
+        rrparams={
+            "fe_2": {"rrtype": 1},
+            "fe_3": None,
+            "he_2": {"rrtype": 3},
+            "he_3": {"rrtype": 3},
+            "o_3": {"rrtype": 2},
+        },
+        drparams={"fe_2": {"drtype": 1}, "o_3": None},
+    )
+
+    rates = chianti_total_rates(ch, 26, 2, temperatures)
+    assert rates.total == pytest.approx([1e-14 + 1e-15])
+    assert (rates.no_radiative_reason, rates.no_dielectronic_reason) == ("", "")
+
+    # fe_3 has a file with a fit type that ChiantiPy does not know, and fe_4 has no file
+    rates = chianti_total_rates(ch, 26, 3, temperatures)
+    assert rates.total is None
+    assert rates.no_radiative_reason == "ChiantiPy does not know the fit type of the radiative recombination parameters"
+    rates = chianti_total_rates(ch, 26, 4, temperatures)
+    assert rates.total is None
+    assert rates.no_radiative_reason == "CHIANTI has no radiative recombination parameters"
+
+    # He III is a bare nucleus, and He II is not
+    rates = chianti_total_rates(ch, 2, 3, temperatures)
+    assert rates.total == pytest.approx([3e-14])
+    assert not rates.no_dielectronic_reason
+    rates = chianti_total_rates(ch, 2, 2, temperatures)
+    assert rates.total == pytest.approx([3e-14])
+    assert rates.no_dielectronic_reason == "CHIANTI has no dielectronic recombination parameters"
+
+    rates = chianti_total_rates(ch, 8, 3, temperatures)
+    assert rates.total == pytest.approx([2e-14])
+    assert (
+        rates.no_dielectronic_reason
+        == "ChiantiPy does not know the fit type of the dielectronic recombination parameters"
+    )
+
+
+def test_makerecombratefile_gives_a_warning_for_each_ion_with_an_absent_rate(tmp_path, monkeypatch, capsys):
+    """The command names each ion with no rates, and each ion whose rate is the radiative rate only."""
+    from artisatomic import makerecombratefile
+
+    ch = fake_chianti(
+        rrparams={"fe_2": {"rrtype": 1}, "fe_3": None, "fe_5": {"rrtype": 2}}, drparams={"fe_5": {"drtype": 1}}
+    )
+    (tmp_path / "artisatomic").mkdir()
+    monkeypatch.setattr(makerecombratefile, "PYDIR", tmp_path / "artisatomic")
+    monkeypatch.setattr(
+        makerecombratefile,
+        "get_composition_data",
+        lambda _path: pl.DataFrame({"Z": [26], "lowermost_ion_stage": [1], "uppermost_ion_stage": [5]}),
+    )
+    monkeypatch.setattr(makerecombratefile, "import_chianti_core", lambda _firstion: ch)
+    outputfolder = tmp_path / "artis_files"
+    outputfolder.mkdir()
+    monkeypatch.setattr("sys.argv", ["makeartisrecombratefile", "-output_folder", str(outputfolder)])
+    makerecombratefile.main()
+
+    lines = (outputfolder / "recombrates.txt").read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if len(line.split()) == 3 and line.startswith("26 ")] == ["26 2 81", "26 5 81"]
+    output = capsys.readouterr().out
+    assert "takes its rates from Chianti, if Chianti has them." in output
+    assert (
+        "WARNING: CHIANTI has no dielectronic recombination parameters for Z=26 Fe ion stage 2."
+        " Its rate in recombrates.txt is the radiative rate only." in output
+    )
+    assert (
+        "WARNING: ChiantiPy does not know the fit type of the radiative recombination parameters for"
+        " Z=26 Fe ion stage 3. recombrates.txt gives no rates for this ion." in output
+    )
+    assert (
+        "WARNING: 1 ions have no rates in recombrates.txt. CHIANTI has no radiative recombination parameters"
+        " for them: Z=26 Fe ion stage 4." in output
+    )
+    assert (
+        "WARNING: 1 ions have no rates in recombrates.txt. ChiantiPy does not know the fit type of the"
+        " radiative recombination parameters for them: Z=26 Fe ion stage 3." in output
+    )
+    assert "WARNING: 1 ions have the radiative rate only in recombrates.txt" in output
+    assert "ion stage 5" not in output
 
 
 def test_find_nahar_file_skips_a_sync_copy(tmp_path, capsys):

@@ -44,7 +44,11 @@ The repository does not hold the Nahar files. The command looks for them in the 
 and the ion stage of the ion after the recombination. Then come `.rrc`, optional characters, and `.txt`.
 For example, `fe2.rrc.txt` holds the rates of the recombination to Fe II. The command skips a name
 that holds a space or a bracket. With no such folder, each ion with an atomic number of 30
-or less takes the ChiantiPy rates.
+or less takes the ChiantiPy rates, if CHIANTI has radiative recombination parameters for it.
+The command gives a warning that names each ion with no such parameters, and recombrates.txt
+has no rates for that ion. The command also gives a warning for an ion with no dielectronic
+recombination parameters, if the ion is not a bare nucleus. The rate of that ion is the
+radiative rate only.
 
 ChiantiPy reads the CHIANTI database, which is a different download. The environment variable
 `XUVTOP` gives the folder of the database to ChiantiPy.

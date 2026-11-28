@@ -854,8 +854,9 @@ def compare_ionization_energy_with_nist(
     return ionization_energy_ev, levelrows
 
 
-# the energy grid of the fit types 1, 4, 5, 6, 7 and 9, as a multiple of the threshold energy. The
-# grid has 1000 points from the threshold to 20.96 times the threshold, denser near the threshold.
+# the first part of the energy grid of the fit types 1, 4, 5, 6, 7 and 9 (fit_energy_grid()), as a
+# multiple of the threshold energy. It has 1000 points from the threshold to 20.96 times the
+# threshold, denser near the threshold.
 fit_energy_div_threshold = 1 + 20 * (np.arange(0, 1.0, 0.001) ** 2)
 
 
@@ -1094,6 +1095,8 @@ class PhotFileReader:
         # the count that the "!Number of cross-section points" line declares.
         self.declared_numpoints = 0
         self.crosssectiontype = -1
+        # whether the current level already has a "!Type of cross-section" line
+        self.level_has_type = False
         self.fitcoefficients: list[t.Any] = []
         # the points of the current tabulated block, in file order
         self.pending_energyryd: list[np.ndarray] = []
@@ -1290,6 +1293,7 @@ class PhotFileReader:
             self.check_fit_is_complete()
             self.lowerlevelname = ""
             self.crosssectiontype = -1
+            self.level_has_type = False
             self.numpointsexpected = 0
             return
 
@@ -1354,6 +1358,7 @@ class PhotFileReader:
             self.fitcoefficients = []
             self.numpointsexpected = 0
             self.declared_numpoints = 0
+            self.level_has_type = False
             # take the first level that matches (without J splitting, several can differ by
             # J). A name with no level that matches gets the index -1, and edge_lambda_angstrom()
             # then gives no edge, so the reader builds no table for it. The phot files can cover
@@ -1392,8 +1397,10 @@ class PhotFileReader:
         if len(row) >= 2 and " ".join(row[1:]) == "!Number of cross-section points":
             # a new block of points starts, so the reader stores a block that no blank line ended as it is
             self.finish_tabulated_block(validate=False)
-            # the fit before this line must be complete, before its declared count goes away
+            # A second count line of one level starts a new part. The fit before this line must be
+            # complete, and its numbers must not count for the new part.
             self.check_fit_is_complete()
+            self.fitcoefficients = []
             self.numpointsexpected = int(row[0])
             self.declared_numpoints = self.numpointsexpected
 
@@ -1404,6 +1411,13 @@ class PhotFileReader:
                 raise ValueError(msg)
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Type of cross-section":
+            if self.level_has_type:
+                # A second type line of one level starts a new part. The check must use the type
+                # of the part before this line, so it runs before the type changes.
+                self.check_fit_is_complete()
+                self.fitcoefficients = []
+                self.declared_numpoints = 0
+            self.level_has_type = bool(self.lowerlevelname)
             self.crosssectiontype = int(row[0])
             self.phixs_type_levels[self.crosssectiontype].add(self.lowerlevelname)
             # dropped here, once, and not on the next "!Configuration name" line: two blocks can
@@ -1416,15 +1430,22 @@ class PhotFileReader:
 
         take_fit_coefficient() and take_vy95_row() make a table only when the count is complete.
         A file that stops in a block, or a block with a missing row, would thus give the level no
-        table and no message. The caller runs this at each end of a block: a blank line, the next
-        "!Configuration name" line, the next "!Number of cross-section points" line, and the end of
-        the file.
+        table and no message. The caller runs this at each end of a part of a block:
+
+        - a blank line;
+        - the next "!Configuration name" line;
+        - a second "!Type of cross-section" line of the level, before the type changes;
+        - the next "!Number of cross-section points" line;
+        - the end of the file.
 
         The check uses the count of the "!Number of cross-section points" line, and not the count
         of the fit type. Many files declare one number, a zero, for a type 1 level with no cross
         section, and such a block is complete.
+
+        The check does not apply to type 0, which gives no table. Its row can hold two numbers
+        (CARB/II/14jul98/c2phot_a.dat), and take_data_rows() counts only a row with one number.
         """
-        if not self.lowerlevelname or self.crosssectiontype in {-1, 20, 21, 22} or not self.type_is_known():
+        if not self.lowerlevelname or self.crosssectiontype in {-1, 0, 20, 21, 22} or not self.type_is_known():
             return
         numbers_in_row = 8 if self.crosssectiontype == 9 else 1
         count = len(self.fitcoefficients) * numbers_in_row

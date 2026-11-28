@@ -68,9 +68,14 @@ def test_a_nuclide_with_two_alpha_rows_does_not_stop_the_command(monkeypatch, tm
 
 
 def nudat_row(parent_elevel: str, radiation: str, energy_kev: str, intensity: str) -> str:
-    """Give one row of a NuDat decay table of Sc-44, with the fields in the order of the header."""
+    """Give one row of a NuDat decay table of Sc-44, with the fields in the order of the header.
+
+    NuDat pads each field with spaces to the width of its column, so a blank field holds spaces.
+    """
     fields = ["44", "Sc", "21", "23", parent_elevel, "", "2+", "EC", "3.97 H 4", "14292.0", "44Ca", radiation, ""]
-    return "\t".join([*fields, energy_kev, "", "", "", intensity, "", "", ""])
+    fields += [energy_kev, "", "", "", intensity, "", "", ""]
+    widths = [len(columnname) for columnname in gamma.nudat_header.split("\t")]
+    return "\t".join(field.ljust(width) for field, width in zip(fields, widths, strict=True))
 
 
 def nudat_response(rows: list[str], *, complete: bool = True) -> str:
@@ -139,17 +144,44 @@ def test_a_line_of_an_unknown_parent_level_stays_out_of_the_ground_level_spectru
     assert spectrumpath.read_text(encoding="utf-8") == "2\n1.157  0.9990\n1.499  0.0091\n"
 
 
-def test_missing_values_of_other_fields_do_not_become_zero(monkeypatch, tmp_path):
-    """A line with no intensity gives no line. A line with an intensity and no energy stops the nuclide."""
-    rows = [*sc44_rows, nudat_row("0.0", "G", "2656.5", "**********")]
+@pytest.mark.parametrize("novalue", ["**********", ""])
+@pytest.mark.parametrize("field", ["energy", "intensity"])
+def test_a_ground_level_gamma_line_with_no_value_keeps_the_earlier_spectrum(monkeypatch, tmp_path, field, novalue):
+    """A gamma line with no energy or no intensity must stop the nuclide.
+
+    The spectrum would otherwise lack a part of the gamma energy, and no message would show that.
+    A field with no value is blank, or it holds asterisks.
+    """
+    energy_kev, intensity = (novalue, "5.0") if field == "energy" else ("2656.5", novalue)
+    rows = [*sc44_rows, nudat_row("0.0", "G", energy_kev, intensity)]
+    spectrumpath = run_with_responses(monkeypatch, tmp_path, nudat_response(rows))
+    message = "A gamma line of the ground level has no energy or no intensity for 1 nuclides: sc44"
+    with pytest.raises(SystemExit, match=message):
+        gamma.main()
+    assert spectrumpath.read_text(encoding="utf-8") == "the spectrum of an earlier run\n"
+
+
+def test_a_ground_level_with_no_intensity_on_each_gamma_line_keeps_the_earlier_spectrum(monkeypatch, tmp_path):
+    """If no gamma line of the ground level has an intensity, the run must not delete the earlier spectrum."""
+    rows = [nudat_row("0.0", "G", "1157.020", "**********"), nudat_row("0.0", "G", "1499.46", "")]
+    spectrumpath = run_with_responses(monkeypatch, tmp_path, nudat_response(rows))
+    with pytest.raises(SystemExit, match="has no energy or no intensity for 1 nuclides: sc44"):
+        gamma.main()
+    assert spectrumpath.read_text(encoding="utf-8") == "the spectrum of an earlier run\n"
+
+
+def test_a_line_of_a_different_radiation_with_no_value_does_not_stop_the_nuclide(monkeypatch, tmp_path):
+    """Only the gamma lines of the ground level go into the spectrum, so only they need each value."""
+    rows = [*sc44_rows, nudat_row("0.0", "B+", "", "**********"), nudat_row("271.24", "G", "", "")]
     spectrumpath = run_with_responses(monkeypatch, tmp_path, nudat_response(rows))
     gamma.main()
     assert spectrumpath.read_text(encoding="utf-8") == "2\n1.157  0.9990\n1.499  0.0091\n"
 
-    rows = [*sc44_rows, nudat_row("0.0", "G", "**********", "5.0")]
-    spectrumpath.unlink()
-    spectrumpath.parent.rmdir()
+
+def test_a_blank_parent_level_is_not_the_ground_level(monkeypatch, tmp_path):
+    """A blank parent level is unknown, the same as a parent level of asterisks."""
+    rows = [nudat_row("", "G", "271.24", "86.7")]
     spectrumpath = run_with_responses(monkeypatch, tmp_path, nudat_response(rows))
-    with pytest.raises(SystemExit, match="NuDat returned an incomplete table for 1 nuclides: sc44"):
+    with pytest.raises(SystemExit, match="The NuDat table of 1 nuclides has no ground level: sc44"):
         gamma.main()
     assert spectrumpath.read_text(encoding="utf-8") == "the spectrum of an earlier run\n"

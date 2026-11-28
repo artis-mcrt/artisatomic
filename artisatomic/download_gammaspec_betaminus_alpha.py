@@ -40,13 +40,23 @@ class IncompleteTableError(ValueError):
     """The NuDat response does not hold a complete table, so the script must not use a part of it."""
 
 
-def nudat_float(column: str) -> pl.Expr:
-    """Give a column of the NuDat table as a float, with a null for a blank field or a field of asterisks.
+def nudat_value(column: str) -> pl.Expr:
+    """Give a text column of the NuDat table, with a null for a field that gives no value.
 
-    NuDat writes asterisks in a field with no value. A null keeps "no value" apart from zero.
+    Such a field is blank, or it holds only asterisks. NuDat pads a blank field with spaces,
+    which read_nudat_table() removes before this. NuDat writes asterisks for a value that
+    does not fit its field.
     """
     text = pl.col(column)
-    return pl.when(~text.str.contains(r"^\*+$")).then(text).cast(pl.Float64).alias(column)
+    return pl.when(~text.str.contains(r"^\**$")).then(text).alias(column)
+
+
+def nudat_float(column: str) -> pl.Expr:
+    """Give a column of the NuDat table as a float, with a null for a field that gives no value.
+
+    A null keeps "no value" apart from zero (nudat_value()).
+    """
+    return nudat_value(column).cast(pl.Float64)
 
 
 def read_nudat_table(textdata: str, strnuclide: str) -> pl.DataFrame | None:
@@ -56,8 +66,8 @@ def read_nudat_table(textdata: str, strnuclide: str) -> pl.DataFrame | None:
     the table, and the function then raises IncompleteTableError. Without that check, the rows
     of the part would replace a complete spectrum of an earlier run.
 
-    A parent level of asterisks is an unknown level, and it becomes a null. It is not the ground
-    level.
+    A parent level that is blank or asterisks is an unknown level, and it becomes a null. It is
+    not the ground level.
     """
     startindex = textdata.find("<pre>")
     if startindex < 0:
@@ -88,11 +98,7 @@ def read_nudat_table(textdata: str, strnuclide: str) -> pl.DataFrame | None:
     dfnuclide.columns = newcols
     return (
         dfnuclide.with_columns(pl.col(pl.Utf8).str.strip_chars())
-        .with_columns(
-            pl.when(~pl.col("parent_elevel").str.contains(r"^\*+$"))
-            .then(pl.col("parent_elevel"))
-            .alias("parent_elevel")
-        )
+        .with_columns(nudat_value("parent_elevel"))
         .with_columns(
             normalise_parent_elevel(),
             nudat_float("radiationenergy_kev"),
@@ -129,7 +135,8 @@ def main():
     artis_files/data/gamma_<nuclide>.txt under the repository root. If the ground level gives no
     gamma line for the file, the script writes no file and deletes the file of an earlier run. The
     file of an earlier run stays if NuDat gives no table, an incomplete table, or no ground level
-    for the nuclide. A parent level that NuDat gives as unknown is not the ground level.
+    for the nuclide. It also stays if a gamma line of the ground level has no energy or no
+    intensity. A parent level that NuDat gives as unknown is not the ground level.
     """
     argparse.ArgumentParser(description=__doc__).parse_args()
     outfolder = PYDIR.parent / "artis_files" / "data"
@@ -184,6 +191,7 @@ def main():
     # dropped connection does not end the run after N nuclides.
     nuclides_without_table: list[str] = []
     nuclides_with_incomplete_table: list[str] = []
+    nuclides_with_unknown_line: list[str] = []
     nuclides_without_groundlevel: list[str] = []
     with requests.Session() as session:
         session.mount(
@@ -229,21 +237,24 @@ def main():
 
                     found_groundlevel = True
 
-                    dfgammadecays = dfdecay.filter(
+                    dfgammalines = dfdecay.filter(
                         (pl.col("Radiation") == "G")
                         # fill_null: an empty cell reads as null, and is_in() on a null drops the row
                         & pl.col("radsubtype").fill_null("").is_in(["", "Annihil."])
-                        & (pl.col("intensity") > 0.0)
                     )
+                    # A gamma line with no energy or no intensity cannot go into the file. The file
+                    # would then lack a part of the gamma energy, and no message would show that.
+                    unknownlines = dfgammalines.filter(
+                        pl.col("radiationenergy_kev").is_null() | pl.col("intensity").is_null()
+                    ).height
+                    if unknownlines:
+                        print(f"  ERROR! {unknownlines} gamma lines of the ground level have no energy or no intensity")
+                        nuclides_with_unknown_line.append(strnuclide)
+                        continue
+                    dfgammadecays = dfgammalines.filter(pl.col("intensity") > 0.0)
 
                     maybedfbetaminusrow = dfbetaminus.filter(pl.col("Z") == z).filter(pl.col("A") == a)
                     maybedfalpharow = dfalpha.filter(pl.col("Z") == z).filter(pl.col("A") == a).limit(1)
-                    # a gamma line with no energy cannot go into the file, and the file would then
-                    # lack a part of the gamma energy with no sign of it
-                    if dfgammadecays["radiationenergy_kev"].null_count():
-                        print("  ERROR! a gamma line of the ground level has no energy")
-                        nuclides_with_incomplete_table.append(strnuclide)
-                        continue
 
                     nndc_halflife = None
                     if not dfgammadecays.is_empty():
@@ -323,6 +334,11 @@ def main():
         problems.append(
             f"NuDat returned an incomplete table for {len(nuclides_with_incomplete_table)} nuclides:"
             f" {', '.join(nuclides_with_incomplete_table)}"
+        )
+    if nuclides_with_unknown_line:
+        problems.append(
+            f"A gamma line of the ground level has no energy or no intensity for"
+            f" {len(nuclides_with_unknown_line)} nuclides: {', '.join(nuclides_with_unknown_line)}"
         )
     if nuclides_without_groundlevel:
         problems.append(

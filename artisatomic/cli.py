@@ -404,7 +404,7 @@ def main() -> None:
 
     outputfolder = Path(args.output_folder)
     outputfolder.mkdir(exist_ok=True, parents=True)
-    # this check runs first, because the read of the ions can take hours. install_files() repeats
+    # This check runs before the read of the ions, which can take hours. install_files() repeats
     # it for the files that the run wrote.
     try:
         check_no_folder_at_output_paths(outputfolder, output_file_names)
@@ -600,7 +600,8 @@ def discard_run(workfolder: Path, outputfolder: Path) -> None:
     print(f"The run failed. The output folder keeps the files of the earlier run. See {failedlogname}.")
 
 
-# the names that a run writes into the output folder. --nophixs writes no phixsdata_v2.txt.
+# the names that a run writes into the output folder. --nophixs writes no phixsdata_v2.txt. Only a
+# run that fails writes failedlogname, and a good run removes that file.
 output_file_names = (
     "adata.txt",
     "compositiondata.txt",
@@ -608,6 +609,7 @@ output_file_names = (
     "phixsdata_v2.txt",
     "artisatomiclog.txt",
     handlersrecordname,
+    failedlogname,
 )
 
 
@@ -694,12 +696,15 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
     That release wrote one log file for each ion, and a copy of the ion handlers, into this folder.
     A user could take such a file for a record of the new run. The name of a log file was the
     element symbol in lower case, the ion stage, and ".txt", for example fe2.txt. The function
-    removes only a file with such a name, for an ion stage that the element can have, and the
-    copy of the ion handlers. Each other file is a
-    file of the user, and it stays. The function then removes the folder if the folder is empty.
+    removes only a file with such a name, for an ion stage that the element can have. It also
+    removes the copy of the ion handlers. Each other file is a file of the user, and it stays.
+    The function then removes the folder if the folder is empty.
 
     A symbolic link at atomic_data_logs stays, and so does each file of its target. The target
     can be a folder that the user also uses for other files.
+
+    If the folder stays, the function prints the reason. The folder can then still hold a log
+    of an earlier release.
 
     keep is the ion handlers file of the run. The function keeps that file, also if it is the copy
     of the ion handlers in this folder.
@@ -707,7 +712,10 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
     from artisatomic.base import elsymbols
 
     old_log_folder = output_folder / "atomic_data_logs"
-    if old_log_folder.is_symlink() or not old_log_folder.is_dir():
+    if old_log_folder.is_symlink():
+        print(f"{old_log_folder} is a symbolic link, so the run removes no log of an earlier release from it.")
+        return
+    if not old_log_folder.is_dir():
         return
     # The first entry of elsymbols is not an element. An ion of the element Z has an ion stage of Z + 1 at most.
     atomic_numbers = {symbol.lower(): atomic_number for atomic_number, symbol in enumerate(elsymbols) if atomic_number}
@@ -721,7 +729,13 @@ def remove_old_log_folder(output_folder: Path, keep: Path | None = None) -> None
         if oldfile.is_file() and not is_same_file(oldfile, keep):
             print("deleting", oldfile)
             oldfile.unlink()
-    if not any(old_log_folder.iterdir()):
+    remaining = sorted(path.name for path in old_log_folder.iterdir())
+    if remaining:
+        print(
+            f"{old_log_folder} stays, because it holds files that are not logs of an earlier release,"
+            f" for example {remaining[0]}."
+        )
+    else:
         old_log_folder.rmdir()
 
 

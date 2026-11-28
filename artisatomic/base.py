@@ -932,16 +932,20 @@ def utf8_conversion_command(filepath: Path) -> str:
     archive. The command therefore decompresses the file, converts the text, and compresses it
     again. It writes a new file beside the data file. It replaces the data file only if each
     step succeeds (pipefail), so a failure leaves the data file as it was.
+
+    dash, csh and tcsh have no pipefail option. The command for a compressed file therefore
+    starts bash, so the user can paste it into each shell.
     """
     source = shlex.quote(str(filepath))
     temporary = shlex.quote(f"{filepath}.utf8.tmp")
     extension = next((ext for ext in compression_extensions if ext and filepath.name.endswith(ext)), "")
     if not extension:
         return f"iconv -f iso-8859-1 -t utf-8 {source} > {temporary} && mv {temporary} {source}"
-    return (
-        f"(set -o pipefail; {decompress_commands[extension]} {source} | iconv -f iso-8859-1 -t utf-8"
-        f" | {compress_commands[extension]} > {temporary}) && mv {temporary} {source}"
+    pipeline = (
+        f"set -o pipefail; {decompress_commands[extension]} {source} | iconv -f iso-8859-1 -t utf-8"
+        f" | {compress_commands[extension]} > {temporary} && mv {temporary} {source}"
     )
+    return f"bash -c {shlex.quote(pipeline)}"
 
 
 def rewrite_file_as_utf8(filename: str | Path) -> bool:

@@ -108,24 +108,53 @@ def import_chianti_core(firstion: str) -> t.Any:
         raise ModuleNotFoundError(msg) from err
 
 
-def chianti_total_rates(
-    ch: t.Any, atomic_number: int, upperionstage: int, temperatures: np.ndarray
-) -> np.ndarray | None:
-    """Give the total recombination rate of CHIANTI at each temperature, or None if CHIANTI has no radiative rate.
+class ChiantiRates(t.NamedTuple):
+    """The rates of one ion from ChiantiPy, with the reason for each rate that ChiantiPy does not give."""
 
-    The total is the radiative rate plus the dielectronic rate. ChiantiPy gives an array of zeros
-    for a process with no parameter file, and it sets RrParams only when it finds the file of the
-    radiative parameters. It also gives zeros for a fit type of the radiative parameters that it
-    does not know. ARTIS scales the cross sections of the lower ion to the total, so a total of
-    zero from an absent file removes each cross section. A dielectronic rate of zero is correct for
-    some ions, for example a bare nucleus, so absent dielectronic parameters stop nothing.
+    # None if ChiantiPy gives no radiative rate
+    total: np.ndarray | None
+    no_radiative_reason: str
+    no_dielectronic_reason: str
+
+
+def chianti_total_rates(ch: t.Any, atomic_number: int, upperionstage: int, temperatures: np.ndarray) -> ChiantiRates:
+    """Give the sum of the radiative and the dielectronic recombination rate of ChiantiPy at each temperature.
+
+    The result has no rates if ChiantiPy gives no radiative rate, and it then gives the reason.
+    ARTIS scales the cross sections of the lower ion to this number. A sum of zero from an absent
+    file would therefore remove each cross section.
+
+    ChiantiPy sets RrParams only when it finds the file of the radiative parameters. With no file,
+    rrRate() gives an array of zeros. For a fit type that ChiantiPy does not know, RrParams is
+    None, and rrRate() then fails. The function therefore tests RrParams before the call and
+    after it. DrParams and drRate() do the same for the dielectronic parameters.
+
+    A bare nucleus has no dielectronic recombination. For each other ion, a result with no
+    dielectronic rate gives the reason, and its sum is the radiative rate only.
+
+    The sum is not the rate of a .trparams file. CHIANTI has such a file of total recombination
+    rates for fe_2 to fe_6, ni_3 and s_3, and ChiantiPy does not read it.
     """
     ion = ch.ion(f"{elsymbols[atomic_number].lower()}_{upperionstage}", temperature=temperatures)
+    unknown_type = "ChiantiPy does not know the fit type of the {} recombination parameters"
+    if getattr(ion, "RrParams", {}) is None:
+        return ChiantiRates(None, unknown_type.format("radiative"), "")
     ion.rrRate()
-    if getattr(ion, "RrParams", {}).get("rrtype") not in chianti_rr_fit_types:
-        return None
+    rrparams = getattr(ion, "RrParams", None)
+    if rrparams is None:
+        return ChiantiRates(None, "CHIANTI has no radiative recombination parameters", "")
+    if rrparams.get("rrtype") not in chianti_rr_fit_types:
+        return ChiantiRates(None, unknown_type.format("radiative"), "")
+    # a copy, so the sum below does not change the array of the ion
+    total = np.array(ion.RrRate["rate"], dtype=float)
+
+    if getattr(ion, "DrParams", {}) is None:
+        return ChiantiRates(total, "", unknown_type.format("dielectronic"))
     ion.drRate()
-    return np.asarray(ion.RrRate["rate"], dtype=float) + np.asarray(ion.DrRate["rate"], dtype=float)
+    total += np.asarray(ion.DrRate["rate"], dtype=float)
+    if getattr(ion, "DrParams", None) is None and upperionstage != atomic_number + 1:
+        return ChiantiRates(total, "", "CHIANTI has no dielectronic recombination parameters")
+    return ChiantiRates(total, "", "")
 
 
 # the fit types of the radiative parameters that ChiantiPy evaluates (Ion.rrRate())
@@ -167,7 +196,10 @@ def main():
     if naharpath.is_dir():
         print(f"Nahar data directory: {naharpath}")
     else:
-        print(f"Nahar data directory {naharpath} not found. Every ion takes its rates from Chianti.")
+        print(
+            f"Nahar data directory {naharpath} not found. Each ion with an atomic number of"
+            f" {max_chianti_atomic_number} or less takes its rates from Chianti, if Chianti has them."
+        )
 
     dfcomposition = get_composition_data(artis_files_path / "compositiondata.txt")
 
@@ -205,7 +237,8 @@ def main():
     ch = import_chianti_core(firstchiantiion) if firstchiantiion is not None else None
 
     # the earlier recombrates.txt stays if a reader or Chianti fails
-    ions_without_rate: list[str] = []
+    ions_without_rate: dict[str, list[str]] = {}
+    ions_without_dielectronic_rate: list[str] = []
     with open_for_atomic_write(artis_files_path / "recombrates.txt") as frecombrates:
         for atomic_number, lowerionstage, naharfilename in ionsources:
             upperionstage = lowerionstage + 1
@@ -222,27 +255,40 @@ def main():
                     raise RuntimeError(msg)
                 print("  source: Chianti")
                 arr_logT_e = np.arange(1.0, 9.1, 0.1)
-                arr_total = chianti_total_rates(ch, atomic_number, upperionstage, 10**arr_logT_e)
-                if arr_total is None:
-                    ionname = f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {upperionstage}"
+                rates = chianti_total_rates(ch, atomic_number, upperionstage, 10**arr_logT_e)
+                ionname = f"Z={atomic_number} {elsymbols[atomic_number]} ion stage {upperionstage}"
+                if rates.total is None:
                     print(
-                        f"WARNING: CHIANTI has no radiative recombination parameters for {ionname}."
+                        f"WARNING: {rates.no_radiative_reason} for {ionname}."
                         " recombrates.txt gives no rates for this ion."
                     )
-                    ions_without_rate.append(ionname)
+                    ions_without_rate.setdefault(rates.no_radiative_reason, []).append(ionname)
                     continue
+                if rates.no_dielectronic_reason:
+                    print(
+                        f"WARNING: {rates.no_dielectronic_reason} for {ionname}."
+                        " Its rate in recombrates.txt is the radiative rate only."
+                    )
+                    ions_without_dielectronic_rate.append(ionname)
                 frecombrates.write(f"{atomic_number} {upperionstage} {len(arr_logT_e)}\n")
                 # the third column is the total recombination rate, the same as RRC(total) of
                 # the Nahar files above, so the sum must include dielectronic recombination
                 frecombrates.writelines(
-                    f"{logT_e:.1f} {-1.0} {total}\n" for logT_e, total in zip(arr_logT_e, arr_total, strict=True)
+                    f"{logT_e:.1f} {-1.0} {total}\n" for logT_e, total in zip(arr_logT_e, rates.total, strict=True)
                 )
 
-    if ions_without_rate:
+    # an absent file is a fault of the database, and an unknown fit type is a limit of the ChiantiPy release
+    advice = "Check that the CHIANTI database is complete, and that ChiantiPy can read this release of it."
+    for reason, ionnames in ions_without_rate.items():
         print(
-            f"WARNING: {len(ions_without_rate)} ions have no rates in recombrates.txt, because CHIANTI has no"
-            f" radiative recombination parameters for them: {', '.join(ions_without_rate)}."
-            " Check that the CHIANTI database is complete."
+            f"WARNING: {len(ionnames)} ions have no rates in recombrates.txt. {reason} for them:"
+            f" {', '.join(ionnames)}. {advice}"
+        )
+    if ions_without_dielectronic_rate:
+        print(
+            f"WARNING: {len(ions_without_dielectronic_rate)} ions have the radiative rate only in recombrates.txt,"
+            f" because ChiantiPy gives no dielectronic rate for them: {', '.join(ions_without_dielectronic_rate)}."
+            f" {advice}"
         )
 
 

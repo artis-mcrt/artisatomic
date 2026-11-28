@@ -14,7 +14,7 @@ uv installs the dependencies in the header above. h5py 3.16 has no wheel for Pyt
 builds h5py from source there, which needs an HDF5 library. Without one, run the script with
 uv run --python 3.14. The script writes the tables into a folder that has the
 name of the HDF5 file without its extension. It replaces the earlier content of that folder. It
-stops if that folder holds a file that it did not write from the same HDF5 file. The
+stops if that folder holds a file that it cannot identify as a table of the same HDF5 file. The
 path of a table in the folder is the path of its object in the HDF5 file. The script does not
 change or delete the HDF5 file.
 
@@ -28,7 +28,8 @@ The key-value metadata of each Parquet file holds these items:
 
 - the HDF5 attributes of the object, with their names;
 - the attributes of each group above the object, with the path of the group before the name;
-- the name of the HDF5 file (hdf5_file) and the SHA-256 hash of its content (hdf5_file_sha256).
+- the name of the HDF5 file (hdf5_file) and the SHA-256 hash of its content (hdf5_file_sha256);
+- the path of the object in the HDF5 file (hdf5_object).
 
 The readers compare hdf5_file_sha256 with the HDF5 file, and they stop if the HDF5 file changed.
 """
@@ -538,8 +539,8 @@ def check_output_paths(path: Path, relativepaths: list[str]) -> None:
         raise ValueError(msg)
 
 
-def is_table_of(filepath: Path, hdf5path: Path) -> bool:
-    """Tell if a file is a table that the script wrote from this HDF5 file.
+def is_table_of(filepath: Path, hdf5path: Path, outputfolder: Path) -> bool:
+    """Tell if a file of outputfolder is a table that the script wrote from this HDF5 file.
 
     Each release of the script records the name of the HDF5 file in each table. A Parquet file
     with no such record is a file of the user, for example the result of an analysis. The hash
@@ -549,17 +550,56 @@ def is_table_of(filepath: Path, hdf5path: Path) -> bool:
     A recorded name with a different spelling is the same source only if the file system gives
     the two names one file. Data.h5 and data.h5 are one file on the default file system of macOS,
     and two files on Linux. data.h5 and data.hdf5 are two files with one output folder.
+
+    A table also records the path of its object in the HDF5 file, and that path gives the path of
+    the table in the folder. A copy of a table with a different name has the two records of the
+    table. So has a file that a program derives from a table, if the program keeps the metadata.
+    Such a file is a file of the user, because its path is not the path of the object. An earlier
+    release of the script recorded no object path, so a table with no such record passes this test.
+
+    The function gives False for two kinds of table that the script wrote, because it cannot
+    identify them: a table that a copy cut short, and a table whose HDF5 file has a new name.
     """
     if filepath.suffix != ".parquet":
         return False
     try:
-        recordedname = pl.read_parquet_metadata(filepath).get("hdf5_file") or ""
-        if recordedname == hdf5path.name:
-            return True
-        # a name only, so the test reads no file outside the folder of the HDF5 file
-        isname = recordedname not in {"", ".", ".."} and "/" not in recordedname and "\\" not in recordedname
-        return isname and hdf5path.with_name(recordedname).samefile(hdf5path)
+        metadata = pl.read_parquet_metadata(filepath)
     except (OSError, pl.exceptions.PolarsError):
+        return False
+    objectpath = metadata.get("hdf5_object")
+    if objectpath is not None and filekey(filepath.relative_to(outputfolder).as_posix()) != filekey(
+        f"{objectpath.lstrip('/')}.parquet"
+    ):
+        return False
+    recordedname = metadata.get("hdf5_file") or ""
+    if recordedname == hdf5path.name:
+        return True
+    # a name only, so the test reads no file outside the folder of the HDF5 file
+    isname = recordedname not in {"", ".", ".."} and "/" not in recordedname and "\\" not in recordedname
+    try:
+        return isname and hdf5path.with_name(recordedname).samefile(hdf5path)
+    # ValueError: a recorded name with a null character
+    except (OSError, ValueError):
+        return False
+
+
+def is_appledouble_file(filepath: Path) -> bool:
+    """Tell if a file is the AppleDouble file of a file or a folder beside it.
+
+    macOS writes the extended attributes of "name" into the file "._name" on a file system that
+    has no extended attributes, for example exFAT or a network share. Such a file starts with
+    the four bytes 00 05 16 07. An AppleDouble file with no "name" beside it does not pass.
+    """
+    name = filepath.name
+    if not name.startswith("._") or len(name) == 2:
+        return False
+    sibling = filepath.with_name(name[2:])
+    if not sibling.is_symlink() and not sibling.exists():
+        return False
+    try:
+        with filepath.open("rb") as appledoublefile:
+            return appledoublefile.read(4) == b"\x00\x05\x16\x07"
+    except OSError:
         return False
 
 
@@ -568,9 +608,9 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
 
     An error leaves the earlier output folder as it was. The script makes the output folder, so it
     replaces the folder as a whole. A table that the HDF5 file no longer holds goes away too. The
-    function stops, and changes no file, if the earlier folder holds a file that the script did
-    not write from hdf5path (is_table_of()). The function permits only .DS_Store, which the Finder
-    of macOS writes.
+    function stops, and changes no file, if the earlier folder holds a file that is_table_of()
+    does not accept. The function permits .DS_Store and an AppleDouble file (._name), which macOS
+    writes.
     """
     # the script makes only a folder at this path, also for an input such as data.parquet.h5
     if outputfolder.is_symlink() or (outputfolder.exists() and not outputfolder.is_dir()):
@@ -582,11 +622,16 @@ def write_tables(outputfolder: Path, tables: list[tuple[str, pl.DataFrame, dict[
             for filepath in outputfolder.rglob("*")
             # a symbolic link is not a file that the script wrote, also with the extension .parquet
             if filepath.is_symlink()
-            or (not filepath.is_dir() and filepath.name != ".DS_Store" and not is_table_of(filepath, hdf5path))
+            or (
+                not filepath.is_dir()
+                and filepath.name != ".DS_Store"
+                and not is_appledouble_file(filepath)
+                and not is_table_of(filepath, hdf5path, outputfolder)
+            )
         ]
         if otherfiles:
             msg = (
-                f"{outputfolder} holds files that the script did not write from {hdf5path.name},"
+                f"{outputfolder} holds files that the script cannot identify as tables of {hdf5path.name},"
                 f" for example {otherfiles[0]}. Move them out of the folder. Then run this again."
             )
             raise FileExistsError(msg)
@@ -662,7 +707,7 @@ def convert_file(path: Path) -> list[Path]:
             (
                 f"{name.lstrip('/')}.parquet",
                 table,
-                merge_metadata(name, group_metadata(h5file, name), metadata, filemetadata),
+                merge_metadata(name, group_metadata(h5file, name), metadata, filemetadata, {"hdf5_object": name}),
             )
             for name, table, metadata in tables_of(h5file)
         ]
