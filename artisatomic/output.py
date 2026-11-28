@@ -2,6 +2,7 @@
 
 import argparse
 import math
+import os
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import Path
@@ -835,9 +836,9 @@ def log_repeated_level_pairs(flog, dftransitions_ion: pl.DataFrame) -> None:
 
 # an ion with fewer rows formats them in this process (see write_transition_data())
 transition_rows_for_the_pool = 50_000
-# The count of rows that one worker formats at one time. The format of 250000 rows needs about
-# 57 MiB of Python objects in the worker and gives 9 MiB of text. A chunk of an ion divided by the
-# count of processors has 2.8 million rows for the largest ions (45 million rows, 16 processors).
+# The largest count of rows that one worker formats at one time. The format of 250000 rows needs
+# about 57 MiB of Python objects in the worker and gives 9 MiB of text. A chunk of an ion divided by
+# the count of processors has 2.8 million rows for the largest ions (45 million rows, 16 processors).
 transition_rows_per_chunk = 250_000
 
 
@@ -938,11 +939,14 @@ def write_transition_data(
         if nrows < transition_rows_for_the_pool:
             ftransitiondata.write(format_transition_rows(columns))
         else:
+            # One chunk for each worker of the run-wide pool, so an ion of a medium size uses each
+            # worker. A large ion gets more chunks, of transition_rows_per_chunk rows each.
+            rows_per_chunk = min(transition_rows_per_chunk, math.ceil(nrows / (os.process_cpu_count() or 1)))
             # A generator, so a chunk exists only while the pool has it. map_chunks() gives the pool
             # one chunk for each processor at most, so the text that waits for its write has a limit.
             chunks = (
-                tuple(column[start : start + transition_rows_per_chunk] for column in columns)
-                for start in range(0, nrows, transition_rows_per_chunk)
+                tuple(column[start : start + rows_per_chunk] for column in columns)
+                for start in range(0, nrows, rows_per_chunk)
             )
             ftransitiondata.writelines(map_chunks(format_transition_rows, chunks))
 

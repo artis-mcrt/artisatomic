@@ -8693,6 +8693,8 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
     # Rows at the end of a chunk and at the start of the next chunk: a count of rows one below a
     # multiple of the chunk size, at it, and one above it. Each row must be in the file one time, in order.
     monkeypatch.setattr(output, "transition_rows_per_chunk", 100)
+    # with one processor, the chunk size is transition_rows_per_chunk for each count below
+    monkeypatch.setattr(output.os, "process_cpu_count", lambda: 1)
     for count in (99, 100, 101, 250, 1000):
         part = dftransitions.head(count)
         ftransitiondata = io.StringIO()
@@ -8707,6 +8709,24 @@ def test_write_transition_data_gives_the_same_bytes_in_the_pool(monkeypatch):
         )
         header = f"{26:7d}{2:7d}{count:12d}\n"
         assert ftransitiondata.getvalue().endswith(header + output.format_transition_rows(columns) + "\n"), count
+
+    # an ion of a medium size gets one chunk for each processor, and not one chunk of 250000 rows
+    monkeypatch.undo()
+    monkeypatch.setattr(output, "transition_rows_for_the_pool", 1)
+    monkeypatch.setattr(output.os, "process_cpu_count", lambda: 4)
+    chunksizes = []
+
+    def map_in_this_process(fn, chunks):
+        for chunk in chunks:
+            chunksizes.append(len(chunk[0]))
+            yield fn(chunk)
+
+    monkeypatch.setattr(output, "map_chunks", map_in_this_process)
+    ftransitiondata = io.StringIO()
+    with contextlib.redirect_stdout(io.StringIO()):
+        output.write_transition_data(ftransitiondata, 26, 2, dftransitions, io.StringIO())
+    assert chunksizes == [250, 250, 250, 250]
+    assert ftransitiondata.getvalue() == texts[0]
 
 
 @pytest.mark.parametrize("interpolation", ["linear", "classic"])

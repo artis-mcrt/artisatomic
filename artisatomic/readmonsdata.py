@@ -59,11 +59,12 @@ def transitions_member(atomic_number: int, ion_stage: int) -> str:
 
 
 # The reader takes this count of bytes of a transition file for one batch. A row has about 72
-# bytes, so a batch holds about 117000 rows. An ion can have 45 million transitions. A read of
+# bytes, so a batch holds about 470000 rows. An ion can have 45 million transitions. A read of
 # the complete file holds each field as text, and needs several times the memory of the numbers.
 # For 12 million rows, the read added 3.2 GiB to the memory of the process as one batch, 1.4 GiB
-# with batches of 32 MiB, and 0.5 GiB with batches of 8 MiB. The time was 2.3 s, 2.3 s and 2.5 s.
-TRANSITION_BATCH_BYTES = 8 * 1024 * 1024
+# with batches of 32 MiB, and 0.6 GiB with batches of 8 MiB. The time was 2.1 s, 2.2 s and 2.3 s.
+# 32 MiB keeps the time of a read as one batch.
+TRANSITION_BATCH_BYTES = 32 * 1024 * 1024
 
 
 def parse_csv_columns(data: bytes, archivename: str, membername: str, columncount: int) -> list[np.ndarray]:
