@@ -1055,6 +1055,9 @@ class PhotFileReader:
         self.lowerlevelname = ""
         self.targetlevelname = ""
         self.numpointsexpected = 0
+        # store_table() replaces numpointsexpected by the point count of the table. This field keeps
+        # the count that the "!Number of cross-section points" line declares.
+        self.declared_numpoints = 0
         self.crosssectiontype = -1
         self.fitcoefficients: list[t.Any] = []
         # the points of the current tabulated block, in file order
@@ -1200,6 +1203,7 @@ class PhotFileReader:
 
         self.take_data_rows(segment_start, len(self.lines))
         self.finish_tabulated_block(validate=False)
+        self.check_fit_is_complete()
 
         # one summary for the file, and not one line for each level or each row
         if self.levels_without_edge:
@@ -1248,6 +1252,7 @@ class PhotFileReader:
         if not row:
             # a blank line ends the block, and the points read must match the declared count
             self.finish_tabulated_block(validate=True)
+            self.check_fit_is_complete()
             self.lowerlevelname = ""
             self.crosssectiontype = -1
             self.numpointsexpected = 0
@@ -1304,6 +1309,8 @@ class PhotFileReader:
                 # "!Configuration name" and are not level blocks
                 return
 
+            # a file can start the next block with no blank line
+            self.check_fit_is_complete()
             self.lowerlevelname = row[0]
             # with J splitting the name (with any [J] suffix) maps to exactly one level.
             # Without it, strip the suffix so that the table covers the configuration.
@@ -1311,6 +1318,7 @@ class PhotFileReader:
                 self.lowerlevelname = self.lowerlevelname.split("[")[0]
             self.fitcoefficients = []
             self.numpointsexpected = 0
+            self.declared_numpoints = 0
             # take the first level that matches (without J splitting, several can differ by
             # J). A name with no level that matches gets the index -1, and edge_lambda_angstrom()
             # then gives no edge, so the reader builds no table for it. The phot files can cover
@@ -1350,6 +1358,7 @@ class PhotFileReader:
             # a new block of points starts, so the reader stores a block that no blank line ended as it is
             self.finish_tabulated_block(validate=False)
             self.numpointsexpected = int(row[0])
+            self.declared_numpoints = self.numpointsexpected
 
         if len(row) >= 2 and " ".join(row[1:]) == "!Cross-section unit":
             self.in_header = True  # All phot_data_* in 19apr23 have this line
@@ -1364,6 +1373,30 @@ class PhotFileReader:
             # follow each other with no blank line between them
             if not self.type_is_known():
                 self.note_unknown_type()
+
+    def check_fit_is_complete(self) -> None:
+        """Stop the run if the block of an analytic fit ends before the count of numbers that it declares.
+
+        take_fit_coefficient() and take_vy95_row() make a table only when the count is complete.
+        A file that stops in a block, or a block with a missing row, would thus give the level no
+        table and no message. The caller runs this at each end of a block: a blank line, the next
+        "!Configuration name" line, and the end of the file.
+
+        The check uses the count of the "!Number of cross-section points" line, and not the count
+        of the fit type. Many files declare one number, a zero, for a type 1 level with no cross
+        section, and such a block is complete.
+        """
+        if not self.lowerlevelname or self.crosssectiontype in {-1, 20, 21, 22} or not self.type_is_known():
+            return
+        numbers_in_row = 8 if self.crosssectiontype == 9 else 1
+        count = len(self.fitcoefficients) * numbers_in_row
+        if count < self.declared_numpoints:
+            msg = (
+                f"Z={self.atomic_number}, ion_stage={self.ion_stage}, lowerlevel={self.lowerlevelname},"
+                f" crosssectiontype={self.crosssectiontype} in {self.photfilename}: the block declares"
+                f" {self.declared_numpoints:d} fit coefficients but ends after {count:d}"
+            )
+            raise ValueError(msg)
 
     def type_is_known(self) -> bool:
         """Whether the current cross section type is one that this reader reads or evaluates."""

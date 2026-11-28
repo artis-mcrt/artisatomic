@@ -5184,6 +5184,99 @@ def test_photfilereader_short_block_and_unknown_type(tmp_path):
     assert "screened nuclear charge" not in flog.getvalue()
 
 
+@pytest.mark.parametrize(
+    ("nextblock", "boundary"),
+    [
+        ("\n", "a blank line"),
+        (
+            (
+                "C                                       !Configuration name\n"
+                "1                                       !Type of cross-section\n"
+                "3                                       !Number of cross-section points\n"
+                "2.0\n1.0\n3.0\n"
+            ),
+            "the next block",
+        ),
+        ("", "the end of the file"),
+    ],
+)
+def test_photfilereader_rejects_an_incomplete_analytic_fit(tmp_path, nextblock, boundary):
+    """A fit block that ends before its declared count of coefficients stops the run at each kind of boundary.
+
+    The reader makes a table only when the count of a fit is complete. A block with two of its
+    three coefficients thus gave its level no table, and the run continued with no message.
+    """
+    from artisatomic.readhillierdata import PhotFileReader
+
+    header = (
+        "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+        "3                                       !Number of energy levels\n"
+        "2.0D0                                   !Screened nuclear charge\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+    )
+    groundblock = (
+        "A                                       !Configuration name\n"
+        "1                                       !Type of cross-section\n"
+        "3                                       !Number of cross-section points\n"
+        "2.0\n1.0\n3.0\n\n"
+    )
+
+    def excitedblock(coefficients: str) -> str:
+        return (
+            "B                                       !Configuration name\n"
+            "1                                       !Type of cross-section\n"
+            "3                                       !Number of cross-section points\n"
+            f"{coefficients}"
+        )
+
+    def read(text: str) -> PhotFileReader:
+        photfile = tmp_path / "phot_test"
+        photfile.write_text(header + text, encoding="utf-8")
+        levelindices = {"A": 0, "B": 1, "C": 2}
+        reader = PhotFileReader(56, 2, 1, [911.0, 455.5, 300.0], levelindices, levelindices, io.StringIO())
+        reader.read_file(0, photfile, photfile.name)
+        return reader
+
+    message = (
+        r"Z=56, ion_stage=2, lowerlevel=B, crosssectiontype=1 in phot_test: the block declares 3 fit"
+        r" coefficients but ends after 2"
+    )
+    with pytest.raises(ValueError, match=message):
+        read(groundblock + excitedblock("2.0\n1.0\n") + nextblock)
+
+    # the complete fit still gives a table at the same boundary
+    reader = read(groundblock + excitedblock("2.0\n1.0\n3.0\n") + nextblock)
+    assert {"A", "B"} <= set(reader.phixstables[0]), boundary
+
+
+def test_photfilereader_accepts_a_fit_block_that_declares_one_zero(tmp_path):
+    """Many CMFGEN files give a type 1 level one number, a zero, for no cross section. Such a block is complete."""
+    from artisatomic.readhillierdata import PhotFileReader
+
+    text = (
+        "\n*****\n  header comment\n12-Oct-2009                             !Date\n"
+        "5s2_5p6_1Se                             !Final state in ion\n"
+        "Megabarns                               !Cross-section unit\n"
+        "False                                   !Split J levels\n"
+        "A                                       !Configuration name\n"
+        "1                                       !Type of cross-section\n"
+        "1                                       !Number of cross-section points\n"
+        "      0.00\n\n"
+        "B                                       !Configuration name\n"
+        "1                                       !Type of cross-section\n"
+        "3                                       !Number of cross-section points\n"
+        "2.0\n1.0\n3.0\n"
+    )
+    photfile = tmp_path / "phot_test"
+    photfile.write_text(text, encoding="utf-8")
+    levelindices = {"A": 0, "B": 1}
+    reader = PhotFileReader(56, 2, 1, [911.0, 455.5], levelindices, levelindices, io.StringIO())
+    reader.read_file(0, photfile, photfile.name)
+    assert set(reader.phixstables[0]) == {"B"}
+
+
 def test_photfilereader_excitation_energy_units(tmp_path):
     """The reader converts the excitation energy of the target, in either unit, and shifts the edge.
 
