@@ -3811,6 +3811,56 @@ def test_rewrite_file_as_utf8_converts_an_iso_8859_1_file(tmp_path):
     assert filepath.read_bytes() == text.encode("utf-8")
 
 
+@pytest.mark.parametrize(
+    ("extension", "tool", "magic"),
+    [
+        ("", None, b"Reference"),
+        (".gz", "gzip", b"\x1f\x8b"),
+        (".xz", "xz", b"\xfd7zXZ"),
+        (".zst", "zstd", b"\x28\xb5\x2f\xfd"),
+    ],
+)
+def test_rewrite_file_as_utf8_gives_a_command_that_keeps_the_compression(tmp_path, monkeypatch, extension, tool, magic):
+    """If the rewrite fails, the command of the error message must give utf-8 text in the same compression format.
+
+    A plain iconv on a compressed file converts the bytes of the archive and replaces the archive.
+    """
+    import shutil
+    import subprocess  # ruff: ignore[suspicious-subprocess-import]  # the test runs the command of the message
+
+    bashpath = shutil.which("bash")
+    if bashpath is None or shutil.which("iconv") is None or (tool and shutil.which(tool) is None):
+        pytest.skip("the test needs bash, iconv and the compression tool")
+    text = "Reference: Galav\u00eds M.E. 1998\nsecond line\n"
+    # a space and a quote in the folder name, which the command must quote
+    folder = tmp_path / "data folder's"
+    folder.mkdir()
+    filepath = folder / f"osc_data{extension}"
+    with xopen(filepath, "wb") as fout:
+        fout.write(text.encode("iso-8859-1"))
+    originalbytes = filepath.read_bytes()
+
+    def fail_replace(_self: Path, _target: Path) -> t.NoReturn:
+        msg = "Read-only file system"
+        raise OSError(msg)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail_replace)
+        with pytest.raises(RuntimeError, match="Convert the file by hand") as error:
+            rewrite_file_as_utf8(folder / "osc_data")
+    # the failed rewrite leaves the data file as it was, and no temporary file
+    assert filepath.read_bytes() == originalbytes
+    assert [path.name for path in folder.iterdir()] == [filepath.name]
+
+    command = str(error.value).splitlines()[-1].strip()
+    subprocess.run([bashpath, "-c", command], check=True)  # ruff: ignore[subprocess-without-shell-equals-true]
+    assert [path.name for path in folder.iterdir()] == [filepath.name]
+    assert filepath.read_bytes().startswith(magic)
+    with xopen(filepath, "rb") as fin:
+        assert fin.read() == text.encode("utf-8")
+    assert not rewrite_file_as_utf8(folder / "osc_data")
+
+
 def test_parse_transition_lines_reads_both_layouts():
     """parse_transition_lines() reads a CMFGEN oscillator table with or without the last two columns."""
     withbars = "3d6_a6De[9/2]           -3d6_a4De[7/2]      1.693E-08   2.090D-03   2.599E+05     1-   2   |    |    |"

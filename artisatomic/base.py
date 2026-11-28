@@ -11,6 +11,7 @@ import operator
 import os
 import re
 import secrets
+import shlex
 import sys
 import typing as t
 import unicodedata
@@ -918,6 +919,31 @@ def xopen_check_extension(filename: str | Path, **kwargs: t.Any) -> t.IO[t.Any]:
     return xopen(find_file_check_extension_or_raise(filename), **kwargs)
 
 
+# the command of each compression format that reads a file and writes the plain data to its output
+decompress_commands = {".zst": "zstd -dc", ".gz": "gzip -dc", ".xz": "xz -dc"}
+# the command of each compression format that reads plain data and writes the compressed data to its output
+compress_commands = {".zst": "zstd -c", ".gz": "gzip -c", ".xz": "xz -c"}
+
+
+def utf8_conversion_command(filepath: Path) -> str:
+    """Give a shell command that converts a data file from iso-8859-1 to utf-8 and keeps its compression.
+
+    iconv on a compressed file would convert the bytes of the archive, and the result is not an
+    archive. The command therefore decompresses the file, converts the text, and compresses it
+    again. It writes a new file beside the data file. It replaces the data file only if each
+    step succeeds (pipefail), so a failure leaves the data file as it was.
+    """
+    source = shlex.quote(str(filepath))
+    temporary = shlex.quote(f"{filepath}.utf8.tmp")
+    extension = next((ext for ext in compression_extensions if ext and filepath.name.endswith(ext)), "")
+    if not extension:
+        return f"iconv -f iso-8859-1 -t utf-8 {source} > {temporary} && mv {temporary} {source}"
+    return (
+        f"(set -o pipefail; {decompress_commands[extension]} {source} | iconv -f iso-8859-1 -t utf-8"
+        f" | {compress_commands[extension]} > {temporary}) && mv {temporary} {source}"
+    )
+
+
 def rewrite_file_as_utf8(filename: str | Path) -> bool:
     """Rewrite a data file as utf-8 if it is not utf-8, and return True if it did so.
 
@@ -955,7 +981,7 @@ def rewrite_file_as_utf8(filename: str | Path) -> bool:
         msg = (
             f"Could not rewrite {filepath} as utf-8: {exc}\n"
             f"Convert the file by hand. Then run this again:\n"
-            f"  iconv -f iso-8859-1 -t utf-8 '{filepath}' > tmp && mv tmp '{filepath}'"
+            f"  {utf8_conversion_command(filepath)}"
         )
         raise RuntimeError(msg) from exc
     except BaseException:
