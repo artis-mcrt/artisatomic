@@ -6257,18 +6257,21 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     remove_old_log_folder(tmp_path)
     assert not oldfolder.exists()
 
-    # a file that the earlier release did not write stays, and so does its folder
+    # a file that the earlier release did not write stays, and so does its folder. The earlier
+    # release gave a log the element symbol and the ion stage as its name.
     oldfolder.mkdir()
-    (oldfolder / "fe2.txt").write_text("an old log\n", encoding="utf-8")
-    (oldfolder / "notes.md").write_text("my notes\n", encoding="utf-8")
+    usernames = ["fe.txt", "fe02.txt", "notes.md", "notes.txt", "xx2.txt"]
+    for name in ("fe2.txt", "u12.txt", *usernames):
+        (oldfolder / name).write_text("text\n", encoding="utf-8")
     remove_old_log_folder(tmp_path)
-    assert [path.name for path in oldfolder.iterdir()] == ["notes.md"]
+    assert sorted(path.name for path in oldfolder.iterdir()) == usernames
 
     # no folder is fine too
     remove_old_log_folder(tmp_path / "artis_files")
     assert not (tmp_path / "artis_files").exists()
 
-    # a symbolic link to a folder loses its old files and stays, because rmdir() fails on a link
+    # a symbolic link to a folder stays, and its target keeps each file. The target can be a
+    # folder that the user also uses for other files.
     target = tmp_path / "logs_on_another_disk"
     target.mkdir()
     (target / "fe2.txt").write_text("an old log\n", encoding="utf-8")
@@ -6277,7 +6280,7 @@ def test_main_removes_the_log_folder_of_an_earlier_release(tmp_path):
     (linkfolder / "atomic_data_logs").symlink_to(target)
     remove_old_log_folder(linkfolder)
     assert (linkfolder / "atomic_data_logs").is_symlink()
-    assert not any(target.iterdir())
+    assert [path.name for path in target.iterdir()] == ["fe2.txt"]
 
 
 def test_description_of_ion_names_the_source_of_a_special_ion():
@@ -6835,6 +6838,64 @@ def test_cli_restores_the_earlier_output_when_a_move_fails(tmp_path, monkeypatch
         assert (outputfolder / filename).read_text(encoding="utf-8") == "the output of an earlier run\n"
     assert not (outputfolder / "transitiondata.txt").exists()
     assert (outputfolder / "artisatomiclog_failed.txt").read_text(encoding="utf-8") == "the log of the new run\n"
+
+
+def test_install_files_moves_nothing_if_a_folder_has_the_name_of_an_output_file(tmp_path):
+    """A folder of the user at the path of an output file must not go into the folder that the cleanup removes."""
+    from artisatomic import cli
+
+    outputfolder = tmp_path / "artis_files"
+    workfolder = outputfolder / ".artisatomic_run_test"
+    workfolder.mkdir(parents=True)
+    for filename in ("adata.txt", "transitiondata.txt"):
+        (workfolder / filename).write_text("the output of the new run\n", encoding="utf-8")
+    (outputfolder / "adata.txt").mkdir()
+    (outputfolder / "adata.txt" / "thesis.tex").write_text("a file of the user\n", encoding="utf-8")
+    (outputfolder / "transitiondata.txt").write_text("the output of an earlier run\n", encoding="utf-8")
+
+    with pytest.raises(IsADirectoryError, match=r"holds a folder with the name of an output file: adata\.txt\."):
+        cli.install_files(workfolder, outputfolder)
+
+    assert (outputfolder / "adata.txt" / "thesis.tex").read_text(encoding="utf-8") == "a file of the user\n"
+    assert (outputfolder / "transitiondata.txt").read_text(encoding="utf-8") == "the output of an earlier run\n"
+    assert sorted(path.name for path in outputfolder.iterdir()) == [
+        ".artisatomic_run_test",
+        "adata.txt",
+        "transitiondata.txt",
+    ]
+    assert sorted(path.name for path in workfolder.iterdir()) == ["adata.txt", "transitiondata.txt"]
+
+    # --nophixs writes no phixsdata_v2.txt, and the install still moves the earlier one
+    (outputfolder / "adata.txt" / "thesis.tex").unlink()
+    (outputfolder / "adata.txt").rmdir()
+    (outputfolder / "phixsdata_v2.txt").mkdir()
+    with pytest.raises(IsADirectoryError, match=r"phixsdata_v2\.txt"):
+        cli.install_files(workfolder, outputfolder)
+
+
+def test_cli_stops_before_the_run_if_a_folder_has_the_name_of_an_output_file(tmp_path, monkeypatch, capsys):
+    """The run must report such a folder before it reads an ion, and not after hours of work."""
+    from artisatomic import cli
+
+    def write_files(_ion_handlers, _args):
+        msg = "The check of the output folder must precede the run."
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(readadasdata, "rename_old_adas_directory", lambda: None)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "get_builtin_ion_handlers", lambda **_kwargs: [(26, [(1, "cmfgen")])])
+    monkeypatch.setattr(readhillierdata, "check_data_folder", lambda: None)
+    monkeypatch.setattr(cli, "write_files", write_files)
+    outputfolder = tmp_path / "artis_files"
+    (outputfolder / "transitiondata.txt").mkdir(parents=True)
+    (outputfolder / "transitiondata.txt" / "notes.txt").write_text("a file of the user\n", encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["makeartisatomicfiles", "-output_folder", str(outputfolder)])
+    with pytest.raises(SystemExit) as error:
+        cli.main()
+    assert error.value.code == 2
+    assert "holds a folder with the name of an output file: transitiondata.txt." in capsys.readouterr().err
+    assert [path.name for path in outputfolder.iterdir()] == ["transitiondata.txt"]
+    assert (outputfolder / "transitiondata.txt" / "notes.txt").read_text(encoding="utf-8") == "a file of the user\n"
 
 
 def test_cli_keeps_the_new_output_when_the_cleanup_fails(tmp_path, monkeypatch, capsys):

@@ -348,10 +348,10 @@ def test_run_keeps_its_handlers_file_in_the_old_log_folder(tmp_path, monkeypatch
     oldfolder.mkdir(parents=True)
     oldcopy = oldfolder / "artisatomicionhandlers.json"
     oldcopy.write_text(json.dumps([[34, [[5, "gsnist"]]]]), encoding="utf-8")
-    (oldfolder / "Z34.txt").write_text("the log of an earlier release\n", encoding="utf-8")
+    (oldfolder / "se5.txt").write_text("the log of an earlier release\n", encoding="utf-8")
     run_main(monkeypatch, "-ionhandlersfile", str(oldcopy), "--nophixs")
     assert oldcopy.is_file()
-    assert not (oldfolder / "Z34.txt").exists()
+    assert not (oldfolder / "se5.txt").exists()
 
 
 def test_rename_of_the_old_adas_folder_does_not_change_the_handlers_file(tmp_path, monkeypatch, capsys):
