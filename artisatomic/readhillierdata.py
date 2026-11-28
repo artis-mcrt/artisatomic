@@ -500,17 +500,25 @@ def parse_transition_lines(dflines: pl.LazyFrame, filename: Path, flog) -> pl.Da
     return dftransitions.cast(hillier_transition_schema)
 
 
-def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tuple[float, pl.DataFrame, pl.DataFrame]:
+def read_levels_and_transitions(
+    atomic_number: int,
+    ion_stage: int,
+    flog,
+    *,
+    names_with_cross_section: Callable[[pl.DataFrame], set[str]] | None = None,
+) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion, and rewrite its file as utf-8 first if CMFGEN wrote it in iso-8859-1.
 
     Python raises a UnicodeDecodeError for such a file, and polars raises a ComputeError. That
     function reads the file twice, once in Python and once with polars. The except clause covers
     both reads of the first call. rewrite_file_as_utf8() converts the file once, so the second
     call reads it.
+
+    read_levels_and_transitions_from_file() explains names_with_cross_section.
     """
     commentcounts = flog.comment_counts() if isinstance(flog, IonLog) else None
     try:
-        return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+        return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog, names_with_cross_section)
     except (UnicodeDecodeError, pl.exceptions.ComputeError):
         # a failure that the encoding does not explain belongs to the caller
         if not rewrite_file_as_utf8(hillier_osc_filename(atomic_number, ion_stage)):
@@ -520,7 +528,7 @@ def read_levels_and_transitions(atomic_number: int, ion_stage: int, flog) -> tup
         if commentcounts is not None:
             flog.drop_comments_after(commentcounts)
 
-    return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog)
+    return read_levels_and_transitions_from_file(atomic_number, ion_stage, flog, names_with_cross_section)
 
 
 def hillier_osc_filename(atomic_number: int, ion_stage: int) -> Path:
@@ -533,14 +541,26 @@ def hillier_osc_filename(atomic_number: int, ion_stage: int) -> Path:
 
 
 def read_levels_and_transitions_from_file(
-    atomic_number: int, ion_stage: int, flog
+    atomic_number: int,
+    ion_stage: int,
+    flog,
+    names_with_cross_section: Callable[[pl.DataFrame], set[str]] | None = None,
 ) -> tuple[float, pl.DataFrame, pl.DataFrame]:
     """Read one ion's levels and bound-bound transitions from its CMFGEN oscillator file.
 
     Returns the ionisation energy in eV, a level frame, and a transition frame. The reader drops
-    the levels with no transitions. The reader takes the columns of the level table from the
+    a level that no transition and no collision row names. Such a level has no connection to
+    another level. The reader takes the columns of the level table from the
     header that the file carries above it, so the layout varies by ion. See
     hillier_rowformat_noheader for the oldest files, which have no header.
+
+    A phot file can give a cross section to a level that the reader would drop. The
+    photoionisation then connects the level to the upper ion. names_with_cross_section decides
+    which of those levels stay. It takes a level frame that holds each such level, and it gives
+    the names of the levels that get a cross section table in this run. The function calls it
+    only if the ion has such a level. With None, the reader drops each of them. That is correct
+    for a run that writes no cross sections for the ion: the top ion of an element, and each ion
+    with --nophixs.
 
     Here the transitions carry level names as keys. add_level_ids_forbidden() joins the level
     ids on afterwards, once the level frame has its ids.
@@ -786,11 +806,36 @@ def read_levels_and_transitions_from_file(
     names_to_keep = pl.concat(
         [dftransitions["namefrom"], dftransitions["nameto"], collision_names, collision_names_no_j]
     )
-    dfhillier_energy_levels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row").filter(
-        # implode(): polars deprecates is_in() with a bare Series of the same dtype
-        pl.col("levelname").is_in(names_to_keep.implode())
-        | pl.col("levelname").str.split("[").list.first().is_in(collision_names.implode())
-    )
+    # implode(): polars deprecates is_in() with a bare Series of the same dtype
+    connected = pl.col("levelname").is_in(names_to_keep.implode()) | pl.col("levelname").str.split(
+        "["
+    ).list.first().is_in(collision_names.implode())
+    dfalllevels = pl.DataFrame(levelrows, schema=hillier_level_schema, orient="row")
+    dfhillier_energy_levels = dfalllevels.filter(connected)
+
+    # A level also stays if it gets a cross section table in this run (K III 3p4(3P)3d_2Pe[1/2]
+    # and [3/2]). A phot file with no J splitting names a term, and its table covers each J level
+    # of the term. A name in a phot file is not enough. Fe I 3d6(1I)4s4p_3Ko[8] has a fit with an
+    # offset edge at 4.5 times its threshold, and the default output grid ends at 4 times.
+    if names_with_cross_section is not None:
+        phot_names = pl.Series(sorted(phot_file_level_names(atomic_number, ion_stage)), dtype=pl.String)
+        in_phot_file = pl.col("levelname").is_in(phot_names.implode()) | pl.col("levelname").str.split(
+            "["
+        ).list.first().is_in(phot_names.implode())
+        candidates = dfalllevels.filter(~connected & in_phot_file)["levelname"]
+        if not candidates.is_empty():
+            names_with_table = pl.Series(
+                sorted(names_with_cross_section(dfalllevels.filter(connected | in_phot_file))), dtype=pl.String
+            )
+            kept = candidates.filter(candidates.is_in(names_with_table.implode()))
+            if not kept.is_empty():
+                log_comment(
+                    flog,
+                    ("adata",),
+                    f"{kept.len():d} levels have no transition and no collision strength. They stay because they"
+                    f" have a photoionisation cross section. The first is {kept[0]}.",
+                )
+                dfhillier_energy_levels = dfalllevels.filter(connected | pl.col("levelname").is_in(kept.implode()))
 
     return hillier_ionization_energy_ev, dfhillier_energy_levels, dftransitions
 
@@ -2433,6 +2478,53 @@ def collision_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
             if inside_table:
                 namefrom, nameto, _ = split_coldata_row(row)
                 names.update((namefrom, nameto))
+    return names
+
+
+def phot_file_level_names(atomic_number: int, ion_stage: int) -> set[str]:
+    """Give the level names that the phot files of one ion give a cross section.
+
+    The level reader keeps such a level, also if no radiative transition and no collision row
+    names it. A block of the type 0, and a block whose first number is zero, give no cross
+    section: many files give a type 1 level one number, a zero. Without J splitting, the name
+    has no J, as in PhotFileReader.take_event_line(). The scan reads only the first data row of
+    each block. PhotFileReader does each check of the files.
+    """
+    ionfiles = ions_data.get((atomic_number, ion_stage))
+    if ionfiles is None:
+        return set()
+    names: set[str] = set()
+    for photfilename in ionfiles.photfilenames:
+        filename = Path(hillier_ion_folder(atomic_number, ion_stage)) / ionfiles.folder / photfilename
+        # a missing file gives no names here. read_phixs_tables() stops with the error when it reads the file.
+        if find_file_check_extension(filename) is None:
+            continue
+        j_splitting_on = False
+        in_table = False
+        blockname = ""
+        crosssectiontype = -1
+        with xopen_check_extension(filename) as fphot:
+            for line in fphot:
+                if "!" not in line:
+                    if blockname and crosssectiontype != -1:
+                        row = line.split()
+                        if row:
+                            if crosssectiontype != 0 and isfloat(row[0]) and fortran_float(row[0]) != 0.0:
+                                names.add(blockname)
+                            blockname = ""
+                    continue
+                row = line.split()
+                marker = line.split("!", maxsplit=1)[1].strip()
+                if marker == "Split J levels":
+                    j_splitting_on = row[0].lower() == "true"
+                elif marker == "Cross-section unit":
+                    # the lines before this one are the header (PhotFileReader.take_event_line())
+                    in_table = True
+                elif marker.startswith("Configuration name") and in_table and len(row) >= 2:
+                    blockname = row[0] if j_splitting_on else row[0].split("[")[0]
+                    crosssectiontype = -1
+                elif marker == "Type of cross-section":
+                    crosssectiontype = int(row[0])
     return names
 
 

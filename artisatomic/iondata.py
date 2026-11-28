@@ -1,7 +1,9 @@
 """Read a single ion's levels, transitions, and photoionisation data from its source data set."""
 
 import argparse
+import contextlib
 import functools
+import io
 import itertools
 import typing as t
 from collections.abc import Callable
@@ -103,11 +105,19 @@ class Handler:
 
     source_summary is the name of the data source for a list of the handlers. A handler whose
     description is a function gives it, because such a function needs an ion.
+
+    With keeps_levels_with_phixs, the level reader drops a level that has no transition and no
+    collision strength, and it takes the keyword names_with_cross_section. read_ion_data() gives
+    a function there that runs read_phixs on a trial level frame. The reader then keeps such a
+    level if it gets a cross section table. read_ion_data() gives no function for an ion that
+    gets no cross sections in the run.
     """
 
     description: str | Callable[[int, int], str]
     read_levels_and_transitions: Callable[..., tuple[t.Any, ...]]
     get_level_valence_n: Callable[..., int | None] | None = None
+    # read_levels_and_transitions takes the keyword names_with_cross_section (see the docstring)
+    keeps_levels_with_phixs: bool = False
     # the parser takes the keyword nelectrons, the count of electrons of the ion
     valence_n_takes_nelectrons: bool = False
     returns_upsilons: bool = False
@@ -205,6 +215,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.description_of_ion,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
+        keeps_levels_with_phixs=True,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readhillierdata.read_phixs_tables,
         source_summary=f"{readhillierdata.description}. H II and He III: {readhillierdata.bare_nucleus_description}",
@@ -215,6 +226,7 @@ handlers: dict[str, Handler] = {
         readhillierdata.description_of_ion,
         readhillierdata.read_levels_and_transitions,
         readhillierdata.get_level_valence_n,
+        keeps_levels_with_phixs=True,
         read_coldata=readhillierdata.read_coldata,
         read_phixs=readadasdata.read_cmfgen_qubphixs_photoionizations,
         source_summary=(
@@ -259,10 +271,25 @@ def read_ion_data(
             else handlerspec.description(atomic_number, ion_stage)
         )
         log_source(flog, ("adata", "transitiondata"), "the levels and the transitions", description)
+        readerkwargs: dict[str, t.Any] = {}
+        read_phixs = handlerspec.read_phixs
+        # the top ion has no upper ion to photoionise to, so it gets no cross sections
+        if handlerspec.keeps_levels_with_phixs and read_phixs is not None and not is_top_ion and not args.nophixs:
+
+            def names_with_cross_section(dftriallevels: pl.DataFrame) -> set[str]:
+                """Give the names of the levels of a trial level frame that get a cross section table."""
+                dftrial = leveltuples_to_pldataframe(dftriallevels)
+                # the messages of this trial read are not about the levels of the ion in the output
+                with contextlib.redirect_stdout(io.StringIO()):
+                    trialphixs = read_phixs(atomic_number, ion_stage, dftrial, args, IonLog(io.StringIO()))
+                hastable = [bool(np.any(table)) for table in trialphixs.crosssections]
+                return {name for name, table in zip(dftrial["levelname"].to_list(), hastable, strict=True) if table}
+
+            readerkwargs["names_with_cross_section"] = names_with_cross_section
         result = (
-            handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, args)
+            handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, args, **readerkwargs)
             if handlerspec.reader_takes_args
-            else handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog)
+            else handlerspec.read_levels_and_transitions(atomic_number, ion_stage, flog, **readerkwargs)
         )
         if handlerspec.returns_upsilons:
             (ionization_energy_ev, energy_levels, transitions, dfupsilon) = result

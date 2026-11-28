@@ -7,6 +7,7 @@ import functools
 import hashlib
 import importlib
 import io
+import itertools
 import json
 import operator
 import pickle  # ruff: ignore[suspicious-pickle-import]  # the test writes a pandas HDFStore
@@ -5839,6 +5840,117 @@ def two_level_iondata(ion_stage: int, nphixspoints: int, *, has_phixs: bool, is_
     )
 
 
+def test_cmfgen_keeps_the_k3_levels_that_have_only_a_cross_section(tmp_path):
+    """K III keeps the two 3p4(3P)3d_2Pe levels, which only the phot file names, and writes their tables.
+
+    The oscillator file gives them the file indices 4 and 5, with no transition, and the collision
+    file does not name them. phot_data_A gives their term a type 1 fit with 2.0324 Mb at the
+    threshold. The reader dropped each level with no transition and no collision strength.
+    """
+    from artisatomic import iondata
+    from artisatomic.output import clear_files
+    from artisatomic.output import write_output_files
+
+    cmfgen_corpus_or_skip()
+    rhd.read_hyd_phixsdata()
+    args = phixs_args(output_folder=str(tmp_path))
+    clear_files(args)
+    with contextlib.redirect_stdout(io.StringIO()):
+        iondatalist = [
+            iondata.read_ion_data(19, (ion_stage, "cmfgen"), is_top_ion=ion_stage == 4, args=args)
+            for ion_stage in (3, 4)
+        ]
+        iondata.resolve_photoion_targetfractions(iondatalist, 19, tmp_path / "artisatomiclog.txt")
+        write_output_files(19, iondatalist, args)
+
+    adatalines = (tmp_path / "adata.txt").read_text(encoding="utf-8").splitlines()
+    pos = artis_noncommentline(adatalines, 0)
+    atomic_number, ion_stage, nlevels, _ = adatalines[pos].split()
+    assert (int(atomic_number), int(ion_stage), int(nlevels)) == (19, 3, 40)
+    levels = [line.split() for line in adatalines[pos + 1 : pos + 1 + 40]]
+    assert [(int(level[0]), level[4]) for level in levels[:6]] == [
+        (1, "3p5_2Po[3/2]"),
+        (2, "3p5_2Po[1/2]"),
+        (3, "3s_3p6_2Se[1/2]"),
+        (4, "3p4(3P)3d_2Pe[1/2]"),
+        (5, "3p4(3P)3d_2Pe[3/2]"),
+        (6, "3p4(3P)3d_2De[3/2]"),
+    ]
+    # the two levels have no transition, and each other level of the ion has one or more
+    assert [int(level[3]) for level in levels[3:5]] == [0, 0]
+    assert "They stay because they have a photoionisation cross section." in "\n".join(adatalines[:pos])
+
+    phixslines = (tmp_path / "phixsdata_v2.txt").read_text(encoding="utf-8").splitlines()
+    pos = artis_noncommentline(phixslines, 0)
+    npoints = int(phixslines[pos])
+    tables = {}
+    pos = artis_noncommentline(phixslines, pos + 2)
+    while pos < len(phixslines):
+        atomic_number, upperstage, upperlevel, lowerstage, lowerlevel, threshold_ev = phixslines[pos].split()
+        assert (atomic_number, upperstage, lowerstage) == ("19", "4", "3")
+        pos += 1
+        if int(upperlevel) == -1:
+            pos += 1 + int(phixslines[pos])
+        tables[int(lowerlevel)] = (float(threshold_ev), [float(value) for value in phixslines[pos : pos + npoints]])
+        pos = artis_noncommentline(phixslines, pos + npoints) if pos + npoints < len(phixslines) else len(phixslines)
+    # the thresholds of the oscillator file are 23.008 and 22.835 eV
+    assert tables[4][0] == pytest.approx(23.008, abs=0.02)
+    assert tables[5][0] == pytest.approx(22.835, abs=0.02)
+    for levelnumber in (4, 5):
+        values = tables[levelnumber][1]
+        assert values[0] == pytest.approx(2.0324, rel=0.03)
+        # the fit falls as nu^-2, and the default grid has a step of 0.03
+        assert values[-1] == pytest.approx(2.0324 / (1.0 + 0.03 * (npoints - 1)) ** 2, rel=0.03)
+        assert all(first > second for first, second in itertools.pairwise(values))
+
+    # The top ion of an element gets no cross sections, so such a level has no connection there.
+    with contextlib.redirect_stdout(io.StringIO()):
+        topion = iondata.read_ion_data(19, (3, "cmfgen"), is_top_ion=True, args=args)
+        nophixs = iondata.read_ion_data(
+            19, (3, "cmfgen"), is_top_ion=False, args=phixs_args(**{**vars(args), "nophixs": True})
+        )
+    for iondataofrun in (topion, nophixs):
+        assert iondataofrun.dfenergylevels.height == 36
+        assert "3p4(3P)3d_2Pe[1/2]" not in iondataofrun.dfenergylevels["levelname"].to_list()
+
+
+def test_cmfgen_drops_a_level_whose_cross_section_is_zero_on_the_output_grid():
+    """A name in a phot file does not keep a level. The level must get a table in the run.
+
+    Fe I 3d6(1I)4s4p_3Ko[8] has no transition and no collision strength. Its type 7 fit opens at
+    4.5 times its threshold, and the default output grid ends at 4 times. A wide grid gives the
+    level a table, and the level then stays.
+    """
+    cmfgen_corpus_or_skip()
+    rhd.read_hyd_phixsdata()
+    levelname = "3d6(1I)4s4p_3Ko[8]"
+    assert levelname.split("[", maxsplit=1)[0] in rhd.phot_file_level_names(26, 1)
+
+    def levelnames(args: argparse.Namespace) -> list[str]:
+        def names_with_cross_section(dftriallevels: pl.DataFrame) -> set[str]:
+            dftrial = leveltuples_to_pldataframe(dftriallevels)
+            phixs = rhd.read_phixs_tables(26, 1, dftrial, args, io.StringIO())
+            return {
+                name
+                for name, table in zip(dftrial["levelname"].to_list(), phixs.crosssections, strict=True)
+                if np.any(table)
+            }
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            _, dflevels, _ = rhd.read_levels_and_transitions(
+                26, 1, io.StringIO(), names_with_cross_section=names_with_cross_section
+            )
+        return dflevels["levelname"].to_list()
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        _, dfconnected, _ = rhd.read_levels_and_transitions(26, 1, io.StringIO())
+    assert levelname not in dfconnected["levelname"].to_list()
+    assert levelnames(phixs_args()) == dfconnected["levelname"].to_list()
+    widenames = levelnames(phixs_args(nphixspoints=100, phixsnuincrement=0.1))
+    assert levelname in widenames
+    assert len(widenames) == dfconnected.height + 1
+
+
 def test_output_files_with_comment_blocks_follow_the_artis_read_rules(tmp_path):
     """Read the output files as ARTIS does (input.cc), so a comment at a wrong position fails here.
 
@@ -5964,7 +6076,7 @@ def test_cmfgen_reader_records_each_comment_one_time_after_the_utf8_retry(monkey
 
     attempts = []
 
-    def fake_read(_atomic_number, _ion_stage, flog):
+    def fake_read(_atomic_number, _ion_stage, flog, _names_with_cross_section=None):
         log_comment(flog, ("adata", "transitiondata"), "Reading osc_data")
         attempts.append(1)
         if len(attempts) == 1:
